@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List
+from typing import List, Dict, Any
 from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -23,6 +23,44 @@ client = OpenAI(
 
 class Request(BaseModel):
     messages: List[ClientMessage]
+
+
+class DependencyAnalysisRequest(BaseModel):
+    repoUrl: str
+
+
+class DependencyItem(BaseModel):
+    name: str
+    type: str  # "internal" | "external"
+    path: str = None
+    version: str = None
+
+
+class FileDependency(BaseModel):
+    filename: str
+    dependencies: List[DependencyItem]
+
+
+class DependencyAnalysisResponse(BaseModel):
+    dependencies: List[FileDependency]
+
+
+class IdeasRequest(BaseModel):
+    repoUrl: str
+    context: str = None
+
+
+class IdeaItem(BaseModel):
+    id: int
+    title: str
+    description: str
+    priority: str  # "high" | "medium" | "low"
+    category: str  # "feature" | "enhancement" | "security"
+    estimatedTime: str
+
+
+class IdeasResponse(BaseModel):
+    ideas: List[IdeaItem]
 
 
 available_tools = {
@@ -142,8 +180,6 @@ def stream_text(messages: List[ChatCompletionMessageParam], protocol: str = 'dat
             )
 
 
-
-
 @app.post("/api/chat")
 async def handle_chat_data(request: Request, protocol: str = Query('data')):
     messages = request.messages
@@ -152,3 +188,101 @@ async def handle_chat_data(request: Request, protocol: str = Query('data')):
     response = StreamingResponse(stream_text(openai_messages, protocol))
     response.headers['x-vercel-ai-data-stream'] = 'v1'
     return response
+
+
+@app.post("/api/analyze-dependencies")
+async def analyze_dependencies(request: DependencyAnalysisRequest) -> DependencyAnalysisResponse:
+    """
+    Analyze dependencies for a given repository URL.
+    In a real implementation, this would clone the repo and analyze the actual files.
+    For now, we return mock data.
+    """
+    
+    # Mock data for demonstration
+    mock_dependencies = [
+        FileDependency(
+            filename="components/appSidebar.tsx",
+            dependencies=[
+                DependencyItem(name="react", type="external", version="^18.0.0"),
+                DependencyItem(name="lucide-react", type="external", version="^0.263.1"),
+                DependencyItem(name="@/components/ui/sidebar", type="internal", path="./ui/sidebar"),
+                DependencyItem(name="@/lib/utils", type="internal", path="./lib/utils")
+            ]
+        ),
+        FileDependency(
+            filename="components/chat.tsx",
+            dependencies=[
+                DependencyItem(name="react", type="external", version="^18.0.0"),
+                DependencyItem(name="@/components/ui/button", type="internal", path="./ui/button"),
+                DependencyItem(name="@/components/ui/textarea", type="internal", path="./ui/textarea"),
+                DependencyItem(name="ai", type="external", version="^3.0.0")
+            ]
+        ),
+        FileDependency(
+            filename="app/layout.tsx",
+            dependencies=[
+                DependencyItem(name="next", type="external", version="^14.0.0"),
+                DependencyItem(name="geist/font/sans", type="external", version="^1.0.0"),
+                DependencyItem(name="sonner", type="external", version="^1.0.0"),
+                DependencyItem(name="@/lib/utils", type="internal", path="./lib/utils")
+            ]
+        ),
+        FileDependency(
+            filename="api/index.py",
+            dependencies=[
+                DependencyItem(name="fastapi", type="external", version="^0.111.1"),
+                DependencyItem(name="openai", type="external", version="^1.37.1"),
+                DependencyItem(name="pydantic", type="external", version="^2.8.2"),
+                DependencyItem(name="python-dotenv", type="external", version="^1.0.1")
+            ]
+        )
+    ]
+    
+    return DependencyAnalysisResponse(dependencies=mock_dependencies)
+
+
+@app.post("/api/generate-ideas")
+async def generate_ideas(request: IdeasRequest) -> IdeasResponse:
+    """
+    Generate improvement ideas for a given repository.
+    In a real implementation, this would use AI to analyze the codebase and generate suggestions.
+    For now, we return mock data.
+    """
+    
+    # Mock data for demonstration
+    mock_ideas = [
+        IdeaItem(
+            id=1,
+            title="Implement Real-time Collaboration",
+            description="Add WebSocket support for multiple users to collaborate on the same repository analysis in real-time.",
+            priority="high",
+            category="feature",
+            estimatedTime="2 weeks"
+        ),
+        IdeaItem(
+            id=2,
+            title="Add Code Quality Metrics",
+            description="Integrate code complexity analysis, test coverage reports, and technical debt assessment.",
+            priority="medium",
+            category="enhancement",
+            estimatedTime="1 week"
+        ),
+        IdeaItem(
+            id=3,
+            title="Export Analysis Reports",
+            description="Allow users to export dependency analysis and chat conversations as PDF or markdown reports.",
+            priority="low",
+            category="feature",
+            estimatedTime="3 days"
+        ),
+        IdeaItem(
+            id=4,
+            title="Dependency Security Scanning",
+            description="Scan external dependencies for known vulnerabilities and provide security recommendations.",
+            priority="high",
+            category="security",
+            estimatedTime="1 week"
+        )
+    ]
+    
+    return IdeasResponse(ideas=mock_ideas)
