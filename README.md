@@ -25,6 +25,7 @@ YudaiV3 runs on a **three-agent pipeline**:
 3. **Coder Agent** — Uses **OpenAI Codex** (or compatible models) to implement the actual pull request in your repo.
 
 This way, insights flow **seamlessly** from raw data to reproducible, test-driven code.
+![YudaiV3 Architecture](arch.png)
 
 ---
 
