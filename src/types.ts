@@ -39,3 +39,4 @@ export interface Toast {
 
 export type ProgressStep = 'PM' | 'Architect' | 'Test-Writer' | 'Coder';
 export type TabType = 'chat' | 'file-deps' | 'context' | 'ideas';
+

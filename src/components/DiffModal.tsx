@@ -8,26 +8,13 @@ interface DiffModalProps {
   branchName?: string;
 }
 
-export const DiffModal: React.FC<DiffModalProps> = ({ 
-  isOpen, 
-  onClose, 
-  prNumber = 123, 
-  branchName = 'yudai-assistant/feature-update' 
+export const DiffModal: React.FC<DiffModalProps> = ({
+  isOpen,
+  onClose,
+  prNumber = 123,
+  branchName = 'yudai-assistant/feature-update'
 }) => {
   if (!isOpen) return null;
-
-  const mockDiff = `- function oldFunction() {
--   return 'old logic';
-- }
-
-+ function newFunction() {
-+   return 'improved logic with better performance';
-+ }
-
-+ // Added new utility function
-+ function helperFunction() {
-+   return 'helper utility';
-+ }`;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -44,7 +31,7 @@ export const DiffModal: React.FC<DiffModalProps> = ({
               yudai-assistant
             </span>
           </div>
-          
+
           <button
             onClick={onClose}
             className="p-2 hover:bg-zinc-800 rounded-lg transition-colors"
@@ -92,8 +79,7 @@ function helperFunction() {
         <div className="p-6 border-t border-zinc-800 flex justify-end">
           <a
             href="#"
-            className="flex items-center gap-2 bg-primary hover:bg-primary/80 
-                     text-white px-4 py-2 rounded-lg transition-colors"
+            className="flex items-center gap-2 bg-primary hover:bg-primary/80 text-white px-4 py-2 rounded-lg transition-colors"
           >
             Open PR on GitHub
             <ExternalLink className="w-4 h-4" />
@@ -103,3 +89,4 @@ function helperFunction() {
     </div>
   );
 };
+
