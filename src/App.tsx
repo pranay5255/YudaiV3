@@ -14,7 +14,7 @@ function App() {
   // State management
   const [activeTab, setActiveTab] = useState<TabType>('chat');
   const [currentStep, setCurrentStep] = useState<ProgressStep>('PM');
-  const [errorStep, setErrorStep] = useState<ProgressStep | undefined>();
+  const [errorStep] = useState<ProgressStep | undefined>();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
   const [contextCards, setContextCards] = useState<ContextCard[]>([]);
