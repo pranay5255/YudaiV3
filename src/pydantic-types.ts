@@ -8,7 +8,7 @@ export interface CSVMetadata {
 export interface ProjectConfig {
   projectName: string;
   repoPath: string;
-  cliConfig: Record<string, any> | null;
+  cliConfig: Record<string, unknown> | null;
 }
 
 export interface PromptContext {

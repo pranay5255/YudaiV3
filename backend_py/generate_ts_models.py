@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, get_args, get_origin, Union
 from models import CSVMetadata, ProjectConfig, PromptContext, RunCLIRequest, RunCLIResponse
 
-PY_TO_TS = {str: 'string', int: 'number', float: 'number', bool: 'boolean', Any: 'any'}
+PY_TO_TS = {str: 'string', int: 'number', float: 'number', bool: 'boolean', Any: 'unknown'}
 
 def ts_type(tp: Any) -> str:
     origin = get_origin(tp)
