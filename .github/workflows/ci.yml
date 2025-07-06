@@ -10,8 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true
       - uses: pnpm/action-setup@v2
         with:
           version: 9
@@ -20,6 +18,5 @@ jobs:
           node-version: 20
           cache: 'pnpm'
       - run: pnpm install
-      - run: git submodule update --init --recursive
       - run: pnpm lint
       - run: pnpm test
