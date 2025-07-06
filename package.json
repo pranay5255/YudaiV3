@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "backend": "uvicorn backend_py.main:app --reload --port 5174",
+    "backend": "tsx backend/server.ts",
     "test": "vitest run"
   },
   "dependencies": {
