@@ -71,6 +71,7 @@ This way, insights flow **seamlessly** from raw data to reproducible, test-drive
 - Unidirectional DAG for schema evolution.
 - No auto-merge or rollback (human-in-the-loop).
 - Cloud-first with optional local mode.
+- Backend server now runs on FastAPI in `backend_py` for faster response times.
 
 ---
 
