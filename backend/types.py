@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, validator
-from typing import Optional, List, Literal, Union
+from typing import Optional, List, Literal, Union, Dict, Any
 from datetime import datetime
 from enum import Enum
 
@@ -35,6 +35,32 @@ class TabType(str, Enum):
 class FileType(str, Enum):
     INTERNAL = "internal"
     EXTERNAL = "external"
+
+# Additional models migrated from TypeScript
+class CSVMetadata(BaseModel):
+    filename: str = Field(...)
+    schema: Dict[str, str] = Field(default_factory=dict)
+    row_count: int = Field(..., ge=0, alias="rowCount")
+    column_count: int = Field(..., ge=0, alias="columnCount")
+    
+    class Config:
+        populate_by_name = True
+
+class ProjectConfig(BaseModel):
+    project_name: str = Field(..., alias="projectName")
+    repo_path: str = Field(..., alias="repoPath") 
+    cli_config: Optional[Dict[str, Any]] = Field(None, alias="cliConfig")
+    
+    class Config:
+        populate_by_name = True
+
+class PromptContext(BaseModel):
+    prompt: str = Field(...)
+    tokens: int = Field(..., ge=0)
+    generated_code: Optional[str] = Field(None, alias="generatedCode")
+    
+    class Config:
+        populate_by_name = True
 
 # Core User Input Models
 class ChatMessageInput(BaseModel):
@@ -89,7 +115,7 @@ class IdeaItemInput(BaseModel):
 class CLICommandInput(BaseModel):
     args: List[str] = Field(default_factory=list)
     working_directory: Optional[str] = Field(None)
-    environment_vars: Optional[dict] = Field(default_factory=dict)
+    environment_vars: Optional[Dict[str, str]] = Field(default_factory=dict)
     
     @validator('args')
     def validate_args(cls, v):
@@ -131,7 +157,7 @@ class ProcessUploadRequest(BaseModel):
 class APIResponse(BaseModel):
     success: bool = Field(...)
     message: str = Field(...)
-    data: Optional[dict] = Field(None)
+    data: Optional[Dict[str, Any]] = Field(None)
     error: Optional[str] = Field(None)
 
 class ContextCardResponse(BaseModel):
