@@ -1,82 +1,9 @@
-# Yudai V3 – Product Requirements Document (Living)
+# YudaiV3 Agent Onboarding Guide
 
-**Revision Date:** 2025‑01‑07 • **Revision ID:** PRD‑0.5
-**Maintainers:** Pranay Kundu (PM/Tech Lead) | Core Platform Team
+> **Last Updated:** 2025-01-07 • **Target:** AI Agents & New Developers  
+> **Status:** Active Migration (TypeScript → FastAPI + SWE-agent integration)
 
-> **Living‑Doc Notice**
-> This PRD is **source‑of‑truth** for Yudai V3. Every merge to `main` must bump the **Revision ID** and include an `## Changelog` entry summarising the delta. Down‑stream LLM agents parse the docstrings below—**do not delete them.**
-
-```python
-""" @prd-meta
-revision_id = "PRD‑0.5"
-updated = "2025‑01‑07T19:00:00+05:30"
-status = "active"
-"""
-```
-
----
-
-## 0. Changelog (aggregate)
-
-| Rev | Date  | Author | Highlight                                                                                                                |
-| --- | ----- | ------ | ------------------------------------------------------------------------------------------------------------------------ |
-| 0.5 | 01‑07 | Pranay | **REALITY CHECK:** Updated directory structure & dependencies to match actual codebase; removed non-existent components |
-| 0.4 | 07‑07 | Pranay | **MIGRATION:** Incomplete TypeScript → FastAPI backend transformation;      |
-| 0.3 | 07‑07 | Pranay | Added directory‑structure section, function‑index, dependencies diff; created **AgentOnboarding.md**; checked off DOC‑01 |
-| 0.2 | 07‑07 | Pranay | Marked PRD as living; added open‑TODO checklist & docstring schema                                                       |
-| 0.1 | 07‑07 | Pranay | Initial SWE‑agent migration draft                                                                                        |
-
----
-
-## 1. Background & Context
-
-*Yudai V3 migrates its backend from Node TS → Python and embeds ****SWE‑agent**** for AI‑powered code generation. This PRD encodes project state for human & machine readers.*
-
----
-
-## 2. Objectives & Key Results (OKRs)
-
-(unchanged)
-
----
-
-## 3. Scope
-
-(unchanged)
-
----
-
-## 4. Personas & Needs
-
-(unchanged)
-
----
-
-## 5. User Stories
-
-(unchanged)
-
----
-
-## 6. Functional Requirements
-
-(unchanged)
-
----
-
-## 7. Non‑Functional Requirements
-
-(unchanged)
-
----
-
-## 8. Architecture Overview
-
-(unchanged)
-
----
-
-## 9. Directory Structure (snapshot @PRD‑0.5)
+## Directory Structure
 
 ```text
 YudaiV3/
@@ -114,7 +41,7 @@ YudaiV3/
 │
 ├── 📁 context/                    # Project documentation
 │   ├── PRD.md                     # Product Requirements Document (living)
-│   └── AgentOnboarding.md         # Agent onboarding guide
+│   └── AgentOnboarding.md         # This file
 │
 ├── 📁 tests/                      # Test suites
 ├── package.json                   # Frontend dependencies & scripts
@@ -123,9 +50,7 @@ YudaiV3/
 └── README.md                      # Project overview
 ```
 
----
-
-## 10. Function Index (key public entry points)
+## Function Index
 
 ### Backend (Python/FastAPI)
 | Function/Class | File | Purpose | Status |
@@ -149,101 +74,99 @@ YudaiV3/
 | `FileDependencies()` | `src/components/FileDependencies.tsx` | File tree browser | Expandable tree, token counting, internal/external classification |
 | `IdeasToImplement()` | `src/components/IdeasToImplement.tsx` | AI idea generation | Complexity estimation (S/M/L/XL), confidence scoring |
 | `DiffModal()` | `src/components/DiffModal.tsx` | PR diff viewer | Code diff display, branch information |
-| `DetailModal()` | `src/components/DetailModal.tsx` | File detail viewer | File content display, metadata |
-| `Toast()` | `src/components/Toast.tsx` | Notification system | Success/error notifications |
 
----
+### SWE-agent Integration
+| Function/Class | File | Purpose | Integration Point |
+|----------------|------|---------|------------------|
+| `main()` | `Yudai-SWE-agent/sweagent/run/run.py` | CLI entry point | Command routing & subcommand dispatch |
+| `RunSingle.run()` | `Yudai-SWE-agent/sweagent/run/run_single.py` | Single issue execution | Main agent loop for individual GitHub issues |
+| `DefaultAgent.run()` | `Yudai-SWE-agent/sweagent/agent/agents.py` | Agent main loop | Problem statement → environment setup → step execution |
+| `SWEEnv()` | `Yudai-SWE-agent/sweagent/environment/swe_env.py` | Environment interface | Docker container management via SWE-ReX |
 
-## 11. Dependencies
+## Dependencies Diff
 
-### Backend Dependencies (Python/FastAPI)
-```txt
-# FastAPI Backend (migrated from TypeScript)
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
-python-multipart==0.0.6
-python-dotenv==1.0.1
-pydantic-settings==2.0.1
-pydantic-core==2.12.0
+### 🔧 **Current State vs. Target State**
+
+#### Backend Dependencies
+```diff
+# CURRENT (backend/requirements.txt)
++ fastapi==0.104.1
++ uvicorn[standard]==0.24.0  
++ pydantic==2.5.0
++ python-multipart==0.0.6
+
+# MISSING (from PRD.md expectations)
+- python-dotenv==1.0.1        # ❌ Environment variable management
+- pydantic-settings==2.0.1    # ❌ Settings management  
+- sweagent>=1.1.0             # ❌ SWE-agent integration package
+- simple-json-logger==0.4.1   # ❌ DEPENDENCY ISSUE: Package not found in PyPI
 ```
 
-### Frontend Dependencies (React/TypeScript)
-```json
-{
-  "dependencies": {
-    "express": "^5.1.0",
-    "lucide-react": "^0.344.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "zod": "^3.25.69"
-  },
-  "devDependencies": {
-    "@types/express": "^5.0.3",
-    "tailwindcss": "^3.4.1",
-    "typescript": "^5.5.3",
-    "vite": "^5.4.2"
-  }
-}
+#### Frontend Dependencies
+```diff
+# CURRENT (package.json)
++ react: ^18.3.1
++ react-dom: ^18.3.1
++ lucide-react: ^0.344.0      # Icon library
++ tailwindcss: ^3.4.1        # CSS framework
++ vite: ^5.4.2                # Build tool
++ typescript: ^5.5.3
+
+# EXPRESS BACKEND (legacy/conflicting)
++ express: ^5.1.0             # ⚠️  Legacy TypeScript backend
++ @types/express: ^5.0.3      # ⚠️  Should be removed post-migration
 ```
 
-### SWE-agent Dependencies
-```txt
+#### SWE-agent Dependencies  
+```diff
 # FROM Yudai-SWE-agent/pyproject.toml
-swe-rex>=1.2.0              # Container orchestration
-rich                        # Terminal UI
-ruamel.yaml                 # YAML parsing
-tenacity                    # Retry mechanisms
-litellm                     # Multi-LLM support
-GitPython                   # Git operations
-ghapi                       # GitHub API
-flask                       # Web server (inspector)
-textual>=1.0.0             # TUI framework
++ swe-rex>=1.2.0              # Container orchestration
++ rich                        # Terminal UI
++ ruamel.yaml                 # YAML parsing
++ tenacity                    # Retry mechanisms
++ litellm                     # Multi-LLM support
++ GitPython                   # Git operations
++ ghapi                       # GitHub API
++ flask                       # Web server (inspector)
++ textual>=1.0.0             # TUI framework
 ```
 
----
+### 🚨 **Critical Dependency Issues**
 
-## 12. Milestones & Timeline
+1. **`simple-json-logger==0.4.1`** - **Package does not exist on PyPI**
+   - Referenced in `context/PRD.md` line 123
+   - Likely should be `python-json-logger` instead
+   - **Action Required:** Update PRD.md and backend dependencies
 
-(unchanged)
+2. **Backend Incomplete** - **No FastAPI server exists yet**
+   - `backend/main.py` missing
+   - No API endpoints implemented
+   - **Action Required:** Complete TypeScript → FastAPI migration
 
----
+3. **Duplicate Pydantic Settings** - **Version conflict in pyproject.toml**
+   - `pydantic-settings==2.0.1` appears twice in backend/pyproject.toml
+   - **Action Required:** Clean up duplicate entries
 
-## 13. Acceptance Criteria
+### 📋 **Next Steps for Agents**
 
-(unchanged)
+#### High Priority
+- [ ] **DEP-01:** Replace `simple-json-logger==0.4.1` with `python-json-logger` 
+- [ ] **DEP-02:** Create `backend/main.py` FastAPI server with endpoints from `types.py`
+- [ ] **DEP-03:** Add missing backend dependencies (`python-dotenv`, `pydantic-settings`)
+- [ ] **DEP-04:** Implement SWE-agent integration layer
 
----
-
-## 14. Success Metrics
-
-(unchanged)
-
----
-
-## 15. Risks & Mitigations
-
-(unchanged)
-
----
-
-## 16. Open TODOs
-
-*(checked items are auto‑archived by CI)*
-
-- [ ] **DEP-01:** Create `backend/main.py` FastAPI server with endpoints from `types.py`
-- [ ] **DEP-02:** Implement SWE-agent integration layer
-- [ ] **DEP-03:** Add missing backend subdirectories (`utils/`, `swe_agent_integration/`)
-- [ ] **DEP-04:** Create `backend/tests/` with pytest configuration
+#### Medium Priority  
 - [ ] **DEP-05:** Remove Express.js dependencies post-migration
-- [ ] **DEP-06:** Fix duplicate `pydantic-settings==2.0.1` in pyproject.toml
+- [ ] **DEP-06:** Add missing backend subdirectories (`utils/`, `swe_agent_integration/`)
+- [ ] **DEP-07:** Create `backend/tests/` with pytest configuration
 
 ---
 
-## 17. Versioning & Commit Guidelines
-
-(unchanged)
-
----
-
-*End of Living PRD – auto‑consumed by CI/LLM agents.*
+**🤖 Agent-Readable Metadata:**
+```yaml
+project_type: "react_fastapi_swe_agent"
+migration_status: "typescript_to_python_in_progress"
+critical_blockers: ["missing_fastapi_server", "invalid_dependency_simple_json_logger"]
+agent_entry_points: ["sweagent run", "backend/main.py (when created)"]
+deployment_target: "docker_swe_rex_containers"
+```
