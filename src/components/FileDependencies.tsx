@@ -8,6 +8,9 @@ interface FileDependenciesProps {
   repoUrl?: string; // Optional repository URL to analyze
 }
 
+// Default repository URL - you can change this to your preferred default
+const DEFAULT_REPO_URL = "https://github.com/pranay5255/pranay5255";
+
 // Default sample data for when no repository is provided
 const sampleFiles: FileItem[] = [
   {
@@ -66,18 +69,14 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
   onShowDetails,
   repoUrl 
 }) => {
-  const [files, setFiles] = useState<FileItem[]>(sampleFiles);
+  const [files, setFiles] = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Fetch repository data when repoUrl changes
   useEffect(() => {
-    if (repoUrl) {
-      fetchRepositoryData(repoUrl);
-    } else {
-      setFiles(sampleFiles);
-      setError(null);
-    }
+    const urlToUse = repoUrl || DEFAULT_REPO_URL;
+    fetchRepositoryData(urlToUse);
   }, [repoUrl]);
 
   const fetchRepositoryData = async (url: string) => {
@@ -92,7 +91,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
         },
         body: JSON.stringify({
           repo_url: url,
-          max_file_size: 51200, // 50KB limit
+          max_file_size: 30000, // 30KB limit
         }),
       });
 
@@ -101,20 +100,36 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
       }
 
       const data = await response.json();
-      setFiles(data.files);
+      
+      // Transform the API response to match our FileItem structure
+      const transformData = (items: any[]): FileItem[] => {
+        return items.map((item, index) => ({
+          id: item.id || `item-${index}`,
+          name: item.name || item.path || 'Unknown',
+          type: item.type || 'INTERNAL',
+          tokens: item.tokens || 0,
+          Category: item.category || item.Category || 'File',
+          isDirectory: item.isDirectory || item.type === 'directory',
+          expanded: item.isDirectory || item.type === 'directory' ? false : undefined,
+          children: item.children ? transformData(item.children) : undefined
+        }));
+      };
+
+      // Use the transformed data or fallback to empty array
+      const transformedData = data.children ? transformData(data.children) : [];
+      setFiles(transformedData);
     } catch (err) {
       console.error('Failed to fetch repository data:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch repository data');
-      setFiles(sampleFiles); // Fallback to sample data
+      setFiles([]); // Set empty array instead of sample data
     } finally {
       setLoading(false);
     }
   };
 
   const handleRefresh = () => {
-    if (repoUrl) {
-      fetchRepositoryData(repoUrl);
-    }
+    const urlToUse = repoUrl || DEFAULT_REPO_URL;
+    fetchRepositoryData(urlToUse);
   };
 
   const toggleExpanded = (id: string) => {
@@ -234,16 +249,14 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
       {/* Header with refresh button */}
       <div className="flex items-center justify-between p-4 border-b border-zinc-800">
         <h3 className="text-sm font-medium text-fg">File Dependencies</h3>
-        {repoUrl && (
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="p-2 hover:bg-zinc-800 rounded transition-colors disabled:opacity-50"
-            aria-label="Refresh repository data"
-          >
-            <RefreshCw className={`w-4 h-4 text-fg ${loading ? 'animate-spin' : ''}`} />
-          </button>
-        )}
+        <button
+          onClick={handleRefresh}
+          disabled={loading}
+          className="p-2 hover:bg-zinc-800 rounded transition-colors disabled:opacity-50"
+          aria-label="Refresh repository data"
+        >
+          <RefreshCw className={`w-4 h-4 text-fg ${loading ? 'animate-spin' : ''}`} />
+        </button>
       </div>
 
       {/* Loading state */}
@@ -269,20 +282,31 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
 
       {/* File tree table */}
       <div className="flex-1 overflow-auto">
-        <table className="w-full">
-          <thead className="border-b border-zinc-800 sticky top-0 bg-bg">
-            <tr>
-              <th className="text-left px-4 py-3 text-sm font-medium text-fg">Name</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-fg">Type</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-fg">Category</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-fg">Tokens</th>
-              <th className="text-left px-4 py-3 text-sm font-medium text-fg"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-800 text-sm">
-            {renderFileTree(files)}
-          </tbody>
-        </table>
+        {!repoUrl && !loading && !error && (
+          <div className="flex items-center justify-center p-8">
+            <div className="text-center text-fg/60">
+              <p className="text-sm">Using default repository: {DEFAULT_REPO_URL}</p>
+              <p className="text-xs mt-1">Pass a repoUrl prop to analyze a different repository</p>
+            </div>
+          </div>
+        )}
+        
+        {(repoUrl || files.length > 0) && (
+          <table className="w-full">
+            <thead className="border-b border-zinc-800 sticky top-0 bg-bg">
+              <tr>
+                <th className="text-left px-4 py-3 text-sm font-medium text-fg">Name</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-fg">Type</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-fg">Category</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-fg">Tokens</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-fg"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800 text-sm">
+              {renderFileTree(files)}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
