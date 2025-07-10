@@ -16,6 +16,7 @@
     "lucide-react": "^0.344.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "vite-react-typescript-starter": "link:",
     "zod": "^3.25.69"
   },
   "devDependencies": {
@@ -34,7 +35,7 @@
     "tsx": "^4.20.3",
     "typescript": "^5.5.3",
     "typescript-eslint": "^8.3.0",
-    "vite": "^5.4.2",
+    "vite": "^5.4.19",
     "vitest": "^3.2.4"
   }
 }

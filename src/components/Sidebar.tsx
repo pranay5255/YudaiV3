@@ -12,7 +12,7 @@ interface SidebarProps {
 const tabs = [
   { id: 'chat' as TabType, label: 'Chat', icon: MessageCircle },
   { id: 'file-deps' as TabType, label: 'File Dependencies', icon: FileTree },
-  { id: 'context' as TabType, label: 'Context Cards', icon: CreditCard },
+  { id: 'context' as TabType, label: 'Context for Issue', icon: CreditCard },
   { id: 'ideas' as TabType, label: 'Ideas to Implement', icon: Lightbulb },
 ];
 
