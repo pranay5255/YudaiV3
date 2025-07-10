@@ -3,3 +3,9 @@ node_modules
 src/yudai_v3.egg-info/
 src/yudai_v3.egg-info/PKG-INFO
 src/yudai_v3.egg-info/requires.txt
+backend/repo_processor/__pycache__/__init__.cpython-311.pyc
+backend/repo_processor/__pycache__/filedeps.cpython-311.pyc
+backend/repo_processor/__pycache__/scraper_script.cpython-311.pyc
+backend/__pycache__/__init__.cpython-311.pyc
+backend/__pycache__/models.cpython-311.pyc
+backend/__pycache__/types.cpython-311.pyc
