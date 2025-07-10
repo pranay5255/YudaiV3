@@ -1,6 +1,0 @@
-pyproject.toml
-yudai_v3_backend.egg-info/PKG-INFO
-yudai_v3_backend.egg-info/SOURCES.txt
-yudai_v3_backend.egg-info/dependency_links.txt
-yudai_v3_backend.egg-info/requires.txt
-yudai_v3_backend.egg-info/top_level.txt

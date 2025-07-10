@@ -1,0 +1,7 @@
+README.md
+pyproject.toml
+src/yudai_v3.egg-info/PKG-INFO
+src/yudai_v3.egg-info/SOURCES.txt
+src/yudai_v3.egg-info/dependency_links.txt
+src/yudai_v3.egg-info/requires.txt
+src/yudai_v3.egg-info/top_level.txt
