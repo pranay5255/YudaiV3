@@ -1,3 +1,5 @@
 node_modules
 .venv
 src/yudai_v3.egg-info/
+src/yudai_v3.egg-info/PKG-INFO
+src/yudai_v3.egg-info/requires.txt
