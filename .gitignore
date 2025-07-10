@@ -1,3 +1,3 @@
 node_modules
 .venv
-src/yudai_v3.egg-info
+src/yudai_v3.egg-info/
