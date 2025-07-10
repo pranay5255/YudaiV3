@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, validator
-from typing import Optional, List, Literal, Union, Dict, Any
+from typing import Optional, List, Literal, Union, Dict, Any, ForwardRef
 from datetime import datetime
 from enum import Enum
 
@@ -37,14 +37,7 @@ class FileType(str, Enum):
     EXTERNAL = "external"
 
 # Additional models migrated from TypeScript
-class CSVMetadata(BaseModel):
-    filename: str = Field(...)
-    schema: Dict[str, str] = Field(default_factory=dict)
-    row_count: int = Field(..., ge=0, alias="rowCount")
-    column_count: int = Field(..., ge=0, alias="columnCount")
-    
-    class Config:
-        populate_by_name = True
+
 
 class ProjectConfig(BaseModel):
     project_name: str = Field(..., alias="projectName")
@@ -99,29 +92,53 @@ class FileItemInput(BaseModel):
             raise ValueError('File name cannot be empty')
         return v.strip()
 
+# Missing input models
 class IdeaItemInput(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     description: str = Field(..., min_length=1, max_length=1000)
-    complexity: ComplexityLevel = Field(...)
-    estimated_tests: int = Field(..., ge=0)
-    confidence: float = Field(..., ge=0.0, le=1.0)
+    complexity: ComplexityLevel = Field(default=ComplexityLevel.M)
     
     @validator('title')
     def validate_title(cls, v):
-        if len(v.strip()) < 1:
+        if not v.strip():
             raise ValueError('Idea title cannot be empty')
         return v.strip()
 
 class CLICommandInput(BaseModel):
-    args: List[str] = Field(default_factory=list)
-    working_directory: Optional[str] = Field(None)
-    environment_vars: Optional[Dict[str, str]] = Field(default_factory=dict)
+    command: str = Field(..., min_length=1)
+    description: str = Field(..., min_length=1, max_length=500)
+    arguments: Optional[List[str]] = Field(default_factory=list)
     
-    @validator('args')
-    def validate_args(cls, v):
-        if not isinstance(v, list):
-            raise ValueError('Args must be a list of strings')
-        return [str(arg) for arg in v]
+    @validator('command')
+    def validate_command(cls, v):
+        if not v.strip():
+            raise ValueError('CLI command cannot be empty')
+        return v.strip()
+
+# File Dependencies Models
+class FileItemResponse(BaseModel):
+    id: str = Field(...)
+    name: str = Field(...)  # path of directory/file
+    type: Literal["INTERNAL", "EXTERNAL"] = Field(...)  # string (INTERNAL || EXTERNAL)
+    tokens: int = Field(..., ge=0)  # int
+    Category: str = Field(...)  # category classification
+    isDirectory: Optional[bool] = Field(default=False)
+    children: Optional[List['FileItemResponse']] = Field(default=None)
+    expanded: Optional[bool] = Field(default=False)
+
+# Allow recursive FileItem definition
+FileItemResponse.model_rebuild()
+
+class RepositoryRequest(BaseModel):
+    repo_url: str = Field(..., min_length=1)
+    max_file_size: Optional[int] = Field(None, ge=1)
+    
+    @validator('repo_url')
+    def validate_repo_url(cls, v):
+        if not v.strip():
+            raise ValueError('Repository URL cannot be empty')
+        return v.strip()
+
 
 # Request/Response Models
 class CreateContextRequest(BaseModel):
@@ -136,10 +153,7 @@ class ProcessFileRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: ChatMessageInput
     context_cards: Optional[List[str]] = Field(default_factory=list)  # Context card IDs
-    
-class CLIRequest(BaseModel):
-    command: CLICommandInput
-    
+
 class CreateIssueRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     description: str = Field(..., min_length=1)
@@ -167,12 +181,6 @@ class ContextCardResponse(BaseModel):
     tokens: int = Field(...)
     source: ContextSource = Field(...)
     created_at: datetime = Field(default_factory=datetime.utcnow)
-
-class CLIResponse(BaseModel):
-    stdout: str = Field(...)
-    stderr: str = Field(...)
-    exit_code: int = Field(...)
-    execution_time: float = Field(...)
 
 class IssueResponse(BaseModel):
     issue_id: str = Field(...)

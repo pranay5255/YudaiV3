@@ -16,9 +16,10 @@ export interface IdeaItem {
 
 export interface FileItem {
   id: string;
-  name: string;
-  type: 'internal' | 'external';
-  tokens: number;
+  name: string; // path of directory/file
+  type: 'INTERNAL' | 'EXTERNAL'; // string (INTERNAL || EXTERNAL)
+  tokens: number; // int
+  Category: string; // category classification
   isDirectory?: boolean;
   children?: FileItem[];
   expanded?: boolean;

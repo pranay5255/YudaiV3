@@ -1,51 +1,121 @@
-import React, { useState } from 'react';
-import { ChevronRight, ChevronDown, Plus, Folder, File } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ChevronRight, ChevronDown, Plus, Folder, File, RefreshCw } from 'lucide-react';
 import { FileItem } from '../types';
 
 interface FileDependenciesProps {
   onAddToContext: (file: FileItem) => void;
   onShowDetails: (file: FileItem) => void;
+  repoUrl?: string; // Optional repository URL to analyze
 }
 
+// Default sample data for when no repository is provided
 const sampleFiles: FileItem[] = [
   {
     id: '1',
     name: 'src',
-    type: 'internal',
+    type: 'INTERNAL',
     tokens: 0,
+    Category: 'Source Directory',
     isDirectory: true,
     expanded: true,
     children: [
-      { id: '2', name: 'components', type: 'internal', tokens: 0, isDirectory: true, children: [
-        { id: '3', name: 'Button.tsx', type: 'internal', tokens: 245 },
-        { id: '4', name: 'Modal.tsx', type: 'internal', tokens: 892 },
-      ]},
-      { id: '5', name: 'utils', type: 'internal', tokens: 0, isDirectory: true, children: [
-        { id: '6', name: 'helpers.ts', type: 'internal', tokens: 156 },
-      ]},
-      { id: '7', name: 'App.tsx', type: 'internal', tokens: 423 },
+      { 
+        id: '2', 
+        name: 'src/components', 
+        type: 'INTERNAL', 
+        tokens: 0, 
+        Category: 'Component Directory',
+        isDirectory: true, 
+        children: [
+          { id: '3', name: 'src/components/Button.tsx', type: 'INTERNAL', tokens: 245, Category: 'React Component' },
+          { id: '4', name: 'src/components/Modal.tsx', type: 'INTERNAL', tokens: 892, Category: 'React Component' },
+        ]
+      },
+      { 
+        id: '5', 
+        name: 'src/utils', 
+        type: 'INTERNAL', 
+        tokens: 0, 
+        Category: 'Utility Directory',
+        isDirectory: true, 
+        children: [
+          { id: '6', name: 'src/utils/helpers.ts', type: 'INTERNAL', tokens: 156, Category: 'TypeScript Utility' },
+        ]
+      },
+      { id: '7', name: 'src/App.tsx', type: 'INTERNAL', tokens: 423, Category: 'React Component' },
     ],
   },
   {
     id: '8',
     name: 'Libraries / Frameworks',
-    type: 'external',
+    type: 'EXTERNAL',
     tokens: 0,
+    Category: 'External Dependencies',
     isDirectory: true,
     expanded: false,
     children: [
-      { id: '9', name: 'react', type: 'external', tokens: 15420 },
-      { id: '10', name: 'typescript', type: 'external', tokens: 8934 },
-      { id: '11', name: 'tailwindcss', type: 'external', tokens: 3245 },
+      { id: '9', name: 'react', type: 'EXTERNAL', tokens: 15420, Category: 'React Library' },
+      { id: '10', name: 'typescript', type: 'EXTERNAL', tokens: 8934, Category: 'Language Framework' },
+      { id: '11', name: 'tailwindcss', type: 'EXTERNAL', tokens: 3245, Category: 'CSS Framework' },
     ],
   },
 ];
 
 export const FileDependencies: React.FC<FileDependenciesProps> = ({ 
   onAddToContext, 
-  onShowDetails 
+  onShowDetails,
+  repoUrl 
 }) => {
   const [files, setFiles] = useState<FileItem[]>(sampleFiles);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch repository data when repoUrl changes
+  useEffect(() => {
+    if (repoUrl) {
+      fetchRepositoryData(repoUrl);
+    } else {
+      setFiles(sampleFiles);
+      setError(null);
+    }
+  }, [repoUrl]);
+
+  const fetchRepositoryData = async (url: string) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const response = await fetch('http://localhost:8000/extract', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          repo_url: url,
+          max_file_size: 51200, // 50KB limit
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setFiles(data.files);
+    } catch (err) {
+      console.error('Failed to fetch repository data:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch repository data');
+      setFiles(sampleFiles); // Fallback to sample data
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRefresh = () => {
+    if (repoUrl) {
+      fetchRepositoryData(repoUrl);
+    }
+  };
 
   const toggleExpanded = (id: string) => {
     const updateFiles = (items: FileItem[]): FileItem[] => {
@@ -61,12 +131,18 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     };
     setFiles(updateFiles(files));
   };
-
   const getTokenBadgeColor = (tokens: number) => {
     if (tokens === 0) return 'bg-zinc-700 text-fg/60';
-    if (tokens < 1000) return 'bg-success/20 text-success';
-    if (tokens < 5000) return 'bg-amber/20 text-amber';
-    return 'bg-error/20 text-error';
+    if (tokens < 10000) return 'bg-red-900/20 text-red-900';
+    if (tokens < 8000) return 'bg-red-600/20 text-red-600';
+    if (tokens < 7000) return 'bg-red-500/20 text-red-500';
+    if (tokens < 6000) return 'bg-red-400/20 text-red-400';
+    if (tokens < 5000) return 'bg-orange-500/20 text-orange-500';
+    if (tokens < 4000) return 'bg-amber-500/20 text-amber-500';
+    if (tokens < 3000) return 'bg-yellow-500/20 text-yellow-500';
+    if (tokens < 2000) return 'bg-lime-500/20 text-lime-500';
+    if (tokens < 1000) return 'bg-green-500/20 text-green-500';
+    return 'bg-emerald-500/20 text-emerald-500';
   };
 
   const renderFileTree = (items: FileItem[], depth = 0) => {
@@ -107,12 +183,17 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
           <td className="px-4 py-3">
             <span className={`
               px-2 py-0.5 rounded text-xs font-medium
-              ${item.type === 'internal' 
+              ${item.type === 'INTERNAL' 
                 ? 'bg-primary/20 text-primary' 
                 : 'bg-zinc-700 text-fg/80'
               }
             `}>
               {item.type}
+            </span>
+          </td>
+          <td className="px-4 py-3">
+            <span className="text-sm text-fg/80">
+              {item.Category}
             </span>
           </td>
           <td className="px-4 py-3">
@@ -149,20 +230,60 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
   };
 
   return (
-    <div className="h-full overflow-auto">
-      <table className="w-full">
-        <thead className="border-b border-zinc-800 sticky top-0 bg-bg">
-          <tr>
-            <th className="text-left px-4 py-3 text-sm font-medium text-fg">Name</th>
-            <th className="text-left px-4 py-3 text-sm font-medium text-fg">Type</th>
-            <th className="text-left px-4 py-3 text-sm font-medium text-fg">Tokens</th>
-            <th className="text-left px-4 py-3 text-sm font-medium text-fg"></th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-zinc-800 text-sm">
-          {renderFileTree(files)}
-        </tbody>
-      </table>
+    <div className="h-full flex flex-col">
+      {/* Header with refresh button */}
+      <div className="flex items-center justify-between p-4 border-b border-zinc-800">
+        <h3 className="text-sm font-medium text-fg">File Dependencies</h3>
+        {repoUrl && (
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            className="p-2 hover:bg-zinc-800 rounded transition-colors disabled:opacity-50"
+            aria-label="Refresh repository data"
+          >
+            <RefreshCw className={`w-4 h-4 text-fg ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        )}
+      </div>
+
+      {/* Loading state */}
+      {loading && (
+        <div className="flex items-center justify-center p-8">
+          <div className="flex items-center gap-2 text-fg/60">
+            <RefreshCw className="w-4 h-4 animate-spin" />
+            <span>Analyzing repository...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Error state */}
+      {error && !loading && (
+        <div className="p-4 border-b border-zinc-800">
+          <div className="text-sm text-error bg-error/10 p-3 rounded">
+            <p className="font-medium">Failed to load repository data</p>
+            <p className="text-xs mt-1">{error}</p>
+            <p className="text-xs mt-1 text-fg/60">Showing sample data instead.</p>
+          </div>
+        </div>
+      )}
+
+      {/* File tree table */}
+      <div className="flex-1 overflow-auto">
+        <table className="w-full">
+          <thead className="border-b border-zinc-800 sticky top-0 bg-bg">
+            <tr>
+              <th className="text-left px-4 py-3 text-sm font-medium text-fg">Name</th>
+              <th className="text-left px-4 py-3 text-sm font-medium text-fg">Type</th>
+              <th className="text-left px-4 py-3 text-sm font-medium text-fg">Category</th>
+              <th className="text-left px-4 py-3 text-sm font-medium text-fg">Tokens</th>
+              <th className="text-left px-4 py-3 text-sm font-medium text-fg"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800 text-sm">
+            {renderFileTree(files)}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };
