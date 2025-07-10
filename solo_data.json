@@ -1,0 +1,34 @@
+{
+  "extraction_info": {
+    "timestamp": "2025-07-10T18:51:25.168515",
+    "source_url": "https://github.com/GetSoloTech/solo-server",
+    "extraction_method": "GitIngest",
+    "ingest_parameters": {}
+  },
+  "repository_metadata": {
+    "repository": "getsolotech/solo-server",
+    "files_analyzed": 119,
+    "estimated_tokens": 99400
+  },
+  "directory_structure": {
+    "root_directory": "",
+    "total_directories": 61,
+    "total_files": 0,
+    "file_types": {},
+    "structure_tree": "Directory structure:\n└── getsolotech-solo-server/\n    ├── README.md\n    ├── LICENSE\n    ├── MANIFEST.in\n    ├── install.sh\n    ├── setup.py\n    ├── assets/\n    │   └── logo/\n    ├── example_apps/\n    │   └── ai-chat/\n    │       ├── README.md\n    │       ├── next.config.js\n    │       ├── package-lock.json\n    │       ├── package.json\n    │       ├── postcss.config.js\n    │       ├── tailwind.config.js\n    │       ├── tsconfig.json\n    │       ├── .gitignore\n    │       ├── public/\n    │       │   └── images/\n    │       └── src/\n    │           └── app/\n    │               ├── globals.css\n    │               ├── layout.tsx\n    │               ├── page.module.css\n    │               └── page.tsx\n    ├── examples/\n    │   ├── containers/\n    │   │   ├── Dockerfile.finetune\n    │   │   ├── Browser Use/\n    │   │   │   └── Dockerfile\n    │   │   ├── Computer Use/\n    │   │   │   └── Dockerfile\n    │   │   ├── Cosmos/\n    │   │   │   └── Dockerfile\n    │   │   ├── JAX/\n    │   │   │   └── Dockerfile\n    │   │   ├── LITA/\n    │   │   │   └── Dockerfile\n    │   │   ├── LeRobot/\n    │   │   │   └── Dockerfile\n    │   │   ├── NanoLLM/\n    │   │   │   └── Dockerfile\n    │   │   ├── NanoOWL/\n    │   │   │   └── Dockerfile\n    │   │   ├── NanoSAM/\n    │   │   │   └── Dockerfile\n    │   │   ├── OpenEMMA/\n    │   │   │   └── Dockerfile\n    │   │   ├── Policy/\n    │   │   │   └── Dockerfile\n    │   │   ├── Pytorch/\n    │   │   │   └── Dockerfile\n    │   │   ├── ROS/\n    │   │   │   └── Dockerfile\n    │   │   ├── Tensorflow/\n    │   │   │   └── Dockerfile\n    │   │   ├── Transformers/\n    │   │   │   └── Dockerfile\n    │   │   ├── VILA/\n    │   │   │   └── Dockerfile\n    │   │   ├── homeassistant-core/\n    │   │   │   └── Dockerfile\n    │   │   ├── langchain/\n    │   │   │   └── Dockerfile\n    │   │   ├── llama-index/\n    │   │   │   └── Dockerfile\n    │   │   ├── llama.cpp/\n    │   │   │   └── Dockerfile\n    │   │   ├── llava/\n    │   │   │   └── Dockerfile\n    │   │   ├── ollama/\n    │   │   │   └── Dockerfile\n    │   │   ├── onnx/\n    │   │   │   └── Dockerfile\n    │   │   ├── piper/\n    │   │   │   └── Dockerfile\n    │   │   ├── rag/\n    │   │   │   └── Dockerfile\n    │   │   ├── txtai/\n    │   │   │   └── Dockerfile\n    │   │   ├── vLLM/\n    │   │   │   └── Dockerfile\n    │   │   ├── whisper/\n    │   │   │   └── Dockerfile\n    │   │   └── xtts/\n    │   │       └── Dockerfile\n    │   └── endpoints/\n    │       ├── CLiP/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── GLiNer/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── Paligemma-2/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── agents-llm/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── deepseek-r1/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── huggingface/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── llama3.2-rag-vllm/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── llama3.2-vision/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── miniCPM/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── ocr/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── qwen2.5/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── sentence-transformers/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── tensorTorch/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── whisper/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       ├── xgboost/\n    │       │   ├── client.py\n    │       │   ├── model.py\n    │       │   └── server.py\n    │       └── xtts/\n    │           ├── client.py\n    │           ├── model.py\n    │           └── server.py\n    └── solo_server/\n        ├── __init__.py\n        ├── cli.py\n        ├── finetune_script.py\n        ├── main.py\n        ├── utils.py\n        ├── commands/\n        │   ├── __init__.py\n        │   ├── benchmark.py\n        │   ├── download_hf.py\n        │   ├── finetune.py\n        │   ├── models_list.py\n        │   ├── serve.py\n        │   ├── status.py\n        │   ├── stop.py\n        │   └── test.py\n        ├── config/\n        │   ├── __init__.py\n        │   ├── config.yaml\n        │   └── config_loader.py\n        └── utils/\n            ├── __init__.py\n            ├── docker_utils.py\n            ├── hardware.py\n            ├── hf_utils.py\n            ├── llama_cpp_utils.py\n            ├── nvidia.py\n            └── server_utils.py"
+  },
+  "file_contents": {
+    "files": [],
+    "total_files_parsed": 0,
+    "total_content_size": 385509,
+    "file_sizes": {},
+    "language_distribution": {}
+  },
+  "statistics": {
+    "total_files": 119,
+    "estimated_tokens": 99400,
+    "total_content_size": 385509,
+    "languages_found": 0,
+    "file_types_found": 0
+  }
+}
