@@ -10,7 +10,7 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      content: 'Welcome to the Development Assistant! How can I help you today?',
+      content: 'Hi, I am Daifu, your development assistant. All chats here are automatically added as context for creating github issues. Add file/directory/library specific context in File Dependencies tab',
       isCode: false,
       timestamp: new Date(),
     },
@@ -27,6 +27,11 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
   ]);
   const [input, setInput] = useState('');
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
+
+  // Count user messages (messages that are not the initial system messages)
+  const userMessageCount = messages.filter(msg => 
+    msg.id !== '1' && msg.id !== '2'
+  ).length;
 
   const handleSend = () => {
     if (!input.trim()) return;
@@ -116,6 +121,14 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
           >
             <Send className="w-4 h-4" />
           </button>
+          {userMessageCount >= 2 && (
+            <button
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg 
+                       transition-colors flex items-center gap-2"
+            >
+              Create Github Issue
+            </button>
+          )}
         </div>
       </div>
     </div>
