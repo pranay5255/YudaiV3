@@ -9,3 +9,12 @@ backend/repo_processor/__pycache__/scraper_script.cpython-311.pyc
 backend/__pycache__/__init__.cpython-311.pyc
 backend/__pycache__/models.cpython-311.pyc
 backend/__pycache__/types.cpython-311.pyc
+backend/__pycache__/__init__.cpython-313.pyc
+backend/__pycache__/models.cpython-313.pyc
+backend/repo_processor/__pycache__/__init__.cpython-313.pyc
+backend/repo_processor/__pycache__/filedeps.cpython-313.pyc
+backend/repo_processor/__pycache__/scraper_script.cpython-313.pyc
+src/yudai_v3.egg-info/PKG-INFO
+src/yudai_v3.egg-info/requires.txt
+src/yudai_v3.egg-info/PKG-INFO
+src/yudai_v3.egg-info/requires.txt
