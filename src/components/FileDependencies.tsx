@@ -11,58 +11,6 @@ interface FileDependenciesProps {
 // Default repository URL - you can change this to your preferred default
 const DEFAULT_REPO_URL = "https://github.com/pranay5255/pranay5255";
 
-// Default sample data for when no repository is provided
-const sampleFiles: FileItem[] = [
-  {
-    id: '1',
-    name: 'src',
-    type: 'INTERNAL',
-    tokens: 0,
-    Category: 'Source Directory',
-    isDirectory: true,
-    expanded: true,
-    children: [
-      { 
-        id: '2', 
-        name: 'src/components', 
-        type: 'INTERNAL', 
-        tokens: 0, 
-        Category: 'Component Directory',
-        isDirectory: true, 
-        children: [
-          { id: '3', name: 'src/components/Button.tsx', type: 'INTERNAL', tokens: 245, Category: 'React Component' },
-          { id: '4', name: 'src/components/Modal.tsx', type: 'INTERNAL', tokens: 892, Category: 'React Component' },
-        ]
-      },
-      { 
-        id: '5', 
-        name: 'src/utils', 
-        type: 'INTERNAL', 
-        tokens: 0, 
-        Category: 'Utility Directory',
-        isDirectory: true, 
-        children: [
-          { id: '6', name: 'src/utils/helpers.ts', type: 'INTERNAL', tokens: 156, Category: 'TypeScript Utility' },
-        ]
-      },
-      { id: '7', name: 'src/App.tsx', type: 'INTERNAL', tokens: 423, Category: 'React Component' },
-    ],
-  },
-  {
-    id: '8',
-    name: 'Libraries / Frameworks',
-    type: 'EXTERNAL',
-    tokens: 0,
-    Category: 'External Dependencies',
-    isDirectory: true,
-    expanded: false,
-    children: [
-      { id: '9', name: 'react', type: 'EXTERNAL', tokens: 15420, Category: 'React Library' },
-      { id: '10', name: 'typescript', type: 'EXTERNAL', tokens: 8934, Category: 'Language Framework' },
-      { id: '11', name: 'tailwindcss', type: 'EXTERNAL', tokens: 3245, Category: 'CSS Framework' },
-    ],
-  },
-];
 
 export const FileDependencies: React.FC<FileDependenciesProps> = ({ 
   onAddToContext, 
