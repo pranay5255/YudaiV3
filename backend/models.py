@@ -323,8 +323,13 @@ class ProcessFileRequest(BaseModel):
     file: FileItemInput
     
 class ChatRequest(BaseModel):
+    conversation_id: Optional[str] = Field(
+        default="default", alias="conversationId"
+    )
     message: ChatMessageInput
     context_cards: Optional[List[str]] = Field(default_factory=list)
+
+    model_config = ConfigDict(populate_by_name=True)
 
 class CreateIssueRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
