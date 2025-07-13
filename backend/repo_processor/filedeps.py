@@ -16,9 +16,6 @@ from sqlalchemy.orm import Session
 from urllib.parse import urlparse
 from sqlalchemy import func
 
-# Import DAifu chat router
-from daifu.chat_api import router as daifu_router
-
 # Import database session
 from db.database import get_db
 
@@ -43,9 +40,6 @@ app = FastAPI(
     description="API for extracting repository file dependencies using GitIngest",
     version="1.0.0"
 )
-
-# Mount DAifu chat routes
-app.include_router(daifu_router)
 
 # Add CORS middleware for frontend integration
 app.add_middleware(
