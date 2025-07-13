@@ -187,3 +187,35 @@ class IssueResponse(BaseModel):
     issue_url: str = Field(...)
     title: str = Field(...)
     status: str = Field(...)
+
+# Database Response Models
+class RepositoryResponse(BaseModel):
+    id: int = Field(...)
+    repo_url: str = Field(...)
+    repo_name: str = Field(...)
+    repo_owner: str = Field(...)
+    processed_at: datetime = Field(...)
+    max_file_size: Optional[int] = Field(None)
+    total_files: int = Field(...)
+    total_tokens: int = Field(...)
+    status: str = Field(...)
+    error_message: Optional[str] = Field(None)
+    created_at: datetime = Field(...)
+    updated_at: datetime = Field(...)
+
+class FileItemDBResponse(BaseModel):
+    id: int = Field(...)
+    name: str = Field(...)
+    path: str = Field(...)
+    file_type: str = Field(...)
+    category: str = Field(...)
+    tokens: int = Field(...)
+    is_directory: bool = Field(...)
+    parent_id: Optional[int] = Field(None)
+    content_size: int = Field(...)
+    created_at: datetime = Field(...)
+    updated_at: datetime = Field(...)
+
+class RepositoryWithFilesResponse(BaseModel):
+    repository: RepositoryResponse = Field(...)
+    file_items: List[FileItemDBResponse] = Field(...)
