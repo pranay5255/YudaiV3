@@ -5,7 +5,7 @@ import os
 from typing import Dict, List, Tuple
 
 from fastapi import APIRouter, HTTPException
-import openai
+import requests
 
 from models import ChatRequest
 from .prompt import build_daifu_prompt
@@ -38,12 +38,28 @@ async def chat_daifu(request: ChatRequest):
     prompt = build_daifu_prompt(GITHUB_CONTEXT, history)
 
     try:
-        client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        resp = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENROUTER_API_KEY not configured")
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+
+        body = {
+            "model": "openai/gpt-3.5-turbo",
+            "messages": [{"role": "user", "content": prompt}],
+        }
+
+        resp = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=body,
+            timeout=30,
         )
-        reply = resp.choices[0].message.content.strip()
+        resp.raise_for_status()
+        reply = resp.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:  # pragma: no cover - network failures
         raise HTTPException(status_code=500, detail=f"LLM call failed: {e}")
 
