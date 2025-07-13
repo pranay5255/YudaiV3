@@ -40,5 +40,8 @@ def init_db():
     Initialize database - create all tables
     """
     # Import all models here to ensure they are registered
-    from models import User, AuthToken, Repository, FileItem, ContextCard, IdeaItem
+    from models import (
+        User, AuthToken, Repository, FileItem, ContextCard, IdeaItem,
+        Issue, PullRequest, Commit
+    )
     Base.metadata.create_all(bind=engine) 
