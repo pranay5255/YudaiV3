@@ -6,17 +6,27 @@ This server provides endpoints to extract repository data using GitIngest
 and transform it to match the FileDependencies component interface.
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any
 import json
 import os
 from pathlib import Path
+from sqlalchemy.orm import Session
+from urllib.parse import urlparse
+from sqlalchemy import func
 
-# Import types from the unified models module
+# Import database session
+from db.database import get_db
+
+# Import unified models
 from models import (
     RepositoryRequest,
-    FileItemResponse
+    FileItemResponse,
+    Repository,
+    FileItem,
+    RepositoryResponse,
+    FileItemDBResponse
 )
 
 # Import functions from scraper_script.py
@@ -69,7 +79,112 @@ def estimate_tokens_for_file(file_path: str, content_size: int) -> int:
     ratio = token_ratios.get(ext, 4)  # Default to 4 chars per token
     return max(1, content_size // ratio)
 
+def extract_repo_info_from_url(repo_url: str) -> tuple[str, str]:
+    """Extract repository name and owner from GitHub URL."""
+    parsed = urlparse(repo_url)
+    path_parts = parsed.path.strip('/').split('/')
+    
+    if len(path_parts) >= 2:
+        owner = path_parts[0]
+        repo_name = path_parts[1].replace('.git', '')
+        return repo_name, owner
+    else:
+        return 'unknown', 'unknown'
 
+def save_repository_to_db(
+    db: Session, 
+    repo_url: str, 
+    repo_name: str, 
+    repo_owner: str,
+    raw_data: Dict[str, Any],
+    processed_data: Dict[str, Any],
+    total_files: int,
+    total_tokens: int,
+    max_file_size: Optional[int] = None,
+    user_id: int = 1  # Default user ID for now
+) -> Repository:
+    """Save repository data to database."""
+    
+    # Check if repository already exists
+    existing_repo = db.query(Repository).filter(
+        Repository.repo_url == repo_url,
+        Repository.user_id == user_id
+    ).first()
+    
+    if existing_repo:
+        # Update existing repository
+        existing_repo.raw_data = raw_data
+        existing_repo.processed_data = processed_data
+        existing_repo.total_files = total_files
+        existing_repo.total_tokens = total_tokens
+        existing_repo.max_file_size = max_file_size
+        existing_repo.status = "completed"
+        existing_repo.processed_at = func.now()
+        db.commit()
+        return existing_repo
+    else:
+        # Create new repository
+        repo = Repository(
+            user_id=user_id,
+            repo_url=repo_url,
+            repo_name=repo_name,
+            repo_owner=repo_owner,
+            raw_data=raw_data,
+            processed_data=processed_data,
+            total_files=total_files,
+            total_tokens=total_tokens,
+            max_file_size=max_file_size,
+            status="completed"
+        )
+        db.add(repo)
+        db.commit()
+        db.refresh(repo)
+        return repo
+
+def save_file_items_to_db(
+    db: Session,
+    repository_id: int,
+    file_items: List[FileItemResponse]
+) -> List[FileItem]:
+    """Save file items to database."""
+    
+    # Clear existing file items for this repository
+    db.query(FileItem).filter(FileItem.repository_id == repository_id).delete()
+    
+    saved_items = []
+    
+    def save_file_item_recursive(item: FileItemResponse, parent_id: Optional[int] = None) -> FileItem:
+        """Recursively save file items with their children."""
+        
+        db_item = FileItem(
+            repository_id=repository_id,
+            name=item.name,
+            path=item.name,  # Use name as path for now
+            file_type=item.type,
+            category=item.Category,
+            tokens=item.tokens,
+            is_directory=item.isDirectory or False,
+            parent_id=parent_id,
+            content_size=item.tokens * 4  # Rough estimation
+        )
+        
+        db.add(db_item)
+        db.flush()  # Get the ID
+        
+        # Save children recursively
+        if item.children:
+            for child in item.children:
+                save_file_item_recursive(child, db_item.id)
+        
+        saved_items.append(db_item)
+        return db_item
+    
+    # Save all root items
+    for item in file_items:
+        save_file_item_recursive(item)
+    
+    db.commit()
+    return saved_items
 
 def build_file_tree(files_data: Dict[str, Any], repo_name: str) -> List[FileItemResponse]:
     """Build a hierarchical file tree from GitIngest file data."""
@@ -144,7 +259,6 @@ def build_file_tree(files_data: Dict[str, Any], repo_name: str) -> List[FileItem
             # File is in root
             file_items.append(file_item)
     
-    
     return file_items
 
 def process_gitingest_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -209,6 +323,9 @@ async def root():
         "version": "1.0.0",
         "endpoints": {
             "/extract": "Extract repository data and return file dependencies",
+            "/repositories": "Get all repositories (optional user_id filter)",
+            "/repositories/{id}": "Get specific repository by ID",
+            "/repositories/{id}/files": "Get all files for a specific repository",
             "/health": "Health check endpoint"
         }
     }
@@ -218,15 +335,62 @@ async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "service": "file-dependencies-api"}
 
+@app.get("/repositories", response_model=List[RepositoryResponse])
+async def get_repositories(
+    user_id: Optional[int] = None,
+    db: Session = Depends(get_db)
+):
+    """Get repositories from database, optionally filtered by user_id."""
+    query = db.query(Repository)
+    
+    if user_id is not None:
+        query = query.filter(Repository.user_id == user_id)
+    
+    repositories = query.all()
+    return repositories
+
+@app.get("/repositories/{repository_id}", response_model=RepositoryResponse)
+async def get_repository_by_id(
+    repository_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get a specific repository by ID."""
+    repository = db.query(Repository).filter(Repository.id == repository_id).first()
+    if not repository:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return repository
+
+@app.get("/repositories/{repository_id}/files", response_model=List[FileItemDBResponse])
+async def get_repository_files(
+    repository_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get all file items for a specific repository."""
+    # Check if repository exists
+    repository = db.query(Repository).filter(Repository.id == repository_id).first()
+    if not repository:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    
+    # Get all file items for this repository
+    file_items = db.query(FileItem).filter(FileItem.repository_id == repository_id).all()
+    return file_items
+
 @app.post("/extract", response_model=FileItemResponse)
-async def extract_file_dependencies(request: RepositoryRequest):
+async def extract_file_dependencies(
+    request: RepositoryRequest,
+    db: Session = Depends(get_db)
+):
     """
     Extract file dependencies from a GitHub repository.
     
     This endpoint uses GitIngest to analyze a repository and returns
     a hierarchical file structure that matches the FileDependencies component interface.
+    The data is also persisted to the database.
     """
     try:
+        # Extract repository information from URL
+        repo_name, repo_owner = extract_repo_info_from_url(request.repo_url)
+        
         # Extract repository data using GitIngest (await the async function)
         raw_repo_data = await extract_repository_data(
             repo_url=request.repo_url,
@@ -242,8 +406,6 @@ async def extract_file_dependencies(request: RepositoryRequest):
         
         # Build file tree from the processed data
         files_data = {'files': repo_data.get('files', [])}
-        repo_name = repo_data.get('repository_metadata', {}).get('repository', 'unknown')
-        
         file_tree = build_file_tree(files_data, repo_name)
         
         # Calculate statistics
@@ -261,12 +423,34 @@ async def extract_file_dependencies(request: RepositoryRequest):
             children=file_tree,
             expanded=True
         )
-
+        
+        # Save to database
+        try:
+            # Save repository data
+            repository = save_repository_to_db(
+                db=db,
+                repo_url=request.repo_url,
+                repo_name=repo_name,
+                repo_owner=repo_owner,
+                raw_data=raw_repo_data,
+                processed_data=repo_data,
+                total_files=total_files,
+                total_tokens=total_tokens,
+                max_file_size=request.max_file_size
+            )
+            
+            # Save file items
+            save_file_items_to_db(db, repository.id, file_tree)
+            
+        except Exception as db_error:
+            # Log database error but don't fail the request
+            print(f"Database save failed: {db_error}")
+            # Continue without database persistence for now
+        
         return root_file_item
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
 
 if __name__ == "__main__":
     import uvicorn

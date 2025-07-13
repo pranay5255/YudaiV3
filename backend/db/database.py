@@ -3,9 +3,11 @@ Database configuration and session management for YudaiV3
 """
 import os
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+# Import Base from unified models
+from models import Base
 
 # Database URL from environment variables
 DATABASE_URL = os.getenv(
@@ -23,9 +25,6 @@ engine = create_engine(
 # Create session maker
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Create base class for models
-Base = declarative_base()
-
 def get_db():
     """
     Dependency function to get database session
@@ -41,5 +40,5 @@ def init_db():
     Initialize database - create all tables
     """
     # Import all models here to ensure they are registered
-    from . import models
+    from models import User, AuthToken, Repository, FileItem, ContextCard, IdeaItem
     Base.metadata.create_all(bind=engine) 
