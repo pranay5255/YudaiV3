@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronRight, ChevronDown, Plus, Folder, File, RefreshCw } from 'lucide-react';
-import { FileItem } from '../types';
+import { FileItem, FileItemAPIResponse } from '../types';
 
 interface FileDependenciesProps {
   onAddToContext: (file: FileItem) => void;
@@ -21,13 +21,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch repository data when repoUrl changes
-  useEffect(() => {
-    const urlToUse = repoUrl || DEFAULT_REPO_URL;
-    fetchRepositoryData(urlToUse);
-  }, [repoUrl]);
-
-  const fetchRepositoryData = async (url: string) => {
+  const fetchRepositoryData = useCallback(async (url: string) => {
     setLoading(true);
     setError(null);
     
@@ -50,15 +44,16 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
       const data = await response.json();
       
       // Transform the API response to match our FileItem structure
-      const transformData = (items: any[]): FileItem[] => {
+      const transformData = (items: FileItemAPIResponse[]): FileItem[] => {
         return items.map((item, index) => ({
           id: item.id || `item-${index}`,
           name: item.name || item.path || 'Unknown',
-          type: item.type || 'INTERNAL',
+          path: item.path,
+          type: normalizeFileType(item.type), // Convert to proper type
           tokens: item.tokens || 0,
           Category: item.category || item.Category || 'File',
-          isDirectory: item.isDirectory || item.type === 'directory',
-          expanded: item.isDirectory || item.type === 'directory' ? false : undefined,
+          isDirectory: item.isDirectory || false,
+          expanded: item.isDirectory ? false : undefined,
           children: item.children ? transformData(item.children) : undefined
         }));
       };
@@ -73,6 +68,30 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // Fetch repository data when repoUrl changes
+  useEffect(() => {
+    const urlToUse = repoUrl || DEFAULT_REPO_URL;
+    fetchRepositoryData(urlToUse);
+  }, [repoUrl, fetchRepositoryData]);
+
+  // Helper function to normalize file type to match our enum
+  const normalizeFileType = (type?: string): 'INTERNAL' | 'EXTERNAL' => {
+    if (!type) return 'INTERNAL';
+    
+    // Normalize common variations
+    const normalizedType = type.toUpperCase().trim();
+    if (normalizedType === 'INTERNAL' || normalizedType === 'EXTERNAL') {
+      return normalizedType as 'INTERNAL' | 'EXTERNAL';
+    }
+    
+    // Default mapping based on common patterns
+    if (normalizedType.includes('EXTERNAL') || normalizedType.includes('DEPENDENCY')) {
+      return 'EXTERNAL';
+    }
+    
+    return 'INTERNAL'; // Default fallback
   };
 
   const handleRefresh = () => {

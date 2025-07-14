@@ -14,15 +14,32 @@ export interface IdeaItem {
   confidence: number;
 }
 
+// Updated to match the database schema from models.py
 export interface FileItem {
   id: string;
-  name: string; // path of directory/file
-  type: 'INTERNAL' | 'EXTERNAL'; // string (INTERNAL || EXTERNAL)
+  name: string; // file/directory name
+  path?: string; // full path (optional for frontend)
+  type: 'INTERNAL' | 'EXTERNAL'; // matches FileType enum from models.py
   tokens: number; // int
   Category: string; // category classification
-  isDirectory?: boolean;
+  isDirectory: boolean; // matches is_directory from database
   children?: FileItem[];
-  expanded?: boolean;
+  expanded?: boolean; // frontend-only state
+  content?: string; // optional file content
+  content_size?: number; // optional content size
+}
+
+// API response type for the filedeps endpoint
+export interface FileItemAPIResponse {
+  id?: string;
+  name?: string;
+  path?: string;
+  type?: string; // can be any string from API
+  tokens?: number;
+  category?: string;
+  Category?: string;
+  isDirectory?: boolean;
+  children?: FileItemAPIResponse[];
 }
 
 export interface Message {
