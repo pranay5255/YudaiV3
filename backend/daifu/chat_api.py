@@ -4,11 +4,14 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Tuple
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
 import requests
 
-from models import ChatRequest
-from .prompt import build_daifu_prompt
+from models import ChatRequest, User
+from auth.github_oauth import get_current_user
+from db.database import get_db
+from .prompt import build_daifu_prompt, get_github_context
 
 router = APIRouter()
 
@@ -29,13 +32,27 @@ def _get_history(conv_id: str) -> List[Tuple[str, str]]:
 
 
 @router.post("/chat/daifu")
-async def chat_daifu(request: ChatRequest):
+async def chat_daifu(
+    request: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Process a chat message via the DAifu agent."""
     conv_id = request.conversation_id or "default"
     history = _get_history(conv_id)
     history.append(("User", request.message.content))
 
-    prompt = build_daifu_prompt(GITHUB_CONTEXT, history)
+    # Get live github context if repo is specified
+    github_context = GITHUB_CONTEXT
+    if request.repo_owner and request.repo_name:
+        github_context = await get_github_context(
+            owner=request.repo_owner,
+            repo=request.repo_name,
+            current_user=current_user,
+            db=db,
+        )
+
+    prompt = build_daifu_prompt(github_context, history)
 
     try:
         api_key = os.getenv("OPENROUTER_API_KEY")
