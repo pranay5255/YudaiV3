@@ -97,100 +97,40 @@ class AuthToken(Base):
     user: Mapped["User"] = relationship(back_populates="auth_tokens")
 
 class Repository(Base):
-    """Repository data from GitHub"""
+    """Repository data extracted from filedeps.py API"""
     __tablename__ = "repositories"
-
+    
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    github_repo_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-
-    # Core GitHub metadata
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    owner: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    full_name: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    private: Mapped[bool] = mapped_column(Boolean, default=False)
-    html_url: Mapped[str] = mapped_column(String(500), nullable=False)
-    clone_url: Mapped[str] = mapped_column(String(500), nullable=False)
-    language: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     
-    # Stats
-    stargazers_count: Mapped[int] = mapped_column(Integer, default=0)
-    forks_count: Mapped[int] = mapped_column(Integer, default=0)
-    open_issues_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Repository metadata
+    repo_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    repo_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    repo_owner: Mapped[str] = mapped_column(String(255), nullable=False)
     
-    # Timestamps from GitHub
-    github_created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    github_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Processing metadata
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    max_file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     
-    # Timestamps of our record
+    # Statistics
+    total_files: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Extraction data
+    raw_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    processed_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    
+    # Status
+    status: Mapped[str] = mapped_column(String(50), default="pending")
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
-
+    
     # Relationships
     user: Mapped["User"] = relationship(back_populates="repositories")
-    issues: Mapped[List["Issue"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
-    pull_requests: Mapped[List["PullRequest"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
-    commits: Mapped[List["Commit"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
     file_items: Mapped[List["FileItem"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
-
-class Issue(Base):
-    """Issues from a repository"""
-    __tablename__ = "issues"
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    github_issue_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
-    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"), nullable=False)
-    
-    number: Mapped[int] = mapped_column(Integer, nullable=False)
-    title: Mapped[str] = mapped_column(String(1000), nullable=False)
-    body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    state: Mapped[str] = mapped_column(String(50), nullable=False)
-    html_url: Mapped[str] = mapped_column(String(1000), nullable=False)
-    author_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    
-    github_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    github_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    github_closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
-    repository: Mapped["Repository"] = relationship(back_populates="issues")
-
-class PullRequest(Base):
-    """Pull Requests from a repository"""
-    __tablename__ = "pull_requests"
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    github_pr_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
-    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"), nullable=False)
-    
-    number: Mapped[int] = mapped_column(Integer, nullable=False)
-    title: Mapped[str] = mapped_column(String(1000), nullable=False)
-    body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    state: Mapped[str] = mapped_column(String(50), nullable=False)
-    html_url: Mapped[str] = mapped_column(String(1000), nullable=False)
-    author_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    
-    github_created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    github_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    github_closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    merged_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
-    repository: Mapped["Repository"] = relationship(back_populates="pull_requests")
-
-class Commit(Base):
-    """Commits from a repository"""
-    __tablename__ = "commits"
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    sha: Mapped[str] = mapped_column(String(40), unique=True, nullable=False, index=True)
-    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"), nullable=False)
-    
-    message: Mapped[str] = mapped_column(Text, nullable=False)
-    html_url: Mapped[str] = mapped_column(String(1000), nullable=False)
-    
-    author_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    author_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    author_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
-    repository: Mapped["Repository"] = relationship(back_populates="commits")
 
 class FileItem(Base):
     """Individual file items from repository analysis"""
@@ -388,8 +328,6 @@ class ChatRequest(BaseModel):
     )
     message: ChatMessageInput
     context_cards: Optional[List[str]] = Field(default_factory=list)
-    repo_owner: Optional[str] = Field(None, alias="repoOwner")
-    repo_name: Optional[str] = Field(None, alias="repoName")
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -452,107 +390,3 @@ class FileItemDBResponse(BaseModel):
     created_at: datetime = Field(...)
     
     model_config = ConfigDict(from_attributes=True)
-
-# ============================================================================
-# AUTHENTICATION MODELS
-# ============================================================================
-
-class UserProfile(BaseModel):
-    id: int
-    github_username: str
-    github_user_id: str
-    email: Optional[str] = None
-    display_name: Optional[str] = None
-    avatar_url: Optional[str] = None
-    created_at: str
-    last_login: Optional[str] = None
-
-class AuthResponse(BaseModel):
-    success: bool
-    message: str
-    user: Optional[UserProfile] = None
-    access_token: Optional[str] = None
-    error: Optional[str] = None
-
-# ============================================================================
-# GITHUB API MODELS
-# ============================================================================
-
-class GitHubUser(BaseModel):
-    login: str
-    id: int
-    avatar_url: Optional[str] = None
-    html_url: Optional[str] = None
-
-class GitHubLabel(BaseModel):
-    id: int
-    name: str
-    color: str
-    description: Optional[str] = None
-
-class GitHubRepo(BaseModel):
-    id: int
-    name: str
-    full_name: str
-    private: bool
-    html_url: str
-    description: Optional[str] = None
-    clone_url: Optional[str] = None
-    language: Optional[str] = None
-    stargazers_count: Optional[int] = 0
-    forks_count: Optional[int] = 0
-    open_issues_count: Optional[int] = 0
-    updated_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
-    pushed_at: Optional[datetime] = None
-    topics: Optional[List[str]] = []
-    license: Optional[Dict[str, Any]] = None
-
-class GitHubIssue(BaseModel):
-    id: int
-    number: int
-    html_url: str
-    title: str
-    body: Optional[str] = None
-    state: str
-    user: Optional[GitHubUser] = None
-    labels: List[GitHubLabel] = []
-    assignees: List[GitHubUser] = []
-    created_at: datetime
-    updated_at: datetime
-    closed_at: Optional[datetime] = None
-
-class GitHubPullRequest(BaseModel):
-    id: int
-    number: int
-    html_url: str
-    title: str
-    body: Optional[str] = None
-    state: str
-    user: Optional[GitHubUser] = None
-    labels: List[GitHubLabel] = []
-    assignees: List[GitHubUser] = []
-    created_at: datetime
-    updated_at: datetime
-    closed_at: Optional[datetime] = None
-    merged_at: Optional[datetime] = None
-    head: Optional[Dict[str, Any]] = None
-    base: Optional[Dict[str, Any]] = None
-
-class GitHubCommitAuthor(BaseModel):
-    name: Optional[str] = None
-    email: Optional[str] = None
-    date: Optional[datetime] = None
-
-class GitHubCommit(BaseModel):
-    sha: str
-    html_url: str
-    message: str
-    author: Optional[GitHubCommitAuthor] = None
-    committer: Optional[GitHubCommitAuthor] = None
-    parents: Optional[List[Dict[str, Any]]] = []
-
-class GitHubSearchResponse(BaseModel):
-    total_count: int
-    incomplete_results: bool
-    items: List[GitHubRepo]

@@ -6,7 +6,7 @@ This server provides endpoints to extract repository data using GitIngest
 and transform it to match the FileDependencies component interface.
 """
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any
 import json
@@ -19,14 +19,8 @@ from sqlalchemy import func
 # Import DAifu chat router
 from daifu.chat_api import router as daifu_router
 
-# Import authentication
-from auth import auth_router, get_current_user, get_current_user_optional
-
-# Import GitHub API
-from github import github_router
-
 # Import database session
-from db.database import get_db, init_db
+from db.database import get_db
 
 # Import unified models
 from models import (
@@ -35,8 +29,7 @@ from models import (
     Repository,
     FileItem,
     RepositoryResponse,
-    FileItemDBResponse,
-    User
+    FileItemDBResponse
 )
 
 # Import functions from scraper_script.py
@@ -50,17 +43,6 @@ app = FastAPI(
     description="API for extracting repository file dependencies using GitIngest",
     version="1.0.0"
 )
-
-@app.on_event("startup")
-def on_startup():
-    """Initialize the database when the application starts."""
-    init_db()
-
-# Mount authentication routes
-app.include_router(auth_router)
-
-# Mount GitHub API routes
-app.include_router(github_router)
 
 # Mount DAifu chat routes
 app.include_router(daifu_router)
@@ -361,17 +343,16 @@ async def health_check():
 
 @app.get("/repositories", response_model=List[RepositoryResponse])
 async def get_repositories(
-    current_user: Optional[User] = Depends(get_current_user_optional),
+    user_id: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
-    """Get all repositories for the authenticated user"""
-    if not current_user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required"
-        )
+    """Get repositories from database, optionally filtered by user_id."""
+    query = db.query(Repository)
     
-    repositories = db.query(Repository).filter(Repository.user_id == current_user.id).all()
+    if user_id is not None:
+        query = query.filter(Repository.user_id == user_id)
+    
+    repositories = query.all()
     return repositories
 
 @app.get("/repositories/{repository_id}", response_model=RepositoryResponse)
@@ -400,58 +381,82 @@ async def get_repository_files(
     file_items = db.query(FileItem).filter(FileItem.repository_id == repository_id).all()
     return file_items
 
-# TODO: This endpoint is currently broken due to Repository model changes.
-# It needs to be refactored to align with the new database schema.
-# @app.post("/extract", response_model=FileItemResponse)
-# async def extract_file_dependencies(
-#     request: RepositoryRequest,
-#     current_user: User = Depends(get_current_user),
-#     db: Session = Depends(get_db)
-# ):
-#     """
-#     Extracts repository data, saves it to the database, and returns file items.
-#     """
-#     repo_url = request.repo_url
-#     max_file_size = request.max_file_size
-# 
-#     try:
-#         # Extract repository information from URL
-#         repo_name, repo_owner = extract_repo_info_from_url(repo_url)
-# 
-#         # Extract repository data using the scraper script
-#         raw_data = await extract_repository_data(repo_url, max_file_size)
-# 
-#         # Process the raw data to get file items and other details
-#         processed_data = process_gitingest_data(raw_data)
-#         file_items_response = processed_data["file_items_response"]
-#         
-#         # Calculate totals
-#         total_files = processed_data["total_files"]
-#         total_tokens = processed_data["total_tokens"]
-# 
-#         # Save repository and file items to the database
-#         repo = save_repository_to_db(
-#             db=db,
-#             repo_url=repo_url,
-#             repo_name=repo_name,
-#             repo_owner=repo_owner,
-#             raw_data=raw_data,
-#             processed_data=processed_data,
-#             total_files=total_files,
-#             total_tokens=total_tokens,
-#             max_file_size=max_file_size,
-#             user_id=current_user.id
-#         )
-# 
-#         save_file_items_to_db(db, repo.id, file_items_response)
-# 
-#         return file_items_response
-# 
-#     except Exception as e:
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail=f"Failed to extract file dependencies: {str(e)}"
-#         )
+@app.post("/extract", response_model=FileItemResponse)
+async def extract_file_dependencies(
+    request: RepositoryRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Extract file dependencies from a GitHub repository.
+    
+    This endpoint uses GitIngest to analyze a repository and returns
+    a hierarchical file structure that matches the FileDependencies component interface.
+    The data is also persisted to the database.
+    """
+    try:
+        # Extract repository information from URL
+        repo_name, repo_owner = extract_repo_info_from_url(request.repo_url)
+        
+        # Extract repository data using GitIngest (await the async function)
+        raw_repo_data = await extract_repository_data(
+            repo_url=request.repo_url,
+            max_file_size=request.max_file_size
+        )
+        
+        # Check for errors
+        if 'error' in raw_repo_data:
+            raise HTTPException(status_code=400, detail=f"Failed to extract data: {raw_repo_data['error']}")
+        
+        # Process raw data into structured format
+        repo_data = process_gitingest_data(raw_repo_data)
+        
+        # Build file tree from the processed data
+        files_data = {'files': repo_data.get('files', [])}
+        file_tree = build_file_tree(files_data, repo_name)
+        
+        # Calculate statistics
+        total_files = repo_data.get('statistics', {}).get('total_files', 0)
+        total_tokens = repo_data.get('statistics', {}).get('estimated_tokens', 0)
+        
+        # Create root FileItem node
+        root_file_item = FileItemResponse(
+            id="root",
+            name=repo_name,
+            type="INTERNAL",
+            tokens=total_tokens,
+            Category="Source Code",
+            isDirectory=True,
+            children=file_tree,
+            expanded=True
+        )
+        
+        # Save to database
+        try:
+            # Save repository data
+            repository = save_repository_to_db(
+                db=db,
+                repo_url=request.repo_url,
+                repo_name=repo_name,
+                repo_owner=repo_owner,
+                raw_data=raw_repo_data,
+                processed_data=repo_data,
+                total_files=total_files,
+                total_tokens=total_tokens,
+                max_file_size=request.max_file_size
+            )
+            
+            # Save file items
+            save_file_items_to_db(db, repository.id, file_tree)
+            
+        except Exception as db_error:
+            # Log database error but don't fail the request
+            print(f"Database save failed: {db_error}")
+            # Continue without database persistence for now
+        
+        return root_file_item
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

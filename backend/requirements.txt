@@ -4,7 +4,6 @@ certifi==2025.7.9
 charset-normalizer==3.4.2
 click==8.2.1
 fastapi==0.116.1
-ghapi==1.0.4
 gitingest==0.1.4
 greenlet==3.2.3
 h11==0.16.0
@@ -13,8 +12,6 @@ idna==3.10
 pydantic==2.11.7
 pydantic-core==2.33.2
 pydantic-settings==2.10.1
-pytest==8.3.4
-pytest-asyncio==0.24.0
 python-dotenv==1.0.1
 python-multipart==0.0.20
 pyyaml==6.0.2
