@@ -44,18 +44,20 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
       const data = await response.json();
       
       // Transform the API response to match our FileItem structure
-      const transformData = (items: FileItemAPIResponse[]): FileItem[] => {
-        return items.map((item, index) => ({
-          id: item.id || `item-${index}`,
-          name: item.name || item.path || 'Unknown',
-          path: item.path,
-          type: normalizeFileType(item.type), // Convert to proper type
-          tokens: item.tokens || 0,
-          Category: item.category || item.Category || 'File',
-          isDirectory: item.isDirectory || false,
-          expanded: item.isDirectory ? false : undefined,
-          children: item.children ? transformData(item.children) : undefined
-        }));
+      const transformData = (items: unknown[]): FileItem[] => {
+        return items.map((rawItem, index) => {
+          const item = rawItem as Record<string, unknown>;
+          return {
+            id: (item.id as string) || `item-${index}`,
+            name: (item.name as string) || (item.path as string) || 'Unknown',
+            type: (item.type as string) || 'INTERNAL',
+            tokens: (item.tokens as number) || 0,
+            Category: (item.category as string) || (item.Category as string) || 'File',
+            isDirectory: (item.isDirectory as boolean) || item.type === 'directory',
+            expanded: (item.isDirectory as boolean) || item.type === 'directory' ? false : undefined,
+            children: item.children ? transformData(item.children as unknown[]) : undefined
+          };
+        });
       };
 
       // Use the transformed data or fallback to empty array

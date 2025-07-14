@@ -108,29 +108,45 @@ class Repository(Base):
     repo_name: Mapped[str] = mapped_column(String(255), nullable=False)
     repo_owner: Mapped[str] = mapped_column(String(255), nullable=False)
     
-    # Processing metadata
-    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    max_file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    
-    # Statistics
-    total_files: Mapped[int] = mapped_column(Integer, default=0)
-    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    
-    # Extraction data
-    raw_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    processed_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    
-    # Status
-    status: Mapped[str] = mapped_column(String(50), default="pending")
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
-    
+
     # Relationships
     user: Mapped["User"] = relationship(back_populates="repositories")
     file_items: Mapped[List["FileItem"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
+    analyses: Mapped[List["FileAnalysis"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
+
+
+class FileAnalysis(Base):
+    """Results of GitIngest analysis for a repository"""
+    __tablename__ = "file_analyses"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"), nullable=False)
+
+    # Processing metadata
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    max_file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Standard timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+
+    # Statistics
+    total_files: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Extraction data
+    raw_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    processed_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    # Status
+    status: Mapped[str] = mapped_column(String(50), default="completed")
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    repository: Mapped["Repository"] = relationship(back_populates="analyses")
 
 class FileItem(Base):
     """Individual file items from repository analysis"""
@@ -323,8 +339,13 @@ class ProcessFileRequest(BaseModel):
     file: FileItemInput
     
 class ChatRequest(BaseModel):
+    conversation_id: Optional[str] = Field(
+        default="default", alias="conversationId"
+    )
     message: ChatMessageInput
     context_cards: Optional[List[str]] = Field(default_factory=list)
+
+    model_config = ConfigDict(populate_by_name=True)
 
 class CreateIssueRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
@@ -366,12 +387,24 @@ class RepositoryResponse(BaseModel):
     repo_url: str = Field(...)
     repo_name: str = Field(...)
     repo_owner: str = Field(...)
+    created_at: datetime = Field(...)
+    updated_at: Optional[datetime] = Field(None)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FileAnalysisResponse(BaseModel):
+    id: int = Field(...)
+    repository_id: int = Field(..., alias="repositoryId")
     total_files: int = Field(...)
     total_tokens: int = Field(...)
+    max_file_size: Optional[int] = Field(None, alias="maxFileSize")
     status: str = Field(...)
-    created_at: datetime = Field(...)
-    
-    model_config = ConfigDict(from_attributes=True)
+    processed_at: datetime = Field(..., alias="processedAt")
+    created_at: datetime = Field(..., alias="createdAt")
+    updated_at: Optional[datetime] = Field(None, alias="updatedAt")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 class FileItemDBResponse(BaseModel):
     id: int = Field(...)
