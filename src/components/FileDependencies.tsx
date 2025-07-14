@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronRight, ChevronDown, Plus, Folder, File, RefreshCw } from 'lucide-react';
-import { FileItem, FileItemAPIResponse } from '../types';
+import { FileItem } from '../types';
 
 interface FileDependenciesProps {
   onAddToContext: (file: FileItem) => void;
@@ -50,7 +50,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
           return {
             id: (item.id as string) || `item-${index}`,
             name: (item.name as string) || (item.path as string) || 'Unknown',
-            type: (item.type as string) || 'INTERNAL',
+            type: (item.type as 'INTERNAL' | 'EXTERNAL') || 'INTERNAL',
             tokens: (item.tokens as number) || 0,
             Category: (item.category as string) || (item.Category as string) || 'File',
             isDirectory: (item.isDirectory as boolean) || item.type === 'directory',
@@ -77,24 +77,6 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     const urlToUse = repoUrl || DEFAULT_REPO_URL;
     fetchRepositoryData(urlToUse);
   }, [repoUrl, fetchRepositoryData]);
-
-  // Helper function to normalize file type to match our enum
-  const normalizeFileType = (type?: string): 'INTERNAL' | 'EXTERNAL' => {
-    if (!type) return 'INTERNAL';
-    
-    // Normalize common variations
-    const normalizedType = type.toUpperCase().trim();
-    if (normalizedType === 'INTERNAL' || normalizedType === 'EXTERNAL') {
-      return normalizedType as 'INTERNAL' | 'EXTERNAL';
-    }
-    
-    // Default mapping based on common patterns
-    if (normalizedType.includes('EXTERNAL') || normalizedType.includes('DEPENDENCY')) {
-      return 'EXTERNAL';
-    }
-    
-    return 'INTERNAL'; // Default fallback
-  };
 
   const handleRefresh = () => {
     const urlToUse = repoUrl || DEFAULT_REPO_URL;
