@@ -9,12 +9,10 @@ and transform it to match the FileDependencies component interface.
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any
-import json
 import os
 from pathlib import Path
 from sqlalchemy.orm import Session
 from urllib.parse import urlparse
-from sqlalchemy import func
 
 # Import DAifu chat router
 from daifu.chat_api import router as daifu_router
@@ -27,6 +25,7 @@ from models import (
     RepositoryRequest,
     FileItemResponse,
     Repository,
+    FileAnalysis,
     FileItem,
     RepositoryResponse,
     FileItemDBResponse
@@ -97,55 +96,63 @@ def extract_repo_info_from_url(repo_url: str) -> tuple[str, str]:
     else:
         return 'unknown', 'unknown'
 
-def save_repository_to_db(
-    db: Session, 
-    repo_url: str, 
-    repo_name: str, 
+def get_or_create_repository(
+    db: Session,
+    repo_url: str,
+    repo_name: str,
     repo_owner: str,
+    user_id: int = 1  # Default user ID for now
+) -> Repository:
+    """Retrieve existing repository metadata or create a new record."""
+
+    repository = db.query(Repository).filter(
+        Repository.repo_url == repo_url,
+        Repository.user_id == user_id,
+    ).first()
+
+    if repository:
+        return repository
+
+    repository = Repository(
+        user_id=user_id,
+        repo_url=repo_url,
+        repo_name=repo_name,
+        repo_owner=repo_owner,
+    )
+    db.add(repository)
+    db.commit()
+    db.refresh(repository)
+    return repository
+
+
+def save_file_analysis_to_db(
+    db: Session,
+    repository_id: int,
     raw_data: Dict[str, Any],
     processed_data: Dict[str, Any],
     total_files: int,
     total_tokens: int,
     max_file_size: Optional[int] = None,
-    user_id: int = 1  # Default user ID for now
-) -> Repository:
-    """Save repository data to database."""
-    
-    # Check if repository already exists
-    existing_repo = db.query(Repository).filter(
-        Repository.repo_url == repo_url,
-        Repository.user_id == user_id
-    ).first()
-    
-    if existing_repo:
-        # Update existing repository
-        existing_repo.raw_data = raw_data
-        existing_repo.processed_data = processed_data
-        existing_repo.total_files = total_files
-        existing_repo.total_tokens = total_tokens
-        existing_repo.max_file_size = max_file_size
-        existing_repo.status = "completed"
-        existing_repo.processed_at = func.now()
-        db.commit()
-        return existing_repo
-    else:
-        # Create new repository
-        repo = Repository(
-            user_id=user_id,
-            repo_url=repo_url,
-            repo_name=repo_name,
-            repo_owner=repo_owner,
-            raw_data=raw_data,
-            processed_data=processed_data,
-            total_files=total_files,
-            total_tokens=total_tokens,
-            max_file_size=max_file_size,
-            status="completed"
-        )
-        db.add(repo)
-        db.commit()
-        db.refresh(repo)
-        return repo
+    status: str = "completed",
+    error_message: Optional[str] = None,
+) -> FileAnalysis:
+    """Save analysis results to the FileAnalysis table."""
+
+    analysis = FileAnalysis(
+        repository_id=repository_id,
+        raw_data=raw_data,
+        processed_data=processed_data,
+        total_files=total_files,
+        total_tokens=total_tokens,
+        max_file_size=max_file_size,
+        status=status,
+        error_message=error_message,
+    )
+
+    db.add(analysis)
+    db.commit()
+    db.refresh(analysis)
+    return analysis
 
 def save_file_items_to_db(
     db: Session,
@@ -164,8 +171,8 @@ def save_file_items_to_db(
         
         db_item = FileItem(
             repository_id=repository_id,
-            name=item.name,
-            path=item.name,  # Use name as path for now
+            name=os.path.basename(item.name),
+            path=item.name,
             file_type=item.type,
             category=item.Category,
             tokens=item.tokens,
@@ -202,7 +209,6 @@ def build_file_tree(files_data: Dict[str, Any], repo_name: str) -> List[FileItem
     # Process each file
     for file_info in files_data.get('files', []):
         file_path = file_info['path']
-        file_name = file_info['name']
         content_size = file_info['content_size']
         
         # Estimate tokens
@@ -215,7 +221,7 @@ def build_file_tree(files_data: Dict[str, Any], repo_name: str) -> List[FileItem
         # Create file item
         file_item = FileItemResponse(
             id=f"file_{len(file_items)}",
-            name=file_name,  # Use full path as requested
+            name=file_path,  # Use full path as requested
             type="INTERNAL",
             tokens=tokens,
             Category=category,
@@ -432,19 +438,25 @@ async def extract_file_dependencies(
         
         # Save to database
         try:
-            # Save repository data
-            repository = save_repository_to_db(
+            # Ensure repository metadata exists
+            repository = get_or_create_repository(
                 db=db,
                 repo_url=request.repo_url,
                 repo_name=repo_name,
                 repo_owner=repo_owner,
+            )
+
+            # Save analysis results
+            analysis = save_file_analysis_to_db(
+                db=db,
+                repository_id=repository.id,
                 raw_data=raw_repo_data,
                 processed_data=repo_data,
                 total_files=total_files,
                 total_tokens=total_tokens,
-                max_file_size=request.max_file_size
+                max_file_size=request.max_file_size,
             )
-            
+
             # Save file items
             save_file_items_to_db(db, repository.id, file_tree)
             
