@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 # Import Base from unified models
-from ..models import Base
+from models import Base
 
 # Database URL from environment variables
 DATABASE_URL = os.getenv(
@@ -40,7 +40,7 @@ def init_db():
     Initialize database - create all tables
     """
     # Import all models here to ensure they are registered
-    from ..models import (
+    from models import (
         User, AuthToken, Repository, FileItem, ContextCard, IdeaItem,
         Issue, PullRequest, Commit
     )

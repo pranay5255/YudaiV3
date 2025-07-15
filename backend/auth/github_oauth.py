@@ -17,8 +17,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from ghapi.all import GhApi
 
-from ..db.database import get_db
-from ..models import User, AuthToken
+from db.database import get_db
+from models import User, AuthToken
 
 # Security scheme for JWT-like token authentication
 security = HTTPBearer()

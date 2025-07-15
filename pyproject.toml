@@ -18,6 +18,7 @@ dependencies = [
     "gitingest>=0.1.4",
     "sqlalchemy>=2.0.41",
     "psycopg2-binary>=2.9.10",
+    "ghapi>=1.0.6",
 ]
 
 [project.optional-dependencies]

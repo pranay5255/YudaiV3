@@ -15,19 +15,19 @@ from sqlalchemy.orm import Session
 from urllib.parse import urlparse
 
 # Import DAifu chat router
-from ..daifuUserAgent.chat_api import router as daifu_router
+from daifuUserAgent.chat_api import router as daifu_router
 
 # Import authentication
-from ..auth import auth_router, get_current_user, get_current_user_optional
+from auth import auth_router, get_current_user, get_current_user_optional
 
 # Import GitHub API
-from ..github import github_router
+from github import github_router
 
 # Import database session
-from ..db.database import get_db, init_db
+from db.database import get_db, init_db
 
 # Import unified models
-from ..models import (
+from models import (
     RepositoryRequest,
     FileItemResponse,
     Repository,

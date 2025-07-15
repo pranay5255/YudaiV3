@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Send, Plus } from 'lucide-react';
 import { Message } from '../types';
+import { ApiService, ChatRequest } from '../services/api';
 
 interface ChatProps {
   onAddToContext: (content: string) => void;
@@ -33,18 +34,54 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
     msg.id !== '1' && msg.id !== '2'
   ).length;
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return;
     
-    const newMessage: Message = {
+    const userMessage: Message = {
       id: Date.now().toString(),
       content: input,
       isCode: input.includes('function') || input.includes('const ') || input.includes('class '),
       timestamp: new Date(),
     };
     
-    setMessages(prev => [...prev, newMessage]);
+    // Add user message immediately
+    setMessages(prev => [...prev, userMessage]);
+    const currentInput = input;
     setInput('');
+    
+    try {
+      // Send to Daifu agent
+      const request: ChatRequest = {
+        message: {
+          content: currentInput,
+          is_code: userMessage.isCode,
+        },
+      };
+      
+      const response = await ApiService.sendChatMessage(request);
+      
+      // Add Daifu's response
+      const daifuMessage: Message = {
+        id: response.message_id,
+        content: response.reply,
+        isCode: false,
+        timestamp: new Date(),
+      };
+      
+      setMessages(prev => [...prev, daifuMessage]);
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      
+      // Add error message
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        content: 'Sorry, I encountered an error. Please try again.',
+        isCode: false,
+        timestamp: new Date(),
+      };
+      
+      setMessages(prev => [...prev, errorMessage]);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {

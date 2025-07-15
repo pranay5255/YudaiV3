@@ -60,14 +60,14 @@ def build_daifu_prompt(github_context: str, conversation: List[Tuple[str, str]])
 
 
 def get_github_context(github_context: str) -> str:
-    from ..github.github_api import (
+    from github.github_api import (
         get_repository_details,
         get_repository_commits,
         get_repository_issues,
         get_repository_pulls,
     )
-    from ..models import User
-    from ..db.database import get_db
+    from models import User
+    from db.database import get_db
     from fastapi import Depends
 
     import asyncio

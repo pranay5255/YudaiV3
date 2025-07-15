@@ -9,8 +9,8 @@ including repository management, issues, and search.
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
-from ..db.database import get_db
-from ..models import (
+from db.database import get_db
+from models import (
     User,
     CreateIssueRequest,
     GitHubRepo,
@@ -29,7 +29,7 @@ from .github_api import (
     search_repositories,
     GitHubAPIError
 )
-from ..auth.github_oauth import get_current_user
+from auth.github_oauth import get_current_user
 
 router = APIRouter(prefix="/github", tags=["github"])
 

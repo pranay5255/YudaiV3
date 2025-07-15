@@ -7,7 +7,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
 
-from ..models import (
+from models import (
     ChatSession, ChatMessage, User,
     CreateChatSessionRequest, CreateChatMessageRequest,
     ChatSessionResponse, ChatMessageResponse
