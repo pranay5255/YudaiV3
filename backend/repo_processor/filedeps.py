@@ -6,7 +6,7 @@ This server provides endpoints to extract repository data using GitIngest
 and transform it to match the FileDependencies component interface.
 """
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional, Dict, Any
 import os
@@ -17,8 +17,14 @@ from urllib.parse import urlparse
 # Import DAifu chat router
 from daifu.chat_api import router as daifu_router
 
+# Import authentication
+from auth import auth_router, get_current_user, get_current_user_optional
+
+# Import GitHub API
+from github import github_router
+
 # Import database session
-from db.database import get_db
+from db.database import get_db, init_db
 
 # Import unified models
 from models import (
@@ -28,7 +34,8 @@ from models import (
     FileAnalysis,
     FileItem,
     RepositoryResponse,
-    FileItemDBResponse
+    FileItemDBResponse,
+    User
 )
 
 # Import functions from scraper_script.py
@@ -42,6 +49,17 @@ app = FastAPI(
     description="API for extracting repository file dependencies using GitIngest",
     version="1.0.0"
 )
+
+@app.on_event("startup")
+def on_startup():
+    """Initialize the database when the application starts."""
+    init_db()
+
+# Mount authentication routes
+app.include_router(auth_router)
+
+# Mount GitHub API routes
+app.include_router(github_router)
 
 # Mount DAifu chat routes
 app.include_router(daifu_router)
@@ -349,16 +367,17 @@ async def health_check():
 
 @app.get("/repositories", response_model=List[RepositoryResponse])
 async def get_repositories(
-    user_id: Optional[int] = None,
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
-    """Get repositories from database, optionally filtered by user_id."""
-    query = db.query(Repository)
+    """Get all repositories for the authenticated user"""
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required"
+        )
     
-    if user_id is not None:
-        query = query.filter(Repository.user_id == user_id)
-    
-    repositories = query.all()
+    repositories = db.query(Repository).filter(Repository.user_id == current_user.id).all()
     return repositories
 
 @app.get("/repositories/{repository_id}", response_model=RepositoryResponse)
