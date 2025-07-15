@@ -10,10 +10,10 @@ from fastapi import APIRouter, HTTPException, Depends
 import requests
 from sqlalchemy.orm import Session
 
-from models import ChatRequest, CreateChatMessageRequest
-from db.database import get_db
-from issueChatServices.chat_service import ChatService
-from issueChatServices.issue_service import IssueService
+from ..models import ChatRequest, CreateChatMessageRequest
+from ..db.database import get_db
+from ..issueChatServices.chat_service import ChatService
+from ..issueChatServices.issue_service import IssueService
 from .prompt import build_daifu_prompt
 
 router = APIRouter()

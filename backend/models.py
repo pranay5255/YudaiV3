@@ -108,6 +108,7 @@ class Repository(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     owner: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     full_name: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    repo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Original repository URL
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     private: Mapped[bool] = mapped_column(Boolean, default=False)
     html_url: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -134,6 +135,7 @@ class Repository(Base):
     pull_requests: Mapped[List["PullRequest"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
     commits: Mapped[List["Commit"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
     file_items: Mapped[List["FileItem"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
+    file_analyses: Mapped[List["FileAnalysis"]] = relationship(back_populates="repository", cascade="all, delete-orphan")
 
 class Issue(Base):
     """Issues from a repository"""
@@ -222,6 +224,32 @@ class FileItem(Base):
     repository: Mapped["Repository"] = relationship(back_populates="file_items")
     children: Mapped[List["FileItem"]] = relationship(back_populates="parent", cascade="all, delete-orphan")
     parent: Mapped[Optional["FileItem"]] = relationship(remote_side=[id], back_populates="children")
+
+class FileAnalysis(Base):
+    """File analysis results from repository processing"""
+    __tablename__ = "file_analyses"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    repository_id: Mapped[int] = mapped_column(ForeignKey("repositories.id"), nullable=False)
+    
+    # Analysis data
+    raw_data: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
+    processed_data: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
+    total_files: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    max_file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    
+    # Status and metadata
+    status: Mapped[str] = mapped_column(String(50), default="pending")  # pending, processing, completed, failed
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Relationships
+    repository: Mapped["Repository"] = relationship(back_populates="file_analyses")
 
 class ContextCard(Base):
     """Context cards created by users"""

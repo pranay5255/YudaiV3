@@ -4,7 +4,7 @@ Simple script to run the File Dependencies FastAPI server
 """
 
 import uvicorn
-from repo_processor.filedeps import app
+from repo_processorGitIngest.filedeps import app
 
 
 if __name__ == "__main__":

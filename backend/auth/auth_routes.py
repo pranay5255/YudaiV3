@@ -11,8 +11,8 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from db.database import get_db
-from models import User, AuthToken, UserProfile, AuthResponse  # Import types from models.py
+from ..db.database import get_db
+from ..models import User, AuthToken, UserProfile, AuthResponse  # Import types from models.py
 from .github_oauth import (
     generate_oauth_state,
     get_github_oauth_url,
