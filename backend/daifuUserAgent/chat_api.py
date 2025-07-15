@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 
 from models import ChatRequest, CreateChatMessageRequest
 from db.database import get_db
-from context_cards.chat_service import ChatService
+from issueChatServices.chat_service import ChatService
+from issueChatServices.issue_service import IssueService
 from .prompt import build_daifu_prompt
 
 router = APIRouter()
@@ -193,3 +194,24 @@ async def deactivate_session(
     if not success:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"message": "Session deactivated successfully"}
+
+
+@router.post("/chat/create-issue")
+async def create_issue_from_chat(
+    request: ChatRequest,
+    db: Session = Depends(get_db),
+    user_id: int = 1  # TODO: Get from authentication
+):
+    """Create an issue from a chat conversation."""
+    try:
+        # Create the issue from the chat request
+        issue = IssueService.create_issue_from_chat(db, user_id, request)
+        
+        return {
+            "success": True,
+            "issue": issue,
+            "message": f"Issue created with ID: {issue.issue_id}"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create issue: {e}")
