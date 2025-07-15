@@ -55,7 +55,7 @@ def check_database_health():
             inspector = inspect(engine)
             tables = inspector.get_table_names()
             
-            expected_tables = ['users', 'auth_tokens', 'repositories', 'file_items', 'file_analyses', 'context_cards', 'idea_items']
+            expected_tables = ['users', 'auth_tokens', 'repositories', 'file_items', 'file_analyses', 'context_cards', 'idea_items', 'chat_sessions', 'chat_messages', 'user_issues']
             missing_tables = [table for table in expected_tables if table not in tables]
             
             if missing_tables:
