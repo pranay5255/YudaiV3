@@ -7,7 +7,7 @@ interface TopBarProps {
   errorStep?: ProgressStep;
 }
 
-const steps: ProgressStep[] = ['PM', 'Architect', 'Test-Writer', 'Coder'];
+const steps: ProgressStep[] = ['DAifu', 'Architect', 'Test-Writer', 'Coder'];
 
 export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
   return (

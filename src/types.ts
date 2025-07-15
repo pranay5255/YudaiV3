@@ -55,6 +55,6 @@ export interface Toast {
   type: 'success' | 'error' | 'info';
 }
 
-export type ProgressStep = 'PM' | 'Architect' | 'Test-Writer' | 'Coder';
+export type ProgressStep = 'DAifu' | 'Architect' | 'Test-Writer' | 'Coder';
 export type TabType = 'chat' | 'file-deps' | 'context' | 'ideas';
 
