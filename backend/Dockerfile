@@ -34,5 +34,20 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:8000/health || exit 1
 
+# Create startup script
+RUN echo '#!/bin/bash\n\
+echo "Waiting for database..."\n\
+while ! pg_isready -h db -p 5432 -U yudai_user; do\n\
+  sleep 2\n\
+done\n\
+echo "Database is ready!"\n\
+\n\
+echo "Initializing database..."\n\
+python init_db.py\n\
+\n\
+echo "Starting backend server..."\n\
+python run_server.py\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
 # Command to run the application
-CMD ["python", "run_server.py"] 
+CMD ["/app/start.sh"] 

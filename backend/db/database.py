@@ -42,6 +42,6 @@ def init_db():
     # Import all models here to ensure they are registered
     from models import (
         User, AuthToken, Repository, FileItem, ContextCard, IdeaItem,
-        Issue, PullRequest, Commit
+        Issue, PullRequest, Commit, FileAnalysis, ChatSession, ChatMessage, UserIssue
     )
     Base.metadata.create_all(bind=engine) 
