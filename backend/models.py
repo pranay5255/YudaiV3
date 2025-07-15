@@ -193,7 +193,7 @@ class Commit(Base):
     repository: Mapped["Repository"] = relationship(back_populates="commits")
 
 class FileItem(Base):
-    """Individual file items from repository analysis"""
+    """Individual file items from repository analysis used by @FileDependencies.tsx"""
     __tablename__ = "file_items"
     
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -225,6 +225,7 @@ class FileItem(Base):
 
 class ContextCard(Base):
     """Context cards created by users"""
+    # TODO: MAke this compatible to display for @ContextCard.tsx
     __tablename__ = "context_cards"
     
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -249,6 +250,7 @@ class ContextCard(Base):
 
 class IdeaItem(Base):
     """Ideas to implement"""
+    # TODO: Make this compatible to display for @IdeasToImplement.tsx
     __tablename__ = "idea_items"
     
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -269,6 +271,107 @@ class IdeaItem(Base):
     
     # Relationships
     user: Mapped["User"] = relationship()
+
+class ChatSession(Base):
+    """Chat sessions for user conversations"""
+    __tablename__ = "chat_sessions"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    
+    # Session data
+    session_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Status and statistics
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    total_messages: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+    last_activity: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Relationships
+    user: Mapped["User"] = relationship()
+    messages: Mapped[List["ChatMessage"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+
+class ChatMessage(Base):
+    """Individual chat messages within sessions"""
+    __tablename__ = "chat_messages"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id"), nullable=False)
+    
+    # Message data
+    message_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    message_text: Mapped[str] = mapped_column(Text, nullable=False)
+    sender_type: Mapped[str] = mapped_column(String(50), nullable=False)  # user, assistant, system
+    role: Mapped[str] = mapped_column(String(50), nullable=False)  # user, assistant, system
+    is_code: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # Metadata
+    tokens: Mapped[int] = mapped_column(Integer, default=0)
+    model_used: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    processing_time: Mapped[Optional[float]] = mapped_column(nullable=True)  # milliseconds
+    context_cards: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
+    referenced_files: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    session: Mapped["ChatSession"] = relationship(back_populates="messages")
+
+class UserIssue(Base):
+    """User-generated issues for agent processing (distinct from GitHub Issues)"""
+    __tablename__ = "user_issues"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    
+    # Core issue data (as requested by user)
+    issue_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    context_card_id: Mapped[Optional[int]] = mapped_column(ForeignKey("context_cards.id"), nullable=True)
+    issue_text_raw: Mapped[str] = mapped_column(Text, nullable=False)
+    issue_steps: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)  # Store as JSON array
+    
+    # Additional data from chat API
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    conversation_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    chat_session_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chat_sessions.id"), nullable=True)
+    
+    # Context and metadata
+    context_cards: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)  # Array of context card IDs
+    ideas: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)  # Array of idea IDs
+    repo_owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    repo_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    
+    # Processing metadata
+    priority: Mapped[str] = mapped_column(String(20), default="medium")  # low, medium, high
+    status: Mapped[str] = mapped_column(String(50), default="pending")  # pending, processing, completed, failed
+    agent_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    processing_time: Mapped[Optional[float]] = mapped_column(nullable=True)
+    tokens_used: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # GitHub integration
+    github_issue_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    github_issue_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    
+    # Relationships
+    user: Mapped["User"] = relationship()
+    context_card: Mapped[Optional["ContextCard"]] = relationship()
+    chat_session: Mapped[Optional["ChatSession"]] = relationship()
 
 # ============================================================================
 # PYDANTIC MODELS (API Request/Response)
@@ -381,6 +484,99 @@ class CreateIdeaRequest(BaseModel):
     
 class ProcessFileRequest(BaseModel):
     file: FileItemInput
+
+# Chat Models
+class CreateChatSessionRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=255)
+    title: Optional[str] = Field(None, max_length=255)
+    description: Optional[str] = Field(None)
+
+class CreateChatMessageRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, max_length=255)
+    message_id: str = Field(..., min_length=1, max_length=255)
+    message_text: str = Field(..., min_length=1)
+    sender_type: str = Field(..., regex="^(user|assistant|system)$")
+    role: str = Field(..., regex="^(user|assistant|system)$")
+    is_code: bool = Field(default=False)
+    tokens: int = Field(default=0, ge=0)
+    model_used: Optional[str] = Field(None, max_length=100)
+    processing_time: Optional[float] = Field(None, ge=0)
+    context_cards: Optional[List[str]] = Field(default_factory=list)
+    referenced_files: Optional[List[str]] = Field(default_factory=list)
+    error_message: Optional[str] = Field(None)
+
+class ChatSessionResponse(BaseModel):
+    id: int
+    session_id: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    is_active: bool
+    total_messages: int
+    total_tokens: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    last_activity: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class ChatMessageResponse(BaseModel):
+    id: int
+    message_id: str
+    message_text: str
+    sender_type: str
+    role: str
+    is_code: bool
+    tokens: int
+    model_used: Optional[str] = None
+    processing_time: Optional[float] = None
+    context_cards: Optional[List[str]] = None
+    referenced_files: Optional[List[str]] = None
+    error_message: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+# User Issue Models
+class CreateUserIssueRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    issue_text_raw: str = Field(..., min_length=1)
+    description: Optional[str] = Field(None)
+    conversation_id: Optional[str] = Field(None, max_length=255)
+    context_card_id: Optional[int] = Field(None)
+    context_cards: Optional[List[str]] = Field(default_factory=list)
+    ideas: Optional[List[str]] = Field(default_factory=list)
+    repo_owner: Optional[str] = Field(None, max_length=255)
+    repo_name: Optional[str] = Field(None, max_length=255)
+    priority: Literal["low", "medium", "high"] = Field(default="medium")
+    issue_steps: Optional[List[str]] = Field(default_factory=list)
+
+class UserIssueResponse(BaseModel):
+    id: int
+    issue_id: str
+    user_id: int
+    title: str
+    description: Optional[str] = None
+    issue_text_raw: str
+    issue_steps: Optional[List[str]] = None
+    conversation_id: Optional[str] = None
+    context_card_id: Optional[int] = None
+    context_cards: Optional[List[str]] = None
+    ideas: Optional[List[str]] = None
+    repo_owner: Optional[str] = None
+    repo_name: Optional[str] = None
+    priority: str
+    status: str
+    agent_response: Optional[str] = None
+    processing_time: Optional[float] = None
+    tokens_used: int
+    github_issue_url: Optional[str] = None
+    github_issue_number: Optional[int] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    processed_at: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
     
 class ChatRequest(BaseModel):
     conversation_id: Optional[str] = Field(
