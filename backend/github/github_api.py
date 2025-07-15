@@ -11,8 +11,8 @@ from fastapi import Depends
 from sqlalchemy.orm import Session, joinedload
 from ghapi.all import GhApi
 
-from db.database import get_db
-from models import (
+from ..db.database import get_db
+from ..models import (
     User, 
     Repository,
     Issue,
@@ -24,7 +24,7 @@ from models import (
     GitHubCommit, 
     GitHubSearchResponse
 )
-from auth.github_oauth import get_github_api, get_current_user
+from ..auth.github_oauth import get_github_api, get_current_user
 
 class GitHubAPIError(Exception):
     """Custom exception for GitHub API errors"""

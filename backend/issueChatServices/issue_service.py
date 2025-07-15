@@ -14,14 +14,14 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, or_
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 
-from models import (
+from ..models import (
     UserIssue, User, ChatSession, ContextCard,
     CreateUserIssueRequest, UserIssueResponse,
     ChatRequest, CreateChatMessageRequest
 )
-from db.database import get_db
-from auth.github_oauth import get_current_user
-from github.github_api import create_issue as create_github_issue, GitHubAPIError
+from ..db.database import get_db
+from ..auth.github_oauth import get_current_user
+from ..github.github_api import create_issue as create_github_issue, GitHubAPIError
 
 # Create FastAPI router
 router = APIRouter(prefix="/issues", tags=["issues"])
