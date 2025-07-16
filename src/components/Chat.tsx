@@ -28,6 +28,8 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
   ]);
   const [input, setInput] = useState('');
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | undefined>();
+  const [isLoading, setIsLoading] = useState(false);
 
   // Count user messages (messages that are not the initial system messages)
   const userMessageCount = messages.filter(msg => 
@@ -35,7 +37,7 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
   ).length;
 
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || isLoading) return;
     
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -48,17 +50,26 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
     setMessages(prev => [...prev, userMessage]);
     const currentInput = input;
     setInput('');
+    setIsLoading(true);
     
     try {
       // Send to Daifu agent
       const request: ChatRequest = {
+        session_id: sessionId,
         message: {
           content: currentInput,
           is_code: userMessage.isCode,
         },
+        // Add context cards if available
+        context_cards: [], // TODO: Add actual context cards from props
       };
       
       const response = await ApiService.sendChatMessage(request);
+      
+      // Update session ID if provided in response
+      if (response.session_id && !sessionId) {
+        setSessionId(response.session_id);
+      }
       
       // Add Daifu's response
       const daifuMessage: Message = {
@@ -72,15 +83,26 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
     } catch (error) {
       console.error('Failed to send message:', error);
       
+      let errorText = 'Sorry, I encountered an error. Please try again.';
+      if (error instanceof Error) {
+        if (error.message === 'Authentication required') {
+          errorText = 'Please log in to continue chatting.';
+        } else {
+          errorText = `Error: ${error.message}`;
+        }
+      }
+      
       // Add error message
       const errorMessage: Message = {
         id: Date.now().toString(),
-        content: 'Sorry, I encountered an error. Please try again.',
+        content: errorText,
         isCode: false,
         timestamp: new Date(),
       };
       
       setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -151,12 +173,16 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim()}
+            disabled={!input.trim() || isLoading}
             className="bg-primary hover:bg-primary/80 disabled:opacity-50 
                      disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg 
                      transition-colors flex items-center gap-2"
           >
-            <Send className="w-4 h-4" />
+            {isLoading ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+            ) : (
+              <Send className="w-4 h-4" />
+            )}
           </button>
           {userMessageCount >= 2 && (
             <button

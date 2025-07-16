@@ -58,3 +58,62 @@ export interface Toast {
 export type ProgressStep = 'DAifu' | 'Architect' | 'Test-Writer' | 'Coder';
 export type TabType = 'chat' | 'file-deps' | 'context' | 'ideas';
 
+// Auth types
+export interface User {
+  id: string;
+  username: string;
+  email?: string;
+  avatar_url?: string;
+  github_id?: string;
+  created_at: string;
+  last_login?: string;
+}
+
+export interface AuthState {
+  user: User | null;
+  token: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+}
+
+export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  user: User;
+}
+
+export interface AuthConfig {
+  github_client_id: string;
+  redirect_uri: string;
+}
+
+// Chat API types
+export interface ChatSession {
+  id: string;
+  title?: string;
+  created_at: string;
+  updated_at: string;
+  is_active: boolean;
+}
+
+export interface ChatSessionStats {
+  total_messages: number;
+  total_tokens: number;
+  total_cost: number;
+}
+
+export interface ChatMessageAPI {
+  id: string;
+  content: string;
+  role: 'user' | 'assistant';
+  timestamp: string;
+  is_code: boolean;
+}
+
+export interface CreateIssueFromChatRequest {
+  session_id: string;
+  title: string;
+  description?: string;
+  repository_url?: string;
+}
+

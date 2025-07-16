@@ -8,12 +8,13 @@ import { IdeasToImplement } from './components/IdeasToImplement';
 import { DiffModal } from './components/DiffModal';
 import { DetailModal } from './components/DetailModal';
 import { ToastContainer } from './components/Toast';
+import { ProtectedRoute } from './components/ProtectedRoute';
 import { ContextCard, FileItem, IdeaItem, Toast, ProgressStep, TabType } from './types';
 
 function App() {
   // State management
   const [activeTab, setActiveTab] = useState<TabType>('chat');
-  const [currentStep, setCurrentStep] = useState<ProgressStep>('PM');
+  const [currentStep, setCurrentStep] = useState<ProgressStep>('DAifu');
   const [errorStep] = useState<ProgressStep | undefined>();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
@@ -123,44 +124,46 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-bg text-fg font-sans">
-      {/* Top Bar */}
-      <TopBar currentStep={currentStep} errorStep={errorStep} />
-      
-      {/* Main Layout */}
-      <div className="flex h-[calc(100vh-56px)]">
-        {/* Sidebar */}
-        <Sidebar 
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          isCollapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+    <ProtectedRoute>
+      <div className="min-h-screen bg-bg text-fg font-sans">
+        {/* Top Bar */}
+        <TopBar currentStep={currentStep} errorStep={errorStep} />
+        
+        {/* Main Layout */}
+        <div className="flex h-[calc(100vh-56px)]">
+          {/* Sidebar */}
+          <Sidebar 
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            isCollapsed={sidebarCollapsed}
+            onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+          />
+          
+          {/* Main Content */}
+          <main className="flex-1 p-6">
+            <div className="h-full bg-bg/80 backdrop-blur rounded-2xl shadow-md border border-zinc-800/50 overflow-hidden">
+              {renderTabContent()}
+            </div>
+          </main>
+        </div>
+
+        {/* Modals */}
+        <DiffModal 
+          isOpen={isDiffModalOpen}
+          onClose={() => setIsDiffModalOpen(false)}
         />
         
-        {/* Main Content */}
-        <main className="flex-1 p-6">
-          <div className="h-full bg-bg/80 backdrop-blur rounded-2xl shadow-md border border-zinc-800/50 overflow-hidden">
-            {renderTabContent()}
-          </div>
-        </main>
+        <DetailModal 
+          isOpen={isDetailModalOpen}
+          onClose={() => setIsDetailModalOpen(false)}
+          file={selectedFile}
+          onAddToContext={addFileToContext}
+        />
+
+        {/* Toast Container */}
+        <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
       </div>
-
-      {/* Modals */}
-      <DiffModal 
-        isOpen={isDiffModalOpen}
-        onClose={() => setIsDiffModalOpen(false)}
-      />
-      
-      <DetailModal 
-        isOpen={isDetailModalOpen}
-        onClose={() => setIsDetailModalOpen(false)}
-        file={selectedFile}
-        onAddToContext={addFileToContext}
-      />
-
-      {/* Toast Container */}
-      <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
-    </div>
+    </ProtectedRoute>
   );
 }
 
