@@ -1,6 +1,7 @@
 import React from 'react';
-import { ChevronDown, Moon, Github } from 'lucide-react';
+import { ChevronDown, Moon } from 'lucide-react';
 import { ProgressStep } from '../types';
+import { UserProfile } from './UserProfile';
 
 interface TopBarProps {
   currentStep: ProgressStep;
@@ -61,9 +62,7 @@ export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
         >
           <Moon className="w-5 h-5 text-fg" />
         </button>
-        <div className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center">
-          <Github className="w-4 h-4 text-fg" />
-        </div>
+        <UserProfile />
       </div>
     </div>
   );
