@@ -11,6 +11,7 @@ This server combines all the backend services:
 """
 
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -24,19 +25,26 @@ from daifuUserAgent.chat_api import router as daifu_router
 from issueChatServices import issue_router
 from repo_processorGitIngest.filedeps import router as filedeps_router
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan events for the FastAPI application."""
+    # Startup
+    print("Initializing database...")
+    init_db()
+    print("Database initialized successfully")
+    yield
+    # Shutdown
+    print("Shutting down...")
+
 # Create the main FastAPI application
 app = FastAPI(
     title="YudaiV3 Backend API",
     description="Unified backend API for YudaiV3 - File Dependencies, Chat, Issues, and GitHub Integration",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
-
-@app.on_event("startup")
-def on_startup():
-    """Initialize the database when the application starts."""
-    init_db()
 
 # Add CORS middleware for frontend integration
 app.add_middleware(
@@ -86,4 +94,4 @@ if __name__ == "__main__":
     print("API documentation at: http://localhost:8000/docs")
     print("ReDoc documentation at: http://localhost:8000/redoc")
     
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
