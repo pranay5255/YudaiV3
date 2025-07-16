@@ -45,7 +45,7 @@ echo "Database is ready!"\n\
 echo "Initializing database..."\n\
 python init_db.py\n\
 \n\
-echo "Starting backend server..."\n\
+echo "Starting unified YudaiV3 backend server..."\n\
 python run_server.py\n\
 ' > /app/start.sh && chmod +x /app/start.sh
 

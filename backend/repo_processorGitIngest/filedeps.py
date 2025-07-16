@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-FastAPI server for file dependencies extraction
+FastAPI router for file dependencies extraction
 
-This server provides endpoints to extract repository data using GitIngest
+This router provides endpoints to extract repository data using GitIngest
 and transform it to match the FileDependencies component interface.
 """
 
-from fastapi import FastAPI, HTTPException, Depends, status
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, HTTPException, Depends, status
 from typing import List, Optional, Dict, Any
 import os
 from pathlib import Path
@@ -25,6 +24,9 @@ from github import github_router
 
 # Import database session
 from db.database import get_db, init_db
+
+# Import authentication
+from auth import get_current_user_optional
 
 # Import unified models
 from models import (
@@ -44,34 +46,8 @@ from .scraper_script import (
     categorize_file
 )
 
-app = FastAPI(
-    title="File Dependencies API",
-    description="API for extracting repository file dependencies using GitIngest",
-    version="1.0.0"
-)
-
-@app.on_event("startup")
-def on_startup():
-    """Initialize the database when the application starts."""
-    init_db()
-
-# Mount authentication routes
-app.include_router(auth_router)
-
-# Mount GitHub API routes
-app.include_router(github_router)
-
-# Mount DAifu chat routes
-app.include_router(daifu_router)
-
-# Add CORS middleware for frontend integration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # React dev servers
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Create router for file dependencies endpoints
+router = APIRouter(prefix="/filedeps", tags=["file-dependencies"])
 
 def estimate_tokens_for_file(file_path: str, content_size: int) -> int:
     """Estimate tokens for a file based on its size and type."""
@@ -348,7 +324,7 @@ def process_gitingest_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
         }
     }
 
-@app.get("/")
+@router.get("/")
 async def root():
     """Root endpoint with API information."""
     return {
@@ -358,17 +334,13 @@ async def root():
             "/extract": "Extract repository data and return file dependencies",
             "/repositories": "Get all repositories (optional user_id filter)",
             "/repositories/{id}": "Get specific repository by ID",
-            "/repositories/{id}/files": "Get all files for a specific repository",
-            "/health": "Health check endpoint"
+            "/repositories/{id}/files": "Get all files for a specific repository"
         }
     }
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "file-dependencies-api"}
 
-@app.get("/repositories", response_model=List[RepositoryResponse])
+
+@router.get("/repositories", response_model=List[RepositoryResponse])
 async def get_repositories(
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
@@ -383,7 +355,7 @@ async def get_repositories(
     repositories = db.query(Repository).filter(Repository.user_id == current_user.id).all()
     return repositories
 
-@app.get("/repositories/{repository_id}", response_model=RepositoryResponse)
+@router.get("/repositories/{repository_id}", response_model=RepositoryResponse)
 async def get_repository_by_id(
     repository_id: int,
     db: Session = Depends(get_db)
@@ -394,7 +366,7 @@ async def get_repository_by_id(
         raise HTTPException(status_code=404, detail="Repository not found")
     return repository
 
-@app.get("/repositories/{repository_id}/files", response_model=List[FileItemDBResponse])
+@router.get("/repositories/{repository_id}/files", response_model=List[FileItemDBResponse])
 async def get_repository_files(
     repository_id: int,
     db: Session = Depends(get_db)
@@ -409,7 +381,7 @@ async def get_repository_files(
     file_items = db.query(FileItem).filter(FileItem.repository_id == repository_id).all()
     return file_items
 
-@app.post("/extract", response_model=FileItemResponse)
+@router.post("/extract", response_model=FileItemResponse)
 async def extract_file_dependencies(
     request: RepositoryRequest,
     db: Session = Depends(get_db)
@@ -491,7 +463,3 @@ async def extract_file_dependencies(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
