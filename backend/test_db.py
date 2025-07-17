@@ -1,24 +1,45 @@
 #!/usr/bin/env python3
 """
-Test script to verify database initialization
+Enhanced test script to verify database initialization and connectivity
+Works both locally and in Docker containers
 """
 
 import sys
+import os
 from pathlib import Path
 
 # Add the backend directory to the path
-backend_dir = Path(__file__).parent.parent
+backend_dir = Path(__file__).parent
 sys.path.insert(0, str(backend_dir))
 
 from sqlalchemy import create_engine, text, inspect
 
+def get_database_url():
+    """Get database URL from environment or use defaults"""
+    # Check if we're in Docker (DATABASE_URL should be set)
+    if os.getenv("DATABASE_URL"):
+        return os.getenv("DATABASE_URL")
+    
+    # Check if we're in Docker Compose (use 'db' as host)
+    if os.getenv("DOCKER_COMPOSE"):
+        return "postgresql://yudai_user:yudai_password@db:5432/yudai_db"
+    
+    # Local development (use localhost)
+    return "postgresql://yudai_user:yudai_password@localhost:5432/yudai_db"
+
 def test_database():
     """Test database connection and verify tables exist"""
+    database_url = get_database_url()
+    
+    print(f"🔍 Testing database connection...")
+    print(f"   URL: {database_url}")
+    
     try:
         # Connect to database
         engine = create_engine(
-            "postgresql://yudai_user:yudai_password@localhost:5432/yudai_db",
-            pool_pre_ping=True
+            database_url,
+            pool_pre_ping=True,
+            echo=False
         )
         
         with engine.connect() as conn:
@@ -37,7 +58,7 @@ def test_database():
             ]
             
             print(f"✓ Found {len(tables)} tables:")
-            for table in tables:
+            for table in sorted(tables):
                 print(f"  - {table}")
             
             # Check for expected tables
@@ -47,7 +68,7 @@ def test_database():
                 return False
             
             # Check sample data
-            print("\nChecking sample data...")
+            print("\n📊 Checking sample data...")
             
             # Check users
             result = conn.execute(text("SELECT COUNT(*) FROM users"))
@@ -74,11 +95,16 @@ def test_database():
             session_count = result.scalar()
             print(f"✓ Chat Sessions: {session_count}")
             
-            print("\n✓ Database initialization test passed!")
+            print("\n✅ Database initialization test passed!")
             return True
             
     except Exception as e:
-        print(f"✗ Database test failed: {e}")
+        print(f"❌ Database test failed: {e}")
+        print(f"🔍 Debug information:")
+        print(f"   - Database URL: {database_url}")
+        print(f"   - Environment: {'Docker' if os.getenv('DATABASE_URL') else 'Local'}")
+        print(f"   - Current working directory: {os.getcwd()}")
+        print(f"   - Python path: {sys.path[:3]}...")
         return False
 
 if __name__ == "__main__":

@@ -11,16 +11,15 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     gcc \
     postgresql-client \
+    postgresql-client-common \
     curl \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
-
-# Copy startup script first
-COPY start.sh .
 
 # Copy application code
 COPY . .
@@ -29,6 +28,7 @@ COPY . .
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 RUN chown -R appuser:appuser /app
 RUN chmod +x /app/start.sh
+RUN chmod +x /app/test_db.py
 USER appuser
 
 # Expose port

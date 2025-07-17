@@ -30,7 +30,7 @@ from .github_oauth import (
 )
 
 # Create router for auth endpoints
-router = APIRouter(prefix="/auth", tags=["authentication"])
+router = APIRouter(tags=["authentication"])
 
 
 @router.get("/login")
