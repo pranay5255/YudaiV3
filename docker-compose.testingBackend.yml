@@ -1,0 +1,63 @@
+services:
+  # PostgreSQL Database
+  db:
+    build:
+      context: ./backend/db
+      dockerfile: Dockerfile
+    container_name: yudai_db_test
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=yudai_db
+      - POSTGRES_USER=yudai_user
+      - POSTGRES_PASSWORD=yudai_password
+    volumes:
+      - postgres_data_test:/var/lib/postgresql/data
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - yudai-test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yudai_user -d yudai_db"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: yudai_backend_test
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://yudai_user:yudai_password@db:5432/yudai_db
+      - DB_ECHO=true
+      - PYTHONPATH=/app
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-dummy_key}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - GITHUB_REDIRECT_URI=http://localhost:3000/auth/callback
+      - HOST=0.0.0.0
+      - PORT=8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+    networks:
+      - yudai-test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data_test:
+    driver: local
+
+networks:
+  yudai-test-network:
+    driver: bridge
