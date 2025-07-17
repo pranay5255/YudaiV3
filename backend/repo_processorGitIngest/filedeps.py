@@ -47,7 +47,7 @@ from .scraper_script import (
 )
 
 # Create router for file dependencies endpoints
-router = APIRouter(prefix="/filedeps", tags=["file-dependencies"])
+router = APIRouter( tags=["file-dependencies"])
 
 def estimate_tokens_for_file(file_path: str, content_size: int) -> int:
     """Estimate tokens for a file based on its size and type."""
