@@ -6,14 +6,12 @@ services:
     build:
       context: ./backend/db
       dockerfile: Dockerfile
-    container_name: yudai_db
+    container_name: yudai_db_prod
     restart: unless-stopped
     environment:
       - POSTGRES_DB=yudai_db
       - POSTGRES_USER=yudai_user
-      - POSTGRES_PASSWORD=yudai_password
-    ports:
-      - "5432:5432"
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -23,22 +21,25 @@ services:
       test: ["CMD-SHELL", "pg_isready -U yudai_user -d yudai_db"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 30s
+      retries: 3
 
   # Backend API Service
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: yudai_backend
+    container_name: yudai_backend_prod
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgresql://yudai_user:yudai_password@db:5432/yudai_db
+      - DATABASE_URL=postgresql://yudai_user:${DB_PASSWORD}@db:5432/yudai_db
       - DB_ECHO=false
       - PYTHONPATH=/app
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - GITHUB_REDIRECT_URI=https://yudai.app/auth/callback
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -51,18 +52,20 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 30s
+      retries: 3
 
   # Frontend React Service
   frontend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: yudai_frontend
+    container_name: yudai_frontend_prod
     restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - VITE_API_URL=https://api.yudai.app
     ports:
-      - "80:80"
+      - "127.0.0.1:3000:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -72,15 +75,12 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost/"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 30s
+      retries: 3
 
-# Volumes
 volumes:
   postgres_data:
     driver: local
 
-# Networks  
 networks:
   yudai-network:
     driver: bridge 

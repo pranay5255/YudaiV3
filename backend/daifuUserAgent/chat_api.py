@@ -78,7 +78,7 @@ async def chat_daifu(
         }
 
         body = {
-            "model": "openai/gpt-3.5-turbo",
+            "model": "deepseek/deepseek-r1-0528:free",
             "messages": [{"role": "user", "content": prompt}],
         }
 
@@ -103,7 +103,7 @@ async def chat_daifu(
             role="assistant",
             is_code=False,
             tokens=len(reply.split()),  # Simple token estimation
-            model_used="openai/gpt-3.5-turbo",
+            model_used="deepseek/deepseek-r1-0528:free",
             processing_time=processing_time
         )
         

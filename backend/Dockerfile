@@ -19,12 +19,16 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# Copy startup script first
+COPY start.sh .
+
 # Copy application code
 COPY . .
 
 # Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 RUN chown -R appuser:appuser /app
+RUN chmod +x /app/start.sh
 USER appuser
 
 # Expose port
@@ -35,4 +39,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:8000/health || exit 1
 
 # Command to run the application
-CMD ["python", "run_server.py"] 
+CMD ["/app/start.sh"]
