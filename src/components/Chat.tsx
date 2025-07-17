@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { Send, Plus } from 'lucide-react';
-import { Message } from '../types';
+import { Message, IssueConfig } from '../types';
 import { ApiService, ChatRequest } from '../services/api';
 
 interface ChatProps {
   onAddToContext: (content: string) => void;
+  issueConfig: IssueConfig;
 }
 
-export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
+export const Chat: React.FC<ChatProps> = ({ onAddToContext, issueConfig }) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -30,6 +31,7 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [isLoading, setIsLoading] = useState(false);
+  const [isCreatingIssue, setIsCreatingIssue] = useState(false);
 
   // Count user messages (messages that are not the initial system messages)
   const userMessageCount = messages.filter(msg => 
@@ -103,6 +105,32 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
       setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleCreateGithubIssue = async () => {
+    if (isCreatingIssue) return;
+    setIsCreatingIssue(true);
+
+    try {
+      const body = messages
+        .filter(m => m.id !== '1' && m.id !== '2')
+        .map(m => m.content)
+        .join('\n\n');
+
+      await ApiService.createRepositoryIssue(
+        issueConfig.repoOwner,
+        issueConfig.repoName,
+        {
+          title: 'Issue from chat session',
+          description: body,
+          labels: issueConfig.categories,
+        }
+      );
+    } catch (error) {
+      console.error('Failed to create GitHub issue:', error);
+    } finally {
+      setIsCreatingIssue(false);
     }
   };
 
@@ -186,10 +214,16 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
           </button>
           {userMessageCount >= 2 && (
             <button
-              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg 
-                       transition-colors flex items-center gap-2"
+              onClick={handleCreateGithubIssue}
+              disabled={isCreatingIssue}
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg
+                       transition-colors flex items-center gap-2 disabled:opacity-50"
             >
-              Create Github Issue
+              {isCreatingIssue ? (
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+              ) : (
+                'Create Github Issue'
+              )}
             </button>
           )}
         </div>
