@@ -22,8 +22,8 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   };
 
   const getTokenHeatColor = (tokens: number) => {
-    if (tokens < 30000) return 'from-teal-500 to-teal-500';
-    if (tokens < 70000) return 'from-teal-500 to-amber-500';
+    if (tokens < 3000) return 'from-teal-500 to-teal-500';
+    if (tokens < 7000) return 'from-teal-500 to-amber-500';
     return 'from-amber-500 to-red-500';
   };
 
@@ -108,7 +108,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
                    disabled:cursor-not-allowed text-white rounded-xl font-medium 
                    transition-colors"
         >
-          Create Issue
+          Create GitHub Issue
         </button>
       </div>
     </div>
