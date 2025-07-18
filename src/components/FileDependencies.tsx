@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronRight, ChevronDown, Plus, Folder, File, RefreshCw } from 'lucide-react';
 import { FileItem } from '../types';
+import { useRepository } from '../contexts/RepositoryContext';
 
 interface FileDependenciesProps {
   onAddToContext: (file: FileItem) => void;
@@ -8,15 +9,24 @@ interface FileDependenciesProps {
   repoUrl?: string; // Optional repository URL to analyze
 }
 
-// Default repository URL - you can change this to your preferred default
-const DEFAULT_REPO_URL = "https://github.com/pranay5255/pranay5255";
-
+// Type definition for the API response structure
+interface ApiFileItem {
+  id: string;
+  name: string;
+  type: 'INTERNAL' | 'EXTERNAL';
+  tokens: number;
+  Category: string;
+  isDirectory: boolean;
+  children: ApiFileItem[] | null;
+  expanded?: boolean;
+}
 
 export const FileDependencies: React.FC<FileDependenciesProps> = ({ 
   onAddToContext, 
   onShowDetails,
   repoUrl 
 }) => {
+  const { selectedRepository } = useRepository();
   const [files, setFiles] = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,27 +51,26 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const data = await response.json();
+      const data: ApiFileItem = await response.json();
       
       // Transform the API response to match our FileItem structure
-      const transformData = (items: unknown[]): FileItem[] => {
-        return items.map((rawItem, index) => {
-          const item = rawItem as Record<string, unknown>;
-          return {
-            id: (item.id as string) || `item-${index}`,
-            name: (item.name as string) || (item.path as string) || 'Unknown',
-            type: (item.type as 'INTERNAL' | 'EXTERNAL') || 'INTERNAL',
-            tokens: (item.tokens as number) || 0,
-            Category: (item.category as string) || (item.Category as string) || 'File',
-            isDirectory: (item.isDirectory as boolean) || item.type === 'directory',
-            expanded: (item.isDirectory as boolean) || item.type === 'directory' ? false : undefined,
-            children: item.children ? transformData(item.children as unknown[]) : undefined
-          };
-        });
+      // The API returns a hierarchical structure with a root directory
+      const transformData = (item: ApiFileItem): FileItem => {
+        return {
+          id: item.id || 'unknown',
+          name: item.name || 'Unknown',
+          type: item.type || 'INTERNAL',
+          tokens: item.tokens || 0,
+          Category: item.Category || 'File',
+          isDirectory: item.isDirectory || false,
+          expanded: item.expanded || false,
+          children: item.children ? item.children.map(transformData) : undefined
+        };
       };
 
-      // Use the transformed data or fallback to empty array
-      const transformedData = data.children ? transformData(data.children) : [];
+      // Transform the root item and extract its children
+      const rootItem = transformData(data);
+      const transformedData = rootItem.children || [];
       setFiles(transformedData);
     } catch (err) {
       console.error('Failed to fetch repository data:', err);
@@ -72,15 +81,29 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     }
   }, []);
 
-  // Fetch repository data when repoUrl changes
+  // Fetch repository data when selectedRepository changes
   useEffect(() => {
-    const urlToUse = repoUrl || DEFAULT_REPO_URL;
-    fetchRepositoryData(urlToUse);
-  }, [repoUrl, fetchRepositoryData]);
+    if (selectedRepository) {
+      // Construct the repository URL from the selected repository
+      const repoUrl = selectedRepository.repository.html_url;
+      fetchRepositoryData(repoUrl);
+    } else if (repoUrl) {
+      // Fallback to provided repoUrl prop if no repository selected
+      fetchRepositoryData(repoUrl);
+    } else {
+      // No repository selected and no repoUrl provided
+      setFiles([]);
+      setError(null);
+    }
+  }, [selectedRepository, repoUrl, fetchRepositoryData]);
 
   const handleRefresh = () => {
-    const urlToUse = repoUrl || DEFAULT_REPO_URL;
-    fetchRepositoryData(urlToUse);
+    if (selectedRepository) {
+      const repoUrl = selectedRepository.repository.html_url;
+      fetchRepositoryData(repoUrl);
+    } else if (repoUrl) {
+      fetchRepositoryData(repoUrl);
+    }
   };
 
   const toggleExpanded = (id: string) => {
@@ -97,6 +120,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     };
     setFiles(updateFiles(files));
   };
+
   const getTokenBadgeColor = (tokens: number) => {
     if (tokens === 0) return 'bg-zinc-700 text-fg/60';
     if (tokens < 10000) return 'bg-red-900/20 text-red-900';
@@ -199,10 +223,17 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     <div className="h-full flex flex-col">
       {/* Header with refresh button */}
       <div className="flex items-center justify-between p-4 border-b border-zinc-800">
-        <h3 className="text-sm font-medium text-fg">File Dependencies</h3>
+        <div>
+          <h3 className="text-sm font-medium text-fg">File Dependencies</h3>
+          {selectedRepository && (
+            <p className="text-xs text-fg/60 mt-1">
+              {selectedRepository.repository.full_name} ({selectedRepository.branch})
+            </p>
+          )}
+        </div>
         <button
           onClick={handleRefresh}
-          disabled={loading}
+          disabled={loading || (!selectedRepository && !repoUrl)}
           className="p-2 hover:bg-zinc-800 rounded transition-colors disabled:opacity-50"
           aria-label="Refresh repository data"
         >
@@ -226,23 +257,22 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
           <div className="text-sm text-error bg-error/10 p-3 rounded">
             <p className="font-medium">Failed to load repository data</p>
             <p className="text-xs mt-1">{error}</p>
-            <p className="text-xs mt-1 text-fg/60">Showing sample data instead.</p>
           </div>
         </div>
       )}
 
       {/* File tree table */}
       <div className="flex-1 overflow-auto">
-        {!repoUrl && !loading && !error && (
+        {!selectedRepository && !repoUrl && !loading && !error && (
           <div className="flex items-center justify-center p-8">
             <div className="text-center text-fg/60">
-              <p className="text-sm">Using default repository: {DEFAULT_REPO_URL}</p>
-              <p className="text-xs mt-1">Pass a repoUrl prop to analyze a different repository</p>
+              <p className="text-sm">No repository selected</p>
+              <p className="text-xs mt-1">Please select a repository from the user profile menu</p>
             </div>
           </div>
         )}
         
-        {(repoUrl || files.length > 0) && (
+        {(selectedRepository || repoUrl || files.length > 0) && (
           <table className="w-full">
             <thead className="border-b border-zinc-800 sticky top-0 bg-bg">
               <tr>

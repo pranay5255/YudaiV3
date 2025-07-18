@@ -3,7 +3,9 @@ import {
   ChatSession, 
   ChatSessionStats, 
   ChatMessageAPI, 
-  CreateIssueFromChatRequest 
+  CreateIssueFromChatRequest,
+  GitHubRepository,
+  GitHubBranch
 } from '../types';
 
 const API_BASE_URL = 'http://localhost:8000';
@@ -166,6 +168,25 @@ export class ApiService {
     });
 
     return this.handleResponse<any[]>(response);
+  }
+
+  // GitHub API Services
+  static async getUserRepositories(): Promise<GitHubRepository[]> {
+    const response = await fetch(`${API_BASE_URL}/github/repositories`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<GitHubRepository[]>(response);
+  }
+
+  static async getRepositoryBranches(owner: string, repo: string): Promise<GitHubBranch[]> {
+    const response = await fetch(`${API_BASE_URL}/github/repositories/${owner}/${repo}/branches`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<GitHubBranch[]>(response);
   }
 
   static async searchRepositories(query: string): Promise<any[]> {
