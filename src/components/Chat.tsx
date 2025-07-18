@@ -11,16 +11,21 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      content: 'Hi, I am Daifu, your development assistant. All chats here are automatically added as context for creating github issues. Add file/directory/library specific context in File Dependencies tab',
+      content: 'Hi, I am Daifu, your spirit guide across the chaos of context. I will help you create github issues and pull requests by adding the right context reqiured for a given task.',
       isCode: false,
       timestamp: new Date(),
     },
     {
       id: '2',
-      content: `function calculateComplexity(code: string): number {
-  const lines = code.split('\\n').length;
-  const conditions = (code.match(/if|else|while|for|switch/g) || []).length;
-  return lines * 0.1 + conditions * 0.5;
+      content: `function getSpiritGuideMessage(): string {
+  const messages = [
+    "In the chaos of code, find your inner peace... or just look at cat memes.",
+    "When the bugs are many, remember: cats always land on their feet.",
+    "The path to enlightenment is paved with console.logs and cat gifs.",
+    "In the darkest debugging sessions, let cat memes be your light.",
+    "The wise developer knows when to refactor... and when to watch cat videos."
+  ];
+  return messages[Math.floor(Math.random() * messages.length)];
 }`,
       isCode: true,
       timestamp: new Date(),

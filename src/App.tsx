@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { Chat } from './components/Chat';
@@ -8,10 +8,17 @@ import { IdeasToImplement } from './components/IdeasToImplement';
 import { DiffModal } from './components/DiffModal';
 import { DetailModal } from './components/DetailModal';
 import { ToastContainer } from './components/Toast';
+import { RepositorySelectionToast } from './components/RepositorySelectionToast';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { ContextCard, FileItem, IdeaItem, Toast, ProgressStep, TabType } from './types';
+import { ContextCard, FileItem, IdeaItem, Toast, ProgressStep, TabType, SelectedRepository } from './types';
+import { useAuth } from './contexts/AuthContext';
+import { useRepository } from './contexts/RepositoryContext';
 
 function App() {
+  // Auth and repository contexts
+  const { user, isAuthenticated } = useAuth();
+  const { setSelectedRepository, hasSelectedRepository } = useRepository();
+  
   // State management
   const [activeTab, setActiveTab] = useState<TabType>('chat');
   const [currentStep, setCurrentStep] = useState<ProgressStep>('DAifu');
@@ -24,6 +31,32 @@ function App() {
   const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+  
+  // Repository selection state
+  const [showRepositorySelection, setShowRepositorySelection] = useState(false);
+
+  // Show repository selection after login if no repository is selected
+  useEffect(() => {
+    if (isAuthenticated && user && !hasSelectedRepository) {
+      // Add a small delay to let the user see they've logged in
+      const timer = setTimeout(() => {
+        setShowRepositorySelection(true);
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthenticated, user, hasSelectedRepository]);
+
+  // Repository selection handlers
+  const handleRepositoryConfirm = (selection: SelectedRepository) => {
+    setSelectedRepository(selection);
+    setShowRepositorySelection(false);
+    addToast('Repository selected successfully', 'success');
+  };
+
+  const handleRepositoryCancel = () => {
+    setShowRepositorySelection(false);
+  };
 
   // Toast management
   const addToast = (message: string, type: Toast['type'] = 'info') => {
@@ -158,6 +191,13 @@ function App() {
           onClose={() => setIsDetailModalOpen(false)}
           file={selectedFile}
           onAddToContext={addFileToContext}
+        />
+
+        {/* Repository Selection Toast */}
+        <RepositorySelectionToast
+          isOpen={showRepositorySelection}
+          onConfirm={handleRepositoryConfirm}
+          onCancel={handleRepositoryCancel}
         />
 
         {/* Toast Container */}
