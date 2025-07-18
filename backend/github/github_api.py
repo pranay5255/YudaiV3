@@ -22,6 +22,7 @@ from models import (
     GitHubIssue, 
     GitHubPullRequest, 
     GitHubCommit, 
+    GitHubBranch,
     GitHubSearchResponse
 )
 from auth.github_oauth import get_github_api, get_current_user
@@ -265,6 +266,24 @@ async def get_repository_commits(
     except Exception as e:
         db.rollback()
         raise GitHubAPIError(f"Failed to fetch commits: {str(e)}")
+
+
+async def get_repository_branches(
+    owner: str,
+    repo_name: str,
+    current_user: User,
+    db: Session
+) -> List[GitHubBranch]:
+    """
+    Get branches for a repository
+    """
+    try:
+        api = get_github_api(current_user.id, db)
+        branches_data = api.repos.list_branches(owner=owner, repo=repo_name, per_page=100)
+        
+        return [GitHubBranch.model_validate(branch) for branch in branches_data]
+    except Exception as e:
+        raise GitHubAPIError(f"Failed to fetch branches: {str(e)}")
 
 
 async def search_repositories(

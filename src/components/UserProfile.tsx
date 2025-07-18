@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { User, LogOut, ChevronDown } from 'lucide-react';
+import { User, LogOut, ChevronDown, Github, GitBranch } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useRepository } from '../contexts/RepositoryContext';
 
 export const UserProfile: React.FC = () => {
   const { user, logout, isLoading } = useAuth();
+  const { selectedRepository, clearSelectedRepository } = useRepository();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
@@ -83,6 +85,33 @@ export const UserProfile: React.FC = () => {
                   )}
                 </div>
               </div>
+              
+              {/* Selected Repository Information */}
+              {selectedRepository && (
+                <div className="mt-3 pt-3 border-t border-zinc-700">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-fg/70">ACTIVE REPOSITORY</span>
+                    <button
+                      onClick={clearSelectedRepository}
+                      className="text-xs text-fg/50 hover:text-fg/70 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-zinc-700/50 rounded">
+                    <Github className="w-4 h-4 text-primary" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-fg truncate">
+                        {selectedRepository.repository.full_name}
+                      </p>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <GitBranch className="w-3 h-3 text-fg/60" />
+                        <span className="text-xs text-fg/60">{selectedRepository.branch}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
               
               {/* Additional Profile Information */}
               <div className="mt-3 pt-3 border-t border-zinc-700">

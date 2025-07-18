@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, validator, ConfigDict
 from typing import Optional, List, Literal, Union, Dict, Any, ForwardRef
 from datetime import datetime
 from enum import Enum
+import uuid
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, JSON
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
@@ -101,7 +102,7 @@ class Repository(Base):
     __tablename__ = "repositories"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    github_repo_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True, nullable=True, index=True)
+    github_repo_id: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 
     # Core GitHub metadata
@@ -787,6 +788,11 @@ class GitHubCommit(BaseModel):
     author: Optional[GitHubCommitAuthor] = None
     committer: Optional[GitHubCommitAuthor] = None
     parents: Optional[List[Dict[str, Any]]] = []
+
+class GitHubBranch(BaseModel):
+    name: str
+    commit: Dict[str, Any]
+    protected: bool
 
 class GitHubSearchResponse(BaseModel):
     total_count: int

@@ -88,6 +88,38 @@ export interface AuthConfig {
   redirect_uri: string;
 }
 
+// GitHub types
+export interface GitHubRepository {
+  id: number;
+  name: string;
+  full_name: string;
+  private: boolean;
+  html_url: string;
+  description?: string;
+  clone_url?: string;
+  language?: string;
+  stargazers_count?: number;
+  forks_count?: number;
+  open_issues_count?: number;
+  updated_at?: string;
+  created_at?: string;
+  pushed_at?: string;
+}
+
+export interface GitHubBranch {
+  name: string;
+  commit: {
+    sha: string;
+    url: string;
+  };
+  protected: boolean;
+}
+
+export interface SelectedRepository {
+  repository: GitHubRepository;
+  branch: string;
+}
+
 // Chat API types
 export interface ChatSession {
   id: string;

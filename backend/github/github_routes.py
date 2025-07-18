@@ -17,6 +17,7 @@ from models import (
     GitHubIssue,
     GitHubPullRequest,
     GitHubCommit,
+    GitHubBranch,
     GitHubSearchResponse,
 )
 from .github_api import (
@@ -26,12 +27,13 @@ from .github_api import (
     get_repository_issues,
     get_repository_pulls,
     get_repository_commits,
+    get_repository_branches,
     search_repositories,
     GitHubAPIError
 )
 from auth.github_oauth import get_current_user
 
-router = APIRouter(prefix="/github", tags=["github"])
+router = APIRouter(tags=["github"])
 
 @router.get("/repositories", response_model=List[GitHubRepo])
 async def get_my_repositories(
@@ -146,6 +148,24 @@ async def get_repository_commits_list(
     """
     try:
         return await get_repository_commits(owner, repo, branch, current_user, db)
+    except GitHubAPIError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+@router.get("/repositories/{owner}/{repo}/branches", response_model=List[GitHubBranch])
+async def get_repository_branches_list(
+    owner: str,
+    repo: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get branches for a repository
+    """
+    try:
+        return await get_repository_branches(owner, repo, current_user, db)
     except GitHubAPIError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
