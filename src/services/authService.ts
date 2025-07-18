@@ -32,12 +32,22 @@ export class AuthService {
 
     const data = await response.json();
     
+    // Handle AuthResponse structure from backend
+    if (!data.success) {
+      throw new Error(data.error || 'Authentication failed');
+    }
+    
     // Store token in localStorage
     if (data.access_token) {
       localStorage.setItem('auth_token', data.access_token);
     }
 
-    return data;
+    // Return the expected LoginResponse format
+    return {
+      access_token: data.access_token,
+      token_type: 'bearer',
+      user: data.user
+    };
   }
 
   // Get current user profile
@@ -138,5 +148,11 @@ export class AuthService {
   static getStoredUserData(): User | null {
     const userData = localStorage.getItem('user_data');
     return userData ? JSON.parse(userData) : null;
+  }
+
+  // Redirect to main application after successful authentication
+  static redirectToMainApp(): void {
+    // Redirect to the root path which contains the main app with chat interface
+    window.location.href = '/';
   }
 } 

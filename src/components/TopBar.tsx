@@ -1,7 +1,8 @@
 import React from 'react';
-import { ChevronDown, Moon } from 'lucide-react';
+import { ChevronDown, User } from 'lucide-react';
 import { ProgressStep } from '../types';
 import { UserProfile } from './UserProfile';
+import { useAuth } from '../contexts/AuthContext';
 
 interface TopBarProps {
   currentStep: ProgressStep;
@@ -11,6 +12,14 @@ interface TopBarProps {
 const steps: ProgressStep[] = ['DAifu', 'Architect', 'Test-Writer', 'Coder'];
 
 export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
+  const { user, login, isLoading } = useAuth();
+
+  const handleLoginClick = () => {
+    if (!user && !isLoading) {
+      login();
+    }
+  };
+
   return (
     <div className="flex h-14 items-center px-4 border-b border-zinc-800 bg-bg">
       {/* Logo & Project Switcher */}
@@ -56,13 +65,30 @@ export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
 
       {/* Right Side Controls */}
       <div className="flex items-center gap-3">
-        <button 
-          className="p-2 rounded-lg hover:bg-zinc-800 transition-colors"
-          aria-label="Toggle theme"
-        >
-          <Moon className="w-5 h-5 text-fg" />
-        </button>
-        <UserProfile />
+        {user ? (
+          // Show full UserProfile component when logged in
+          <UserProfile />
+        ) : (
+          // Show login button when not logged in
+          <button 
+            onClick={handleLoginClick}
+            disabled={isLoading}
+            className="flex items-center space-x-2 text-fg hover:text-primary transition-colors duration-200 bg-zinc-800/50 hover:bg-zinc-800 rounded-lg px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Sign in with GitHub"
+          >
+            {isLoading ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" />
+                <span className="text-sm font-medium">Signing in...</span>
+              </>
+            ) : (
+              <>
+                <User className="w-5 h-5" />
+                <span className="text-sm font-medium">Sign in</span>
+              </>
+            )}
+          </button>
+        )}
       </div>
     </div>
   );
