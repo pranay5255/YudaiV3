@@ -13,15 +13,6 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 from urllib.parse import urlparse
 
-# Import DAifu chat router
-from daifuUserAgent.chat_api import router as daifu_router
-
-# Import authentication
-from auth import auth_router, get_current_user, get_current_user_optional
-
-# Import GitHub API
-from github import github_router
-
 # Import database session
 from db.database import get_db, init_db
 
@@ -35,9 +26,7 @@ from models import (
     Repository,
     FileAnalysis,
     FileItem,
-    RepositoryResponse,
-    FileItemDBResponse,
-    User
+    FileItemDBResponse
 )
 
 # Import functions from scraper_script.py
@@ -115,6 +104,7 @@ def get_or_create_repository(
         full_name=f"{repo_owner}/{repo_name}",
         html_url=f"https://github.com/{repo_owner}/{repo_name}",
         clone_url=f"https://github.com/{repo_owner}/{repo_name}.git",
+        github_repo_id=None  # Set to None since we don't have GitHub API data
     )
     db.add(repository)
     db.commit()
@@ -317,10 +307,6 @@ def process_gitingest_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
         'repository_metadata': {
             'repository': repo_name,
             'url': repo_url
-        },
-        'statistics': {
-            'total_files': len(files),
-            'estimated_tokens': sum(estimate_tokens_for_file(f['path'], f['content_size']) for f in files)
         }
     }
 
@@ -332,39 +318,9 @@ async def root():
         "version": "1.0.0",
         "endpoints": {
             "/extract": "Extract repository data and return file dependencies",
-            "/repositories": "Get all repositories (optional user_id filter)",
-            "/repositories/{id}": "Get specific repository by ID",
             "/repositories/{id}/files": "Get all files for a specific repository"
         }
     }
-
-
-
-@router.get("/repositories", response_model=List[RepositoryResponse])
-async def get_repositories(
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    db: Session = Depends(get_db)
-):
-    """Get all repositories for the authenticated user"""
-    if not current_user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required"
-        )
-    
-    repositories = db.query(Repository).filter(Repository.user_id == current_user.id).all()
-    return repositories
-
-@router.get("/repositories/{repository_id}", response_model=RepositoryResponse)
-async def get_repository_by_id(
-    repository_id: int,
-    db: Session = Depends(get_db)
-):
-    """Get a specific repository by ID."""
-    repository = db.query(Repository).filter(Repository.id == repository_id).first()
-    if not repository:
-        raise HTTPException(status_code=404, detail="Repository not found")
-    return repository
 
 @router.get("/repositories/{repository_id}/files", response_model=List[FileItemDBResponse])
 async def get_repository_files(
@@ -414,9 +370,9 @@ async def extract_file_dependencies(
         files_data = {'files': repo_data.get('files', [])}
         file_tree = build_file_tree(files_data, repo_name)
         
-        # Calculate statistics
-        total_files = repo_data.get('statistics', {}).get('total_files', 0)
-        total_tokens = repo_data.get('statistics', {}).get('estimated_tokens', 0)
+        # Calculate basic statistics
+        total_files = len(repo_data.get('files', []))
+        total_tokens = sum(estimate_tokens_for_file(f['path'], f['content_size']) for f in repo_data.get('files', []))
         
         # Create root FileItem node
         root_file_item = FileItemResponse(

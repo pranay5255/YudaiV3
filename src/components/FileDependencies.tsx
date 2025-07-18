@@ -26,7 +26,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     setError(null);
     
     try {
-      const response = await fetch('http://localhost:8000/extract', {
+      const response = await fetch('http://localhost:8000/filedeps/extract', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
