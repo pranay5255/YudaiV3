@@ -26,7 +26,7 @@ security = HTTPBearer()
 # GitHub OAuth Configuration
 GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
 GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
-GITHUB_REDIRECT_URI = os.getenv("GITHUB_REDIRECT_URI", "http://localhost:3000/auth/callback")
+GITHUB_REDIRECT_URI = os.getenv("GITHUB_REDIRECT_URI", "http://localhost:5173/auth/callback")
 GITHUB_AUTH_URL = "https://github.com/login/oauth/authorize"
 GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
 GITHUB_USER_API_URL = "https://api.github.com/user"
@@ -148,42 +148,40 @@ async def create_or_update_user(db: Session, github_user: Dict[str, Any], access
     github_id = str(github_user["id"])
     username = github_user["login"]
     
-    # Check if user exists
-    user = db.query(User).filter(User.github_user_id == github_id).first()
-    
-    if user:
-        # Update existing user
-        user.github_username = username
-        user.email = github_user.get("email")
-        user.display_name = github_user.get("name")
-        user.avatar_url = github_user.get("avatar_url")
-        user.last_login = datetime.utcnow()
-        user.updated_at = datetime.utcnow()
-    else:
-        # Create new user
-        user = User(
-            github_username=username,
-            github_user_id=github_id,
-            email=github_user.get("email"),
-            display_name=github_user.get("name"),
-            avatar_url=github_user.get("avatar_url"),
-            last_login=datetime.utcnow()
-        )
-        db.add(user)
-    
-    # Save or update auth token
-    auth_token = db.query(AuthToken).filter(
-        AuthToken.user_id == user.id,
-        AuthToken.is_active == True
-    ).first()
-    
-    if auth_token:
-        # Update existing token
-        auth_token.access_token = access_token
-        auth_token.updated_at = datetime.utcnow()
-        # Set expiration to 8 hours from now (GitHub tokens typically last 8 hours)
-        auth_token.expires_at = datetime.utcnow() + timedelta(hours=8)
-    else:
+    try:
+        # Check if user exists
+        user = db.query(User).filter(User.github_user_id == github_id).first()
+        
+        if user:
+            # Update existing user
+            user.github_username = username
+            user.email = github_user.get("email")
+            user.display_name = github_user.get("name")
+            user.avatar_url = github_user.get("avatar_url")
+            user.last_login = datetime.utcnow()
+            user.updated_at = datetime.utcnow()
+        else:
+            # Create new user
+            user = User(
+                github_username=username,
+                github_user_id=github_id,
+                email=github_user.get("email"),
+                display_name=github_user.get("name"),
+                avatar_url=github_user.get("avatar_url"),
+                last_login=datetime.utcnow()
+            )
+            db.add(user)
+        
+        # Flush to get the user ID without committing the transaction
+        db.flush()
+        
+        # Now user.id is available for the auth token
+        # Deactivate any existing active tokens for this user
+        db.query(AuthToken).filter(
+            AuthToken.user_id == user.id,
+            AuthToken.is_active == True
+        ).update({"is_active": False})
+        
         # Create new token
         auth_token = AuthToken(
             user_id=user.id,
@@ -194,11 +192,17 @@ async def create_or_update_user(db: Session, github_user: Dict[str, Any], access
             is_active=True
         )
         db.add(auth_token)
-    
-    db.commit()
-    db.refresh(user)
-    
-    return user
+        
+        # Commit the entire transaction
+        db.commit()
+        db.refresh(user)
+        
+        return user
+        
+    except Exception as e:
+        # Rollback on any error
+        db.rollback()
+        raise GitHubOAuthError(f"Failed to create or update user: {str(e)}")
 
 def get_github_api(user_id: int, db: Session) -> GhApi:
     """

@@ -60,11 +60,12 @@ export type TabType = 'chat' | 'file-deps' | 'context' | 'ideas';
 
 // Auth types
 export interface User {
-  id: string;
-  username: string;
+  id: number; // Changed from string to number to match backend
+  github_username: string; // Changed from username to match backend
+  github_user_id: string; // Changed from github_id to match backend
   email?: string;
+  display_name?: string; // Added display_name field from backend
   avatar_url?: string;
-  github_id?: string;
   created_at: string;
   last_login?: string;
 }

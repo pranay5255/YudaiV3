@@ -95,6 +95,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Clean up URL parameters
       window.history.replaceState({}, document.title, window.location.pathname);
+      
+      // Redirect to main application after successful authentication
+      AuthService.redirectToMainApp();
     } catch (error) {
       console.error('OAuth callback failed:', error);
       clearAuthState();

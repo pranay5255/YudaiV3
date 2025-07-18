@@ -134,13 +134,19 @@ async def auth_status(
     Check authentication status
     """
     if current_user:
+        user_profile = UserProfile(
+            id=current_user.id,
+            github_username=current_user.github_username,
+            github_user_id=current_user.github_user_id,
+            email=current_user.email,
+            display_name=current_user.display_name,
+            avatar_url=current_user.avatar_url,
+            created_at=current_user.created_at.isoformat(),
+            last_login=current_user.last_login.isoformat() if current_user.last_login else None
+        )
         return {
             "authenticated": True,
-            "user": {
-                "id": current_user.id,
-                "github_username": current_user.github_username,
-                "display_name": current_user.display_name
-            }
+            "user": user_profile
         }
     else:
         return {"authenticated": False}

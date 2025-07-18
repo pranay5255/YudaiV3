@@ -21,6 +21,10 @@ export const UserProfile: React.FC = () => {
     return null;
   }
 
+  // Use display_name if available, fallback to github_username
+  const displayName = user.display_name || user.github_username;
+  const username = user.github_username;
+
   return (
     <div className="relative">
       <button
@@ -30,13 +34,13 @@ export const UserProfile: React.FC = () => {
         {user.avatar_url ? (
           <img
             src={user.avatar_url}
-            alt={user.username}
+            alt={username}
             className="w-6 h-6 rounded-full"
           />
         ) : (
           <User className="w-5 h-5" />
         )}
-        <span className="text-sm font-medium">{user.username}</span>
+        <span className="text-sm font-medium">{username}</span>
         <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${
           isDropdownOpen ? 'rotate-180' : ''
         }`} />
@@ -51,28 +55,55 @@ export const UserProfile: React.FC = () => {
           />
           
           {/* Dropdown Menu */}
-          <div className="absolute right-0 mt-2 w-64 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg z-20">
+          <div className="absolute right-0 mt-2 w-72 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg z-20">
             <div className="p-4 border-b border-zinc-700">
               <div className="flex items-center space-x-3">
                 {user.avatar_url ? (
                   <img
                     src={user.avatar_url}
-                    alt={user.username}
-                    className="w-10 h-10 rounded-full"
+                    alt={username}
+                    className="w-12 h-12 rounded-full"
                   />
                 ) : (
-                  <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center">
+                  <div className="w-12 h-12 bg-primary rounded-full flex items-center justify-center">
                     <User className="w-6 h-6 text-white" />
                   </div>
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-fg truncate">
-                    {user.username}
+                  <p className="text-sm font-semibold text-fg truncate">
+                    {displayName}
+                  </p>
+                  <p className="text-xs text-fg/80 truncate">
+                    @{username}
                   </p>
                   {user.email && (
-                    <p className="text-xs text-fg/70 truncate">
+                    <p className="text-xs text-fg/70 truncate mt-1">
                       {user.email}
                     </p>
+                  )}
+                </div>
+              </div>
+              
+              {/* Additional Profile Information */}
+              <div className="mt-3 pt-3 border-t border-zinc-700">
+                <div className="grid grid-cols-1 gap-2 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-fg/70">GitHub ID:</span>
+                    <span className="text-fg/90">{user.github_user_id}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-fg/70">Member since:</span>
+                    <span className="text-fg/90">
+                      {new Date(user.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                  {user.last_login && (
+                    <div className="flex justify-between">
+                      <span className="text-fg/70">Last login:</span>
+                      <span className="text-fg/90">
+                        {new Date(user.last_login).toLocaleDateString()}
+                      </span>
+                    </div>
                   )}
                 </div>
               </div>
