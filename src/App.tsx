@@ -9,7 +9,9 @@ import { DiffModal } from './components/DiffModal';
 import { DetailModal } from './components/DetailModal';
 import { ToastContainer } from './components/Toast';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { IssueSetup } from './components/IssueSetup';
 import { ContextCard, FileItem, IdeaItem, Toast, ProgressStep, TabType } from './types';
+import { IssueConfig } from './types';
 
 function App() {
   // State management
@@ -24,6 +26,10 @@ function App() {
   const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+  const [issueConfig, setIssueConfig] = useState<IssueConfig | null>(() => {
+    const stored = localStorage.getItem('issue_config');
+    return stored ? JSON.parse(stored) : null;
+  });
 
   // Toast management
   const addToast = (message: string, type: Toast['type'] = 'info') => {
@@ -96,11 +102,20 @@ function App() {
     handleCreateIssue();
   };
 
+  const handleSetupComplete = (config: IssueConfig) => {
+    setIssueConfig(config);
+    localStorage.setItem('issue_config', JSON.stringify(config));
+  };
+
   // Render tab content
   const renderTabContent = () => {
     switch (activeTab) {
       case 'chat':
-        return <Chat onAddToContext={addToContext} />;
+        return issueConfig ? (
+          <Chat onAddToContext={addToContext} issueConfig={issueConfig} />
+        ) : (
+          <IssueSetup onComplete={handleSetupComplete} />
+        );
       case 'file-deps':
         return (
           <FileDependencies 

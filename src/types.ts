@@ -117,3 +117,24 @@ export interface CreateIssueFromChatRequest {
   repository_url?: string;
 }
 
+export type IssueCategory =
+  | 'Bug-fix'
+  | 'Add-library'
+  | 'add-tests(pytest)'
+  | 'add-tests(docker)'
+  | 'new-feature-scaffold'
+  | 'refactor'
+  | 'docs update'
+  | 'context-update(md files)'
+  | 'containerisation'
+  | 'database-design(sqlAlchemy+pydantic)'
+  | 'type-setting(pydantic)'
+  | 'type-setting(typescript)';
+
+export interface IssueConfig {
+  repoOwner: string;
+  repoName: string;
+  branch: string;
+  categories: IssueCategory[];
+}
+
