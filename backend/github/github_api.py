@@ -40,7 +40,7 @@ async def get_user_repositories(
     """
     try:
         api = get_github_api(current_user.id, db)
-        repos_data = api.repos.list_for_authenticated_user(sort="updated", per_page=100)
+        repos_data = api.repos.list_for_authenticated_user(sort="updated", per_page=10)
         
         for repo_data in repos_data:
             repo = db.query(Repository).filter(Repository.github_repo_id == repo_data.id).first()

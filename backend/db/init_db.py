@@ -91,7 +91,7 @@ def create_tables_standalone(engine):
         """
         CREATE TABLE IF NOT EXISTS repositories (
             id SERIAL PRIMARY KEY,
-            github_repo_id INTEGER UNIQUE NOT NULL,
+            github_repo_id INTEGER UNIQUE,
             user_id INTEGER REFERENCES users(id),
             name VARCHAR(255) NOT NULL,
             owner VARCHAR(255) NOT NULL,
