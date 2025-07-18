@@ -11,6 +11,7 @@ from .github_api import (
     get_repository_issues,
     get_repository_pulls,
     get_repository_commits,
+    get_repository_branches,
     search_repositories,
     GitHubAPIError
 )
@@ -23,6 +24,7 @@ __all__ = [
     "get_repository_issues",
     "get_repository_pulls",
     "get_repository_commits",
+    "get_repository_branches",
     "search_repositories",
     "GitHubAPIError",
     "github_router"
