@@ -24,6 +24,7 @@ from github import github_router
 from daifuUserAgent.chat_api import router as daifu_router
 from issueChatServices import issue_router
 from repo_processorGitIngest.filedeps import router as filedeps_router
+from contextServices import context_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -61,6 +62,7 @@ app.include_router(github_router, prefix="/github", tags=["github"])
 app.include_router(daifu_router, prefix="/daifu", tags=["chat"])
 app.include_router(issue_router, prefix="/issues", tags=["issues"])
 app.include_router(filedeps_router, prefix="/filedeps", tags=["file-dependencies"])
+app.include_router(context_router, tags=["context"])
 
 # Add a unified root endpoint
 @app.get("/")

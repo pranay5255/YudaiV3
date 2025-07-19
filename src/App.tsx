@@ -13,6 +13,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { ContextCard, FileItem, IdeaItem, Toast, ProgressStep, TabType, SelectedRepository } from './types';
 import { useAuth } from './contexts/AuthContext';
 import { useRepository } from './contexts/RepositoryContext';
+import { ApiService } from './services/api';
 
 function App() {
   // Auth and repository contexts
@@ -35,9 +36,19 @@ function App() {
   // Repository selection state
   const [showRepositorySelection, setShowRepositorySelection] = useState(false);
 
+  // Load context cards when user is authenticated
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      loadContextCards();
+    }
+  }, [isAuthenticated, user]);
+
   // Show repository selection after login if no repository is selected
   useEffect(() => {
     if (isAuthenticated && user && !hasSelectedRepository) {
+      // Welcome the user
+      addToast(`Welcome back, ${user.github_username}! 🐱`, 'success');
+      
       // Add a small delay to let the user see they've logged in
       const timer = setTimeout(() => {
         setShowRepositorySelection(true);
@@ -47,11 +58,34 @@ function App() {
     }
   }, [isAuthenticated, user, hasSelectedRepository]);
 
+  // Load context cards from API
+  const loadContextCards = async () => {
+    try {
+      const cards = await ApiService.getContextCards();
+      const transformedCards: ContextCard[] = cards.map(card => ({
+        id: card.id,
+        title: card.title,
+        description: card.description,
+        tokens: card.tokens,
+        source: card.source,
+      }));
+      setContextCards(transformedCards);
+    } catch (error) {
+      console.error('Failed to load context cards:', error);
+    }
+  };
+
   // Repository selection handlers
-  const handleRepositoryConfirm = (selection: SelectedRepository) => {
-    setSelectedRepository(selection);
-    setShowRepositorySelection(false);
-    addToast('Repository selected successfully', 'success');
+  const handleRepositoryConfirm = async (selection: SelectedRepository) => {
+    try {
+      await setSelectedRepository(selection);
+      setShowRepositorySelection(false);
+      addToast('Repository selected and synchronized successfully', 'success');
+    } catch (error) {
+      console.error('Failed to sync repository:', error);
+      addToast('Repository selected but sync failed', 'error');
+      setShowRepositorySelection(false);
+    }
   };
 
   const handleRepositoryCancel = () => {
@@ -73,17 +107,31 @@ function App() {
   };
 
   // Context management
-  const addToContext = (content: string, source: ContextCard['source'] = 'chat') => {
-    const newCard: ContextCard = {
-      id: Date.now().toString(),
-      title: content.slice(0, 50) + (content.length > 50 ? '...' : ''),
-      description: content.slice(0, 150) + (content.length > 150 ? '...' : ''),
-      tokens: Math.floor(content.length * 0.75), // Rough token estimation
-      source,
-    };
-    
-    setContextCards(prev => [...prev, newCard]);
-    addToast('Added to context successfully', 'success');
+  const addToContext = async (content: string, source: ContextCard['source'] = 'chat') => {
+    try {
+      // Create context card via API
+      const contextCard = await ApiService.createContextCard({
+        title: content.slice(0, 50) + (content.length > 50 ? '...' : ''),
+        description: content.slice(0, 150) + (content.length > 150 ? '...' : ''),
+        content,
+        source,
+      });
+
+      // Add to local state
+      const newCard: ContextCard = {
+        id: contextCard.id,
+        title: contextCard.title,
+        description: contextCard.description,
+        tokens: contextCard.tokens,
+        source: contextCard.source,
+      };
+      
+      setContextCards(prev => [...prev, newCard]);
+      addToast('Added to context successfully', 'success');
+    } catch (error) {
+      console.error('Failed to add context card:', error);
+      addToast('Failed to add to context', 'error');
+    }
   };
 
   const addFileToContext = (file: FileItem) => {
@@ -99,9 +147,15 @@ function App() {
     addToast(`Added ${file.name} to context`, 'success');
   };
 
-  const removeContextCard = (id: string) => {
-    setContextCards(prev => prev.filter(card => card.id !== id));
-    addToast('Removed from context', 'info');
+  const removeContextCard = async (id: string) => {
+    try {
+      await ApiService.deleteContextCard(id);
+      setContextCards(prev => prev.filter(card => card.id !== id));
+      addToast('Removed from context', 'info');
+    } catch (error) {
+      console.error('Failed to remove context card:', error);
+      addToast('Failed to remove from context', 'error');
+    }
   };
 
   // Modal handlers

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronDown, Github, GitBranch, Check, X, Loader2 } from 'lucide-react';
 import { GitHubRepository, GitHubBranch, SelectedRepository } from '../types';
-import { ApiService } from '../services/api';
+import { useRepository } from '../contexts/RepositoryContext';
 
 interface RepositorySelectionToastProps {
   isOpen: boolean;
@@ -14,11 +14,10 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
   onConfirm, 
   onCancel 
 }) => {
-  const [repositories, setRepositories] = useState<GitHubRepository[]>([]);
+  const { repositories, loadUserRepositories, isLoadingRepositories } = useRepository();
   const [branches, setBranches] = useState<GitHubBranch[]>([]);
   const [selectedRepository, setSelectedRepository] = useState<GitHubRepository | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string>('');
-  const [loadingRepos, setLoadingRepos] = useState(false);
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [isRepoDropdownOpen, setIsRepoDropdownOpen] = useState(false);
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
@@ -26,10 +25,13 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
 
   // Load repositories when toast opens
   useEffect(() => {
-    if (isOpen) {
-      loadRepositories();
+    if (isOpen && repositories.length === 0) {
+      loadUserRepositories().catch((error) => {
+        console.error('Failed to load repositories:', error);
+        setError('Failed to load repositories. Please try again.');
+      });
     }
-  }, [isOpen]);
+  }, [isOpen, repositories.length, loadUserRepositories]);
 
   // Load branches when repository is selected
   useEffect(() => {
@@ -37,20 +39,6 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
       loadBranches();
     }
   }, [selectedRepository]);
-
-  const loadRepositories = async () => {
-    setLoadingRepos(true);
-    setError(null);
-    try {
-      const repos = await ApiService.getUserRepositories();
-      setRepositories(repos);
-    } catch (error) {
-      console.error('Failed to load repositories:', error);
-      setError('Failed to load repositories. Please try again.');
-    } finally {
-      setLoadingRepos(false);
-    }
-  };
 
   const loadBranches = async () => {
     if (!selectedRepository) return;
@@ -61,11 +49,24 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
     
     try {
       const [owner, repo] = selectedRepository.full_name.split('/');
-      const branchList = await ApiService.getRepositoryBranches(owner, repo);
+      
+      // Call GitHub API to get branches
+      const response = await fetch(`http://localhost:8000/github/repositories/${owner}/${repo}/branches`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch branches: ${response.status}`);
+      }
+
+      const branchList: GitHubBranch[] = await response.json();
       setBranches(branchList);
       
       // Auto-select main or master branch if available
-      const defaultBranch = branchList.find(b => 
+      const defaultBranch = branchList.find((b: GitHubBranch) => 
         b.name === 'main' || b.name === 'master'
       );
       if (defaultBranch) {
@@ -144,11 +145,11 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
               <div className="relative">
                 <button
                   onClick={() => setIsRepoDropdownOpen(!isRepoDropdownOpen)}
-                  disabled={loadingRepos}
+                  disabled={isLoadingRepositories}
                   className="w-full flex items-center justify-between px-4 py-3 bg-zinc-900 border border-zinc-600 rounded-lg text-fg hover:border-zinc-500 transition-colors disabled:opacity-50"
                 >
                   <span className="flex items-center gap-2">
-                    {loadingRepos ? (
+                    {isLoadingRepositories ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
                         Loading repositories...

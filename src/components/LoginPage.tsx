@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Github, Shield, Zap, Code } from 'lucide-react';
+import { Github, Heart, Coffee } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export const LoginPage: React.FC = () => {
@@ -18,38 +18,31 @@ export const LoginPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-bg via-bg/95 to-zinc-900 flex items-center justify-center p-4">
-      <div className="max-w-md w-full space-y-8">
-        {/* Logo and Title */}
+      <div className="max-w-sm w-full space-y-6">
+        {/* Cat-themed Logo and Title */}
         <div className="text-center">
-          <div className="mx-auto h-16 w-16 bg-primary rounded-2xl flex items-center justify-center mb-6">
-            <Code className="h-8 w-8 text-white" />
+          <div className="mx-auto h-12 w-12 bg-primary rounded-full flex items-center justify-center mb-4">
+            <span className="text-2xl">🐱</span>
           </div>
-          <h2 className="text-3xl font-bold text-fg">
-            Welcome to YudaiV3
+          <h2 className="text-2xl font-bold text-fg">
+            YudaiV3
           </h2>
-          <p className="mt-2 text-sm text-fg/70">
-            Your AI-powered development assistant
+          <p className="text-sm text-fg/70">
+            Where cats and code collide
           </p>
         </div>
 
-        {/* Features */}
-        <div className="space-y-4">
-          <div className="flex items-center space-x-3 text-fg/80">
-            <Shield className="h-5 w-5 text-primary" />
-            <span className="text-sm">Secure GitHub OAuth authentication</span>
-          </div>
-          <div className="flex items-center space-x-3 text-fg/80">
-            <Zap className="h-5 w-5 text-primary" />
-            <span className="text-sm">AI-powered code analysis and chat</span>
-          </div>
-          <div className="flex items-center space-x-3 text-fg/80">
-            <Github className="h-5 w-5 text-primary" />
-            <span className="text-sm">Seamless GitHub integration</span>
+        {/* Fun Cat Facts */}
+        <div className="space-y-3 text-center">
+          <div className="text-xs text-fg/60">
+            <p>🐾 Cats are natural debuggers - they always find the warmest spot</p>
+            <p>😸 Like cats, good code is curious and playful</p>
+            <p>💤 Cats know the importance of rest - so do great developers</p>
           </div>
         </div>
 
         {/* Login Button */}
-        <div className="space-y-4">
+        <div className="space-y-3">
           <button
             onClick={handleLogin}
             disabled={isLoading || isLoggingIn}
@@ -58,26 +51,21 @@ export const LoginPage: React.FC = () => {
             {isLoggingIn ? (
               <>
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                Redirecting to GitHub...
+                Redirecting...
               </>
             ) : (
               <>
-                <Github className="h-5 w-5 mr-2" />
+                <Github className="h-4 w-4 mr-2" />
                 Sign in with GitHub
               </>
             )}
           </button>
 
-          <p className="text-xs text-center text-fg/50">
-            By signing in, you agree to our terms of service and privacy policy
-          </p>
-        </div>
-
-        {/* Additional Info */}
-        <div className="text-center">
-          <p className="text-xs text-fg/40">
-            Need help? Contact support at support@yudai.dev
-          </p>
+          <div className="flex items-center justify-center space-x-2 text-xs text-fg/40">
+            <Coffee className="h-3 w-3" />
+            <span>Powered by catnip and caffeine</span>
+            <Heart className="h-3 w-3 text-red-400" />
+          </div>
         </div>
       </div>
     </div>

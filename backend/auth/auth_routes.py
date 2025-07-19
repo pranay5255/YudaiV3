@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from typing import Optional
+from datetime import datetime
 
 from db.database import get_db
 from models import User, AuthToken, UserProfile, AuthResponse  # Import types from models.py
@@ -150,6 +151,45 @@ async def auth_status(
         }
     else:
         return {"authenticated": False}
+
+@router.patch("/profile", response_model=UserProfile)
+async def update_user_profile(
+    profile_updates: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update current user's profile (e.g., active_repository)
+    """
+    try:
+        # Update allowed fields
+        if "active_repository" in profile_updates:
+            current_user.active_repository = profile_updates["active_repository"]
+        
+        if "display_name" in profile_updates:
+            current_user.display_name = profile_updates["display_name"]
+        
+        # Update timestamp
+        current_user.updated_at = datetime.utcnow()
+        
+        db.commit()
+        db.refresh(current_user)
+        
+        return UserProfile(
+            id=current_user.id,
+            github_username=current_user.github_username,
+            github_user_id=current_user.github_user_id,
+            email=current_user.email,
+            display_name=current_user.display_name,
+            avatar_url=current_user.avatar_url,
+            created_at=current_user.created_at.isoformat(),
+            last_login=current_user.last_login.isoformat() if current_user.last_login else None
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to update profile: {str(e)}"
+        )
 
 @router.get("/config")
 async def get_auth_config():
