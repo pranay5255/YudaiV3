@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 from db.database import get_db, init_db
 
 # Import authentication
-from auth import get_current_user_optional
+from auth import get_current_user_optional, get_current_user
 
 # Import unified models
 from models import (
@@ -26,7 +26,8 @@ from models import (
     Repository,
     FileAnalysis,
     FileItem,
-    FileItemDBResponse
+    FileItemDBResponse,
+    User
 )
 
 # Import functions from scraper_script.py
@@ -34,6 +35,9 @@ from .scraper_script import (
     extract_repository_data,
     categorize_file
 )
+
+# Import GitHub API functions
+from github.github_api import get_repository_details
 
 # Create router for file dependencies endpoints
 router = APIRouter( tags=["file-dependencies"])
@@ -79,12 +83,49 @@ def extract_repo_info_from_url(repo_url: str) -> tuple[str, str]:
     else:
         return 'unknown', 'unknown'
 
+def set_active_repository(
+    db: Session,
+    user_id: int,
+    repository_id: int,
+    repo_url: str
+) -> None:
+    """
+    Set the active repository for a user and deactivate all other repositories.
+    
+    Args:
+        db: Database session
+        user_id: ID of the user
+        repository_id: ID of the repository to set as active
+        repo_url: URL of the repository
+    """
+    try:
+        # Deactivate all repositories for this user
+        db.query(Repository).filter(
+            Repository.user_id == user_id
+        ).update({Repository.active: False})
+        
+        # Set the current repository as active
+        db.query(Repository).filter(
+            Repository.id == repository_id
+        ).update({Repository.active: True})
+        
+        # Update user's active repository URL
+        db.query(User).filter(
+            User.id == user_id
+        ).update({User.active_repository: repo_url})
+        
+        db.commit()
+        
+    except Exception as e:
+        db.rollback()
+        raise Exception(f"Failed to set active repository: {str(e)}")
+
 def get_or_create_repository(
     db: Session,
     repo_url: str,
     repo_name: str,
     repo_owner: str,
-    user_id: int = 1  # Default user ID for now
+    user_id: int
 ) -> Repository:
     """Retrieve existing repository metadata or create a new record."""
 
@@ -340,6 +381,7 @@ async def get_repository_files(
 @router.post("/extract", response_model=FileItemResponse)
 async def extract_file_dependencies(
     request: RepositoryRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -352,6 +394,22 @@ async def extract_file_dependencies(
     try:
         # Extract repository information from URL
         repo_name, repo_owner = extract_repo_info_from_url(request.repo_url)
+        
+        # Get repository details from GitHub API (this validates access and gets accurate info)
+        try:
+            github_repo = await get_repository_details(
+                owner=repo_owner,
+                repo_name=repo_name,
+                current_user=current_user,
+                db=db
+            )
+            # Use GitHub API data for more accurate repository information
+            repo_name = github_repo.name
+            repo_owner = github_repo.full_name.split('/')[0]
+        except Exception as github_error:
+            # If GitHub API fails, continue with URL-extracted info
+            print(f"GitHub API access failed: {github_error}")
+            # Continue with extracted repo info
         
         # Extract repository data using GitIngest (await the async function)
         raw_repo_data = await extract_repository_data(
@@ -394,6 +452,7 @@ async def extract_file_dependencies(
                 repo_url=request.repo_url,
                 repo_name=repo_name,
                 repo_owner=repo_owner,
+                user_id=current_user.id
             )
 
             # Save analysis results
@@ -409,6 +468,14 @@ async def extract_file_dependencies(
 
             # Save file items
             save_file_items_to_db(db, repository.id, file_tree)
+            
+            # Set this repository as the active one for the user
+            set_active_repository(
+                db=db,
+                user_id=current_user.id,
+                repository_id=repository.id,
+                repo_url=request.repo_url
+            )
             
         except Exception as db_error:
             # Log database error but don't fail the request

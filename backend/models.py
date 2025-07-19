@@ -64,6 +64,9 @@ class User(Base):
     display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     
+    # Active repository tracking
+    active_repository: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
@@ -102,7 +105,7 @@ class Repository(Base):
     __tablename__ = "repositories"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    github_repo_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
+    github_repo_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True, nullable=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 
     # Core GitHub metadata
@@ -120,6 +123,9 @@ class Repository(Base):
     stargazers_count: Mapped[int] = mapped_column(Integer, default=0)
     forks_count: Mapped[int] = mapped_column(Integer, default=0)
     open_issues_count: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Repository status
+    active: Mapped[bool] = mapped_column(Boolean, default=False)
     
     # Timestamps from GitHub
     github_created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
