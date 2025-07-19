@@ -37,32 +37,36 @@ async def get_user_repositories(
 ) -> List[GitHubRepo]:
     """
     Get all repositories for the authenticated user from GitHub,
-    update the database, and return the list.
+    update the database only if repository doesn't exist, and return the list.
     """
     try:
         api = get_github_api(current_user.id, db)
-        repos_data = api.repos.list_for_authenticated_user(sort="updated", per_page=10)
+        repos_data = api.repos.list_for_authenticated_user(sort="updated", per_page=100)
         
         for repo_data in repos_data:
-            repo = db.query(Repository).filter(Repository.github_repo_id == repo_data.id).first()
-            if not repo:
+            # Check if repository already exists in database
+            existing_repo = db.query(Repository).filter(Repository.github_repo_id == repo_data.id).first()
+            
+            if not existing_repo:
+                # Only create new repository if it doesn't exist
                 repo = Repository(github_repo_id=repo_data.id, user_id=current_user.id)
                 db.add(repo)
-            
-            repo.name = repo_data.name
-            repo.owner = repo_data.owner.login
-            repo.full_name = repo_data.full_name
-            repo.description = repo_data.description
-            repo.private = repo_data.private
-            repo.html_url = repo_data.html_url
-            repo.clone_url = repo_data.clone_url
-            repo.language = repo_data.language
-            repo.stargazers_count = repo_data.stargazers_count
-            repo.forks_count = repo_data.forks_count
-            repo.open_issues_count = repo_data.open_issues_count
-            repo.github_created_at = repo_data.created_at
-            repo.github_updated_at = repo_data.updated_at
-            repo.pushed_at = repo_data.pushed_at
+                
+                # Set all the fields for new repository
+                repo.name = repo_data.name
+                repo.owner = repo_data.owner.login
+                repo.full_name = repo_data.full_name
+                repo.description = repo_data.description
+                repo.private = repo_data.private
+                repo.html_url = repo_data.html_url
+                repo.clone_url = repo_data.clone_url
+                repo.language = repo_data.language
+                repo.stargazers_count = repo_data.stargazers_count
+                repo.forks_count = repo_data.forks_count
+                repo.open_issues_count = repo_data.open_issues_count
+                repo.github_created_at = repo_data.created_at
+                repo.github_updated_at = repo_data.updated_at
+                repo.pushed_at = repo_data.pushed_at
 
         db.commit()
         return [GitHubRepo.model_validate(r) for r in repos_data]
@@ -78,34 +82,38 @@ async def get_repository_details(
     db: Session = Depends(get_db)
 ) -> GitHubRepo:
     """
-    Get detailed information for a repository, update the database, and return it.
+    Get detailed information for a repository, update the database only if repository doesn't exist, and return it.
     """
     try:
         api = get_github_api(current_user.id, db)
         repo_data = api.repos.get(owner=owner, repo=repo_name)
         
-        repo = db.query(Repository).filter(Repository.github_repo_id == repo_data.id).first()
-        if not repo:
+        # Check if repository already exists in database
+        existing_repo = db.query(Repository).filter(Repository.github_repo_id == repo_data.id).first()
+        
+        if not existing_repo:
+            # Only create new repository if it doesn't exist
             repo = Repository(github_repo_id=repo_data.id, user_id=current_user.id)
             db.add(repo)
+            
+            # Set all the fields for new repository
+            repo.name = repo_data.name
+            repo.owner = repo_data.owner.login
+            repo.full_name = repo_data.full_name
+            repo.description = repo_data.description
+            repo.private = repo_data.private
+            repo.html_url = repo_data.html_url
+            repo.clone_url = repo_data.clone_url
+            repo.language = repo_data.language
+            repo.stargazers_count = repo_data.stargazers_count
+            repo.forks_count = repo_data.forks_count
+            repo.open_issues_count = repo_data.open_issues_count
+            repo.github_created_at = repo_data.created_at
+            repo.github_updated_at = repo_data.updated_at
+            repo.pushed_at = repo_data.pushed_at
+            
+            db.commit()
         
-        # Update fields...
-        repo.name = repo_data.name
-        repo.owner = repo_data.owner.login
-        repo.full_name = repo_data.full_name
-        repo.description = repo_data.description
-        repo.private = repo_data.private
-        repo.html_url = repo_data.html_url
-        repo.clone_url = repo_data.clone_url
-        repo.language = repo_data.language
-        repo.stargazers_count = repo_data.stargazers_count
-        repo.forks_count = repo_data.forks_count
-        repo.open_issues_count = repo_data.open_issues_count
-        repo.github_created_at = repo_data.created_at
-        repo.github_updated_at = repo_data.updated_at
-        repo.pushed_at = repo_data.pushed_at
-        
-        db.commit()
         return GitHubRepo.model_validate(repo_data)
 
     except Exception as e:
@@ -124,7 +132,7 @@ async def create_issue(
     db: Session = Depends(get_db)
 ) -> GitHubIssue:
     """
-    Create a new issue, save it to the database, and return it.
+    Create a new issue, save it to the database only if it doesn't exist, and return it.
     """
     try:
         api = get_github_api(current_user.id, db)
@@ -133,22 +141,26 @@ async def create_issue(
             labels=labels or [], assignees=assignees or []
         )
         
-        repo = db.query(Repository).filter(Repository.full_name == f"{owner}/{repo_name}").first()
-        if repo:
-            new_issue = Issue(
-                github_issue_id=issue_data.id,
-                repository_id=repo.id,
-                number=issue_data.number,
-                title=issue_data.title,
-                body=issue_data.body,
-                state=issue_data.state,
-                html_url=issue_data.html_url,
-                author_username=issue_data.user.login,
-                github_created_at=issue_data.created_at,
-                github_updated_at=issue_data.updated_at
-            )
-            db.add(new_issue)
-            db.commit()
+        # Check if issue already exists in database
+        existing_issue = db.query(Issue).filter(Issue.github_issue_id == issue_data.id).first()
+        
+        if not existing_issue:
+            repo = db.query(Repository).filter(Repository.full_name == f"{owner}/{repo_name}").first()
+            if repo:
+                new_issue = Issue(
+                    github_issue_id=issue_data.id,
+                    repository_id=repo.id,
+                    number=issue_data.number,
+                    title=issue_data.title,
+                    body=issue_data.body,
+                    state=issue_data.state,
+                    html_url=issue_data.html_url,
+                    author_username=issue_data.user.login,
+                    github_created_at=issue_data.created_at,
+                    github_updated_at=issue_data.updated_at
+                )
+                db.add(new_issue)
+                db.commit()
             
         return GitHubIssue.model_validate(issue_data)
 
@@ -172,20 +184,24 @@ async def get_repository_issues(
             raise GitHubAPIError("Repository not found in database.")
             
         for issue_data in issues_data:
-            issue = db.query(Issue).filter(Issue.github_issue_id == issue_data.id).first()
-            if not issue:
+            # Check if issue already exists in database
+            existing_issue = db.query(Issue).filter(Issue.github_issue_id == issue_data.id).first()
+            
+            if not existing_issue:
+                # Only create new issue if it doesn't exist
                 issue = Issue(github_issue_id=issue_data.id, repository_id=repo.id)
                 db.add(issue)
-            
-            issue.number = issue_data.number
-            issue.title = issue_data.title
-            issue.body = issue_data.body
-            issue.state = issue_data.state
-            issue.html_url = issue_data.html_url
-            issue.author_username = issue_data.user.login if issue_data.user else None
-            issue.github_created_at = issue_data.created_at
-            issue.github_updated_at = issue_data.updated_at
-            issue.github_closed_at = issue_data.closed_at
+                
+                # Set all the fields for new issue
+                issue.number = issue_data.number
+                issue.title = issue_data.title
+                issue.body = issue_data.body
+                issue.state = issue_data.state
+                issue.html_url = issue_data.html_url
+                issue.author_username = issue_data.user.login if issue_data.user else None
+                issue.github_created_at = issue_data.created_at
+                issue.github_updated_at = issue_data.updated_at
+                issue.github_closed_at = issue_data.closed_at
         
         db.commit()
         return [GitHubIssue.model_validate(i) for i in issues_data]
@@ -210,21 +226,25 @@ async def get_repository_pulls(
             raise GitHubAPIError("Repository not found in database.")
 
         for pr_data in pulls_data:
-            pr = db.query(PullRequest).filter(PullRequest.github_pr_id == pr_data.id).first()
-            if not pr:
+            # Check if pull request already exists in database
+            existing_pr = db.query(PullRequest).filter(PullRequest.github_pr_id == pr_data.id).first()
+            
+            if not existing_pr:
+                # Only create new pull request if it doesn't exist
                 pr = PullRequest(github_pr_id=pr_data.id, repository_id=repo.id)
                 db.add(pr)
-
-            pr.number = pr_data.number
-            pr.title = pr_data.title
-            pr.body = pr_data.body
-            pr.state = pr_data.state
-            pr.html_url = pr_data.html_url
-            pr.author_username = pr_data.user.login if pr_data.user else None
-            pr.github_created_at = pr_data.created_at
-            pr.github_updated_at = pr_data.updated_at
-            pr.github_closed_at = pr_data.closed_at
-            pr.merged_at = pr_data.merged_at
+                
+                # Set all the fields for new pull request
+                pr.number = pr_data.number
+                pr.title = pr_data.title
+                pr.body = pr_data.body
+                pr.state = pr_data.state
+                pr.html_url = pr_data.html_url
+                pr.author_username = pr_data.user.login if pr_data.user else None
+                pr.github_created_at = pr_data.created_at
+                pr.github_updated_at = pr_data.updated_at
+                pr.github_closed_at = pr_data.closed_at
+                pr.merged_at = pr_data.merged_at
 
         db.commit()
         return [GitHubPullRequest.model_validate(p) for p in pulls_data]
@@ -249,17 +269,21 @@ async def get_repository_commits(
             raise GitHubAPIError("Repository not found in database.")
 
         for commit_data in commits_data:
-            commit = db.query(Commit).filter(Commit.sha == commit_data.sha).first()
-            if not commit:
+            # Check if commit already exists in database
+            existing_commit = db.query(Commit).filter(Commit.sha == commit_data.sha).first()
+            
+            if not existing_commit:
+                # Only create new commit if it doesn't exist
                 commit = Commit(sha=commit_data.sha, repository_id=repo.id)
                 db.add(commit)
-
-            commit.message = commit_data.commit.message
-            commit.html_url = commit_data.html_url
-            if commit_data.author:
-                commit.author_name = commit_data.commit.author.name
-                commit.author_email = commit_data.commit.author.email
-                commit.author_date = commit_data.commit.author.date
+                
+                # Set all the fields for new commit
+                commit.message = commit_data.commit.message
+                commit.html_url = commit_data.html_url
+                if commit_data.author:
+                    commit.author_name = commit_data.commit.author.name
+                    commit.author_email = commit_data.commit.author.email
+                    commit.author_date = commit_data.commit.author.date
 
         db.commit()
         return [GitHubCommit.model_validate(c) for c in commits_data]
