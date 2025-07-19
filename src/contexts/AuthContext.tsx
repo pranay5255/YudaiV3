@@ -83,6 +83,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       const loginResponse = await AuthService.handleCallback(code, state || undefined);
       
+      // Store user data first
+      AuthService.storeUserData(loginResponse.user);
+
+      // Update auth state
       setAuthState({
         user: loginResponse.user,
         token: loginResponse.access_token,
@@ -90,13 +94,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         isLoading: false,
       });
 
-      // Store user data
-      AuthService.storeUserData(loginResponse.user);
-
-      // Clean up URL parameters
-      window.history.replaceState({}, document.title, window.location.pathname);
-      
-      // Redirect to main application after successful authentication
+      // Clean up URL parameters and let React handle the redirect
       AuthService.redirectToMainApp();
     } catch (error) {
       console.error('OAuth callback failed:', error);

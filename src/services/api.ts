@@ -217,4 +217,71 @@ export class ApiService {
 
     return this.handleResponse<any>(response);
   }
+
+  // Context Cards Services
+  static async createContextCard(contextCard: {
+    title: string;
+    description: string;
+    content: string;
+    source: 'chat' | 'file-deps' | 'upload';
+  }): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/context/cards`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({ context_card: contextCard }),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  static async getContextCards(): Promise<any[]> {
+    const response = await fetch(`${API_BASE_URL}/context/cards`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<any[]>(response);
+  }
+
+  static async getContextCard(cardId: string): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/context/cards/${cardId}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  static async updateContextCard(cardId: string, updates: {
+    title: string;
+    description: string;
+    content: string;
+    source: 'chat' | 'file-deps' | 'upload';
+  }): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/context/cards/${cardId}`, {
+      method: 'PUT',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(updates),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  static async deleteContextCard(cardId: string): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/context/cards/${cardId}`, {
+      method: 'DELETE',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  static async getContextStatistics(): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/context/statistics`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<any>(response);
+  }
 } 

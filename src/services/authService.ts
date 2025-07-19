@@ -152,7 +152,8 @@ export class AuthService {
 
   // Redirect to main application after successful authentication
   static redirectToMainApp(): void {
-    // Redirect to the root path which contains the main app with chat interface
-    window.location.href = '/';
+    // Clear URL parameters and let React state handle the redirect
+    // The authentication state change will automatically show the main app
+    window.history.replaceState({}, document.title, window.location.pathname);
   }
 } 
