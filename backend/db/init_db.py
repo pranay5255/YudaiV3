@@ -22,8 +22,9 @@ def wait_for_database(max_retries=30, delay=2):
     
     for attempt in range(max_retries):
         try:
+            # Use Unix socket connection instead of TCP/IP
             engine = create_engine(
-                "postgresql://yudai_user:yudai_password@localhost:5432/yudai_db",
+                "postgresql://yudai_user:yudai_password@/yudai_db?host=/var/run/postgresql",
                 pool_pre_ping=True
             )
             with engine.connect() as conn:
