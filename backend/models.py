@@ -658,8 +658,8 @@ class IssueResponse(BaseModel):
 class RepositoryResponse(BaseModel):
     id: int = Field(...)
     repo_url: str = Field(...)
-    repo_name: str = Field(...)
-    repo_owner: str = Field(...)
+    name: str = Field(...)
+    owner: str = Field(...)
     created_at: datetime = Field(...)
     updated_at: Optional[datetime] = Field(None)
 
