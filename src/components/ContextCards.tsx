@@ -1,18 +1,39 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Trash2, FileText, MessageCircle, Upload } from 'lucide-react';
 import { ContextCard } from '../types';
+import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview, UserIssueResponse } from '../services/api';
+
+interface IssuePreviewData extends GitHubIssuePreview {
+  userIssue?: UserIssueResponse;
+  conversationContext: ChatContextMessage[];
+  fileContext: FileContextItem[];
+  canCreateGitHubIssue: boolean;
+  repositoryInfo?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
+}
 
 interface ContextCardsProps {
   cards: ContextCard[];
   onRemoveCard: (id: string) => void;
-  onCreateIssue: () => void;
+  onShowIssuePreview?: (issuePreview: IssuePreviewData) => void;
+  repositoryInfo?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
 }
 
 export const ContextCards: React.FC<ContextCardsProps> = ({ 
   cards, 
   onRemoveCard, 
-  onCreateIssue 
+  onShowIssuePreview,
+  repositoryInfo
 }) => {
+  const [isCreatingIssue, setIsCreatingIssue] = useState(false);
+
   const getSourceIcon = (source: ContextCard['source']) => {
     switch (source) {
       case 'chat': return MessageCircle;
@@ -28,6 +49,60 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   };
 
   const totalTokens = cards.reduce((sum, card) => sum + card.tokens, 0);
+
+  // Replicate Chat.tsx: handle create GitHub issue with context cards
+  const handleCreateGitHubIssue = async () => {
+    if (isCreatingIssue) return;
+    setIsCreatingIssue(true);
+    try {
+      // Separate chat and file context
+      const chatCards = cards.filter(card => card.source === 'chat');
+      const fileCards = cards.filter(card => card.source === 'file-deps');
+
+      // Convert to API formats
+      const conversationMessages: ChatContextMessage[] = chatCards.map(card => ({
+        id: card.id,
+        content: card.title + '\n' + card.description,
+        isCode: false,
+        timestamp: new Date().toISOString(),
+      }));
+      const fileContextItems: FileContextItem[] = fileCards.map(card => ({
+        id: card.id,
+        name: card.title,
+        type: 'INTERNAL',
+        tokens: card.tokens,
+        category: 'Context File',
+        path: card.title,
+      }));
+
+      const request: CreateIssueWithContextRequest = {
+        title: `Issue from Context Cards`,
+        description: 'This issue was generated from context cards.',
+        chat_messages: conversationMessages,
+        file_context: fileContextItems,
+        repository_info: repositoryInfo,
+        priority: 'medium',
+      };
+
+      const response = await ApiService.createIssueWithContext(request, true, true);
+      if (response.success && onShowIssuePreview) {
+        onShowIssuePreview({
+          ...response.github_preview,
+          userIssue: response.user_issue,
+          conversationContext: conversationMessages,
+          fileContext: fileContextItems,
+          canCreateGitHubIssue: !!repositoryInfo,
+          repositoryInfo: request.repository_info,
+        });
+      }
+    } catch (error) {
+      // Optionally show error toast or message
+      // eslint-disable-next-line no-console
+      console.error('Failed to create GitHub issue from context cards:', error);
+    } finally {
+      setIsCreatingIssue(false);
+    }
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -102,13 +177,13 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
           </span>
         </div>
         <button
-          onClick={onCreateIssue}
-          disabled={cards.length === 0}
+          onClick={handleCreateGitHubIssue}
+          disabled={cards.length === 0 || isCreatingIssue}
           className="w-full h-11 bg-primary hover:bg-primary/80 disabled:opacity-50 
                    disabled:cursor-not-allowed text-white rounded-xl font-medium 
                    transition-colors"
         >
-          Create GitHub Issue
+          {isCreatingIssue ? 'Creating...' : 'Create GitHub Issue'}
         </button>
       </div>
     </div>

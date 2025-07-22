@@ -31,6 +31,89 @@ export interface ChatResponse {
   session_id?: string;
 }
 
+// Add new interfaces for issue creation with context
+export interface FileContextItem {
+  id: string;
+  name: string;
+  type: string;
+  tokens: number;
+  category: string;
+  path?: string;
+}
+
+export interface ChatContextMessage {
+  id: string;
+  content: string;
+  isCode: boolean;
+  timestamp: string;
+}
+
+export interface CreateIssueWithContextRequest {
+  title: string;
+  description?: string;
+  chat_messages: ChatContextMessage[];
+  file_context: FileContextItem[];
+  repository_info?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
+  priority?: string;
+}
+
+export interface GitHubIssuePreview {
+  title: string;
+  body: string;
+  labels: string[];
+  assignees: string[];
+  repository_info?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
+  metadata: {
+    chat_messages_count: number;
+    file_context_count: number;
+    total_tokens: number;
+    generated_at: string;
+    generation_method: string;
+  };
+}
+
+export interface IssueCreationResponse {
+  success: boolean;
+  preview_only: boolean;
+  github_preview: GitHubIssuePreview;
+  user_issue?: UserIssueResponse;
+  message: string;
+}
+
+export interface UserIssueResponse {
+  id: number;
+  issue_id: string;
+  user_id: number;
+  title: string;
+  description?: string;
+  issue_text_raw: string;
+  issue_steps?: string[];
+  conversation_id?: string;
+  context_card_id?: number;
+  context_cards?: string[];
+  ideas?: string[];
+  repo_owner?: string;
+  repo_name?: string;
+  priority: string;
+  status: string;
+  agent_response?: string;
+  processing_time?: number;
+  tokens_used: number;
+  github_issue_url?: string;
+  github_issue_number?: number;
+  created_at: string;
+  updated_at?: string;
+  processed_at?: string;
+}
+
 export class ApiService {
   private static getAuthHeaders(): HeadersInit {
     const token = localStorage.getItem('auth_token');
@@ -219,5 +302,62 @@ export class ApiService {
     });
 
     return this.handleResponse<any>(response);
+  }
+
+  // Issue Services
+  static async createIssueWithContext(
+    request: CreateIssueWithContextRequest, 
+    previewOnly: boolean = false,
+    useSampleData: boolean = true
+  ): Promise<IssueCreationResponse> {
+    const response = await fetch(`${API_BASE_URL}/issues/create-with-context?preview_only=${previewOnly}&use_sample_data=${useSampleData}`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return this.handleResponse<IssueCreationResponse>(response);
+  }
+
+  static async createGitHubIssueFromUserIssue(issueId: string): Promise<{ success: boolean; github_url: string; message: string }> {
+    const response = await fetch(`${API_BASE_URL}/issues/${issueId}/create-github-issue`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<{ success: boolean; github_url: string; message: string }>(response);
+  }
+
+  static async getUserIssues(filters?: {
+    status?: string;
+    priority?: string;
+    repo_owner?: string;
+    repo_name?: string;
+    limit?: number;
+  }): Promise<UserIssueResponse[]> {
+    const params = new URLSearchParams();
+    if (filters) {
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value !== undefined) {
+          params.append(key, value.toString());
+        }
+      });
+    }
+    
+    const response = await fetch(`${API_BASE_URL}/issues/?${params}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<UserIssueResponse[]>(response);
+  }
+
+  static async getUserIssue(issueId: string): Promise<UserIssueResponse> {
+    const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<UserIssueResponse>(response);
   }
 } 
