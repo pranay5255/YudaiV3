@@ -150,3 +150,21 @@ export interface CreateIssueFromChatRequest {
   repository_url?: string;
 }
 
+// GitHub Issue Context Structure
+export interface GitHubIssueContext {
+  conversation: {
+    messages: Message[];
+    contextCards: ContextCard[];
+  };
+  fileDependencies: {
+    cards: ContextCard[];
+    totalTokens: number;
+  };
+  summary: {
+    totalContextCards: number;
+    totalTokens: number;
+    conversationLength: number;
+    filesIncluded: number;
+  };
+}
+

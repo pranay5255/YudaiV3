@@ -102,7 +102,7 @@ class Repository(Base):
     __tablename__ = "repositories"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    github_repo_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
+    github_repo_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True, nullable=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 
     # Core GitHub metadata

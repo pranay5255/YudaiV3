@@ -9,6 +9,7 @@ and transform it to match the FileDependencies component interface.
 from fastapi import APIRouter, HTTPException, Depends, status
 from typing import List, Optional, Dict, Any
 import os
+import json
 from pathlib import Path
 from sqlalchemy.orm import Session
 from urllib.parse import urlparse
@@ -84,17 +85,41 @@ def get_or_create_repository(
     repo_url: str,
     repo_name: str,
     repo_owner: str,
-    user_id: int = 1  # Default user ID for now
+    user_id: Optional[int] = None  # Make user_id optional
 ) -> Repository:
     """Retrieve existing repository metadata or create a new record."""
 
+    # First try to find existing repository by URL
     repository = db.query(Repository).filter(
-        Repository.repo_url == repo_url,
-        Repository.user_id == user_id,
+        Repository.repo_url == repo_url
     ).first()
 
     if repository:
         return repository
+
+    # If no user_id provided, try to find a default user or create one
+    if user_id is None:
+        # Try to find any existing user
+        from models import User
+        default_user = db.query(User).first()
+        if default_user:
+            user_id = default_user.id
+        else:
+            # Create a default user if none exists
+            default_user = User(
+                github_username="default_user",
+                github_user_id="default_user_id",
+                email="default@example.com"
+            )
+            db.add(default_user)
+            db.flush()  # Get the ID
+            user_id = default_user.id
+
+    # Generate a unique github_repo_id based on URL hash
+    import hashlib
+    repo_hash = hashlib.md5(repo_url.encode()).hexdigest()
+    # Use first 6 characters to keep within PostgreSQL integer range (max ~16M)
+    github_repo_id = int(repo_hash[:6], 16)  # Use first 6 characters as integer
 
     repository = Repository(
         user_id=user_id,
@@ -104,7 +129,10 @@ def get_or_create_repository(
         full_name=f"{repo_owner}/{repo_name}",
         html_url=f"https://github.com/{repo_owner}/{repo_name}",
         clone_url=f"https://github.com/{repo_owner}/{repo_name}.git",
-        github_repo_id=None  # Set to None since we don't have GitHub API data
+        github_repo_id=github_repo_id,  # Use generated ID instead of None
+        description=f"Repository imported from {repo_url}",
+        private=False,  # Default to public
+        language=None
     )
     db.add(repository)
     db.commit()
@@ -125,10 +153,14 @@ def save_file_analysis_to_db(
 ) -> FileAnalysis:
     """Save analysis results to the FileAnalysis table."""
 
+    # Convert dictionaries to JSON strings for database storage
+    raw_data_json = json.dumps(raw_data) if raw_data else None
+    processed_data_json = json.dumps(processed_data) if processed_data else None
+
     analysis = FileAnalysis(
         repository_id=repository_id,
-        raw_data=raw_data,
-        processed_data=processed_data,
+        raw_data=raw_data_json,  # Store as JSON string
+        processed_data=processed_data_json,  # Store as JSON string
         total_files=total_files,
         total_tokens=total_tokens,
         max_file_size=max_file_size,
@@ -278,12 +310,30 @@ def process_gitingest_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
             if line.strip() and not line.startswith('Directory structure:'):
                 # Extract path from tree line (remove tree characters)
                 path = line.strip()
-                # Remove tree formatting characters
-                path = path.replace('├── ', '').replace('└── ', '').replace('│   ', '').replace('│  ', '')
+                
+                # More robust tree formatting character removal
+                # Remove tree formatting characters in the correct order
+                path = path.replace('├── ', '').replace('└── ', '')
+                path = path.replace('│   ', '').replace('│  ', '')
+                
+                # Remove any remaining leading/trailing whitespace
+                path = path.strip()
                 
                 if path and not path.endswith('/'):  # Skip directories and empty lines
+                    # Clean up the path - remove any remaining tree artifacts
+                    # Sometimes there might be extra spaces or characters
+                    path = path.strip()
+                    
+                    # Skip if path is empty after cleaning
+                    if not path:
+                        continue
+                    
                     # Get file name from path
                     file_name = os.path.basename(path)
+                    
+                    # Skip if filename is empty or just whitespace
+                    if not file_name.strip():
+                        continue
                     
                     # Estimate content size (rough approximation)
                     # In a real implementation, you'd get this from the actual file content
@@ -350,29 +400,40 @@ async def extract_file_dependencies(
     The data is also persisted to the database.
     """
     try:
+        print(f"Starting extraction for repository: {request.repo_url}")
+        
         # Extract repository information from URL
         repo_name, repo_owner = extract_repo_info_from_url(request.repo_url)
+        print(f"Extracted repo info - name: {repo_name}, owner: {repo_owner}")
         
         # Extract repository data using GitIngest (await the async function)
+        print("Calling GitIngest extract_repository_data...")
         raw_repo_data = await extract_repository_data(
             repo_url=request.repo_url,
             max_file_size=request.max_file_size
         )
+        print(f"GitIngest returned data with keys: {list(raw_repo_data.keys())}")
         
         # Check for errors
         if 'error' in raw_repo_data:
+            print(f"GitIngest returned error: {raw_repo_data['error']}")
             raise HTTPException(status_code=400, detail=f"Failed to extract data: {raw_repo_data['error']}")
         
         # Process raw data into structured format
+        print("Processing GitIngest data...")
         repo_data = process_gitingest_data(raw_repo_data)
+        print(f"Processed data has {len(repo_data.get('files', []))} files")
         
         # Build file tree from the processed data
+        print("Building file tree...")
         files_data = {'files': repo_data.get('files', [])}
         file_tree = build_file_tree(files_data, repo_name)
+        print(f"Built file tree with {len(file_tree)} root items")
         
         # Calculate basic statistics
         total_files = len(repo_data.get('files', []))
         total_tokens = sum(estimate_tokens_for_file(f['path'], f['content_size']) for f in repo_data.get('files', []))
+        print(f"Calculated stats - files: {total_files}, tokens: {total_tokens}")
         
         # Create root FileItem node
         root_file_item = FileItemResponse(
@@ -386,17 +447,21 @@ async def extract_file_dependencies(
             expanded=True
         )
         
-        # Save to database
+        # Save to database (with comprehensive error handling)
+        print("Attempting to save to database...")
         try:
             # Ensure repository metadata exists
+            print("Creating/getting repository record...")
             repository = get_or_create_repository(
                 db=db,
                 repo_url=request.repo_url,
                 repo_name=repo_name,
                 repo_owner=repo_owner,
             )
+            print(f"Repository ID: {repository.id}")
 
             # Save analysis results
+            print("Saving file analysis...")
             analysis = save_file_analysis_to_db(
                 db=db,
                 repository_id=repository.id,
@@ -406,16 +471,28 @@ async def extract_file_dependencies(
                 total_tokens=total_tokens,
                 max_file_size=request.max_file_size,
             )
+            print(f"File analysis saved with ID: {analysis.id}")
 
             # Save file items
-            save_file_items_to_db(db, repository.id, file_tree)
+            print("Saving file items...")
+            saved_items = save_file_items_to_db(db, repository.id, file_tree)
+            print(f"Saved {len(saved_items)} file items")
             
         except Exception as db_error:
             # Log database error but don't fail the request
             print(f"Database save failed: {db_error}")
+            import traceback
+            traceback.print_exc()
             # Continue without database persistence for now
         
+        print("Extraction completed successfully")
         return root_file_item
         
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
+        print(f"Error in extract_file_dependencies: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

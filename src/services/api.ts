@@ -8,7 +8,7 @@ import {
   GitHubBranch
 } from '../types';
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export interface ChatMessage {
   content: string;
@@ -208,11 +208,14 @@ export class ApiService {
     return this.handleResponse<any>(response);
   }
 
-  static async extractFileDependencies(repositoryUrl: string): Promise<any> {
+  static async extractFileDependencies(repositoryUrl: string, maxFileSize?: number): Promise<any> {
     const response = await fetch(`${API_BASE_URL}/filedeps/extract`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
-      body: JSON.stringify({ repository_url: repositoryUrl }),
+      body: JSON.stringify({ 
+        repo_url: repositoryUrl,
+        max_file_size: maxFileSize || 30000
+      }),
     });
 
     return this.handleResponse<any>(response);
