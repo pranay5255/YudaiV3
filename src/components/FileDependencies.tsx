@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronRight, ChevronDown, Plus, Folder, File, RefreshCw } from 'lucide-react';
 import { FileItem } from '../types';
 import { useRepository } from '../contexts/RepositoryContext';
+import { ApiService } from '../services/api';
 
 interface FileDependenciesProps {
   onAddToContext: (file: FileItem) => void;
@@ -9,7 +10,7 @@ interface FileDependenciesProps {
   repoUrl?: string; // Optional repository URL to analyze
 }
 
-// Type definition for the API response structure
+// Type definition for the API response structure - matches backend exactly
 interface ApiFileItem {
   id: string;
   name: string;
@@ -20,6 +21,8 @@ interface ApiFileItem {
   children: ApiFileItem[] | null;
   expanded?: boolean;
 }
+
+
 
 export const FileDependencies: React.FC<FileDependenciesProps> = ({ 
   onAddToContext, 
@@ -36,22 +39,10 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     setError(null);
     
     try {
-      const response = await fetch('http://localhost:8000/filedeps/extract', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          repo_url: url,
-          max_file_size: 30000, // 30KB limit
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data: ApiFileItem = await response.json();
+      console.log(`Fetching repository data for: ${url}`);
+      
+      const data: ApiFileItem = await ApiService.extractFileDependencies(url, 30000);
+      console.log('API Response:', data);
       
       // Transform the API response to match our FileItem structure
       // The API returns a hierarchical structure with a root directory
@@ -71,10 +62,29 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
       // Transform the root item and extract its children
       const rootItem = transformData(data);
       const transformedData = rootItem.children || [];
+      
+      console.log(`Transformed ${transformedData.length} files/directories`);
       setFiles(transformedData);
     } catch (err) {
       console.error('Failed to fetch repository data:', err);
-      setError(err instanceof Error ? err.message : 'Failed to fetch repository data');
+      
+      // Provide more specific error messages
+      let errorMessage = 'Failed to fetch repository data';
+      if (err instanceof Error) {
+        if (err.message.includes('fetch')) {
+          errorMessage = 'Unable to connect to the server. Please check your connection.';
+        } else if (err.message.includes('Invalid repository')) {
+          errorMessage = err.message;
+        } else if (err.message.includes('not found')) {
+          errorMessage = err.message;
+        } else if (err.message.includes('Server error')) {
+          errorMessage = err.message;
+        } else {
+          errorMessage = err.message;
+        }
+      }
+      
+      setError(errorMessage);
       setFiles([]); // Set empty array instead of sample data
     } finally {
       setLoading(false);
@@ -97,16 +107,16 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     }
   }, [selectedRepository, repoUrl, fetchRepositoryData]);
 
-  const handleRefresh = () => {
+  const handleRefresh = useCallback(() => {
     if (selectedRepository) {
       const repoUrl = selectedRepository.repository.html_url;
       fetchRepositoryData(repoUrl);
     } else if (repoUrl) {
       fetchRepositoryData(repoUrl);
     }
-  };
+  }, [selectedRepository, repoUrl, fetchRepositoryData]);
 
-  const toggleExpanded = (id: string) => {
+  const toggleExpanded = useCallback((id: string) => {
     const updateFiles = (items: FileItem[]): FileItem[] => {
       return items.map(item => {
         if (item.id === id) {
@@ -119,9 +129,9 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
       });
     };
     setFiles(updateFiles(files));
-  };
+  }, [files]);
 
-  const getTokenBadgeColor = (tokens: number) => {
+  const getTokenBadgeColor = useCallback((tokens: number) => {
     if (tokens === 0) return 'bg-zinc-700 text-fg/60';
     if (tokens < 10000) return 'bg-red-900/20 text-red-900';
     if (tokens < 8000) return 'bg-red-600/20 text-red-600';
@@ -133,9 +143,9 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     if (tokens < 2000) return 'bg-lime-500/20 text-lime-500';
     if (tokens < 1000) return 'bg-green-500/20 text-green-500';
     return 'bg-emerald-500/20 text-emerald-500';
-  };
+  }, []);
 
-  const renderFileTree = (items: FileItem[], depth = 0) => {
+  const renderFileTree = useCallback((items: FileItem[], depth = 0) => {
     return items.map((item) => (
       <React.Fragment key={item.id}>
         <tr 
@@ -217,7 +227,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
         )}
       </React.Fragment>
     ));
-  };
+  }, [toggleExpanded, onShowDetails, onAddToContext, getTokenBadgeColor]);
 
   return (
     <div className="h-full flex flex-col">
@@ -257,6 +267,12 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
           <div className="text-sm text-error bg-error/10 p-3 rounded">
             <p className="font-medium">Failed to load repository data</p>
             <p className="text-xs mt-1">{error}</p>
+            <button
+              onClick={handleRefresh}
+              className="mt-2 text-xs text-error hover:underline"
+            >
+              Try again
+            </button>
           </div>
         </div>
       )}
@@ -272,7 +288,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
           </div>
         )}
         
-        {(selectedRepository || repoUrl || files.length > 0) && (
+        {(selectedRepository || repoUrl || files.length > 0) && !loading && !error && (
           <table className="w-full">
             <thead className="border-b border-zinc-800 sticky top-0 bg-bg">
               <tr>
@@ -287,6 +303,16 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
               {renderFileTree(files)}
             </tbody>
           </table>
+        )}
+        
+        {/* Empty state when no files found */}
+        {!loading && !error && files.length === 0 && (selectedRepository || repoUrl) && (
+          <div className="flex items-center justify-center p-8">
+            <div className="text-center text-fg/60">
+              <p className="text-sm">No files found</p>
+              <p className="text-xs mt-1">This repository appears to be empty or contains no analyzable files</p>
+            </div>
+          </div>
         )}
       </div>
     </div>

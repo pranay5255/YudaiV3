@@ -10,7 +10,7 @@ import { DetailModal } from './components/DetailModal';
 import { ToastContainer } from './components/Toast';
 import { RepositorySelectionToast } from './components/RepositorySelectionToast';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { ContextCard, FileItem, IdeaItem, Toast, ProgressStep, TabType, SelectedRepository } from './types';
+import { ContextCard, FileItem, IdeaItem, Toast, ProgressStep, TabType, SelectedRepository, Message } from './types';
 import { useAuth } from './contexts/AuthContext';
 import { useRepository } from './contexts/RepositoryContext';
 
@@ -72,6 +72,50 @@ function App() {
     setToasts(prev => prev.filter(toast => toast.id !== id));
   };
 
+  // Enhanced issue creation with conversation context
+  const handleCreateIssueWithContext = (conversationContext?: Message[]) => {
+    // Collect conversation context
+    const chatContext = conversationContext || [];
+    
+    // Collect file dependencies context (already in contextCards)
+    const fileContext = contextCards.filter(card => card.source === 'file-deps');
+    const chatContextCards = contextCards.filter(card => card.source === 'chat');
+    
+    // Prepare unified context for GitHub issue creation
+    const issueContext = {
+      conversation: {
+        messages: chatContext,
+        contextCards: chatContextCards
+      },
+      fileDependencies: {
+        cards: fileContext,
+        totalTokens: fileContext.reduce((sum, card) => sum + card.tokens, 0)
+      },
+      summary: {
+        totalContextCards: contextCards.length,
+        totalTokens: contextCards.reduce((sum, card) => sum + card.tokens, 0),
+        conversationLength: chatContext.length,
+        filesIncluded: fileContext.length
+      }
+    };
+
+    console.log('GitHub Issue Context:', issueContext);
+    
+    // For now, just show the existing flow - we'll connect to backend later
+    addToast('Preparing GitHub issue with collected context...', 'info');
+    setCurrentStep('Architect');
+    
+    // TODO: Replace this with actual API call to create GitHub issue
+    setTimeout(() => {
+      setCurrentStep('Test-Writer');
+      setTimeout(() => {
+        setCurrentStep('Coder');
+        setIsDiffModalOpen(true);
+        addToast('GitHub issue context prepared successfully!', 'success');
+      }, 2000);
+    }, 1500);
+  };
+
   // Context management
   const addToContext = (content: string, source: ContextCard['source'] = 'chat') => {
     const newCard: ContextCard = {
@@ -110,18 +154,9 @@ function App() {
     setIsDetailModalOpen(true);
   };
 
+  // Updated create issue function for ContextCards
   const handleCreateIssue = () => {
-    addToast('Creating GitHub issue...', 'info');
-    setCurrentStep('Architect');
-    
-    setTimeout(() => {
-      setCurrentStep('Test-Writer');
-      setTimeout(() => {
-        setCurrentStep('Coder');
-        setIsDiffModalOpen(true);
-        addToast('Pull request ready for review!', 'success');
-      }, 2000);
-    }, 1500);
+    handleCreateIssueWithContext();
   };
 
   const handleCreateIdeaIssue = (idea: IdeaItem) => {
@@ -133,7 +168,12 @@ function App() {
   const renderTabContent = () => {
     switch (activeTab) {
       case 'chat':
-        return <Chat onAddToContext={addToContext} />;
+        return (
+          <Chat 
+            onAddToContext={addToContext} 
+            onCreateIssue={handleCreateIssueWithContext}
+          />
+        );
       case 'file-deps':
         return (
           <FileDependencies 

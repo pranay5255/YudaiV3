@@ -5,9 +5,10 @@ import { ApiService, ChatRequest } from '../services/api';
 
 interface ChatProps {
   onAddToContext: (content: string) => void;
+  onCreateIssue: (conversationContext: Message[]) => void;
 }
 
-export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
+export const Chat: React.FC<ChatProps> = ({ onAddToContext, onCreateIssue }) => {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -118,6 +119,14 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
     }
   };
 
+  const handleCreateGitHubIssue = () => {
+    // Filter out system messages and pass conversation context
+    const conversationMessages = messages.filter(msg => 
+      msg.id !== '1' && msg.id !== '2'
+    );
+    onCreateIssue(conversationMessages);
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* Messages */}
@@ -191,6 +200,7 @@ export const Chat: React.FC<ChatProps> = ({ onAddToContext }) => {
           </button>
           {userMessageCount >= 2 && (
             <button
+              onClick={handleCreateGitHubIssue}
               className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg 
                        transition-colors flex items-center gap-2"
             >
