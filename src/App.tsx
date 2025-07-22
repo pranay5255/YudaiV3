@@ -13,6 +13,36 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { ContextCard, FileItem, IdeaItem, Toast, ProgressStep, TabType, SelectedRepository, Message } from './types';
 import { useAuth } from './contexts/AuthContext';
 import { useRepository } from './contexts/RepositoryContext';
+import { UserIssueResponse, ChatContextMessage, FileContextItem } from './services/api';
+
+// Interface for issue preview data (matching DiffModal expectations)
+interface IssuePreviewData {
+  title: string;
+  body: string;
+  labels: string[];
+  assignees: string[];
+  repository_info?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
+  metadata: {
+    chat_messages_count: number;
+    file_context_count: number;
+    total_tokens: number;
+    generated_at: string;
+    generation_method: string;
+  };
+  userIssue?: UserIssueResponse;
+  conversationContext: ChatContextMessage[];
+  fileContext: FileContextItem[];
+  canCreateGitHubIssue: boolean;
+  repositoryInfo?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
+}
 
 function App() {
   // Auth and repository contexts
@@ -31,6 +61,7 @@ function App() {
   const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+  const [issuePreviewData, setIssuePreviewData] = useState<IssuePreviewData | undefined>(undefined);
   
   // Repository selection state
   const [showRepositorySelection, setShowRepositorySelection] = useState(false);
@@ -72,7 +103,14 @@ function App() {
     setToasts(prev => prev.filter(toast => toast.id !== id));
   };
 
-  // Enhanced issue creation with conversation context
+  // Handle issue preview from Chat component
+  const handleShowIssuePreview = (previewData: IssuePreviewData) => {
+    setIssuePreviewData(previewData);
+    setIsDiffModalOpen(true);
+    addToast('Issue preview generated successfully!', 'success');
+  };
+
+  // Enhanced issue creation with conversation context (legacy)
   const handleCreateIssueWithContext = (conversationContext?: Message[]) => {
     // Collect conversation context
     const chatContext = conversationContext || [];
@@ -164,6 +202,21 @@ function App() {
     handleCreateIssue();
   };
 
+  // Get file context from context cards for Chat component
+  const getFileContext = (): FileItem[] => {
+    return contextCards
+      .filter(card => card.source === 'file-deps')
+      .map(card => ({
+        id: card.id,
+        name: card.title,
+        type: 'INTERNAL' as const,
+        tokens: card.tokens,
+        Category: 'Context File',
+        isDirectory: false,
+        path: card.title
+      }));
+  };
+
   // Render tab content
   const renderTabContent = () => {
     switch (activeTab) {
@@ -172,6 +225,9 @@ function App() {
           <Chat 
             onAddToContext={addToContext} 
             onCreateIssue={handleCreateIssueWithContext}
+            contextCards={contextCards}
+            fileContext={getFileContext()}
+            onShowIssuePreview={handleShowIssuePreview}
           />
         );
       case 'file-deps':
@@ -223,7 +279,11 @@ function App() {
         {/* Modals */}
         <DiffModal 
           isOpen={isDiffModalOpen}
-          onClose={() => setIsDiffModalOpen(false)}
+          onClose={() => {
+            setIsDiffModalOpen(false);
+            setIssuePreviewData(undefined);
+          }}
+          issuePreview={issuePreviewData}
         />
         
         <DetailModal 
