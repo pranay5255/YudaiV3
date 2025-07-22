@@ -22,6 +22,58 @@ interface ApiFileItem {
   expanded?: boolean;
 }
 
+// Flat file item returned from database
+interface DbFileItem {
+  id: number;
+  name: string;
+  path: string;
+  file_type: 'INTERNAL' | 'EXTERNAL';
+  category: string;
+  tokens: number;
+  is_directory: boolean;
+}
+
+const buildFileTreeFromDb = (items: DbFileItem[]): FileItem[] => {
+  const directories: Record<string, FileItem> = {};
+  const roots: FileItem[] = [];
+
+  // Sort so that parent directories appear before children
+  const sorted = [...items].sort((a, b) => a.path.localeCompare(b.path));
+
+  for (const item of sorted) {
+    const pathParts = item.path.split('/');
+    const parentPath = pathParts.slice(0, -1).join('/');
+    const file: FileItem = {
+      id: String(item.id),
+      name: pathParts[pathParts.length - 1],
+      type: item.file_type,
+      tokens: item.tokens,
+      Category: item.category,
+      isDirectory: item.is_directory,
+      expanded: false,
+      children: item.is_directory ? [] : undefined,
+    };
+
+    if (item.is_directory) {
+      directories[item.path] = file;
+    }
+
+    if (parentPath) {
+      const parent = directories[parentPath];
+      if (parent) {
+        if (!parent.children) parent.children = [];
+        parent.children.push(file);
+      } else {
+        roots.push(file);
+      }
+    } else {
+      roots.push(file);
+    }
+  }
+
+  return roots;
+};
+
 
 
 export const FileDependencies: React.FC<FileDependenciesProps> = ({ 
@@ -37,33 +89,39 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
   const fetchRepositoryData = useCallback(async (url: string) => {
     setLoading(true);
     setError(null);
-    
+
     try {
       console.log(`Fetching repository data for: ${url}`);
-      
-      const data: ApiFileItem = await ApiService.extractFileDependencies(url, 30000);
-      console.log('API Response:', data);
-      
-      // Transform the API response to match our FileItem structure
-      // The API returns a hierarchical structure with a root directory
-      const transformData = (item: ApiFileItem): FileItem => {
-        return {
-          id: item.id || 'unknown',
-          name: item.name || 'Unknown',
-          type: item.type || 'INTERNAL',
-          tokens: item.tokens || 0,
-          Category: item.Category || 'File',
-          isDirectory: item.isDirectory || false,
-          expanded: item.expanded || false,
-          children: item.children ? item.children.map(transformData) : undefined
-        };
-      };
 
-      // Transform the root item and extract its children
+      // First check if repository exists in the database
+      const repoInDb = await ApiService.getRepositoryByUrl(url);
+      if (repoInDb && repoInDb.id) {
+        console.log('Repository found in database');
+        const dbFiles: DbFileItem[] = await ApiService.getRepositoryFiles(repoInDb.id);
+        if (dbFiles.length > 0) {
+          const tree = buildFileTreeFromDb(dbFiles);
+          setFiles(tree);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // If not found or no files, fall back to extraction endpoint
+      const data: ApiFileItem = await ApiService.extractFileDependencies(url, 30000);
+
+      const transformData = (item: ApiFileItem): FileItem => ({
+        id: item.id || 'unknown',
+        name: item.name || 'Unknown',
+        type: item.type || 'INTERNAL',
+        tokens: item.tokens || 0,
+        Category: item.Category || 'File',
+        isDirectory: item.isDirectory || false,
+        expanded: item.expanded || false,
+        children: item.children ? item.children.map(transformData) : undefined
+      });
+
       const rootItem = transformData(data);
       const transformedData = rootItem.children || [];
-      
-      console.log(`Transformed ${transformedData.length} files/directories`);
       setFiles(transformedData);
     } catch (err) {
       console.error('Failed to fetch repository data:', err);
@@ -253,11 +311,14 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
 
       {/* Loading state */}
       {loading && (
-        <div className="flex items-center justify-center p-8">
+        <div className="p-8 space-y-2 animate-pulse">
           <div className="flex items-center gap-2 text-fg/60">
             <RefreshCw className="w-4 h-4 animate-spin" />
             <span>Analyzing repository...</span>
           </div>
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="h-4 bg-zinc-800 rounded" />
+          ))}
         </div>
       )}
 

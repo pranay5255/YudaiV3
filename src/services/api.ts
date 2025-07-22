@@ -220,4 +220,25 @@ export class ApiService {
 
     return this.handleResponse<any>(response);
   }
-} 
+
+  static async getRepositoryByUrl(repoUrl: string): Promise<any | null> {
+    const url = `${API_BASE_URL}/filedeps/repositories?repo_url=${encodeURIComponent(repoUrl)}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+    if (response.status === 404) {
+      return null;
+    }
+    return this.handleResponse<any>(response);
+  }
+
+  static async getRepositoryFiles(repositoryId: number): Promise<any[]> {
+    const response = await fetch(`${API_BASE_URL}/filedeps/repositories/${repositoryId}/files`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<any[]>(response);
+  }
+}
