@@ -17,14 +17,47 @@ from fastapi import APIRouter, HTTPException, Depends, status, Query
 from models import (
     UserIssue, User, ChatSession, ContextCard,
     CreateUserIssueRequest, UserIssueResponse,
-    ChatRequest, CreateChatMessageRequest
+    ChatRequest, CreateChatMessageRequest, FileItemResponse
 )
 from db.database import get_db
 from auth.github_oauth import get_current_user
 from github.github_api import create_issue as create_github_issue, GitHubAPIError
 
+# Add new imports at the top
+from pydantic import BaseModel, Field
+
+class FileContextItem(BaseModel):
+    id: str
+    name: str
+    type: str
+    tokens: int
+    category: str
+    path: Optional[str] = None
+
+class ChatContextMessage(BaseModel):
+    id: str
+    content: str
+    isCode: bool
+    timestamp: str
+
+class CreateIssueWithContextRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None)
+    chat_messages: List[ChatContextMessage] = Field(default_factory=list)
+    file_context: List[FileContextItem] = Field(default_factory=list)
+    repository_info: Optional[Dict[str, str]] = Field(None)  # owner, name, branch
+    priority: str = Field(default="medium")
+
+class GitHubIssuePreview(BaseModel):
+    title: str
+    body: str
+    labels: List[str] = Field(default_factory=list)
+    assignees: List[str] = Field(default_factory=list)
+    repository_info: Optional[Dict[str, str]] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
 # Create FastAPI router
-router = APIRouter(prefix="/issues", tags=["issues"])
+router = APIRouter(tags=["issues"])
 
 
 class IssueService:
@@ -290,6 +323,107 @@ class IssueService:
             "success_rate": completed_issues / total_issues if total_issues > 0 else 0
         }
 
+    @staticmethod
+    def generate_github_issue_preview(
+        request: CreateIssueWithContextRequest,
+        use_sample_data: bool = False
+    ) -> GitHubIssuePreview:
+        """Generate a GitHub issue preview with optional sample data"""
+        
+        if use_sample_data:
+            # Generate sample data when LLM is not available
+            return GitHubIssuePreview(
+                title=f"[Feature Request] {request.title}",
+                body=f"""## Description
+{request.description or 'Implement new functionality based on user requirements.'}
+
+## Context from Chat Conversation
+{len(request.chat_messages)} messages were analyzed to understand the requirements.
+
+## File Dependencies Analyzed
+- **Total files reviewed**: {len(request.file_context)}
+- **Total tokens**: {sum(f.tokens for f in request.file_context)}
+- **Key files**: {', '.join([f.name for f in request.file_context[:5]])}
+
+## Implementation Steps
+1. **Analysis Phase**: Review existing codebase structure
+2. **Design Phase**: Create implementation plan based on context
+3. **Development Phase**: Implement the requested functionality
+4. **Testing Phase**: Write comprehensive tests
+5. **Documentation Phase**: Update relevant documentation
+
+## Technical Requirements
+- Maintain compatibility with existing codebase
+- Follow project coding standards
+- Include proper error handling
+- Add appropriate unit tests
+
+## Acceptance Criteria
+- [ ] Feature works as described in chat conversation
+- [ ] Code follows project patterns and standards
+- [ ] Tests are added and passing
+- [ ] Documentation is updated
+
+## Priority
+{request.priority.capitalize()}
+
+---
+*This issue was auto-generated from chat conversation and file dependency analysis.*
+""",
+                labels=["enhancement", "yudai-assistant", f"priority-{request.priority}"],
+                assignees=[],
+                repository_info=request.repository_info,
+                metadata={
+                    "chat_messages_count": len(request.chat_messages),
+                    "file_context_count": len(request.file_context),
+                    "total_tokens": sum(f.tokens for f in request.file_context),
+                    "generated_at": datetime.utcnow().isoformat(),
+                    "generation_method": "sample_data"
+                }
+            )
+        
+        # Generate real issue from context (this would call LLM in production)
+        context_summary = ""
+        if request.chat_messages:
+            context_summary += f"## Chat Context\n"
+            for msg in request.chat_messages[-5:]:  # Last 5 messages
+                role = "User" if not msg.isCode else "Code"
+                context_summary += f"**{role}**: {msg.content[:100]}...\n\n"
+        
+        if request.file_context:
+            context_summary += f"## File Context\n"
+            for file in request.file_context[:10]:  # Top 10 files
+                context_summary += f"- **{file.name}** ({file.type}, {file.tokens} tokens): {file.category}\n"
+        
+        return GitHubIssuePreview(
+            title=request.title,
+            body=f"""{request.description or ''}
+
+{context_summary}
+
+## Implementation Notes
+Based on the analyzed context, this issue requires attention to the following files and components.
+
+## Next Steps
+1. Review the chat conversation for detailed requirements
+2. Analyze the file dependencies for implementation approach
+3. Create detailed implementation plan
+4. Begin development with proper testing
+
+*Generated from chat and file dependency analysis*
+""",
+            labels=["enhancement", "yudai-assistant"],
+            assignees=[],
+            repository_info=request.repository_info,
+            metadata={
+                "chat_messages_count": len(request.chat_messages),
+                "file_context_count": len(request.file_context),
+                "total_tokens": sum(f.tokens for f in request.file_context),
+                "generated_at": datetime.utcnow().isoformat(),
+                "generation_method": "context_analysis"
+            }
+        )
+
 
 # API Routes
 @router.post("/", response_model=UserIssueResponse)
@@ -348,6 +482,65 @@ async def get_issue(
     return issue
 
 
+@router.post("/create-with-context", response_model=Dict[str, Any])
+async def create_issue_with_context(
+    request: CreateIssueWithContextRequest,
+    preview_only: bool = Query(default=False, description="Only generate preview without saving"),
+    use_sample_data: bool = Query(default=True, description="Use sample data when LLM is unavailable"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create a user issue with comprehensive context from chat and file dependencies.
+    Optionally generate a GitHub issue preview.
+    """
+    try:
+        # Generate GitHub issue preview
+        github_preview = IssueService.generate_github_issue_preview(request, use_sample_data)
+        
+        if preview_only:
+            return {
+                "success": True,
+                "preview_only": True,
+                "github_preview": github_preview.dict(),
+                "message": "GitHub issue preview generated successfully"
+            }
+        
+        # Create the user issue in database
+        issue_request = CreateUserIssueRequest(
+            title=request.title,
+            issue_text_raw=github_preview.body,
+            description=request.description,
+            context_cards=[f.id for f in request.file_context],  # Use file IDs as context cards
+            repo_owner=request.repository_info.get("owner") if request.repository_info else None,
+            repo_name=request.repository_info.get("name") if request.repository_info else None,
+            priority=request.priority,
+            issue_steps=[
+                "Analyze chat conversation context",
+                "Review file dependencies",
+                "Design implementation approach",
+                "Implement functionality",
+                "Add tests and documentation"
+            ]
+        )
+        
+        user_issue = IssueService.create_user_issue(db, current_user.id, issue_request)
+        
+        return {
+            "success": True,
+            "preview_only": False,
+            "user_issue": user_issue.dict(),
+            "github_preview": github_preview.dict(),
+            "message": f"Issue created successfully with ID: {user_issue.issue_id}"
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create issue with context: {str(e)}"
+        )
+
+
 @router.put("/{issue_id}/status")
 async def update_issue_status(
     issue_id: str,
@@ -372,13 +565,13 @@ async def update_issue_status(
     return issue
 
 
-@router.post("/{issue_id}/convert-to-github", response_model=UserIssueResponse)
-async def convert_to_github_issue(
+@router.post("/{issue_id}/create-github-issue")
+async def create_github_issue_from_user_issue(
     issue_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Convert a user issue to a GitHub issue"""
+    """Convert a user issue to an actual GitHub issue"""
     try:
         result = await IssueService.create_github_issue_from_user_issue(
             db, current_user.id, issue_id, current_user
@@ -390,12 +583,22 @@ async def convert_to_github_issue(
                 detail="Issue not found or missing repository information"
             )
         
-        return result
+        return {
+            "success": True,
+            "issue": result.dict(),
+            "github_url": result.github_issue_url,
+            "message": f"GitHub issue created successfully: {result.github_issue_url}"
+        }
         
+    except GitHubAPIError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to create GitHub issue: {str(e)}"
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to convert to GitHub issue: {str(e)}"
+            detail=f"Failed to create GitHub issue: {str(e)}"
         )
 
 
