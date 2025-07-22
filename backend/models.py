@@ -109,7 +109,9 @@ class Repository(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     owner: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     full_name: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
-    repo_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Original repository URL
+    repo_url: Mapped[Optional[str]] = mapped_column(
+        String(500), unique=True, index=True, nullable=True
+    )  # Original repository URL
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     private: Mapped[bool] = mapped_column(Boolean, default=False)
     html_url: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -656,8 +658,8 @@ class IssueResponse(BaseModel):
 class RepositoryResponse(BaseModel):
     id: int = Field(...)
     repo_url: str = Field(...)
-    repo_name: str = Field(...)
-    repo_owner: str = Field(...)
+    name: str = Field(...)
+    owner: str = Field(...)
     created_at: datetime = Field(...)
     updated_at: Optional[datetime] = Field(None)
 

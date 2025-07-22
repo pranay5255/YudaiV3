@@ -25,9 +25,10 @@ from models import (
     RepositoryRequest,
     FileItemResponse,
     Repository,
+    RepositoryResponse,
     FileAnalysis,
     FileItem,
-    FileItemDBResponse
+    FileItemDBResponse,
 )
 
 # Import functions from scraper_script.py
@@ -368,9 +369,21 @@ async def root():
         "version": "1.0.0",
         "endpoints": {
             "/extract": "Extract repository data and return file dependencies",
+            "/repositories": "Get repository by URL",
             "/repositories/{id}/files": "Get all files for a specific repository"
         }
     }
+
+
+@router.get("/repositories", response_model=RepositoryResponse)
+async def get_repository_by_url(
+    repo_url: str, db: Session = Depends(get_db)
+):
+    """Retrieve a repository by its exact URL."""
+    repository = db.query(Repository).filter(Repository.repo_url == repo_url).first()
+    if not repository:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return repository
 
 @router.get("/repositories/{repository_id}/files", response_model=List[FileItemDBResponse])
 async def get_repository_files(
