@@ -10,10 +10,10 @@ import { DetailModal } from './components/DetailModal';
 import { ToastContainer } from './components/Toast';
 import { RepositorySelectionToast } from './components/RepositorySelectionToast';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { ContextCard, FileItem, IdeaItem, Toast, ProgressStep, TabType, SelectedRepository, Message } from './types';
+import { ContextCard, FileItem, IdeaItem, Toast, ProgressStep, TabType, SelectedRepository } from './types';
 import { useAuth } from './contexts/AuthContext';
 import { useRepository } from './contexts/RepositoryContext';
-import { UserIssueResponse, ChatContextMessage, FileContextItem } from './services/api';
+import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, UserIssueResponse } from './services/api';
 
 // Interface for issue preview data (matching DiffModal expectations)
 interface IssuePreviewData {
@@ -111,47 +111,58 @@ function App() {
   };
 
   // Enhanced issue creation with conversation context (legacy)
-  const handleCreateIssueWithContext = (conversationContext?: Message[]) => {
-    // Collect conversation context
-    const chatContext = conversationContext || [];
-    
+  const handleCreateIssueWithContext = async () => {
+    // Collect conversation context (not used, handled via contextCards)
     // Collect file dependencies context (already in contextCards)
     const fileContext = contextCards.filter(card => card.source === 'file-deps');
     const chatContextCards = contextCards.filter(card => card.source === 'chat');
-    
-    // Prepare unified context for GitHub issue creation
-    const issueContext = {
-      conversation: {
-        messages: chatContext,
-        contextCards: chatContextCards
-      },
-      fileDependencies: {
-        cards: fileContext,
-        totalTokens: fileContext.reduce((sum, card) => sum + card.tokens, 0)
-      },
-      summary: {
-        totalContextCards: contextCards.length,
-        totalTokens: contextCards.reduce((sum, card) => sum + card.tokens, 0),
-        conversationLength: chatContext.length,
-        filesIncluded: fileContext.length
-      }
+
+    // Convert to API formats
+    const conversationMessages: ChatContextMessage[] = chatContextCards.map(card => ({
+      id: card.id,
+      content: card.title + '\n' + card.description,
+      isCode: false,
+      timestamp: new Date().toISOString(),
+    }));
+    const fileContextItems: FileContextItem[] = fileContext.map(card => ({
+      id: card.id,
+      name: card.title,
+      type: 'INTERNAL',
+      tokens: card.tokens,
+      category: 'Context File',
+      path: card.title,
+    }));
+
+    const request: CreateIssueWithContextRequest = {
+      title: `Issue from Context Cards`,
+      description: 'This issue was generated from context cards.',
+      chat_messages: conversationMessages,
+      file_context: fileContextItems,
+      repository_info: undefined, // TODO: pass real repo info if available
+      priority: 'medium',
     };
 
-    console.log('GitHub Issue Context:', issueContext);
-    
-    // For now, just show the existing flow - we'll connect to backend later
-    addToast('Preparing GitHub issue with collected context...', 'info');
-    setCurrentStep('Architect');
-    
-    // TODO: Replace this with actual API call to create GitHub issue
-    setTimeout(() => {
-      setCurrentStep('Test-Writer');
-      setTimeout(() => {
-        setCurrentStep('Coder');
-        setIsDiffModalOpen(true);
-        addToast('GitHub issue context prepared successfully!', 'success');
-      }, 2000);
-    }, 1500);
+    try {
+      addToast('Preparing GitHub issue with collected context...', 'info');
+      setCurrentStep('Architect');
+      const response = await ApiService.createIssueWithContext(request, true, true);
+      if (response.success) {
+        handleShowIssuePreview({
+          ...response.github_preview,
+          userIssue: response.user_issue,
+          conversationContext: conversationMessages,
+          fileContext: fileContextItems,
+          canCreateGitHubIssue: false, // TODO: set true if repo info is available
+          repositoryInfo: request.repository_info,
+        });
+      } else {
+        addToast('Failed to generate issue preview', 'error');
+      }
+    } catch (error) {
+      addToast('Failed to generate issue preview', 'error');
+      // eslint-disable-next-line no-console
+      console.error('Failed to create GitHub issue from context cards:', error);
+    }
   };
 
   // Context management
@@ -243,6 +254,8 @@ function App() {
             cards={contextCards}
             onRemoveCard={removeContextCard}
             onCreateIssue={handleCreateIssue}
+            onShowIssuePreview={handleShowIssuePreview}
+            repositoryInfo={/* pass repository info if available */ undefined}
           />
         );
       case 'ideas':

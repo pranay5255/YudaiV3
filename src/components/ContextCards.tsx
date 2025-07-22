@@ -18,6 +18,7 @@ interface IssuePreviewData extends GitHubIssuePreview {
 interface ContextCardsProps {
   cards: ContextCard[];
   onRemoveCard: (id: string) => void;
+  onCreateIssue?: () => void; // <-- add this
   onShowIssuePreview?: (issuePreview: IssuePreviewData) => void;
   repositoryInfo?: {
     owner: string;
@@ -29,6 +30,7 @@ interface ContextCardsProps {
 export const ContextCards: React.FC<ContextCardsProps> = ({ 
   cards, 
   onRemoveCard, 
+  onCreateIssue, // <-- add this
   onShowIssuePreview,
   repositoryInfo
 }) => {
@@ -177,7 +179,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
           </span>
         </div>
         <button
-          onClick={handleCreateGitHubIssue}
+          onClick={onCreateIssue ? onCreateIssue : handleCreateGitHubIssue}
           disabled={cards.length === 0 || isCreatingIssue}
           className="w-full h-11 bg-primary hover:bg-primary/80 disabled:opacity-50 
                    disabled:cursor-not-allowed text-white rounded-xl font-medium 
