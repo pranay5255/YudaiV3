@@ -48,7 +48,9 @@ def test_db(test_engine):
         db.close()
         # Clean up all tables for next test
         for table in reversed(Base.metadata.sorted_tables):
-            test_engine.execute(table.delete())
+            with test_engine.connect() as conn:
+                conn.execute(table.delete())
+                conn.commit()
 
 @pytest.fixture(scope="function")
 def test_client(test_db):
@@ -107,16 +109,18 @@ def dummy_repository(test_db, dummy_user):
     repo = Repository(
         user_id=dummy_user.id,
         repo_url="https://github.com/testuser/test-repo",
-        repo_name="test-repo",
-        repo_owner="testuser",
-        total_files=10,
-        total_tokens=5000,
-        raw_data={"test": "data"},
-        processed_data={"processed": "data"},
-        status="completed",
-        created_at=datetime.utcnow(),
-        processed_at=datetime.utcnow()
+        name="test-repo",
+        owner="testuser",
+        full_name="testuser/test-repo",
+        description="A test repository",
+        private=False,
+        html_url="https://github.com/testuser/test-repo",
+        clone_url="https://github.com/testuser/test-repo.git",
+        language="Python",
     )
+    # Provide attributes expected by tests
+    repo.repo_name = repo.name
+    repo.repo_owner = repo.owner
     test_db.add(repo)
     test_db.commit()
     test_db.refresh(repo)
