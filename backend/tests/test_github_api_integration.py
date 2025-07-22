@@ -334,6 +334,28 @@ class TestRepositoryDataIntegration:
         assert main_file["is_directory"] is False
         assert main_file["tokens"] == 1000
 
+    def test_get_repository_by_url(self, test_client, auth_headers, dummy_repository):
+        """Repository can be retrieved by exact URL"""
+        response = test_client.get(
+            "/repositories",
+            params={"repo_url": dummy_repository.repo_url},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["repo_url"] == dummy_repository.repo_url
+        assert data["repo_name"] == dummy_repository.repo_name
+
+    def test_get_repository_by_url_not_found(self, test_client, auth_headers):
+        """404 returned when repository does not exist"""
+        response = test_client.get(
+            "/repositories",
+            params={"repo_url": "https://github.com/does/not-exist"},
+            headers=auth_headers,
+        )
+        assert response.status_code == 404
+
 
 class TestEndToEndIntegration:
     """Test end-to-end integration scenarios"""

@@ -112,6 +112,7 @@ The server will be available at:
 ### File Dependencies
 - `GET /filedeps/` - File dependencies API info
 - `GET /filedeps/repositories` - User repositories
+- `GET /filedeps/repositories?repo_url=<url>` - Repository lookup by URL
 - `GET /filedeps/repositories/{repository_id}` - Repository details
 - `GET /filedeps/repositories/{repository_id}/files` - Repository files
 - `POST /filedeps/extract` - Extract file dependencies
