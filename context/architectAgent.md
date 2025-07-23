@@ -1,59 +1,55 @@
-# Plan: Context-Enriched GitHub Issue Creation (Daifu Handoff)
+# Architect Agent: Backend & DB State Flow for Issue Creation
 
-## Goal
-When creating a GitHub issue from a chat/Daifu handoff, automatically gather and summarize three key context areas. These will be used to populate a prompt template for the Architect Agent.
+## State Flow: User Issue to GitHub Issue
 
-## Step-by-Step Plan
+1. **Chat Interaction**
+   - User sends a message via chat (frontend → `/chat/daifu` in `chat_api.py`).
+   - Message is stored as a `ChatMessage` in the database.
+   - DAifu agent (LLM) generates a reply, which is also stored.
 
-### Step 1: Gather Conversation and File Dependency Context (No Change)
-1.  **Conversation Context**:
-    *   **Reuse**: Use `ChatService.get_chat_messages` to fetch the full chat history.
-    *   **Action**: This will provide the conversation context.
+2. **User Issue Creation**
+   - User (or agent) initiates issue creation from chat or context (e.g., `/chat/create-issue` or `/issues/create-with-context`).
+   - Backend calls `IssueService.create_user_issue` or `create_issue_from_chat`.
+   - A new `UserIssue` is created in the DB with status `pending`.
+   - Context (chat, files, etc.) is attached to the issue.
 
-2.  **File Dependencies Context**:
-    *   **Reuse**: Use the file dependency API (`/extract` endpoint in `filedeps.py`).
-    *   **Action**: This provides the hierarchical file structure and token counts.
+3. **GitHub Issue Preview (Architect Agent)**
+   - Architect agent (LLM) is invoked via `generate_github_issue_preview`.
+   - Generates a draft GitHub issue (title, body, labels, etc.) from the context.
+   - Preview is returned to the user/agent for review (not yet in GitHub).
 
-### Step 2: Code-Aware Context Generation (Combined Step)
-1.  **Code-Aware Analysis**:
-    *   **Adopt**: Implement the workflow from `code_inspector_agent.ipynb` to create a `Code-Aware Context` string.
-    *   **Action**: This process will involve:
-        *   Indexing the relevant codebase.
-        *   Using semantic search to find relevant code sections based on the conversation context.
-        *   Analyzing the top N files to identify:
-            *   **Internal calls**: Key functions, classes, and their relationships.
-            *   **External libraries**: Dependencies imported and used within the code.
-    *   **Output**: A single, consolidated string containing a summary of the codebase's structure, key components, and dependencies relevant to the task.
+4. **Final GitHub Issue Creation**
+   - On approval, `/issues/{issue_id}/create-github-issue` is called.
+   - Backend calls `IssueService.create_github_issue_from_user_issue`:
+     - Fetches the `UserIssue` from DB.
+     - Calls GitHub API to create the issue.
+     - Updates the `UserIssue` in DB:
+       - Sets `github_issue_url`, `github_issue_number`.
+       - Updates status to `completed` (or `failed` on error).
 
-### Step 3: Architect Agent Prompt Generation
-1.  **Define Prompt Template**:
-    *   **Action**: Create a template in `backend/daifuUserAgent/architectAgent/promptTemplate.py`. This template will be a string with placeholders for the three context areas.
-    *   **Example Structure**:
-        ```python
-        ARCHITECT_PROMPT_TEMPLATE = """
-        System Prompt: {system_prompt}
-
-        Conversation Context:
-        {conversation_context}
-
-        File Dependencies Context:
-        {file_dependencies_context}
-
-        Code-Aware Context:
-        {code_aware_context}
-        """
-        ```
-
-2.  **Compose Final Prompt**:
-    *   **Action**: In a service layer (likely extending `issue_service.py`), populate the `ARCHITECT_PROMPT_TEMPLATE` with the context strings gathered in the previous steps.
-    *   **System Prompt**: The `{system_prompt}` placeholder should be filled with a prompt modeled after `backend/daifuUserAgent/architectAgent/exampleSystemPrompt.txt`, providing the agent with its identity, capabilities, and rules.
+5. **DB Consistency**
+   - All state transitions are reflected in the DB.
+   - The UI/backend can always query the latest state of any issue.
 
 ---
 
-## Summary of Changes
-- Steps 2 and 3 from the old plan are now a single "Code-Aware Context Generation" step, using the `code_inspector_agent.ipynb` methodology.
-- The output of each step is a string destined for a formal prompt template.
-- A new `promptTemplate.py` file will define the structure for the final agent prompt.
-- The final output is a well-structured prompt ready for the Architect Agent, rather than just a GitHub issue body.
+## Next Steps: Debugging & Extending GitHub Issue Creation
 
-This revised plan is minimal, leverages existing and new patterns effectively, and aligns with your request to use the code inspector and a formal prompt templating structure.
+- **Debugging**
+  - Ensure all DB updates are atomic and error-handled.
+  - Add logging for all state transitions (pending → completed/failed).
+  - Validate that architect agent's LLM output is correctly parsed and mapped to GitHub issue fields.
+  - Test with diverse chat/file contexts to ensure robust issue generation.
+
+- **Extending Functionality**
+  - Allow user/agent to edit the GitHub issue preview before final creation.
+  - Support additional GitHub fields (milestones, projects, etc.).
+  - Add more granular status tracking (e.g., "awaiting approval", "in review").
+  - Integrate GitHub webhooks to update status if the issue is closed/updated externally.
+  - Add UI/endpoint for re-trying failed GitHub issue creations.
+
+---
+
+**Note:**
+- The final output is a GitHub issue (as defined by `GitHubIssue` in `models.py`), and the corresponding `UserIssue` in the DB is updated with the GitHub issue info and status.
+- The architect agent is responsible for generating the high-quality issue content from context, and the backend ensures state consistency throughout the flow.
