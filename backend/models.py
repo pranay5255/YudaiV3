@@ -385,10 +385,17 @@ class UserIssue(Base):
     
     # Processing metadata
     priority: Mapped[str] = mapped_column(String(20), default="medium")  # low, medium, high
-    status: Mapped[str] = mapped_column(String(50), default="pending")  # pending, processing, completed, failed
-    agent_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="pending")  # pending, ready_for_swe, swe_processing, completed, failed, cancelled
+    agent_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Code inspector analysis or SWE execution plan
     processing_time: Mapped[Optional[float]] = mapped_column(nullable=True)
     tokens_used: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # SWE Agent integration
+    swe_agent_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # not_started, running, completed, failed
+    swe_execution_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON execution plan for SWE agent
+    swe_result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # SWE agent execution result
+    complexity_score: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # S, M, L, XL
+    estimated_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Estimated effort in hours
     
     # GitHub integration
     github_issue_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
@@ -601,6 +608,12 @@ class UserIssueResponse(BaseModel):
     agent_response: Optional[str] = None
     processing_time: Optional[float] = None
     tokens_used: int
+    # SWE Agent fields
+    swe_agent_status: Optional[str] = None
+    swe_execution_plan: Optional[str] = None
+    swe_result: Optional[str] = None
+    complexity_score: Optional[str] = None
+    estimated_hours: Optional[int] = None
     github_issue_url: Optional[str] = None
     github_issue_number: Optional[int] = None
     created_at: datetime
