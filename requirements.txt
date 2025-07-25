@@ -1,3 +1,6 @@
+# Docker requirements - generated from pyproject.toml
+# Excludes editable installs and hash verification for Docker compatibility
+
 annotated-types==0.7.0
 anyio==3.7.1
 certifi==2025.7.9
@@ -33,4 +36,3 @@ uvicorn==0.35.0
 uvloop==0.21.0
 watchfiles==1.1.0
 websockets==15.0.1
-

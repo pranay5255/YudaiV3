@@ -58,8 +58,8 @@ app.add_middleware(
 # Mount all service routers
 app.include_router(auth_router, prefix="/auth", tags=["authentication"])
 app.include_router(github_router, prefix="/github", tags=["github"])
-app.include_router(daifu_router, prefix="/daifu", tags=["chat"])
-app.include_router(issue_router, prefix="/issues", tags=["issues"])
+app.include_router(daifu_router, tags=["chat"])  # DaiFu router already has /api/daifu prefix
+app.include_router(issue_router, prefix="/api/issues", tags=["issues"])
 app.include_router(filedeps_router, prefix="/filedeps", tags=["file-dependencies"])
 
 # Add a unified root endpoint
@@ -72,8 +72,8 @@ async def api_root():
         "services": {
             "authentication": "/auth",
             "github": "/github", 
-            "chat": "/daifu",
-            "issues": "/issues",
+            "chat": "/api/daifu",
+            "issues": "/api/issues",
             "file-dependencies": "/filedeps"
         },
         "documentation": {

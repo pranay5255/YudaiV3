@@ -1,217 +1,293 @@
-"""FastAPI router for interacting with the DAifu agent."""
-from __future__ import annotations
+"""
+DaiFu User Agent Chat API with Langfuse Telemetry
+
+This module provides chat API for the DaiFu user agent with comprehensive telemetry
+and observability through Langfuse.
+"""
 
 import os
-import uuid
 import time
-from typing import Dict, List, Tuple
-
-from fastapi import APIRouter, HTTPException, Depends
-import requests
+import json
+from typing import Dict, Any, List, Optional
+from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.orm import Session
+import requests
 
-from models import ChatRequest, CreateChatMessageRequest
+from models import ChatRequest, User, ChatSession, ChatMessage
 from db.database import get_db
-from issueChatServices.chat_service import ChatService
-from issueChatServices.issue_service import IssueService
-from .prompt import build_daifu_prompt
+from auth.github_oauth import get_current_user
+from utils.langfuse_utils import daifu_agent_trace, log_llm_generation
 
-router = APIRouter()
+# Create FastAPI router
+router = APIRouter(tags=["daifu"])
 
-# Basic repository context fed to the prompt
-GITHUB_CONTEXT = (
-    "Repository root: YudaiV3\n"
-    "Key frontend file: src/components/Chat.tsx\n"
-    "Key frontend file: src/App.tsx\n"
-    "Backend FastAPI: backend/repo_processor/filedeps.py"
-)
+class DaiFuAgent:
+    """DaiFu User Agent with telemetry support"""
+    
+    @staticmethod
+    @daifu_agent_trace
+    def build_daifu_prompt(
+        repo_details: Dict[str, Any],
+        commits: List[Dict[str, Any]],
+        issues: List[Dict[str, Any]],
+        pulls: List[Dict[str, Any]],
+        conversation: List[tuple]
+    ) -> str:
+        """Build DaiFu agent prompt with repository context"""
+        
+        prompt = f"""You are DaiFu, an intelligent assistant for software development and GitHub repository analysis.
 
+Repository: {repo_details.get('name', 'Unknown')}
+Owner: {repo_details.get('owner', 'Unknown')}
+Description: {repo_details.get('description', 'No description available')}
+Language: {repo_details.get('language', 'Unknown')}
+Stars: {repo_details.get('stargazers_count', 0)}
 
-@router.post("/chat/daifu")
-async def chat_daifu(
-    request: ChatRequest,
-    db: Session = Depends(get_db),
-    user_id: int = 1  # TODO: Get from authentication
-):
-    """Process a chat message via the DAifu agent and store in database."""
-    start_time = time.time()
+Recent Commits ({len(commits)}):
+"""
+        
+        for commit in commits[:5]:  # Show last 5 commits
+            prompt += f"- {commit.get('message', 'No message')[:100]}...\n"
+        
+        prompt += f"\nOpen Issues ({len(issues)}):\n"
+        for issue in issues[:5]:  # Show first 5 issues
+            prompt += f"- #{issue.get('number', 'N/A')}: {issue.get('title', 'No title')[:80]}...\n"
+        
+        prompt += f"\nRecent Pull Requests ({len(pulls)}):\n"
+        for pr in pulls[:3]:  # Show first 3 PRs
+            prompt += f"- #{pr.get('number', 'N/A')}: {pr.get('title', 'No title')[:80]}...\n"
+        
+        prompt += "\nConversation History:\n"
+        for role, content in conversation[-10:]:  # Last 10 messages
+            prompt += f"{role}: {content[:200]}...\n"
+        
+        prompt += """
+Please provide helpful, accurate responses about the repository, code analysis, or development guidance.
+Be concise but informative. If you need more specific information, ask clarifying questions.
+"""
+        return prompt
     
-    # Generate unique message ID
-    message_id = str(uuid.uuid4())
-    
-    # Store user message in database
-    user_message_request = CreateChatMessageRequest(
-        session_id=request.conversation_id or "default",
-        message_id=message_id,
-        message_text=request.message.content,
-        sender_type="user",
-        role="user",
-        is_code=request.message.is_code,
-        tokens=len(request.message.content.split()),  # Simple token estimation
-        context_cards=request.context_cards
-    )
-    
-    user_message = ChatService.create_chat_message(db, user_id, user_message_request)
-    
-    # Get conversation history from database
-    history_messages = ChatService.get_chat_messages(
-        db, user_id, request.conversation_id or "default", limit=50
-    )
-    
-    # Convert to format expected by prompt builder
-    history = []
-    for msg in history_messages:
-        sender = "User" if msg.sender_type == "user" else "DAifu"
-        history.append((sender, msg.message_text))
-    
-    # Build prompt
-    prompt = build_daifu_prompt(GITHUB_CONTEXT, history)
-
-    try:
+    @staticmethod
+    @daifu_agent_trace
+    async def generate_response(
+        user_message: str,
+        repo_context: Dict[str, Any],
+        conversation_history: List[tuple],
+        user_id: int
+    ) -> Dict[str, Any]:
+        """Generate DaiFu agent response with full telemetry"""
+        
+        # Build the prompt
+        prompt = DaiFuAgent.build_daifu_prompt(
+            repo_details=repo_context.get('repo_details', {}),
+            commits=repo_context.get('commits', []),
+            issues=repo_context.get('issues', []),
+            pulls=repo_context.get('pulls', []),
+            conversation=conversation_history + [("User", user_message)]
+        )
+        
+        # Prepare API call
         api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
-            raise RuntimeError("OPENROUTER_API_KEY not configured")
-
+            raise ValueError("OPENROUTER_API_KEY not found in environment variables")
+        
+        model = "deepseek/deepseek-r1-0528:free"
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
-
+        
         body = {
-            "model": "deepseek/deepseek-r1-0528:free",
-            "messages": [{"role": "user", "content": prompt}],
+            "model": model,
+            "messages": [
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": user_message}
+            ],
+            "temperature": 0.7,
+            "max_tokens": 1500
         }
-
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=body,
-            timeout=30,
-        )
-        resp.raise_for_status()
-        reply = resp.json()["choices"][0]["message"]["content"].strip()
         
-        # Calculate processing time
-        processing_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+        # Log input data for telemetry
+        input_data = {
+            "user_message": user_message[:200],
+            "prompt_length": len(prompt),
+            "repo_name": repo_context.get('repo_details', {}).get('name', 'Unknown'),
+            "conversation_length": len(conversation_history),
+            "model": model,
+            "user_id": user_id
+        }
         
-        # Store assistant response in database
-        assistant_message_request = CreateChatMessageRequest(
-            session_id=request.conversation_id or "default",
-            message_id=str(uuid.uuid4()),
-            message_text=reply,
-            sender_type="assistant",
-            role="assistant",
-            is_code=False,
-            tokens=len(reply.split()),  # Simple token estimation
-            model_used="deepseek/deepseek-r1-0528:free",
-            processing_time=processing_time
-        )
-        
-        assistant_message = ChatService.create_chat_message(db, user_id, assistant_message_request)
-        
-    except Exception as e:  # pragma: no cover - network failures
-        # Store error message in database
-        error_message_request = CreateChatMessageRequest(
-            session_id=request.conversation_id or "default",
-            message_id=str(uuid.uuid4()),
-            message_text=f"Error: {str(e)}",
-            sender_type="system",
-            role="system",
-            is_code=False,
-            tokens=0,
-            error_message=str(e)
-        )
-        
-        ChatService.create_chat_message(db, user_id, error_message_request)
-        raise HTTPException(status_code=500, detail=f"LLM call failed: {e}")
-
-    return {
-        "reply": reply, 
-        "conversation": history + [("User", request.message.content), ("DAifu", reply)],
-        "message_id": message_id,
-        "processing_time": processing_time
-    }
-
-
-@router.get("/chat/sessions")
-async def get_chat_sessions(
-    db: Session = Depends(get_db),
-    user_id: int = 1,  # TODO: Get from authentication
-    limit: int = 50
-):
-    """Get all chat sessions for a user."""
-    sessions = ChatService.get_user_chat_sessions(db, user_id, limit)
-    return {"sessions": sessions}
-
-
-@router.get("/chat/sessions/{session_id}/messages")
-async def get_chat_messages(
-    session_id: str,
-    db: Session = Depends(get_db),
-    user_id: int = 1,  # TODO: Get from authentication
-    limit: int = 100
-):
-    """Get messages for a specific chat session."""
-    messages = ChatService.get_chat_messages(db, user_id, session_id, limit)
-    return {"messages": messages}
-
-
-@router.get("/chat/sessions/{session_id}/statistics")
-async def get_session_statistics(
-    session_id: str,
-    db: Session = Depends(get_db),
-    user_id: int = 1  # TODO: Get from authentication
-):
-    """Get statistics for a chat session."""
-    stats = ChatService.get_session_statistics(db, user_id, session_id)
-    if not stats:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return stats
+        try:
+            start_time = time.time()
+            
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=body,
+                timeout=60
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            ai_response = result["choices"][0]["message"]["content"]
+            execution_time = time.time() - start_time
+            
+            # Extract usage information
+            usage = result.get("usage", {})
+            tokens_used = usage.get("total_tokens", 0)
+            
+            # Log the LLM generation for telemetry
+            output_data = {
+                "response": ai_response[:200],
+                "response_length": len(ai_response),
+                "tokens_used": tokens_used,
+                "execution_time": execution_time
+            }
+            
+            log_llm_generation(
+                name="daifu_agent_chat_response",
+                model=model,
+                input_data=input_data,
+                output_data=output_data,
+                metadata={
+                    "service": "daifu_chat",
+                    "agent": "daifu_user_agent",
+                    "user_id": user_id,
+                    "repo_context": repo_context.get('repo_details', {}).get('name', 'Unknown')
+                },
+                tokens_used=tokens_used
+            )
+            
+            return {
+                "response": ai_response,
+                "tokens_used": tokens_used,
+                "execution_time": execution_time,
+                "model": model,
+                "success": True
+            }
+            
+        except requests.RequestException as e:
+            # Log error for telemetry
+            log_llm_generation(
+                name="daifu_agent_chat_response_error",
+                model=model,
+                input_data=input_data,
+                output_data={"error": str(e)},
+                metadata={
+                    "service": "daifu_chat",
+                    "agent": "daifu_user_agent",
+                    "user_id": user_id,
+                    "error_type": type(e).__name__
+                }
+            )
+            
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to generate response: {str(e)}"
+            )
 
 
-@router.put("/chat/sessions/{session_id}/title")
-async def update_session_title(
-    session_id: str,
-    title: str,
-    db: Session = Depends(get_db),
-    user_id: int = 1  # TODO: Get from authentication
-):
-    """Update the title of a chat session."""
-    session = ChatService.update_session_title(db, user_id, session_id, title)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return session
-
-
-@router.delete("/chat/sessions/{session_id}")
-async def deactivate_session(
-    session_id: str,
-    db: Session = Depends(get_db),
-    user_id: int = 1  # TODO: Get from authentication
-):
-    """Deactivate a chat session."""
-    success = ChatService.deactivate_session(db, user_id, session_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return {"message": "Session deactivated successfully"}
-
-
-@router.post("/chat/create-issue")
-async def create_issue_from_chat(
+@router.post("/chat")
+@daifu_agent_trace
+async def chat_with_daifu(
     request: ChatRequest,
     db: Session = Depends(get_db),
-    user_id: int = 1  # TODO: Get from authentication
+    current_user: User = Depends(get_current_user)
 ):
-    """Create an issue from a chat conversation."""
+    """
+    Chat with DaiFu agent with comprehensive telemetry
+    """
     try:
-        # Create the issue from the chat request
-        issue = IssueService.create_issue_from_chat(db, user_id, request)
+        # Mock repository context for testing
+        # In a real implementation, this would fetch from GitHub API
+        repo_context = {
+            "repo_details": {
+                "name": request.repo_name or "test-repo",
+                "owner": request.repo_owner or "test-owner",
+                "description": "Test repository for DaiFu agent",
+                "language": "Python",
+                "stargazers_count": 42
+            },
+            "commits": [
+                {"message": "Fix authentication bug", "sha": "abc123"},
+                {"message": "Add new feature", "sha": "def456"},
+                {"message": "Update documentation", "sha": "ghi789"}
+            ],
+            "issues": [
+                {"number": 1, "title": "Authentication not working"},
+                {"number": 2, "title": "Add dark mode support"}
+            ],
+            "pulls": [
+                {"number": 3, "title": "Feature: User dashboard"},
+                {"number": 4, "title": "Fix: Memory leak in background process"}
+            ]
+        }
+        
+        # Mock conversation history
+        conversation_history = [
+            ("Assistant", "Hello! I'm DaiFu, your development assistant. How can I help you today?"),
+            ("User", "Can you help me understand this codebase?"),
+            ("Assistant", "Of course! I'd be happy to help you understand the codebase. What specific aspects would you like to explore?")
+        ]
+        
+        # Generate response using DaiFu agent
+        result = await DaiFuAgent.generate_response(
+            user_message=request.message.content,
+            repo_context=repo_context,
+            conversation_history=conversation_history,
+            user_id=current_user.id
+        )
         
         return {
             "success": True,
-            "issue": issue,
-            "message": f"Issue created with ID: {issue.issue_id}"
+            "message": result["response"],
+            "metadata": {
+                "tokens_used": result["tokens_used"],
+                "execution_time": result["execution_time"],
+                "model": result["model"],
+                "conversation_id": request.conversation_id,
+                "agent": "daifu"
+            }
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create issue: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Chat request failed: {str(e)}"
+        )
+
+
+@router.get("/test")
+@daifu_agent_trace
+async def test_daifu_agent(
+    message: str = "Hello DaiFu, can you help me understand this repository?",
+    current_user: User = Depends(get_current_user)
+):
+    """Test endpoint for DaiFu agent"""
+    try:
+        # Create a test chat request
+        from models import ChatMessageInput
+        
+        test_request = ChatRequest(
+            conversation_id="test-conversation",
+            message=ChatMessageInput(content=message),
+            repo_owner="test-owner",
+            repo_name="test-repo"
+        )
+        
+        # Mock database session for testing
+        class MockDB:
+            def __init__(self):
+                pass
+                
+        mock_db = MockDB()
+        
+        # Call the chat endpoint
+        result = await chat_with_daifu(test_request, mock_db, current_user)
+        return result
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Test failed: {str(e)}"
+        )
