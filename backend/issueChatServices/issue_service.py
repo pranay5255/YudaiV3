@@ -17,48 +17,29 @@ from fastapi import APIRouter, HTTPException, Depends, status, Query
 from models import (
     UserIssue, User, ChatSession, ContextCard,
     CreateUserIssueRequest, UserIssueResponse,
-    ChatRequest, CreateChatMessageRequest, FileItemResponse
+    ChatRequest, CreateChatMessageRequest, FileItemResponse,
+    FileContextItem, ChatContextMessage, CreateIssueWithContextRequest, GitHubIssuePreview
 )
 from db.database import get_db
 from auth.github_oauth import get_current_user
 from github.github_api import create_issue as create_github_issue, GitHubAPIError
 
 # Add new imports at the top
-from pydantic import BaseModel, Field
 import os
 import requests
+import json
 from daifuUserAgent.architectAgent.promptTemplate import build_architect_prompt
 import re
 
-class FileContextItem(BaseModel):
-    id: str
-    name: str
-    type: str
-    tokens: int
-    category: str
-    path: Optional[str] = None
+# Import Langfuse utilities for telemetry
+from utils.langfuse_utils import (
+    architect_agent_trace, 
+    issue_service_trace, 
+    log_llm_generation,
+    log_github_api_call
+)
 
-class ChatContextMessage(BaseModel):
-    id: str
-    content: str
-    isCode: bool
-    timestamp: str
 
-class CreateIssueWithContextRequest(BaseModel):
-    title: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = Field(None)
-    chat_messages: List[ChatContextMessage] = Field(default_factory=list)
-    file_context: List[FileContextItem] = Field(default_factory=list)
-    repository_info: Optional[Dict[str, str]] = Field(None)  # owner, name, branch
-    priority: str = Field(default="medium")
-
-class GitHubIssuePreview(BaseModel):
-    title: str
-    body: str
-    labels: List[str] = Field(default_factory=list)
-    assignees: List[str] = Field(default_factory=list)
-    repository_info: Optional[Dict[str, str]] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 # Create FastAPI router
 router = APIRouter(tags=["issues"])
@@ -68,6 +49,7 @@ class IssueService:
     """Service class for managing user issues"""
     
     @staticmethod
+    @issue_service_trace
     def create_user_issue(
         db: Session,
         user_id: int,
@@ -221,6 +203,7 @@ class IssueService:
         return IssueService.create_user_issue(db, user_id, issue_request)
     
     @staticmethod
+    @issue_service_trace
     async def create_github_issue_from_user_issue(
         db: Session,
         user_id: int,
@@ -256,6 +239,15 @@ class IssueService:
             if issue.conversation_id:
                 github_body += f"**Generated from conversation:** {issue.conversation_id}\n"
             
+            # Prepare GitHub API input for logging
+            github_input = {
+                "owner": issue.repo_owner,
+                "repo_name": issue.repo_name,
+                "title": issue.title,
+                "body_length": len(github_body),
+                "user_issue_id": issue.issue_id
+            }
+            
             # Create GitHub issue
             github_issue = await create_github_issue(
                 owner=issue.repo_owner,
@@ -264,6 +256,19 @@ class IssueService:
                 body=github_body,
                 current_user=current_user,
                 db=db
+            )
+            
+            # Log successful GitHub API call
+            log_github_api_call(
+                action="create_issue",
+                repository=f"{issue.repo_owner}/{issue.repo_name}",
+                input_data=github_input,
+                output_data={
+                    "issue_number": github_issue.number,
+                    "issue_url": github_issue.html_url,
+                    "status": "success"
+                },
+                success=True
             )
             
             # Update user issue with GitHub info
@@ -279,6 +284,16 @@ class IssueService:
             return UserIssueResponse.model_validate(issue)
             
         except GitHubAPIError as e:
+            # Log failed GitHub API call
+            log_github_api_call(
+                action="create_issue",
+                repository=f"{issue.repo_owner}/{issue.repo_name}",
+                input_data=github_input,
+                output_data={},
+                success=False,
+                error=str(e)
+            )
+            
             # Update issue status to failed
             issue.status = "failed"
             issue.agent_response = f"Failed to create GitHub issue: {str(e)}"
@@ -328,6 +343,7 @@ class IssueService:
         }
 
     @staticmethod
+    @architect_agent_trace
     def generate_github_issue_preview(
         request: CreateIssueWithContextRequest,
         use_sample_data: bool = False
@@ -394,70 +410,176 @@ class IssueService:
         file_dependencies_context = "\n".join(
             f"{f.name} ({f.type}, {f.tokens} tokens): {f.category}" for f in request.file_context
         )
-        # Optionally, code-aware context (could be empty or summary)
+        # Code-aware context - could include file contents or summaries
         code_aware_context = ""
+        if request.file_context:
+            code_aware_context = f"Total files analyzed: {len(request.file_context)}\n"
+            code_aware_context += f"Total tokens: {sum(f.tokens for f in request.file_context)}\n"
+            code_aware_context += "Key files: " + ", ".join([f.name for f in request.file_context[:10]])
+
+        # Build prompt using the Yudai Architect agent
         prompt = build_architect_prompt(
             conversation_context=conversation_context,
             file_dependencies_context=file_dependencies_context,
             code_aware_context=code_aware_context,
         )
+        
+        # Add specific instruction for JSON output
+        prompt += "\n\nIMPORTANT: Respond with ONLY a valid JSON object as specified in the output_format section. Do not include any text before or after the JSON."
+        
         api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError("OPENROUTER_API_KEY not found in environment variables")
+            
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
+        
+        model = "deepseek/deepseek-r1-0528:free"
         body = {
-            "model": "deepseek/deepseek-r1-0528:free",
+            "model": model,
             "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,  # Lower temperature for more consistent JSON output
+            "max_tokens": 2000
         }
+        
+        # Log the LLM input for telemetry
+        input_data = {
+            "prompt_length": len(prompt),
+            "chat_messages_count": len(request.chat_messages),
+            "file_context_count": len(request.file_context),
+            "model": model,
+            "request_title": request.title
+        }
+        
         try:
+            start_time = time.time()
             resp = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers=headers,
                 json=body,
-                timeout=60,
+                timeout=120,  # Increased timeout for better reliability
             )
             resp.raise_for_status()
-            llm_reply = resp.json()["choices"][0]["message"]["content"].strip()
-            # --- Parse LLM output for GitHub issue fields ---
-            # Expecting output in markdown or YAML frontmatter or similar
-            # Try to extract title, body, labels, etc. Fallback to using the whole output as body
-            title = request.title
-            labels = ["yudai-assistant"]
-            assignees = []
-            body_text = llm_reply
-            # Try to extract a markdown H1 or 'Title:'
-            m = re.search(r"^# (.+)$", llm_reply, re.MULTILINE)
-            if m:
-                title = m.group(1).strip()
-                body_text = llm_reply[m.end():].strip()
-            else:
-                m2 = re.search(r"^Title:\s*(.+)$", llm_reply, re.MULTILINE)
-                if m2:
-                    title = m2.group(1).strip()
-                    body_text = llm_reply[m2.end():].strip()
-            # Try to extract labels if present
-            m3 = re.search(r"Labels?:\s*\[(.*?)\]", llm_reply, re.IGNORECASE)
-            if m3:
-                labels = [l.strip().strip('"') for l in m3.group(1).split(",") if l.strip()]
-            # Try to extract assignees if present
-            m4 = re.search(r"Assignees?:\s*\[(.*?)\]", llm_reply, re.IGNORECASE)
-            if m4:
-                assignees = [a.strip().strip('"') for a in m4.group(1).split(",") if a.strip()]
-            return GitHubIssuePreview(
-                title=title,
-                body=body_text,
-                labels=labels,
-                assignees=assignees,
-                repository_info=request.repository_info,
+            
+            response_data = resp.json()
+            llm_reply = response_data["choices"][0]["message"]["content"].strip()
+            execution_time = time.time() - start_time
+            
+            # Extract usage information if available
+            usage = response_data.get("usage", {})
+            tokens_used = usage.get("total_tokens", 0)
+            
+            # Log the LLM generation for telemetry
+            output_data = {
+                "response_length": len(llm_reply),
+                "tokens_used": tokens_used,
+                "execution_time": execution_time
+            }
+            
+            log_llm_generation(
+                name="architect_agent_github_issue_generation",
+                model=model,
+                input_data=input_data,
+                output_data=output_data,
                 metadata={
-                    "chat_messages_count": len(request.chat_messages),
-                    "file_context_count": len(request.file_context),
-                    "total_tokens": sum(f.tokens for f in request.file_context),
-                    "generated_at": datetime.utcnow().isoformat(),
-                    "generation_method": "architect_agent_llm"
-                }
+                    "service": "issue_service",
+                    "agent": "yudai_architect",
+                    "use_case": "github_issue_preview"
+                },
+                tokens_used=tokens_used
             )
+            
+            # --- Parse JSON output from Architect Agent ---
+            try:
+                # Try to parse as direct JSON first
+                issue_data = json.loads(llm_reply)
+                
+                # Validate required fields
+                if not all(key in issue_data for key in ["title", "body", "labels"]):
+                    raise ValueError("Missing required fields in JSON response")
+                
+                # Extract data with defaults
+                title = issue_data.get("title", request.title)[:255]  # Limit title length
+                body = issue_data.get("body", "")
+                labels = issue_data.get("labels", ["yudai-assistant"])
+                assignees = issue_data.get("assignees", [])
+                metadata = issue_data.get("metadata", {})
+                
+                # Ensure yudai-assistant label is always present
+                if "yudai-assistant" not in labels:
+                    labels.append("yudai-assistant")
+                
+                return GitHubIssuePreview(
+                    title=title,
+                    body=body,
+                    labels=labels,
+                    assignees=assignees,
+                    repository_info=request.repository_info,
+                    metadata={
+                        **metadata,
+                        "chat_messages_count": len(request.chat_messages),
+                        "file_context_count": len(request.file_context),
+                        "total_tokens": sum(f.tokens for f in request.file_context),
+                        "generated_at": datetime.utcnow().isoformat(),
+                        "generation_method": "architect_agent_json",
+                        "llm_tokens_used": tokens_used,
+                        "llm_execution_time": execution_time
+                    }
+                )
+                
+            except json.JSONDecodeError:
+                # Fallback: try to extract JSON from within the response
+                json_match = re.search(r'\{.*\}', llm_reply, re.DOTALL)
+                if json_match:
+                    try:
+                        issue_data = json.loads(json_match.group())
+                        title = issue_data.get("title", request.title)[:255]
+                        body = issue_data.get("body", llm_reply)
+                        labels = issue_data.get("labels", ["yudai-assistant"])
+                        assignees = issue_data.get("assignees", [])
+                        
+                        if "yudai-assistant" not in labels:
+                            labels.append("yudai-assistant")
+                        
+                        return GitHubIssuePreview(
+                            title=title,
+                            body=body,
+                            labels=labels,
+                            assignees=assignees,
+                            repository_info=request.repository_info,
+                            metadata={
+                                "chat_messages_count": len(request.chat_messages),
+                                "file_context_count": len(request.file_context),
+                                "total_tokens": sum(f.tokens for f in request.file_context),
+                                "generated_at": datetime.utcnow().isoformat(),
+                                "generation_method": "architect_agent_json_extracted",
+                                "llm_tokens_used": tokens_used,
+                                "llm_execution_time": execution_time
+                            }
+                        )
+                    except json.JSONDecodeError:
+                        pass
+                
+                # Last fallback: treat as markdown response
+                return GitHubIssuePreview(
+                    title=request.title,
+                    body=llm_reply,
+                    labels=["yudai-assistant", "needs-review"],
+                    assignees=[],
+                    repository_info=request.repository_info,
+                    metadata={
+                        "chat_messages_count": len(request.chat_messages),
+                        "file_context_count": len(request.file_context),
+                        "total_tokens": sum(f.tokens for f in request.file_context),
+                        "generated_at": datetime.utcnow().isoformat(),
+                        "generation_method": "architect_agent_markdown_fallback",
+                        "llm_tokens_used": tokens_used,
+                        "llm_execution_time": execution_time,
+                        "parsing_error": "Could not parse JSON output"
+                    }
+                )
         except Exception as e:
             # Fallback to static template if LLM fails
             context_summary = ""
