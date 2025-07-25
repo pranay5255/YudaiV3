@@ -25,6 +25,10 @@ from github.github_api import create_issue as create_github_issue, GitHubAPIErro
 
 # Add new imports at the top
 from pydantic import BaseModel, Field
+import os
+import requests
+from daifuUserAgent.architectAgent.promptTemplate import build_architect_prompt
+import re
 
 class FileContextItem(BaseModel):
     id: str
@@ -328,7 +332,7 @@ class IssueService:
         request: CreateIssueWithContextRequest,
         use_sample_data: bool = False
     ) -> GitHubIssuePreview:
-        """Generate a GitHub issue preview with optional sample data"""
+        """Generate a GitHub issue preview with optional sample data or via LLM (architect agent)"""
         
         if use_sample_data:
             # Generate sample data when LLM is not available
@@ -381,23 +385,94 @@ class IssueService:
                     "generation_method": "sample_data"
                 }
             )
-        
-        # Generate real issue from context (this would call LLM in production)
-        context_summary = ""
-        if request.chat_messages:
-            context_summary += f"## Chat Context\n"
-            for msg in request.chat_messages[-5:]:  # Last 5 messages
-                role = "User" if not msg.isCode else "Code"
-                context_summary += f"**{role}**: {msg.content[:100]}...\n\n"
-        
-        if request.file_context:
-            context_summary += f"## File Context\n"
-            for file in request.file_context[:10]:  # Top 10 files
-                context_summary += f"- **{file.name}** ({file.type}, {file.tokens} tokens): {file.category}\n"
-        
-        return GitHubIssuePreview(
-            title=request.title,
-            body=f"""{request.description or ''}
+        # --- LLM/Architect Agent Integration ---
+        # Prepare conversation context
+        conversation_context = "\n".join(
+            f"{'Code' if m.isCode else 'User'}: {m.content}" for m in request.chat_messages
+        )
+        # Prepare file dependencies context
+        file_dependencies_context = "\n".join(
+            f"{f.name} ({f.type}, {f.tokens} tokens): {f.category}" for f in request.file_context
+        )
+        # Optionally, code-aware context (could be empty or summary)
+        code_aware_context = ""
+        prompt = build_architect_prompt(
+            conversation_context=conversation_context,
+            file_dependencies_context=file_dependencies_context,
+            code_aware_context=code_aware_context,
+        )
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        body = {
+            "model": "deepseek/deepseek-r1-0528:free",
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        try:
+            resp = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers=headers,
+                json=body,
+                timeout=60,
+            )
+            resp.raise_for_status()
+            llm_reply = resp.json()["choices"][0]["message"]["content"].strip()
+            # --- Parse LLM output for GitHub issue fields ---
+            # Expecting output in markdown or YAML frontmatter or similar
+            # Try to extract title, body, labels, etc. Fallback to using the whole output as body
+            title = request.title
+            labels = ["yudai-assistant"]
+            assignees = []
+            body_text = llm_reply
+            # Try to extract a markdown H1 or 'Title:'
+            m = re.search(r"^# (.+)$", llm_reply, re.MULTILINE)
+            if m:
+                title = m.group(1).strip()
+                body_text = llm_reply[m.end():].strip()
+            else:
+                m2 = re.search(r"^Title:\s*(.+)$", llm_reply, re.MULTILINE)
+                if m2:
+                    title = m2.group(1).strip()
+                    body_text = llm_reply[m2.end():].strip()
+            # Try to extract labels if present
+            m3 = re.search(r"Labels?:\s*\[(.*?)\]", llm_reply, re.IGNORECASE)
+            if m3:
+                labels = [l.strip().strip('"') for l in m3.group(1).split(",") if l.strip()]
+            # Try to extract assignees if present
+            m4 = re.search(r"Assignees?:\s*\[(.*?)\]", llm_reply, re.IGNORECASE)
+            if m4:
+                assignees = [a.strip().strip('"') for a in m4.group(1).split(",") if a.strip()]
+            return GitHubIssuePreview(
+                title=title,
+                body=body_text,
+                labels=labels,
+                assignees=assignees,
+                repository_info=request.repository_info,
+                metadata={
+                    "chat_messages_count": len(request.chat_messages),
+                    "file_context_count": len(request.file_context),
+                    "total_tokens": sum(f.tokens for f in request.file_context),
+                    "generated_at": datetime.utcnow().isoformat(),
+                    "generation_method": "architect_agent_llm"
+                }
+            )
+        except Exception as e:
+            # Fallback to static template if LLM fails
+            context_summary = ""
+            if request.chat_messages:
+                context_summary += f"## Chat Context\n"
+                for msg in request.chat_messages[-5:]:  # Last 5 messages
+                    role = "User" if not msg.isCode else "Code"
+                    context_summary += f"**{role}**: {msg.content[:100]}...\n\n"
+            if request.file_context:
+                context_summary += f"## File Context\n"
+                for file in request.file_context[:10]:  # Top 10 files
+                    context_summary += f"- **{file.name}** ({file.type}, {file.tokens} tokens): {file.category}\n"
+            return GitHubIssuePreview(
+                title=request.title,
+                body=f"""{request.description or ''}
 
 {context_summary}
 
@@ -412,17 +487,18 @@ Based on the analyzed context, this issue requires attention to the following fi
 
 *Generated from chat and file dependency analysis*
 """,
-            labels=["enhancement", "yudai-assistant"],
-            assignees=[],
-            repository_info=request.repository_info,
-            metadata={
-                "chat_messages_count": len(request.chat_messages),
-                "file_context_count": len(request.file_context),
-                "total_tokens": sum(f.tokens for f in request.file_context),
-                "generated_at": datetime.utcnow().isoformat(),
-                "generation_method": "context_analysis"
-            }
-        )
+                labels=["enhancement", "yudai-assistant"],
+                assignees=[],
+                repository_info=request.repository_info,
+                metadata={
+                    "chat_messages_count": len(request.chat_messages),
+                    "file_context_count": len(request.file_context),
+                    "total_tokens": sum(f.tokens for f in request.file_context),
+                    "generated_at": datetime.utcnow().isoformat(),
+                    "generation_method": "context_analysis|llm_fallback",
+                    "error": str(e)
+                }
+            )
 
 
 # API Routes
