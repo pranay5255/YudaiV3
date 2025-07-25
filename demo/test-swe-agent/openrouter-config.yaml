@@ -37,7 +37,7 @@ agent:
       - path: tools/diff_state
     enable_bash_tool: true
     parse_function:
-      type: function_calling
+      type: thought_action
     registry_variables:
       USE_FILEMAP: 'true'
       SUBMIT_REVIEW_MESSAGES:
@@ -57,16 +57,14 @@ agent:
           <diff>
           {{diff}}
           </diff>
-  history_processors:
-    - type: cache_control
-      last_n_messages: 2
+  history_processors: []
   model:
-    name: qwen/qwen3-coder
+    name: openrouter/qwen/qwen3-coder
     api_key: $OPENROUTER_API_KEY
     api_base: https://openrouter.ai/api/v1
-    per_instance_cost_limit: 1.0
+    per_instance_cost_limit: 0.0
     per_instance_call_limit: 200
-    total_cost_limit: 500.0
+    max_input_tokens: 10000
+    total_cost_limit: 0.0
     temperature: 0.0
     delay: 0.0
-    litellm_model_registry: "openrouter_model_registry.json"
