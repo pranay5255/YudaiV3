@@ -4,13 +4,9 @@ Langfuse utilities for telemetry and observability in Yudai backend services.
 
 import os
 import functools
-import time
 from typing import Dict, Any, Optional, Callable
-from datetime import datetime
-import json
 
-from langfuse import Langfuse
-from langfuse.decorators import observe, langfuse_context
+from langfuse import Langfuse, observe, get_client
 
 # Initialize Langfuse client
 def get_langfuse_client() -> Optional[Langfuse]:
@@ -22,6 +18,11 @@ def get_langfuse_client() -> Optional[Langfuse]:
         
         if not secret_key or not public_key:
             print("Langfuse credentials not found, telemetry disabled")
+            return None
+            
+        # Skip dummy keys
+        if secret_key == "sk-dummy" or public_key == "pk-dummy":
+            print("Langfuse dummy credentials detected, telemetry disabled")
             return None
             
         return Langfuse(
@@ -36,118 +37,47 @@ def get_langfuse_client() -> Optional[Langfuse]:
 # Global Langfuse client
 _langfuse_client = get_langfuse_client()
 
-def langfuse_trace(name: str, metadata: Optional[Dict[str, Any]] = None):
-    """
-    Decorator for tracing function calls with Langfuse
-    
-    Args:
-        name: Name of the trace
-        metadata: Additional metadata to include
-    """
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            if not _langfuse_client:
-                return await func(*args, **kwargs)
-            
-            trace = _langfuse_client.trace(
-                name=name,
-                metadata=metadata or {}
-            )
-            
-            start_time = time.time()
-            try:
-                # Add input data to trace
-                input_data = {
-                    "args": str(args)[:500],  # Limit size
-                    "kwargs": {k: str(v)[:200] for k, v in kwargs.items()}
-                }
-                trace.update(input=input_data)
-                
-                result = await func(*args, **kwargs)
-                
-                # Add successful output
-                execution_time = time.time() - start_time
-                trace.update(
-                    output={"result": str(result)[:1000]},
-                    metadata={
-                        **(metadata or {}),
-                        "execution_time_seconds": execution_time,
-                        "status": "success"
-                    }
-                )
-                
-                return result
-                
-            except Exception as e:
-                # Add error information
-                execution_time = time.time() - start_time
-                trace.update(
-                    output={"error": str(e)},
-                    metadata={
-                        **(metadata or {}),
-                        "execution_time_seconds": execution_time,
-                        "status": "error",
-                        "error_type": type(e).__name__
-                    }
-                )
-                raise
-            finally:
-                _langfuse_client.flush()
-        
-        @functools.wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            if not _langfuse_client:
-                return func(*args, **kwargs)
-            
-            trace = _langfuse_client.trace(
-                name=name,
-                metadata=metadata or {}
-            )
-            
-            start_time = time.time()
-            try:
-                # Add input data to trace
-                input_data = {
-                    "args": str(args)[:500],  # Limit size
-                    "kwargs": {k: str(v)[:200] for k, v in kwargs.items()}
-                }
-                trace.update(input=input_data)
-                
-                result = func(*args, **kwargs)
-                
-                # Add successful output
-                execution_time = time.time() - start_time
-                trace.update(
-                    output={"result": str(result)[:1000]},
-                    metadata={
-                        **(metadata or {}),
-                        "execution_time_seconds": execution_time,
-                        "status": "success"
-                    }
-                )
-                
-                return result
-                
-            except Exception as e:
-                # Add error information
-                execution_time = time.time() - start_time
-                trace.update(
-                    output={"error": str(e)},
-                    metadata={
-                        **(metadata or {}),
-                        "execution_time_seconds": execution_time,
-                        "status": "error",
-                        "error_type": type(e).__name__
-                    }
-                )
-                raise
-            finally:
-                _langfuse_client.flush()
-        
-        return async_wrapper if functools.iscoroutinefunction(func) else sync_wrapper
-    return decorator
+def is_langfuse_enabled() -> bool:
+    """Check if Langfuse is properly configured and enabled"""
+    return _langfuse_client is not None
 
+# Decorator aliases for different agents/services
+def architect_agent_trace(func: Callable):
+    """Decorator for Architect Agent functions"""
+    if not is_langfuse_enabled():
+        return func
+    
+    return observe(func)
+
+def daifu_agent_trace(func: Callable):
+    """Decorator for Daifu Agent functions"""
+    if not is_langfuse_enabled():
+        return func
+    
+    return observe(func)
+
+def issue_service_trace(func: Callable):
+    """Decorator for Issue Service functions"""
+    if not is_langfuse_enabled():
+        return func
+    
+    return observe(func)
+
+def github_api_trace(func: Callable):
+    """Decorator for GitHub API functions"""
+    if not is_langfuse_enabled():
+        return func
+    
+    return observe(func)
+
+def chat_service_trace(func: Callable):
+    """Decorator for Chat Service functions"""
+    if not is_langfuse_enabled():
+        return func
+    
+    return observe(func)
+
+# Utility functions for manual logging when needed
 def log_llm_generation(
     name: str,
     model: str,
@@ -158,7 +88,7 @@ def log_llm_generation(
     cost: Optional[float] = None
 ):
     """
-    Log LLM generation to Langfuse
+    Log LLM generation manually (use when @observe decorator isn't sufficient)
     
     Args:
         name: Name of the generation
@@ -169,26 +99,27 @@ def log_llm_generation(
         tokens_used: Number of tokens used
         cost: Cost of the generation
     """
-    if not _langfuse_client:
+    if not is_langfuse_enabled():
         return
     
     try:
-        generation_data = {
-            "name": name,
-            "model": model,
-            "input": input_data,
-            "output": output_data,
-            "metadata": metadata or {}
-        }
-        
-        if tokens_used:
-            generation_data["usage"] = {"total_tokens": tokens_used}
-            
-        if cost:
-            generation_data["metadata"]["cost_usd"] = cost
-        
-        _langfuse_client.generation(**generation_data)
-        _langfuse_client.flush()
+        # Use get_client() for manual logging
+        client = get_client()
+        if client:
+            client.generation(
+                name=name,
+                model=model,
+                input=input_data,
+                output=output_data,
+                metadata={
+                    **(metadata or {}),
+                    "tokens_used": tokens_used,
+                    "cost_usd": cost
+                },
+                usage={
+                    "total_tokens": tokens_used
+                } if tokens_used else None
+            )
         
     except Exception as e:
         print(f"Failed to log LLM generation to Langfuse: {e}")
@@ -202,7 +133,7 @@ def log_github_api_call(
     error: Optional[str] = None
 ):
     """
-    Log GitHub API calls to Langfuse
+    Log GitHub API calls manually
     
     Args:
         action: Type of GitHub action (create_issue, get_repos, etc.)
@@ -212,63 +143,36 @@ def log_github_api_call(
         success: Whether the call was successful
         error: Error message if any
     """
-    if not _langfuse_client:
+    if not is_langfuse_enabled():
         return
     
     try:
-        event_data = {
-            "name": f"github_api_{action}",
-            "input": input_data,
-            "output": output_data if success else {"error": error},
-            "metadata": {
-                "action": action,
-                "repository": repository,
-                "success": success,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        }
-        
-        if error:
-            event_data["metadata"]["error"] = error
-        
-        _langfuse_client.event(**event_data)
-        _langfuse_client.flush()
+        # Use get_client() for manual logging
+        client = get_client()
+        if client:
+            client.event(
+                name=f"github_api_{action}",
+                input=input_data,
+                output=output_data if success else {"error": error},
+                metadata={
+                    "action": action,
+                    "repository": repository,
+                    "success": success,
+                    "service": "github_api"
+                }
+            )
         
     except Exception as e:
         print(f"Failed to log GitHub API call to Langfuse: {e}")
 
-def architect_agent_trace(func: Callable):
+# Legacy function name for backward compatibility
+def langfuse_trace(name: str, metadata: Optional[Dict[str, Any]] = None):
     """
-    Specific decorator for Architect Agent functions
+    Legacy decorator - use specific agent decorators instead
     """
-    return langfuse_trace(
-        name=f"architect_agent_{func.__name__}",
-        metadata={
-            "agent": "yudai_architect",
-            "function": func.__name__
-        }
-    )(func)
-
-def daifu_agent_trace(func: Callable):
-    """
-    Specific decorator for Daifu Agent functions
-    """
-    return langfuse_trace(
-        name=f"daifu_agent_{func.__name__}",
-        metadata={
-            "agent": "daifu_user_agent",
-            "function": func.__name__
-        }
-    )(func)
-
-def issue_service_trace(func: Callable):
-    """
-    Specific decorator for Issue Service functions
-    """
-    return langfuse_trace(
-        name=f"issue_service_{func.__name__}",
-        metadata={
-            "service": "issue_service",
-            "function": func.__name__
-        }
-    )(func) 
+    def decorator(func: Callable):
+        if not is_langfuse_enabled():
+            return func
+        
+        return observe(func)
+    return decorator 

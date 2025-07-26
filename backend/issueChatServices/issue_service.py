@@ -35,9 +35,10 @@ import re
 from utils.langfuse_utils import (
     architect_agent_trace, 
     issue_service_trace, 
-    log_llm_generation,
-    log_github_api_call
+    github_api_trace,
+    is_langfuse_enabled
 )
+from langfuse import observe, get_client
 
 
 
@@ -203,7 +204,7 @@ class IssueService:
         return IssueService.create_user_issue(db, user_id, issue_request)
     
     @staticmethod
-    @issue_service_trace
+    @github_api_trace
     async def create_github_issue_from_user_issue(
         db: Session,
         user_id: int,
@@ -259,17 +260,23 @@ class IssueService:
             )
             
             # Log successful GitHub API call
-            log_github_api_call(
-                action="create_issue",
-                repository=f"{issue.repo_owner}/{issue.repo_name}",
-                input_data=github_input,
-                output_data={
-                    "issue_number": github_issue.number,
-                    "issue_url": github_issue.html_url,
-                    "status": "success"
-                },
-                success=True
-            )
+            if is_langfuse_enabled():
+                client = get_client()
+                if client:
+                    client.event(
+                        name="github_issue_created",
+                        input=github_input,
+                        output={
+                            "issue_number": github_issue.number,
+                            "issue_url": github_issue.html_url,
+                            "status": "success"
+                        },
+                        metadata={
+                            "action": "create_github_issue",
+                            "repository": f"{issue.repo_owner}/{issue.repo_name}",
+                            "service": "github_api"
+                        }
+                    )
             
             # Update user issue with GitHub info
             issue.github_issue_url = github_issue.html_url
@@ -285,14 +292,20 @@ class IssueService:
             
         except GitHubAPIError as e:
             # Log failed GitHub API call
-            log_github_api_call(
-                action="create_issue",
-                repository=f"{issue.repo_owner}/{issue.repo_name}",
-                input_data=github_input,
-                output_data={},
-                success=False,
-                error=str(e)
-            )
+            if is_langfuse_enabled():
+                client = get_client()
+                if client:
+                    client.event(
+                        name="github_issue_creation_failed",
+                        input={"issue_id": issue.issue_id},
+                        output={"error": str(e)},
+                        metadata={
+                            "action": "create_github_issue",
+                            "repository": f"{issue.repo_owner}/{issue.repo_name}",
+                            "service": "github_api",
+                            "error_type": type(e).__name__
+                        }
+                    )
             
             # Update issue status to failed
             issue.status = "failed"
@@ -343,7 +356,7 @@ class IssueService:
         }
 
     @staticmethod
-    @architect_agent_trace
+    @observe
     def generate_github_issue_preview(
         request: CreateIssueWithContextRequest,
         use_sample_data: bool = False
@@ -444,14 +457,7 @@ class IssueService:
             "max_tokens": 2000
         }
         
-        # Log the LLM input for telemetry
-        input_data = {
-            "prompt_length": len(prompt),
-            "chat_messages_count": len(request.chat_messages),
-            "file_context_count": len(request.file_context),
-            "model": model,
-            "request_title": request.title
-        }
+        # @observe decorator automatically captures input
         
         try:
             start_time = time.time()
@@ -471,25 +477,7 @@ class IssueService:
             usage = response_data.get("usage", {})
             tokens_used = usage.get("total_tokens", 0)
             
-            # Log the LLM generation for telemetry
-            output_data = {
-                "response_length": len(llm_reply),
-                "tokens_used": tokens_used,
-                "execution_time": execution_time
-            }
-            
-            log_llm_generation(
-                name="architect_agent_github_issue_generation",
-                model=model,
-                input_data=input_data,
-                output_data=output_data,
-                metadata={
-                    "service": "issue_service",
-                    "agent": "yudai_architect",
-                    "use_case": "github_issue_preview"
-                },
-                tokens_used=tokens_used
-            )
+            # @observe decorator automatically captures LLM response
             
             # --- Parse JSON output from Architect Agent ---
             try:
