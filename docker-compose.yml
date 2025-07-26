@@ -15,6 +15,8 @@ services:
       - POSTGRES_DB=yudai_db
       - POSTGRES_USER=yudai_user
       - POSTGRES_PASSWORD=yudai_password
+    ports:
+      - "5255:5432"  # Host:5255 -> Container:5432
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -50,8 +52,6 @@ services:
       - "8000:8000"
     depends_on:
       db:
-        condition: service_healthy
-      langfuse-web:
         condition: service_healthy
     volumes:
       - ./backend:/app
@@ -151,11 +151,6 @@ services:
       LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
     networks:
       - yudai-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/public/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   # Clickhouse Database for analytical workloads
   clickhouse:
@@ -224,7 +219,7 @@ services:
 
   # PostgreSQL Database for Langfuse
   postgres:
-    image: docker.io/postgres:${POSTGRES_VERSION:-latest}
+    image: docker.io/postgres:16
     restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -235,8 +230,9 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres # CHANGEME
       POSTGRES_DB: postgres
+      POSTGRES_PORT: 5432  # Add this line
     ports:
-      - 127.0.0.1:5432:5432
+      - 127.0.0.1:5432:5432  
     volumes:
       - langfuse_postgres_data:/var/lib/postgresql/data
     networks:

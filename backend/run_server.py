@@ -58,7 +58,7 @@ app.add_middleware(
 # Mount all service routers
 app.include_router(auth_router, prefix="/auth", tags=["authentication"])
 app.include_router(github_router, prefix="/github", tags=["github"])
-app.include_router(daifu_router, tags=["chat"])  # DaiFu router already has /api/daifu prefix
+app.include_router(daifu_router, prefix="/api/daifu", tags=["chat"])  # DaiFu router already has /api/daifu prefix
 app.include_router(issue_router, prefix="/api/issues", tags=["issues"])
 app.include_router(filedeps_router, prefix="/filedeps", tags=["file-dependencies"])
 

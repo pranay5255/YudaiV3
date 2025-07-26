@@ -12,12 +12,14 @@ from models import (
     CreateChatSessionRequest, CreateChatMessageRequest,
     ChatSessionResponse, ChatMessageResponse
 )
+from utils.langfuse_utils import chat_service_trace
 
 
 class ChatService:
     """Service class for managing chat operations"""
     
     @staticmethod
+    @chat_service_trace
     def create_chat_session(
         db: Session, 
         user_id: int, 
@@ -74,6 +76,7 @@ class ChatService:
         return [ChatSessionResponse.model_validate(session) for session in sessions]
     
     @staticmethod
+    @chat_service_trace
     def create_chat_message(
         db: Session,
         user_id: int,

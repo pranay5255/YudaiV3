@@ -1,8 +1,6 @@
-# Docker requirements - generated from pyproject.toml
-# Excludes editable installs and hash verification for Docker compatibility
-
 annotated-types==0.7.0
 anyio==3.7.1
+backoff==2.2.1
 certifi==2025.7.9
 charset-normalizer==3.4.2
 click==8.2.1
@@ -10,11 +8,26 @@ fastapi==0.116.1
 fastcore==1.8.5
 ghapi==1.0.6
 gitingest==0.1.4
+googleapis-common-protos==1.70.0
 greenlet==3.2.3
+grpcio==1.74.0
 h11==0.16.0
+httpcore==1.0.9
 httptools==0.6.4
+httpx==0.28.1
 idna==3.10
-packaging==25.0
+importlib-metadata==8.7.0
+langfuse==3.2.1
+opentelemetry-api==1.35.0
+opentelemetry-exporter-otlp==1.35.0
+opentelemetry-exporter-otlp-proto-common==1.35.0
+opentelemetry-exporter-otlp-proto-grpc==1.35.0
+opentelemetry-exporter-otlp-proto-http==1.35.0
+opentelemetry-proto==1.35.0
+opentelemetry-sdk==1.35.0
+opentelemetry-semantic-conventions==0.56b0
+packaging==24.2
+protobuf==6.31.1
 psycopg2-binary==2.9.10
 pydantic==2.11.7
 pydantic-core==2.33.2
@@ -36,3 +49,5 @@ uvicorn==0.35.0
 uvloop==0.21.0
 watchfiles==1.1.0
 websockets==15.0.1
+wrapt==1.17.2
+zipp==3.23.0

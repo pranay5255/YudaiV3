@@ -16,7 +16,8 @@ import requests
 from models import ChatRequest, User, ChatSession, ChatMessage
 from db.database import get_db
 from auth.github_oauth import get_current_user
-from utils.langfuse_utils import daifu_agent_trace, log_llm_generation
+from utils.langfuse_utils import daifu_agent_trace, is_langfuse_enabled
+from langfuse import observe, get_client
 
 # Create FastAPI router
 router = APIRouter(tags=["daifu"])
@@ -68,7 +69,7 @@ Be concise but informative. If you need more specific information, ask clarifyin
         return prompt
     
     @staticmethod
-    @daifu_agent_trace
+    @observe
     async def generate_response(
         user_message: str,
         repo_context: Dict[str, Any],
@@ -107,15 +108,7 @@ Be concise but informative. If you need more specific information, ask clarifyin
             "max_tokens": 1500
         }
         
-        # Log input data for telemetry
-        input_data = {
-            "user_message": user_message[:200],
-            "prompt_length": len(prompt),
-            "repo_name": repo_context.get('repo_details', {}).get('name', 'Unknown'),
-            "conversation_length": len(conversation_history),
-            "model": model,
-            "user_id": user_id
-        }
+        # The @observe decorator will automatically capture input/output
         
         try:
             start_time = time.time()
@@ -136,27 +129,7 @@ Be concise but informative. If you need more specific information, ask clarifyin
             usage = result.get("usage", {})
             tokens_used = usage.get("total_tokens", 0)
             
-            # Log the LLM generation for telemetry
-            output_data = {
-                "response": ai_response[:200],
-                "response_length": len(ai_response),
-                "tokens_used": tokens_used,
-                "execution_time": execution_time
-            }
-            
-            log_llm_generation(
-                name="daifu_agent_chat_response",
-                model=model,
-                input_data=input_data,
-                output_data=output_data,
-                metadata={
-                    "service": "daifu_chat",
-                    "agent": "daifu_user_agent",
-                    "user_id": user_id,
-                    "repo_context": repo_context.get('repo_details', {}).get('name', 'Unknown')
-                },
-                tokens_used=tokens_used
-            )
+            # @observe decorator automatically captures output
             
             return {
                 "response": ai_response,
@@ -167,20 +140,7 @@ Be concise but informative. If you need more specific information, ask clarifyin
             }
             
         except requests.RequestException as e:
-            # Log error for telemetry
-            log_llm_generation(
-                name="daifu_agent_chat_response_error",
-                model=model,
-                input_data=input_data,
-                output_data={"error": str(e)},
-                metadata={
-                    "service": "daifu_chat",
-                    "agent": "daifu_user_agent",
-                    "user_id": user_id,
-                    "error_type": type(e).__name__
-                }
-            )
-            
+            # @observe decorator automatically captures exceptions
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to generate response: {str(e)}"
@@ -230,6 +190,8 @@ async def chat_with_daifu(
             ("Assistant", "Of course! I'd be happy to help you understand the codebase. What specific aspects would you like to explore?")
         ]
         
+        # @observe decorator automatically captures function input
+        
         # Generate response using DaiFu agent
         result = await DaiFuAgent.generate_response(
             user_message=request.message.content,
@@ -238,7 +200,7 @@ async def chat_with_daifu(
             user_id=current_user.id
         )
         
-        return {
+        response_data = {
             "success": True,
             "message": result["response"],
             "metadata": {
@@ -250,7 +212,11 @@ async def chat_with_daifu(
             }
         }
         
+        # @observe decorator automatically captures output
+        return response_data
+        
     except Exception as e:
+        # @observe decorator automatically captures exceptions
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat request failed: {str(e)}"
