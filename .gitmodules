@@ -1,3 +1,6 @@
 [submodule "Yudai-SWE-agent"]
 	path = Yudai-SWE-agent
 	url = https://github.com/pranay5255/Yudai-SWE-agent.git
+[submodule "langfuse"]
+	path = langfuse
+	url = https://github.com/langfuse/langfuse.git

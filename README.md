@@ -25,7 +25,7 @@ YudaiV3 is for anyone who wants to streamline their development workflow and imp
 
 ## ⚙️ Getting Started
 
-You can easily get started with YudaiV3 on your own website with these three simple steps:
+You can easily get started with YudaiV3 with these simple steps:
 
 ### 1. Clone the repository
 
