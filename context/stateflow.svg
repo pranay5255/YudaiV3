@@ -1,0 +1,76 @@
+graph TD
+    %% Frontend Components
+    subgraph "Frontend (React)"
+        A[App.tsx] --> B[AuthContext]
+        A --> C[SessionContext] 
+        A --> D[RepositoryContext]
+        A --> E[Chat Component]
+        A --> F[FileDependencies]
+        A --> G[ContextCards]
+        A --> H[IdeasToImplement]
+        
+        %% State Management
+        B --> B1[Auth State]
+        C --> C1[Session State]
+        D --> D1[Repository State]
+        A --> A1[App State]
+        
+        %% UI Components
+        E --> E1[Message State]
+        E --> E2[Input State]
+        F --> F1[File Tree State]
+        G --> G1[Context Cards State]
+        H --> H1[Ideas State]
+    end
+    
+    %% Backend Services
+    subgraph "Backend (Python/FastAPI)"
+        I[Auth Service]
+        J[Session Service]
+        K[Chat Service]
+        L[Repository Service]
+        M[Issue Service]
+        N[File Analysis Service]
+        
+        %% Database
+        O[(Database)]
+        I --> O
+        J --> O
+        K --> O
+        L --> O
+        M --> O
+        N --> O
+    end
+    
+    %% External Services
+    subgraph "External Services"
+        P[GitHub OAuth]
+        Q[GitHub API]
+        R[AI/LLM Service]
+    end
+    
+    %% Flow Connections
+    B <--> I
+    C <--> J
+    E <--> K
+    D <--> L
+    F <--> N
+    G <--> M
+    H <--> M
+    
+    I <--> P
+    L <--> Q
+    K <--> R
+    M <--> Q
+    M <--> R
+    
+    %% State Transitions
+    B1 -->|"Login"| I
+    B1 -->|"Logout"| I
+    C1 -->|"Create Session"| J
+    C1 -->|"Load Messages"| J
+    E1 -->|"Send Message"| K
+    D1 -->|"Select Repo"| L
+    F1 -->|"Analyze Files"| N
+    G1 -->|"Create Issue"| M
+    H1 -->|"Generate Ideas"| M

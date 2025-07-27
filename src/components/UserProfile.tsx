@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
-import { User, LogOut, ChevronDown, Github, GitBranch } from 'lucide-react';
+import { User, LogOut, ChevronDown, Github, GitBranch, MessageCircle, Plus } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useRepository } from '../contexts/RepositoryContext';
+import { useSession } from '../contexts/SessionContext';
 
 export const UserProfile: React.FC = () => {
   const { user, logout, isLoading } = useAuth();
   const { selectedRepository, clearSelectedRepository } = useRepository();
+  const { currentSession, sessions, createNewSession, switchToSession, updateSessionTitle } = useSession();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
 
   const handleLogout = async () => {
     try {
@@ -112,6 +116,108 @@ export const UserProfile: React.FC = () => {
                   </div>
                 </div>
               )}
+
+              {/* Current Session Information */}
+              <div className="mt-3 pt-3 border-t border-zinc-700">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-fg/70">CURRENT SESSION</span>
+                  <button
+                    onClick={() => {
+                      const sessionId = createNewSession();
+                      switchToSession(sessionId);
+                    }}
+                    className="text-xs text-fg/50 hover:text-fg/70 transition-colors flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" />
+                    New
+                  </button>
+                </div>
+                
+                {currentSession ? (
+                  <div className="p-2 bg-zinc-700/50 rounded">
+                    <div className="flex items-center gap-2">
+                      <MessageCircle className="w-4 h-4 text-primary" />
+                      <div className="flex-1 min-w-0">
+                        {isEditingTitle ? (
+                          <input
+                            type="text"
+                            value={newTitle}
+                            onChange={(e) => setNewTitle(e.target.value)}
+                            onBlur={async () => {
+                              if (newTitle.trim() && newTitle !== currentSession.title) {
+                                try {
+                                  await updateSessionTitle(currentSession.session_id, newTitle);
+                                } catch (err) {
+                                  console.error('Failed to update title:', err);
+                                }
+                              }
+                              setIsEditingTitle(false);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.currentTarget.blur();
+                              }
+                            }}
+                            className="text-xs font-medium text-fg bg-transparent border-none outline-none w-full"
+                            autoFocus
+                          />
+                        ) : (
+                          <p 
+                            className="text-xs font-medium text-fg truncate cursor-pointer"
+                            onClick={() => {
+                              setNewTitle(currentSession.title || '');
+                              setIsEditingTitle(true);
+                            }}
+                          >
+                            {currentSession.title || `Session ${currentSession.session_id.slice(0, 8)}...`}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-xs text-fg/60">
+                            {currentSession.total_messages} messages
+                          </span>
+                          <span className="text-xs text-fg/60">•</span>
+                          <span className="text-xs text-fg/60">
+                            {currentSession.total_tokens} tokens
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-2 bg-zinc-700/50 rounded">
+                    <p className="text-xs text-fg/50">No active session</p>
+                    <p className="text-xs text-fg/40">Start chatting to create one</p>
+                  </div>
+                )}
+                
+                {/* Recent Sessions */}
+                {sessions.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-xs font-medium text-fg/70 mb-1">RECENT SESSIONS</p>
+                    <div className="space-y-1 max-h-32 overflow-y-auto">
+                      {sessions.slice(0, 3).map((session) => (
+                        <button
+                          key={session.session_id}
+                          onClick={() => switchToSession(session.session_id)}
+                          className={`w-full text-left p-1.5 rounded text-xs transition-colors ${
+                            currentSession?.session_id === session.session_id
+                              ? 'bg-primary/20 text-primary'
+                              : 'hover:bg-zinc-600/50 text-fg/70'
+                          }`}
+                        >
+                          <div className="truncate">
+                            {session.title || `Session ${session.session_id.slice(0, 8)}...`}
+                          </div>
+                          <div className="text-xs text-fg/50 mt-0.5">
+                            {session.total_messages} messages
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
               
               {/* Additional Profile Information */}
               <div className="mt-3 pt-3 border-t border-zinc-700">
