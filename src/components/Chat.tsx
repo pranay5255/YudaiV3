@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Send, Plus } from 'lucide-react';
 import { Message, FileItem } from '../types';
 import { ApiService, ChatRequest, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview, UserIssueResponse } from '../services/api';
 import { useRepository } from '../contexts/RepositoryContext';
+import { useSession } from '../contexts/SessionContext';
 
 interface ContextCard {
   id: string;
@@ -43,6 +44,7 @@ export const Chat: React.FC<ChatProps> = ({
   void onCreateIssue;
   
   const { selectedRepository } = useRepository();
+  const { currentSession, createNewSession, sessionMessages, loadSessionMessages } = useSession();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -65,9 +67,50 @@ export const Chat: React.FC<ChatProps> = ({
   ]);
   const [input, setInput] = useState('');
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | undefined>();
   const [isLoading, setIsLoading] = useState(false);
   const [isCreatingIssue, setIsCreatingIssue] = useState(false);
+
+  // Load session messages when current session changes
+  useEffect(() => {
+    if (currentSession) {
+      loadSessionMessages(currentSession.session_id).then(() => {
+        // Convert session messages to Message format and replace the hardcoded messages
+        const convertedMessages: Message[] = sessionMessages.map(msg => ({
+          id: msg.id,
+          content: msg.content,
+          isCode: msg.is_code,
+          timestamp: new Date(msg.timestamp),
+        }));
+        
+        // If we have real messages, replace the welcome messages
+        if (convertedMessages.length > 0) {
+          setMessages(convertedMessages);
+        } else {
+          // Keep welcome messages for new sessions
+          setMessages([
+            {
+              id: '1',
+              content: 'Hi, I am Daifu, your spirit guide across the chaos of context. I will help you create github issues and pull requests by adding the right context required for a given task.You can add the individual text messages to context such as the one below to prioritize text messages in conversations',
+              isCode: false,
+              timestamp: new Date(),
+            },
+            {
+              id: '2',
+              content: `function getSpiritGuideMessage(): string {
+  const messages = [
+    "In the chaos of code, find your inner peace... or just look at cat memes.",
+
+  ];
+  return messages[Math.floor(Math.random() * messages.length)];
+}`,
+              isCode: true,
+              timestamp: new Date(),
+            },
+          ]);
+        }
+      });
+    }
+  }, [currentSession, loadSessionMessages, sessionMessages]);
 
   // Count user messages (messages that are not the initial system messages)
   const userMessageCount = messages.filter(msg => 
@@ -76,6 +119,13 @@ export const Chat: React.FC<ChatProps> = ({
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
+    
+    // Ensure we have a session
+    let sessionId = currentSession?.session_id;
+    if (!sessionId) {
+      sessionId = createNewSession();
+      // Note: The session will be created on the backend when we send the first message
+    }
     
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -93,7 +143,7 @@ export const Chat: React.FC<ChatProps> = ({
     try {
       // Send to Daifu agent
       const request: ChatRequest = {
-        session_id: sessionId,
+        conversation_id: sessionId,
         message: {
           content: currentInput,
           is_code: userMessage.isCode,
@@ -104,9 +154,10 @@ export const Chat: React.FC<ChatProps> = ({
       
       const response = await ApiService.sendChatMessage(request);
       
-      // Update session ID if provided in response
-      if (response.session_id && !sessionId) {
-        setSessionId(response.session_id);
+      // Update current session if not set or if different
+      if (response.session_id && (!currentSession || currentSession.session_id !== response.session_id)) {
+        // We would need to refresh the session list to get the full session data
+        // For now, we'll trust that the backend created the session
       }
       
       // Add Daifu's response
@@ -179,7 +230,7 @@ export const Chat: React.FC<ChatProps> = ({
 
       // Prepare the request
       const request: CreateIssueWithContextRequest = {
-        title: `Issue from Chat Session ${sessionId || 'default'}`,
+        title: `Issue from Chat Session ${currentSession?.session_id || 'default'}`,
         description: 'This issue was generated from a chat conversation with file dependency context.',
         chat_messages: conversationMessages,
         file_context: fileContextItems,

@@ -16,7 +16,7 @@ export interface ChatMessage {
 }
 
 export interface ChatRequest {
-  session_id?: string;
+  conversation_id?: string;
   message: ChatMessage;
   context_cards?: string[];
   repo_owner?: string;
@@ -149,7 +149,7 @@ export class ApiService {
 
   // Daifu Chat Services
   static async sendChatMessage(request: ChatRequest): Promise<ChatResponse> {
-    const response = await fetch(`${API_BASE_URL}/daifu/chat/daifu`, {
+    const response = await fetch(`${API_BASE_URL}/api/daifu/chat/daifu`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
       body: JSON.stringify(request),
@@ -159,7 +159,7 @@ export class ApiService {
   }
 
   static async getChatSessions(): Promise<ChatSession[]> {
-    const response = await fetch(`${API_BASE_URL}/daifu/chat/sessions`, {
+    const response = await fetch(`${API_BASE_URL}/api/daifu/chat/sessions`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });
@@ -168,7 +168,7 @@ export class ApiService {
   }
 
   static async getSessionMessages(sessionId: string): Promise<ChatMessageAPI[]> {
-    const response = await fetch(`${API_BASE_URL}/daifu/chat/sessions/${sessionId}/messages`, {
+    const response = await fetch(`${API_BASE_URL}/api/daifu/chat/sessions/${sessionId}/messages`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });
@@ -177,7 +177,7 @@ export class ApiService {
   }
 
   static async getSessionStatistics(sessionId: string): Promise<ChatSessionStats> {
-    const response = await fetch(`${API_BASE_URL}/daifu/chat/sessions/${sessionId}/statistics`, {
+    const response = await fetch(`${API_BASE_URL}/api/daifu/chat/sessions/${sessionId}/statistics`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });
@@ -185,18 +185,18 @@ export class ApiService {
     return this.handleResponse<ChatSessionStats>(response);
   }
 
-  static async updateSessionTitle(sessionId: string, title: string): Promise<{ success: boolean }> {
-    const response = await fetch(`${API_BASE_URL}/daifu/chat/sessions/${sessionId}/title`, {
+  static async updateSessionTitle(sessionId: string, title: string): Promise<ChatSession> {
+    const response = await fetch(`${API_BASE_URL}/api/daifu/chat/sessions/${sessionId}/title`, {
       method: 'PUT',
       headers: this.getAuthHeaders(),
       body: JSON.stringify({ title }),
     });
 
-    return this.handleResponse<{ success: boolean }>(response);
+    return this.handleResponse<ChatSession>(response);
   }
 
   static async deactivateSession(sessionId: string): Promise<{ success: boolean }> {
-    const response = await fetch(`${API_BASE_URL}/daifu/chat/sessions/${sessionId}`, {
+    const response = await fetch(`${API_BASE_URL}/api/daifu/chat/sessions/${sessionId}`, {
       method: 'DELETE',
       headers: this.getAuthHeaders(),
     });
@@ -205,7 +205,7 @@ export class ApiService {
   }
 
   static async createIssueFromChat(request: CreateIssueFromChatRequest): Promise<{ issue_id: string; github_issue_url?: string }> {
-    const response = await fetch(`${API_BASE_URL}/daifu/chat/create-issue`, {
+    const response = await fetch(`${API_BASE_URL}/api/issues/from-chat`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
       body: JSON.stringify(request),
@@ -310,7 +310,7 @@ export class ApiService {
     previewOnly: boolean = false,
     useSampleData: boolean = true
   ): Promise<IssueCreationResponse> {
-    const response = await fetch(`${API_BASE_URL}/issues/create-with-context?preview_only=${previewOnly}&use_sample_data=${useSampleData}`, {
+    const response = await fetch(`${API_BASE_URL}/api/issues/create-with-context?preview_only=${previewOnly}&use_sample_data=${useSampleData}`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
       body: JSON.stringify(request),
@@ -320,7 +320,7 @@ export class ApiService {
   }
 
   static async createGitHubIssueFromUserIssue(issueId: string): Promise<{ success: boolean; github_url: string; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/issues/${issueId}/create-github-issue`, {
+    const response = await fetch(`${API_BASE_URL}/api/issues/${issueId}/create-github-issue`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
     });
@@ -344,7 +344,7 @@ export class ApiService {
       });
     }
     
-    const response = await fetch(`${API_BASE_URL}/issues/?${params}`, {
+    const response = await fetch(`${API_BASE_URL}/api/issues/?${params}`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });
@@ -353,7 +353,7 @@ export class ApiService {
   }
 
   static async getUserIssue(issueId: string): Promise<UserIssueResponse> {
-    const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
+    const response = await fetch(`${API_BASE_URL}/api/issues/${issueId}`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });
