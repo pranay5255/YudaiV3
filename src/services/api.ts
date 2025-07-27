@@ -8,7 +8,9 @@ import {
   GitHubBranch
 } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// API endpoints use the full VITE_API_URL (includes /api prefix)
+const API_BASE_URL = import.meta.env.VITE_API_URL || 
+  (import.meta.env.DEV ? 'http://localhost:8000' : 'https://yudai.app/api');
 
 export interface ChatMessage {
   content: string;
