@@ -53,9 +53,9 @@ mkdir -p backups
 if [ ! -f ssl/fullchain.pem ] || [ ! -f ssl/privkey.pem ]; then
     print_warning "SSL certificates not found. Please run SSL setup first:"
     echo "sudo certbot certonly --standalone -d yudai.app -d www.yudai.app"
-    echo "sudo cp /etc/letsencrypt/live/yudai.app/fullchain.pem ssl/"
-    echo "sudo cp /etc/letsencrypt/live/yudai.app/privkey.pem ssl/"
-    echo "sudo chown -R yudai:yudai ssl/"
+    echo "sudo cp /etc/letsencrypt/live/yudai.app/fullchain.pem /home/yudai/YudaiV3/ssl/"
+    echo "sudo cp /etc/letsencrypt/live/yudai.app/privkey.pem /home/yudai/YudaiV3/ssl/"
+    echo "sudo chown -R yudai:yudai /home/yudai/YudaiV3/ssl/"
     echo "sudo chmod 600 ssl/*"
     exit 1
 fi

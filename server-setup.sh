@@ -71,12 +71,12 @@ ufw allow 22/tcp
 ufw --force enable
 
 print_status "Creating application directory..."
-mkdir -p /home/yudai/yudai-app
-chown -R yudai:yudai /home/yudai/yudai-app
+mkdir -p /home/yudai/YudaiV3
+chown -R yudai:yudai /home/yudai/YudaiV3
 
 print_status "Setting up log rotation..."
 cat > /etc/logrotate.d/yudai << 'EOF'
-/home/yudai/yudai-app/logs/*.log {
+/home/yudai/YudaiV3/logs/*.log {
     daily
     missingok
     rotate 52
@@ -85,7 +85,7 @@ cat > /etc/logrotate.d/yudai << 'EOF'
     notifempty
     create 644 yudai yudai
     postrotate
-        docker-compose -f /home/yudai/yudai-app/docker-compose.prod.yml restart nginx
+        docker-compose -f /home/yudai/YudaiV3/docker-compose.prod.yml restart nginx
     endscript
 }
 EOF
@@ -102,7 +102,7 @@ mkdir -p $BACKUP_DIR
 docker exec yudai-db pg_dump -U yudai_user yudai_db > $BACKUP_DIR/db_backup_$DATE.sql
 
 # Backup application files
-tar -czf $BACKUP_DIR/app_backup_$DATE.tar.gz -C /home/yudai yudai-app
+tar -czf $BACKUP_DIR/app_backup_$DATE.tar.gz -C /home/yudai YudaiV3
 
 # Keep only last 7 days of backups
 find $BACKUP_DIR -name "*.sql" -mtime +7 -delete
@@ -115,11 +115,11 @@ print_status "Setting up SSL renewal script..."
 cat > /home/yudai/renew-ssl.sh << 'EOF'
 #!/bin/bash
 certbot renew --quiet
-cp /etc/letsencrypt/live/yudai.app/fullchain.pem /home/yudai/yudai-app/ssl/
-cp /etc/letsencrypt/live/yudai.app/privkey.pem /home/yudai/yudai-app/ssl/
-chown -R yudai:yudai /home/yudai/yudai-app/ssl
-chmod 600 /home/yudai/yudai-app/ssl/*
-docker-compose -f /home/yudai/yudai-app/docker-compose.prod.yml restart nginx
+cp /etc/letsencrypt/live/yudai.app/fullchain.pem /home/yudai/YudaiV3/ssl/
+cp /etc/letsencrypt/live/yudai.app/privkey.pem /home/yudai/YudaiV3/ssl/
+chown -R yudai:yudai /home/yudai/YudaiV3/ssl
+chmod 600 /home/yudai/YudaiV3/ssl/*
+docker-compose -f /home/yudai/YudaiV3/docker-compose.prod.yml restart nginx
 EOF
 
 chmod +x /home/yudai/renew-ssl.sh
@@ -138,7 +138,7 @@ Requires=docker.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/home/yudai/yudai-app
+WorkingDirectory=/home/yudai/YudaiV3
 ExecStart=/usr/local/bin/docker-compose -f docker-compose.prod.yml up -d
 ExecStop=/usr/local/bin/docker-compose -f docker-compose.prod.yml down
 User=yudai
@@ -155,12 +155,12 @@ print_status "🎉 Server setup completed!"
 print_status ""
 print_status "Next steps:"
 print_status "1. Switch to yudai user: su - yudai"
-print_status "2. Clone your repository: git clone YOUR_REPO_URL /home/yudai/yudai-app"
-print_status "3. Copy configuration files to /home/yudai/yudai-app/"
+print_status "2. Clone your repository: git clone YOUR_REPO_URL /home/yudai/YudaiV3"
+print_status "3. Copy configuration files to /home/yudai/YudaiV3/"
 print_status "4. Create .env file from .env.example"
 print_status "5. Set up SSL certificates: sudo certbot certonly --standalone -d yudai.app -d www.yudai.app"
-print_status "6. Copy SSL certificates to /home/yudai/yudai-app/ssl/"
-print_status "7. Run deployment: cd /home/yudai/yudai-app && ./deploy.sh"
+print_status "6. Copy SSL certificates to /home/yudai/YudaiV3/ssl/"
+print_status "7. Run deployment: cd /home/yudai/YudaiV3 && ./deploy.sh"
 print_status ""
 print_status "Useful commands:"
 print_status "- View logs: docker-compose -f docker-compose.prod.yml logs -f"

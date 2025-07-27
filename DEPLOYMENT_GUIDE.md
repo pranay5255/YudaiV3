@@ -102,8 +102,8 @@ ufw --force enable
 su - yudai
 
 # Clone your repository
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git /home/yudai/yudai-app
-cd /home/yudai/yudai-app
+git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git /home/yudai/YudaiV3
+cd /home/yudai/YudaiV3
 ```
 
 ### 3.2 Create Environment File
@@ -349,7 +349,7 @@ Before obtaining SSL certificates, ensure:
 apt install -y certbot python3-certbot-nginx
 
 # Create SSL directory
-mkdir -p /home/yudai/yudai-app/ssl
+mkdir -p /home/yudai/YudaiV3/ssl
 ```
 
 ### 4.3 Verify DNS Resolution
@@ -389,15 +389,15 @@ sudo certbot certonly --manual -d "*.yudai.app" -d yudai.app --preferred-challen
 ### 4.5 Copy Certificates to Application Directory
 ```bash
 # Copy certificates to project directory
-cp /etc/letsencrypt/live/yudai.app/fullchain.pem /home/yudai/yudai-app/ssl/
-cp /etc/letsencrypt/live/yudai.app/privkey.pem /home/yudai/yudai-app/ssl/
+cp /etc/letsencrypt/live/yudai.app/fullchain.pem /home/yudai/YudaiV3/ssl/
+cp /etc/letsencrypt/live/yudai.app/privkey.pem /home/yudai/YudaiV3/ssl/
 
 # Set proper permissions
-chown -R yudai:yudai /home/yudai/yudai-app/ssl
-chmod 600 /home/yudai/yudai-app/ssl/*
+chown -R yudai:yudai /home/yudai/YudaiV3/ssl
+chmod 600 /home/yudai/YudaiV3/ssl/*
 
 # Verify certificates are in place
-ls -la /home/yudai/yudai-app/ssl/
+ls -la /home/yudai/YudaiV3/ssl/
 ```
 
 ### 4.6 Troubleshooting SSL Certificate Issues
@@ -543,7 +543,7 @@ nslookup api.yudai.app
 
 ### 6.1 Build and Start Services
 ```bash
-cd /home/yudai/yudai-app
+cd /home/yudai/YudaiV3
 
 # Build and start services
 docker-compose -f docker-compose.prod.yml up -d --build
@@ -573,11 +573,11 @@ curl -I https://yudai.app
 cat > /home/yudai/renew-ssl.sh << 'EOF'
 #!/bin/bash
 certbot renew --quiet
-cp /etc/letsencrypt/live/yudai.app/fullchain.pem /home/yudai/yudai-app/ssl/
-cp /etc/letsencrypt/live/yudai.app/privkey.pem /home/yudai/yudai-app/ssl/
-chown -R yudai:yudai /home/yudai/yudai-app/ssl
-chmod 600 /home/yudai/yudai-app/ssl/*
-docker-compose -f /home/yudai/yudai-app/docker-compose.prod.yml restart nginx
+cp /etc/letsencrypt/live/yudai.app/fullchain.pem /home/yudai/YudaiV3/ssl/
+cp /etc/letsencrypt/live/yudai.app/privkey.pem /home/yudai/YudaiV3/ssl/
+chown -R yudai:yudai /home/yudai/YudaiV3/ssl
+chmod 600 /home/yudai/YudaiV3/ssl/*
+docker-compose -f /home/yudai/YudaiV3/docker-compose.prod.yml restart nginx
 EOF
 
 chmod +x /home/yudai/renew-ssl.sh
@@ -590,7 +590,7 @@ chmod +x /home/yudai/renew-ssl.sh
 ```bash
 # Create log rotation config
 cat > /etc/logrotate.d/yudai << 'EOF'
-/home/yudai/yudai-app/logs/*.log {
+/home/yudai/YudaiV3/logs/*.log {
     daily
     missingok
     rotate 52
@@ -599,7 +599,7 @@ cat > /etc/logrotate.d/yudai << 'EOF'
     notifempty
     create 644 yudai yudai
     postrotate
-        docker-compose -f /home/yudai/yudai-app/docker-compose.prod.yml restart nginx
+        docker-compose -f /home/yudai/YudaiV3/docker-compose.prod.yml restart nginx
     endscript
 }
 EOF
@@ -618,7 +618,7 @@ mkdir -p $BACKUP_DIR
 docker exec yudai-db pg_dump -U yudai_user yudai_db > $BACKUP_DIR/db_backup_$DATE.sql
 
 # Backup application files
-tar -czf $BACKUP_DIR/app_backup_$DATE.tar.gz -C /home/yudai yudai-app
+tar -czf $BACKUP_DIR/app_backup_$DATE.tar.gz -C /home/yudai YudaiV3
 
 # Keep only last 7 days of backups
 find $BACKUP_DIR -name "*.sql" -mtime +7 -delete
@@ -724,7 +724,7 @@ docker-compose -f docker-compose.prod.yml logs -f [service_name]
 docker-compose -f docker-compose.prod.yml restart
 
 # Update application
-cd /home/yudai/yudai-app
+cd /home/yudai/YudaiV3
 git pull
 docker-compose -f docker-compose.prod.yml up -d --build
 ```
