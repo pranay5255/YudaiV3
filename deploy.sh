@@ -106,6 +106,15 @@ else
     print_warning "⚠️  SSL certificate test failed (DNS might not be propagated yet)"
 fi
 
+# Test DNS resolution
+print_status "Testing DNS resolution..."
+if nslookup yudai.app | grep -q "YOUR_VULTR_SERVER_IP"; then
+    print_status "✅ DNS is pointing to correct server"
+else
+    print_warning "⚠️  DNS might not be pointing to correct server"
+    print_warning "Please check GoDaddy DNS settings and ensure yudai.app points to your Vultr IP"
+fi
+
 # Show logs
 print_status "Recent logs:"
 docker-compose -f docker-compose.prod.yml logs --tail=20

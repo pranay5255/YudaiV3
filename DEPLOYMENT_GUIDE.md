@@ -5,9 +5,24 @@ This guide will help you deploy your Yudaiv3 application to Vultr with proper DN
 ## Prerequisites
 
 1. **Vultr Account**: You need a Vultr account with billing set up
-2. **Domain**: Your domain `yudai.app` purchased from GoDaddy
-3. **DNS Records**: The DNS records provided by GoDaddy
+2. **GoDaddy Domain**: Your domain `yudai.app` purchased from GoDaddy
+3. **GoDaddy Account Access**: Access to your GoDaddy dashboard for DNS management
 4. **Git Access**: Your code repository should be accessible
+5. **API Keys**: Your OpenRouter and GitHub API keys for the application
+
+## GoDaddy Domain Management
+
+### Accessing Your Domain
+1. **GoDaddy Login**: Visit [godaddy.com](https://godaddy.com) and sign in
+2. **Domain List**: Navigate to "Domains" → "My Domains"
+3. **Domain Details**: Click on `yudai.app` to access domain management
+4. **DNS Management**: Click "DNS" or "Manage DNS" to configure DNS records
+
+### Important GoDaddy Settings
+- **Domain Lock**: Ensure domain is unlocked for DNS changes
+- **Privacy Protection**: Can be enabled/disabled as needed
+- **Auto-Renewal**: Recommended to enable for continuous service
+- **Nameservers**: Keep default GoDaddy nameservers (don't change to custom nameservers)
 
 ## Step 1: Create Vultr Instance
 
@@ -322,7 +337,13 @@ EOF
 
 ## Step 4: SSL Certificate Setup
 
-### 4.1 Install Certbot
+### 4.1 Prerequisites for SSL Certificate
+Before obtaining SSL certificates, ensure:
+1. **DNS is configured**: Your GoDaddy DNS records must be pointing to your Vultr server IP
+2. **Domain is accessible**: Test that `yudai.app` resolves to your server IP
+3. **Port 80 is open**: Certbot needs port 80 to verify domain ownership
+
+### 4.2 Install Certbot
 ```bash
 # Install Certbot
 apt install -y certbot python3-certbot-nginx
@@ -331,14 +352,29 @@ apt install -y certbot python3-certbot-nginx
 mkdir -p /home/yudai/yudai-app/ssl
 ```
 
-### 4.2 Get SSL Certificate
+### 4.3 Verify DNS Resolution
 ```bash
-# Stop nginx temporarily
-docker-compose -f docker-compose.prod.yml stop nginx
+# Test DNS resolution before getting SSL certificate
+nslookup yudai.app
+nslookup www.yudai.app
 
-# Get certificate
+# Should return your Vultr server IP address
+# If not, wait for DNS propagation or check GoDaddy DNS settings
+```
+
+### 4.4 Get SSL Certificate
+```bash
+# Stop nginx temporarily (if running)
+docker-compose -f docker-compose.prod.yml stop nginx || true
+
+# Get certificate using standalone mode
 certbot certonly --standalone -d yudai.app -d www.yudai.app
 
+# If successful, you'll see a success message with certificate paths
+```
+
+### 4.5 Copy Certificates to Application Directory
+```bash
 # Copy certificates to project directory
 cp /etc/letsencrypt/live/yudai.app/fullchain.pem /home/yudai/yudai-app/ssl/
 cp /etc/letsencrypt/live/yudai.app/privkey.pem /home/yudai/yudai-app/ssl/
@@ -346,29 +382,126 @@ cp /etc/letsencrypt/live/yudai.app/privkey.pem /home/yudai/yudai-app/ssl/
 # Set proper permissions
 chown -R yudai:yudai /home/yudai/yudai-app/ssl
 chmod 600 /home/yudai/yudai-app/ssl/*
+
+# Verify certificates are in place
+ls -la /home/yudai/yudai-app/ssl/
+```
+
+### 4.6 Troubleshooting SSL Certificate Issues
+
+#### **Common Issues and Solutions:**
+
+**Issue 1: "Domain not pointing to this server"**
+```bash
+# Check if domain resolves to your server
+dig yudai.app
+# Should show your Vultr server IP in the ANSWER section
+```
+
+**Issue 2: "Connection refused on port 80"**
+```bash
+# Ensure port 80 is not blocked
+sudo ufw status
+# Should show port 80 as ALLOW
+
+# Check if any service is using port 80
+sudo netstat -tlnp | grep :80
+```
+
+**Issue 3: "DNS propagation not complete"**
+- Wait 15-30 minutes after updating GoDaddy DNS
+- Use online tools like https://www.whatsmydns.net/
+- Try from different locations/networks
+
+**Issue 4: "Rate limit exceeded"**
+- Let's Encrypt has rate limits
+- Wait 1 hour before retrying
+- Use `--dry-run` flag to test without counting against limits:
+```bash
+certbot certonly --standalone -d yudai.app -d www.yudai.app --dry-run
 ```
 
 ## Step 5: DNS Configuration
 
-### 5.1 Configure GoDaddy DNS Records
-In your GoDaddy DNS management panel, add these records:
+### 5.1 Access GoDaddy DNS Management
+1. **Log into GoDaddy**: Go to [godaddy.com](https://godaddy.com) and sign in to your account
+2. **Navigate to Domains**: Click on "Domains" in the top navigation
+3. **Select your domain**: Find and click on `yudai.app` in your domain list
+4. **Access DNS Management**: Click on "DNS" or "Manage DNS" button
 
-**A Records:**
-- `yudai.app` → `YOUR_VULTR_SERVER_IP`
-- `www.yudai.app` → `YOUR_VULTR_SERVER_IP`
+### 5.2 Configure DNS Records in GoDaddy Dashboard
 
-**CNAME Records (if needed):**
-- `api.yudai.app` → `yudai.app`
+#### **Step 1: Remove Default Records (if any)**
+- Look for any existing A records pointing to GoDaddy's default parking page
+- Delete any A records that point to `@` or `yudai.app` with GoDaddy's IP addresses
 
-**Optional:**
-- `*.yudai.app` → `YOUR_VULTR_SERVER_IP` (for subdomains)
+#### **Step 2: Add A Records**
+1. **Click "Add" or "+" button** to add new records
+2. **Select "A" record type**
+3. **Add the following A records:**
 
-### 5.2 Verify DNS Propagation
+   **Record 1:**
+   - **Name/Host**: `@` (or leave blank for root domain)
+   - **Value/Points to**: `YOUR_VULTR_SERVER_IP`
+   - **TTL**: `600` (or default)
+
+   **Record 2:**
+   - **Name/Host**: `www`
+   - **Value/Points to**: `YOUR_VULTR_SERVER_IP`
+   - **TTL**: `600` (or default)
+
+#### **Step 3: Add CNAME Records (Optional)**
+1. **Click "Add" or "+" button**
+2. **Select "CNAME" record type**
+3. **Add the following CNAME record:**
+
+   **Record:**
+   - **Name/Host**: `api`
+   - **Value/Points to**: `yudai.app`
+   - **TTL**: `600` (or default)
+
+#### **Step 4: Add Wildcard Record (Optional)**
+1. **Click "Add" or "+" button**
+2. **Select "A" record type**
+3. **Add wildcard record:**
+
+   **Record:**
+   - **Name/Host**: `*`
+   - **Value/Points to**: `YOUR_VULTR_SERVER_IP`
+   - **TTL**: `600` (or default)
+
+#### **Step 5: Save Changes**
+- Click "Save" or "Save All" to apply the DNS changes
+- Wait for confirmation that changes have been saved
+
+### 5.3 Verify DNS Configuration
+After saving, your DNS records should look like this:
+
+| Type | Name | Value | TTL |
+|------|------|-------|-----|
+| A | @ | YOUR_VULTR_SERVER_IP | 600 |
+| A | www | YOUR_VULTR_SERVER_IP | 600 |
+| CNAME | api | yudai.app | 600 |
+| A | * | YOUR_VULTR_SERVER_IP | 600 |
+
+### 5.4 Test DNS Propagation
 ```bash
-# Check DNS propagation
+# Check DNS propagation from your local machine
 nslookup yudai.app
 nslookup www.yudai.app
+nslookup api.yudai.app
+
+# Or use online tools
+# Visit: https://www.whatsmydns.net/
+# Enter: yudai.app and www.yudai.app
 ```
+
+### 5.5 DNS Propagation Timeline
+- **Local propagation**: 5-30 minutes
+- **Global propagation**: 24-48 hours
+- **Full propagation**: Up to 72 hours
+
+**Note**: You can proceed with SSL certificate setup once local DNS resolution works, but some users worldwide may not see the site until full propagation is complete.
 
 ## Step 6: Deploy Application
 
@@ -491,6 +624,32 @@ openssl s_client -connect yudai.app:443 -servername yudai.app
 3. **Docker build failures**: Check logs with `docker-compose logs`
 4. **Database connection issues**: Verify environment variables
 5. **Frontend not loading**: Check nginx configuration and logs
+
+### GoDaddy-Specific Issues:
+
+#### **DNS Records Not Updating**
+```bash
+# Check current DNS resolution
+dig yudai.app
+dig www.yudai.app
+
+# If still showing old IP or GoDaddy parking page:
+# 1. Verify DNS records in GoDaddy dashboard
+# 2. Clear browser cache and DNS cache
+# 3. Try from different network/location
+# 4. Contact GoDaddy support if issue persists
+```
+
+#### **GoDaddy DNS Management Issues**
+- **Can't edit DNS records**: Ensure domain is unlocked
+- **Changes not saving**: Try refreshing page and re-entering values
+- **Wrong nameservers**: Keep default GoDaddy nameservers, don't change to custom
+- **Domain pointing to parking page**: Remove any A records pointing to GoDaddy's IPs
+
+#### **SSL Certificate with GoDaddy Domain**
+- **Domain verification fails**: Ensure DNS A records are correct
+- **Certificate not issued**: Check that domain resolves to your Vultr server IP
+- **Wildcard certificate issues**: Use specific subdomain certificates instead
 
 ### Useful Commands:
 ```bash
