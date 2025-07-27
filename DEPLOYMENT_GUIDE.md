@@ -135,7 +135,203 @@ DOCKER_COMPOSE=true
 EOF
 ```
 
-### 3.3 Update Docker Compose for Production
+### 3.3 Create Test Nginx Configuration
+```bash
+cat > nginx.test.conf << 'EOF'
+# Test configuration for frontend container only
+server {
+    listen 80;
+    server_name localhost;
+    
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    
+    # Block access to .git directory (SECURITY)
+    location ~ /\.git {
+        deny all;
+        return 403;
+    }
+    
+    # Block access to sensitive files
+    location ~ /\.(env|htaccess|htpasswd) {
+        deny all;
+        return 403;
+    }
+    
+    # Frontend static files
+    location / {
+        root /usr/share/nginx/html;
+        index index.html index.htm;
+        try_files $uri $uri/ /index.html;
+        
+        # Cache static assets
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+    
+    # API endpoints - return 404 for testing (no backend)
+    location /api/ {
+        return 404 "API not available in test mode\n";
+        add_header Content-Type text/plain;
+    }
+    
+    # Health check
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+    
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_comp_level 6;
+    gzip_types 
+        text/plain 
+        text/css 
+        text/xml 
+        text/javascript 
+        application/javascript 
+        application/xml+rss 
+        application/json;
+}
+EOF
+```
+
+### 3.4 Update Dockerfile for Testing Support
+I'll modify the `Dockerfile` instructions in your guide to use a new, dedicated frontend Nginx configuration, which you'll create in the next step.
+
+```bash
+# Update the Dockerfile to support both configurations
+cat > Dockerfile << 'EOF'
+# Multi-stage build for React frontend
+FROM node:18-alpine AS builder
+
+# Install pnpm
+RUN npm install -g pnpm
+
+# Set work directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json pnpm-lock.yaml* ./
+
+# Install dependencies using pnpm
+RUN pnpm install
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN pnpm run build
+
+# Verify build output
+RUN ls -la /app/dist/ && test -f /app/dist/index.html
+
+# Production stage
+FROM nginx:alpine
+
+# Copy built app from builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy nginx configurations
+COPY ./nginx.frontend.conf /etc/nginx/conf.d/default.conf
+
+# Create health endpoint
+RUN echo "healthy" > /usr/share/nginx/html/health
+
+# Set proper permissions
+RUN chmod -R 755 /usr/share/nginx/html
+
+# Expose port
+EXPOSE 80
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost/health || exit 1
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]
+EOF
+```
+
+### 3.5 Create Frontend Nginx Configuration
+This new configuration file, `nginx.frontend.conf`, is a simplified version of the test configuration, which is appropriate for the production frontend service.
+
+```bash
+cat > nginx.frontend.conf << 'EOF'
+server {
+    listen 80;
+    server_name localhost;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    location / {
+        root /usr/share/nginx/html;
+        index index.html index.htm;
+        try_files $uri $uri/ /index.html;
+
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_comp_level 6;
+    gzip_types
+        text/plain
+        text/css
+        text/xml
+        text/javascript
+        application/javascript
+        application/xml+rss
+        application/json;
+}
+EOF
+```
+
+### 3.6 Test Frontend Container in Isolation
+```bash
+# Build frontend container with test configuration
+docker build -t yudai-fe-test .
+
+# Run with test nginx configuration
+docker run -d --name yudai-fe-test -p 8080:80 \
+  -v $(pwd)/nginx.test.conf:/etc/nginx/conf.d/default.conf \
+  yudai-fe-test
+
+# Check if it's running
+docker ps | grep yudai-fe-test
+
+# Test the container
+curl http://localhost:8080/health
+curl http://localhost:8080/
+curl http://localhost:8080/api/test
+
+# Clean up test container
+docker stop yudai-fe-test
+docker rm yudai-fe-test
+```
+
+### 3.7 Update Docker Compose for Production
 Create a production docker-compose file:
 
 ```bash
@@ -246,22 +442,24 @@ networks:
 EOF
 ```
 
-### 3.4 Create Production Nginx Configuration
+### 3.8 Create Production Nginx Configuration
 ```bash
 cat > nginx.prod.conf << 'EOF'
+# HTTP to HTTPS redirect for all domains
 server {
     listen 80;
-    server_name yudai.app www.yudai.app;
+    server_name yudai.app www.yudai.app api.yudai.app dev.yudai.app;
     
     # Redirect HTTP to HTTPS
     return 301 https://$server_name$request_uri;
 }
 
+# Main application server
 server {
     listen 443 ssl http2;
     server_name yudai.app www.yudai.app;
     
-    # SSL Configuration (will be set up with Let's Encrypt)
+    # SSL Configuration
     ssl_certificate /etc/nginx/ssl/fullchain.pem;
     ssl_certificate_key /etc/nginx/ssl/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -277,7 +475,19 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     
-    # Frontend
+    # Block access to .git directory (SECURITY)
+    location ~ /\.git {
+        deny all;
+        return 403;
+    }
+    
+    # Block access to sensitive files
+    location ~ /\.(env|htaccess|htpasswd) {
+        deny all;
+        return 403;
+    }
+    
+    # Frontend static files
     location / {
         proxy_pass http://frontend:80;
         proxy_set_header Host $host;
@@ -286,9 +496,82 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
     
-    # API endpoints
+    # API endpoints - proxy to backend container
     location /api/ {
         proxy_pass http://backend:8000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # CORS headers
+        add_header 'Access-Control-Allow-Origin' 'https://yudai.app' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization' always;
+        add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+        
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' 'https://yudai.app';
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization';
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Type' 'text/plain; charset=utf-8';
+            add_header 'Content-Length' 0;
+            return 204;
+        }
+        
+        # Timeout settings
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+    }
+    
+    # Health check
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+    
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_comp_level 6;
+    gzip_types 
+        text/plain 
+        text/css 
+        text/xml 
+        text/javascript 
+        application/javascript 
+        application/xml+rss 
+        application/json;
+}
+
+# API subdomain server
+server {
+    listen 443 ssl http2;
+    server_name api.yudai.app;
+    
+    # SSL Configuration
+    ssl_certificate /etc/nginx/ssl/fullchain.pem;
+    ssl_certificate_key /etc/nginx/ssl/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    
+    # API endpoints - proxy directly to backend
+    location / {
+        proxy_pass http://backend:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -317,20 +600,44 @@ server {
         return 200 "healthy\n";
         add_header Content-Type text/plain;
     }
+}
+
+# Development subdomain server
+server {
+    listen 443 ssl http2;
+    server_name dev.yudai.app;
     
-    # Gzip compression
-    gzip on;
-    gzip_vary on;
-    gzip_min_length 1024;
-    gzip_comp_level 6;
-    gzip_types 
-        text/plain 
-        text/css 
-        text/xml 
-        text/javascript 
-        application/javascript 
-        application/xml+rss 
-        application/json;
+    # SSL Configuration
+    ssl_certificate /etc/nginx/ssl/fullchain.pem;
+    ssl_certificate_key /etc/nginx/ssl/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    
+    # Security headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    
+    # Development frontend - proxy to frontend container
+    location / {
+        proxy_pass http://frontend:80;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    
+    # Health check
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
 }
 EOF
 ```
@@ -520,19 +827,7 @@ nslookup www.yudai.app
 # Enter: yudai.app, api.yudai.app, dev.yudai.app
 ```
 
-### 5.4 Test DNS Propagation
-```bash
-# Check DNS propagation from your local machine
-nslookup yudai.app
-nslookup www.yudai.app
-nslookup api.yudai.app
-
-# Or use online tools
-# Visit: https://www.whatsmydns.net/
-# Enter: yudai.app and www.yudai.app
-```
-
-### 5.5 DNS Propagation Timeline
+### 5.6 DNS Propagation Timeline
 - **Local propagation**: 5-30 minutes
 - **Global propagation**: 24-48 hours
 - **Full propagation**: Up to 72 hours
@@ -565,9 +860,71 @@ curl -f http://localhost/api/health
 curl -I https://yudai.app
 ```
 
-## Step 7: Monitoring and Maintenance
+## Step 7: Testing Your Deployment
 
-### 7.1 Set up SSL Auto-renewal
+### 7.1 Test Frontend Container in Isolation
+```bash
+# Test frontend container with test configuration
+docker build -t yudai-fe-test .
+docker run -d --name yudai-fe-test -p 8080:80 \
+  -v $(pwd)/nginx.test.conf:/etc/nginx/conf.d/default.conf \
+  yudai-fe-test
+
+# Test the container
+curl http://localhost:8080/health
+curl http://localhost:8080/
+curl http://localhost:8080/api/test
+
+# Clean up
+docker stop yudai-fe-test && docker rm yudai-fe-test
+```
+
+### 7.2 Test Main Application
+- Visit `https://yudai.app`
+- Verify the application loads correctly
+- Test all major functionality
+
+### 7.3 Test API Subdomain
+- Visit `https://api.yudai.app`
+- Test API endpoints:
+```bash
+curl -X GET https://api.yudai.app/health
+curl -X GET https://api.yudai.app/your-endpoint
+```
+
+### 7.4 Test Development Subdomain
+- Visit `https://dev.yudai.app`
+- Verify the development environment loads correctly
+
+### 7.5 Test WWW Subdomain
+- Visit `https://www.yudai.app`
+- Should redirect to or load the same as `https://yudai.app`
+
+### 7.6 Test SSL Certificates
+```bash
+# Check SSL certificates for all domains
+openssl s_client -connect yudai.app:443 -servername yudai.app
+openssl s_client -connect api.yudai.app:443 -servername api.yudai.app
+openssl s_client -connect dev.yudai.app:443 -servername dev.yudai.app
+```
+
+### 7.7 Verify All Subdomains
+```bash
+# Test all subdomains resolve correctly
+nslookup yudai.app
+nslookup www.yudai.app
+nslookup api.yudai.app
+nslookup dev.yudai.app
+
+# Test HTTP to HTTPS redirects
+curl -I http://yudai.app
+curl -I http://api.yudai.app
+curl -I http://dev.yudai.app
+```
+
+## Step 8: Monitoring and Maintenance
+
+### 8.1 Set up SSL Auto-renewal
 ```bash
 # Create renewal script
 cat > /home/yudai/renew-ssl.sh << 'EOF'
@@ -586,7 +943,7 @@ chmod +x /home/yudai/renew-ssl.sh
 (crontab -l 2>/dev/null; echo "0 12 * * * /home/yudai/renew-ssl.sh") | crontab -
 ```
 
-### 7.2 Set up Log Rotation
+### 8.2 Set up Log Rotation
 ```bash
 # Create log rotation config
 cat > /etc/logrotate.d/yudai << 'EOF'
@@ -605,7 +962,7 @@ cat > /etc/logrotate.d/yudai << 'EOF'
 EOF
 ```
 
-### 7.3 Set up Backup Script
+### 8.3 Set up Backup Script
 ```bash
 cat > /home/yudai/backup.sh << 'EOF'
 #!/bin/bash
@@ -631,51 +988,6 @@ chmod +x /home/yudai/backup.sh
 (crontab -l 2>/dev/null; echo "0 2 * * * /home/yudai/backup.sh") | crontab -
 ```
 
-## Step 8: Testing Your Deployment
-
-### 8.1 Test Main Application
-- Visit `https://yudai.app`
-- Verify the application loads correctly
-- Test all major functionality
-
-### 8.2 Test API Subdomain
-- Visit `https://api.yudai.app`
-- Test API endpoints:
-```bash
-curl -X GET https://api.yudai.app/health
-curl -X GET https://api.yudai.app/your-endpoint
-```
-
-### 8.3 Test Development Subdomain
-- Visit `https://dev.yudai.app`
-- Verify the development environment loads correctly
-
-### 8.4 Test WWW Subdomain
-- Visit `https://www.yudai.app`
-- Should redirect to or load the same as `https://yudai.app`
-
-### 8.5 Test SSL Certificates
-```bash
-# Check SSL certificates for all domains
-openssl s_client -connect yudai.app:443 -servername yudai.app
-openssl s_client -connect api.yudai.app:443 -servername api.yudai.app
-openssl s_client -connect dev.yudai.app:443 -servername dev.yudai.app
-```
-
-### 8.6 Verify All Subdomains
-```bash
-# Test all subdomains resolve correctly
-nslookup yudai.app
-nslookup www.yudai.app
-nslookup api.yudai.app
-nslookup dev.yudai.app
-
-# Test HTTP to HTTPS redirects
-curl -I http://yudai.app
-curl -I http://api.yudai.app
-curl -I http://dev.yudai.app
-```
-
 ## Troubleshooting
 
 ### Common Issues:
@@ -685,6 +997,33 @@ curl -I http://dev.yudai.app
 3. **Docker build failures**: Check logs with `docker-compose logs`
 4. **Database connection issues**: Verify environment variables
 5. **Frontend not loading**: Check nginx configuration and logs
+
+### Frontend Container Testing Issues:
+
+#### **Issue: "host not found in upstream 'backend'"**
+**Solution**: Use the test nginx configuration when testing frontend in isolation:
+```bash
+# Build and test with test configuration
+docker build -t yudai-fe-test .
+docker run -d --name yudai-fe-test -p 8080:80 \
+  -v $(pwd)/nginx.test.conf:/etc/nginx/conf.d/default.conf \
+  yudai-fe-test
+
+# Test the container
+curl http://localhost:8080/health
+curl http://localhost:8080/
+curl http://localhost:8080/api/test
+
+# Clean up
+docker stop yudai-fe-test && docker rm yudai-fe-test
+```
+
+#### **Issue: "nginx configuration test failed"**
+**Solution**: Check nginx configuration syntax:
+```bash
+# Test nginx configuration
+docker run --rm -v $(pwd)/nginx.test.conf:/etc/nginx/conf.d/default.conf nginx:alpine nginx -t
+```
 
 ### GoDaddy-Specific Issues:
 
@@ -727,6 +1066,12 @@ docker-compose -f docker-compose.prod.yml restart
 cd /home/yudai/YudaiV3
 git pull
 docker-compose -f docker-compose.prod.yml up -d --build
+
+# Test frontend container
+docker build -t yudai-fe-test .
+docker run -d --name yudai-fe-test -p 8080:80 \
+  -v $(pwd)/nginx.test.conf:/etc/nginx/conf.d/default.conf \
+  yudai-fe-test
 ```
 
 ## Security Considerations
