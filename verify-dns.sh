@@ -71,14 +71,14 @@ else
     print_warning "⚠️  API subdomain (api.yudai.app) is pointing to $API_RESULT"
 fi
 
-# Test wildcard subdomain
-print_info "Testing wildcard subdomain (test.yudai.app)..."
-WILDCARD_RESULT=$(nslookup test.yudai.app 2>/dev/null | grep -A 1 "Name:" | tail -1 | awk '{print $2}')
+# Test development subdomain
+print_info "Testing development subdomain (dev.yudai.app)..."
+DEV_RESULT=$(nslookup dev.yudai.app 2>/dev/null | grep -A 1 "Name:" | tail -1 | awk '{print $2}')
 
-if [ "$WILDCARD_RESULT" = "$VULTR_IP" ]; then
-    print_status "✅ Wildcard subdomain (*.yudai.app) is correctly pointing to $VULTR_IP"
+if [ "$DEV_RESULT" = "$VULTR_IP" ]; then
+    print_status "✅ Development subdomain (dev.yudai.app) is correctly pointing to $VULTR_IP"
 else
-    print_warning "⚠️  Wildcard subdomain (*.yudai.app) is pointing to $WILDCARD_RESULT"
+    print_warning "⚠️  Development subdomain (dev.yudai.app) is pointing to $DEV_RESULT"
 fi
 
 # Test HTTP connectivity
@@ -111,7 +111,7 @@ echo "Vultr Server IP: $VULTR_IP"
 echo "Root Domain: $ROOT_RESULT"
 echo "WWW Subdomain: $WWW_RESULT"
 echo "API Subdomain: $API_RESULT"
-echo "Wildcard Subdomain: $WILDCARD_RESULT"
+echo "Development Subdomain: $DEV_RESULT"
 
 echo ""
 print_info "=== Next Steps ==="

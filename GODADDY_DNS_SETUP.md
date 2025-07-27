@@ -17,10 +17,10 @@
 
 | Type | Name | Value | TTL | Purpose |
 |------|------|-------|-----|---------|
-| A | @ | YOUR_VULTR_IP | 600 | Root domain |
-| A | www | YOUR_VULTR_IP | 600 | WWW subdomain |
-| CNAME | api | yudai.app | 600 | API subdomain |
-| A | * | YOUR_VULTR_IP | 600 | Wildcard subdomains |
+| A | @ | YOUR_VULTR_IP | 1 Hour | Root domain |
+| A | api | YOUR_VULTR_IP | 1 Hour | API subdomain |
+| A | dev | YOUR_VULTR_IP | 1 Hour | Development subdomain |
+| A | www | YOUR_VULTR_IP | 1 Hour | WWW subdomain |
 
 ### Step 4: Save and Verify
 1. Click "Save" or "Save All"
@@ -29,31 +29,35 @@
 
 ## 🔧 Detailed Instructions
 
-### Adding A Records
+### Updating Root Domain A Record
+1. **Find the existing `@` A record** (usually pointing to "WebsiteBuilder Site")
+2. **Click "Edit"** on the `@` A record
+3. **Update the "Data" field** with your Vultr IP address
+4. **Save the changes**
+
+### Adding API Subdomain A Record
 1. Click "Add" or "+" button
 2. Select "A" from record type dropdown
-3. For root domain:
-   - **Name**: `@` (or leave blank)
-   - **Value**: `YOUR_VULTR_SERVER_IP`
-   - **TTL**: `600`
-4. For www subdomain:
-   - **Name**: `www`
-   - **Value**: `YOUR_VULTR_SERVER_IP`
-   - **TTL**: `600`
-
-### Adding CNAME Records
-1. Click "Add" or "+" button
-2. Select "CNAME" from record type dropdown
 3. **Name**: `api`
-4. **Value**: `yudai.app`
-5. **TTL**: `600`
+4. **Value**: `YOUR_VULTR_IP` (e.g., 143.110.123.45)
+5. **TTL**: `1 Hour`
+6. **Click "Save"**
 
-### Adding Wildcard Record
+### Adding Development Subdomain A Record
 1. Click "Add" or "+" button
 2. Select "A" from record type dropdown
-3. **Name**: `*`
-4. **Value**: `YOUR_VULTR_SERVER_IP`
-5. **TTL**: `600`
+3. **Name**: `dev`
+4. **Value**: `YOUR_VULTR_IP` (e.g., 143.110.123.45)
+5. **TTL**: `1 Hour`
+6. **Click "Save"**
+
+### Adding WWW Subdomain A Record
+1. Click "Add" or "+" button
+2. Select "A" from record type dropdown
+3. **Name**: `www`
+4. **Value**: `YOUR_VULTR_IP` (e.g., 143.110.123.45)
+5. **TTL**: `1 Hour`
+6. **Click "Save"**
 
 ## ⚠️ Common Mistakes
 
@@ -84,8 +88,8 @@ nslookup www.yudai.app
 # Test API subdomain
 nslookup api.yudai.app
 
-# Test wildcard subdomain
-nslookup test.yudai.app
+# Test development subdomain
+nslookup dev.yudai.app
 ```
 
 ### Online Testing Tools

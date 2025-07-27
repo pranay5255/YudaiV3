@@ -363,15 +363,28 @@ nslookup www.yudai.app
 ```
 
 ### 4.4 Get SSL Certificate
+
+#### **Option 1: Individual Certificates (Recommended for initial setup)**
 ```bash
 # Stop nginx temporarily (if running)
 docker-compose -f docker-compose.prod.yml stop nginx || true
 
-# Get certificate using standalone mode
-certbot certonly --standalone -d yudai.app -d www.yudai.app
+# Get certificate for main domains
+certbot certonly --standalone -d yudai.app -d www.yudai.app -d api.yudai.app -d dev.yudai.app
 
 # If successful, you'll see a success message with certificate paths
 ```
+
+#### **Option 2: Wildcard Certificate (Advanced)**
+```bash
+# Get wildcard certificate for all subdomains
+sudo certbot certonly --manual -d "*.yudai.app" -d yudai.app --preferred-challenges dns
+
+# Follow the interactive prompts to add DNS TXT records
+# This requires manual DNS verification for each challenge
+```
+
+**Note**: For initial deployment, use Option 1. Option 2 requires manual DNS verification and is more complex.
 
 ### 4.5 Copy Certificates to Application Directory
 ```bash
@@ -429,60 +442,83 @@ certbot certonly --standalone -d yudai.app -d www.yudai.app --dry-run
 3. **Select your domain**: Find and click on `yudai.app` in your domain list
 4. **Access DNS Management**: Click on "DNS" or "Manage DNS" button
 
-### 5.2 Configure DNS Records in GoDaddy Dashboard
+### 5.2 Get Your Vultr Public IP Address
+1. **Log into Vultr Dashboard**: Go to [vultr.com](https://vultr.com) and sign in
+2. **Find your instance**: Locate your Yudaiv3 server instance
+3. **Copy the IP address**: Note down the public IP address (e.g., `143.110.123.45`)
 
-#### **Step 1: Remove Default Records (if any)**
-- Look for any existing A records pointing to GoDaddy's default parking page
-- Delete any A records that point to `@` or `yudai.app` with GoDaddy's IP addresses
+### 5.3 Configure DNS Records in GoDaddy Dashboard
 
-#### **Step 2: Add A Records**
-1. **Click "Add" or "+" button** to add new records
+#### **Step 1: Update Root Domain A Record**
+1. **Find the existing `@` A record** (usually pointing to "WebsiteBuilder Site")
+2. **Click "Edit"** on the `@` A record
+3. **Update the "Data" field** with your Vultr IP address
+4. **Save the changes**
+
+#### **Step 2: Add API Subdomain A Record**
+1. **Click "Add" button** to create a new record
 2. **Select "A" record type**
-3. **Add the following A records:**
+3. **Configure the record:**
 
-   **Record 1:**
-   - **Name/Host**: `@` (or leave blank for root domain)
-   - **Value/Points to**: `YOUR_VULTR_SERVER_IP`
-   - **TTL**: `600` (or default)
+   | Field | Value |
+   |-------|-------|
+   | **Type** | `A` |
+   | **Name** | `api` |
+   | **Value** | `YOUR_VULTR_IP` (e.g., 143.110.123.45) |
+   | **TTL** | `1 Hour` |
 
-   **Record 2:**
-   - **Name/Host**: `www`
-   - **Value/Points to**: `YOUR_VULTR_SERVER_IP`
-   - **TTL**: `600` (or default)
+4. **Click "Save"**
 
-#### **Step 3: Add CNAME Records (Optional)**
-1. **Click "Add" or "+" button**
-2. **Select "CNAME" record type**
-3. **Add the following CNAME record:**
-
-   **Record:**
-   - **Name/Host**: `api`
-   - **Value/Points to**: `yudai.app`
-   - **TTL**: `600` (or default)
-
-#### **Step 4: Add Wildcard Record (Optional)**
-1. **Click "Add" or "+" button**
+#### **Step 3: Add Development Subdomain A Record**
+1. **Click "Add" button** to create another record
 2. **Select "A" record type**
-3. **Add wildcard record:**
+3. **Configure the record:**
 
-   **Record:**
-   - **Name/Host**: `*`
-   - **Value/Points to**: `YOUR_VULTR_SERVER_IP`
-   - **TTL**: `600` (or default)
+   | Field | Value |
+   |-------|-------|
+   | **Type** | `A` |
+   | **Name** | `dev` |
+   | **Value** | `YOUR_VULTR_IP` (e.g., 143.110.123.45) |
+   | **TTL** | `1 Hour` |
 
-#### **Step 5: Save Changes**
-- Click "Save" or "Save All" to apply the DNS changes
-- Wait for confirmation that changes have been saved
+4. **Click "Save"**
 
-### 5.3 Verify DNS Configuration
-After saving, your DNS records should look like this:
+#### **Step 4: Add WWW Subdomain A Record (Optional)**
+1. **Click "Add" button**
+2. **Select "A" record type**
+3. **Configure the record:**
 
-| Type | Name | Value | TTL |
-|------|------|-------|-----|
-| A | @ | YOUR_VULTR_SERVER_IP | 600 |
-| A | www | YOUR_VULTR_SERVER_IP | 600 |
-| CNAME | api | yudai.app | 600 |
-| A | * | YOUR_VULTR_SERVER_IP | 600 |
+   | Field | Value |
+   |-------|-------|
+   | **Type** | `A` |
+   | **Name** | `www` |
+   | **Value** | `YOUR_VULTR_IP` (e.g., 143.110.123.45) |
+   | **TTL** | `1 Hour` |
+
+4. **Click "Save"**
+
+### 5.4 Verify DNS Configuration
+After saving all records, your DNS configuration should look like this:
+
+| Type | Name | Value | TTL | Purpose |
+|------|------|-------|-----|---------|
+| A | @ | YOUR_VULTR_IP | 1 Hour | Root domain |
+| A | api | YOUR_VULTR_IP | 1 Hour | API subdomain |
+| A | dev | YOUR_VULTR_IP | 1 Hour | Development subdomain |
+| A | www | YOUR_VULTR_IP | 1 Hour | WWW subdomain |
+
+### 5.5 Test DNS Propagation
+```bash
+# Test from your local machine
+nslookup yudai.app
+nslookup api.yudai.app
+nslookup dev.yudai.app
+nslookup www.yudai.app
+
+# Or use online tools
+# Visit: https://dnschecker.org
+# Enter: yudai.app, api.yudai.app, dev.yudai.app
+```
 
 ### 5.4 Test DNS Propagation
 ```bash
@@ -597,22 +633,47 @@ chmod +x /home/yudai/backup.sh
 
 ## Step 8: Testing Your Deployment
 
-### 8.1 Test Frontend
+### 8.1 Test Main Application
 - Visit `https://yudai.app`
 - Verify the application loads correctly
 - Test all major functionality
 
-### 8.2 Test Backend API
+### 8.2 Test API Subdomain
+- Visit `https://api.yudai.app`
+- Test API endpoints:
 ```bash
-# Test API endpoints
-curl -X GET https://yudai.app/api/health
-curl -X GET https://yudai.app/api/your-endpoint
+curl -X GET https://api.yudai.app/health
+curl -X GET https://api.yudai.app/your-endpoint
 ```
 
-### 8.3 Test SSL Certificate
+### 8.3 Test Development Subdomain
+- Visit `https://dev.yudai.app`
+- Verify the development environment loads correctly
+
+### 8.4 Test WWW Subdomain
+- Visit `https://www.yudai.app`
+- Should redirect to or load the same as `https://yudai.app`
+
+### 8.5 Test SSL Certificates
 ```bash
-# Check SSL certificate
+# Check SSL certificates for all domains
 openssl s_client -connect yudai.app:443 -servername yudai.app
+openssl s_client -connect api.yudai.app:443 -servername api.yudai.app
+openssl s_client -connect dev.yudai.app:443 -servername dev.yudai.app
+```
+
+### 8.6 Verify All Subdomains
+```bash
+# Test all subdomains resolve correctly
+nslookup yudai.app
+nslookup www.yudai.app
+nslookup api.yudai.app
+nslookup dev.yudai.app
+
+# Test HTTP to HTTPS redirects
+curl -I http://yudai.app
+curl -I http://api.yudai.app
+curl -I http://dev.yudai.app
 ```
 
 ## Troubleshooting

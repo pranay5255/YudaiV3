@@ -39,6 +39,8 @@ services:
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
       - GITHUB_REDIRECT_URI=https://${DOMAIN}/auth/callback
+      - API_DOMAIN=api.${DOMAIN}
+      - DEV_DOMAIN=dev.${DOMAIN}
       - SECRET_KEY=${SECRET_KEY}
       - JWT_SECRET=${JWT_SECRET}
       - NODE_ENV=production
