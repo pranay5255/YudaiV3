@@ -8,16 +8,21 @@ and observability through Langfuse.
 import os
 import time
 import json
+import uuid
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Query
 from sqlalchemy.orm import Session
 import requests
 
-from models import ChatRequest, User, ChatSession, ChatMessage
+from models import (
+    ChatRequest, User, ChatSession, ChatMessage,
+    CreateChatMessageRequest, ChatSessionResponse, ChatMessageResponse
+)
 from db.database import get_db
 from auth.github_oauth import get_current_user
 from utils.langfuse_utils import daifu_agent_trace, is_langfuse_enabled
 from langfuse import observe, get_client
+from issueChatServices.chat_service import ChatService
 
 # Create FastAPI router
 router = APIRouter(tags=["daifu"])
@@ -148,6 +153,7 @@ Be concise but informative. If you need more specific information, ask clarifyin
 
 
 @router.post("/chat")
+@router.post("/chat/daifu")  # Add alias for frontend compatibility
 @daifu_agent_trace
 async def chat_with_daifu(
     request: ChatRequest,
@@ -155,9 +161,29 @@ async def chat_with_daifu(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Chat with DaiFu agent with comprehensive telemetry
+    Chat with DaiFu agent with comprehensive telemetry and session persistence
     """
     try:
+        # Generate session ID if not provided
+        session_id = request.conversation_id or str(uuid.uuid4())
+        
+        # Store user message
+        user_message_id = str(uuid.uuid4())
+        user_tokens = ChatService.count_tokens(request.message.content)
+        
+        user_message_request = CreateChatMessageRequest(
+            session_id=session_id,
+            message_id=user_message_id,
+            message_text=request.message.content,
+            sender_type="user",
+            role="user",
+            is_code=request.message.is_code,
+            tokens=user_tokens,
+            context_cards=request.context_cards or []
+        )
+        
+        ChatService.create_chat_message(db, current_user.id, user_message_request)
+        
         # Mock repository context for testing
         # In a real implementation, this would fetch from GitHub API
         repo_context = {
@@ -183,43 +209,178 @@ async def chat_with_daifu(
             ]
         }
         
-        # Mock conversation history
-        conversation_history = [
-            ("Assistant", "Hello! I'm DaiFu, your development assistant. How can I help you today?"),
-            ("User", "Can you help me understand this codebase?"),
-            ("Assistant", "Of course! I'd be happy to help you understand the codebase. What specific aspects would you like to explore?")
-        ]
-        
-        # @observe decorator automatically captures function input
+        # Get conversation history from database
+        conversation_messages = ChatService.get_chat_messages(db, current_user.id, session_id, limit=10)
+        conversation_history = []
+        for msg in conversation_messages[:-1]:  # Exclude the just-added user message
+            role = "User" if msg.sender_type == "user" else "Assistant"
+            conversation_history.append((role, msg.message_text))
         
         # Generate response using DaiFu agent
+        start_time = time.time()
         result = await DaiFuAgent.generate_response(
             user_message=request.message.content,
             repo_context=repo_context,
             conversation_history=conversation_history,
             user_id=current_user.id
         )
+        processing_time = (time.time() - start_time) * 1000  # Convert to milliseconds
         
+        # Store assistant message
+        assistant_message_id = str(uuid.uuid4())
+        assistant_tokens = ChatService.count_tokens(result["response"])
+        
+        assistant_message_request = CreateChatMessageRequest(
+            session_id=session_id,
+            message_id=assistant_message_id,
+            message_text=result["response"],
+            sender_type="assistant",
+            role="assistant",
+            is_code=False,
+            tokens=assistant_tokens,
+            model_used=result["model"],
+            processing_time=processing_time
+        )
+        
+        ChatService.create_chat_message(db, current_user.id, assistant_message_request)
+        
+        # Return response in expected format
         response_data = {
-            "success": True,
-            "message": result["response"],
-            "metadata": {
-                "tokens_used": result["tokens_used"],
-                "execution_time": result["execution_time"],
-                "model": result["model"],
-                "conversation_id": request.conversation_id,
-                "agent": "daifu"
-            }
+            "reply": result["response"],
+            "message_id": assistant_message_id,
+            "session_id": session_id,
+            "conversation": [],  # V1: Empty array as discussed
+            "processing_time": processing_time
         }
         
-        # @observe decorator automatically captures output
         return response_data
         
     except Exception as e:
-        # @observe decorator automatically captures exceptions
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat request failed: {str(e)}"
+        )
+
+
+# Session Management Endpoints
+
+@router.get("/chat/sessions", response_model=List[ChatSessionResponse])
+@daifu_agent_trace
+async def get_chat_sessions(
+    limit: int = Query(default=50, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all chat sessions for the current user"""
+    try:
+        sessions = ChatService.get_user_chat_sessions(db, current_user.id, limit)
+        return sessions
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get sessions: {str(e)}"
+        )
+
+
+@router.get("/chat/sessions/{session_id}/messages", response_model=List[ChatMessageResponse])
+@daifu_agent_trace
+async def get_session_messages(
+    session_id: str,
+    limit: int = Query(default=100, le=500),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get messages for a specific chat session"""
+    try:
+        messages = ChatService.get_chat_messages(db, current_user.id, session_id, limit)
+        return messages
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get messages: {str(e)}"
+        )
+
+
+@router.get("/chat/sessions/{session_id}/statistics")
+@daifu_agent_trace
+async def get_session_statistics(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get statistics for a specific chat session"""
+    try:
+        stats = ChatService.get_session_statistics(db, current_user.id, session_id)
+        if not stats:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+        return stats
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get statistics: {str(e)}"
+        )
+
+
+@router.put("/chat/sessions/{session_id}/title", response_model=ChatSessionResponse)
+@daifu_agent_trace
+async def update_session_title(
+    session_id: str,
+    title_request: Dict[str, str],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update the title of a chat session"""
+    try:
+        title = title_request.get("title", "").strip()
+        if not title:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Title cannot be empty"
+            )
+        
+        session = ChatService.update_session_title(db, current_user.id, session_id, title)
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+        return session
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update title: {str(e)}"
+        )
+
+
+@router.delete("/chat/sessions/{session_id}")
+@daifu_agent_trace
+async def deactivate_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Deactivate a chat session"""
+    try:
+        success = ChatService.deactivate_session(db, current_user.id, session_id)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to deactivate session: {str(e)}"
         )
 
 
