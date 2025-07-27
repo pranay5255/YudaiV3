@@ -122,11 +122,16 @@ export interface SelectedRepository {
 
 // Chat API types
 export interface ChatSession {
-  id: string;
+  id: number;
+  session_id: string;
   title?: string;
-  created_at: string;
-  updated_at: string;
+  description?: string;
   is_active: boolean;
+  total_messages: number;
+  total_tokens: number;
+  created_at: string;
+  updated_at?: string;
+  last_activity?: string;
 }
 
 export interface ChatSessionStats {
