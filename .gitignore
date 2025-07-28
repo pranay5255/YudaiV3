@@ -3,5 +3,4 @@ node_modules
 .env
 .env.local
 ssl/
-nginx.test.conf
-nginx.prod.conf
+
