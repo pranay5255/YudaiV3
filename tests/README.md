@@ -225,7 +225,7 @@ The tests verify these key endpoints:
 
 For GitHub authentication to work properly, ensure your GitHub OAuth App is configured with:
 
-**Authorization callback URL:** `https://yudai.app/auth/callback`
+**Authorization callback URL:** `https://yudai.app/`
 
 This matches the `GITHUB_REDIRECT_URI` environment variable in your `docker-compose.prod.yml`.
 
