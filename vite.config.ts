@@ -1,9 +1,11 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 import { resolve } from 'path';
+import autoprefixer from 'autoprefixer';
+import cssnano from 'cssnano';
 
 // https://vitejs.dev/config/
-export default defineConfig(({ command, mode }) => {
+export default defineConfig(({ mode }) => {
   const isProduction = mode === 'production';
   
   return {
@@ -16,8 +18,6 @@ export default defineConfig(({ command, mode }) => {
         '@components': resolve(__dirname, 'src/components'),
         '@services': resolve(__dirname, 'src/services'),
         '@contexts': resolve(__dirname, 'src/contexts'),
-        '@utils': resolve(__dirname, 'src/utils'),
-        '@types': resolve(__dirname, 'src/types'),
       },
     },
 
@@ -25,7 +25,6 @@ export default defineConfig(({ command, mode }) => {
     server: {
       port: 5173,
       host: true,
-      open: false,
       strictPort: true,
       // Proxy for development API calls
       proxy: {
@@ -45,89 +44,48 @@ export default defineConfig(({ command, mode }) => {
     // Build optimization
     build: {
       target: 'esnext',
-      minify: isProduction ? 'esbuild' : false,
+      minify: isProduction,
       sourcemap: !isProduction,
       cssMinify: isProduction,
       
-      // Rollup options for production optimization
+      // Simplified rollup options
       rollupOptions: {
         output: {
-          // Manual chunks for better caching
-          manualChunks(id) {
-            // Vendor chunk for node_modules
-            if (id.includes('node_modules')) {
-              // Separate React vendor chunk
-              if (id.includes('react') || id.includes('react-dom')) {
-                return 'react-vendor';
-              }
-              // Other vendor libraries
-              return 'vendor';
-            }
-            
-            // Services chunk
-            if (id.includes('/src/services/')) {
-              return 'services';
-            }
-            
-            // Components chunk (if large)
-            if (id.includes('/src/components/') && !id.includes('.css')) {
-              return 'components';
-            }
+          // Essential chunks only
+          manualChunks: {
+            'react-vendor': ['react', 'react-dom'],
+            'vendor': ['axios', 'lucide-react']
           },
           
-          // Asset file naming
-          assetFileNames: (assetInfo) => {
-            const info = assetInfo.name?.split('.') || [];
-            let extType = info[info.length - 1];
-            
-            if (/png|jpe?g|svg|gif|tiff|bmp|ico/i.test(extType)) {
-              extType = 'images';
-            } else if (/woff2?|eot|ttf|otf/i.test(extType)) {
-              extType = 'fonts';
-            }
-            
-            return `assets/${extType}/[name]-[hash][extname]`;
-          },
-          
+          // Clean asset naming
           chunkFileNames: 'assets/js/[name]-[hash].js',
           entryFileNames: 'assets/js/[name]-[hash].js',
+          assetFileNames: 'assets/[ext]/[name]-[hash].[ext]',
         },
       },
       
-      // Chunk size warning limit
       chunkSizeWarningLimit: 1000,
     },
 
     // Dependency optimization
     optimizeDeps: {
-      include: [
-        'react',
-        'react-dom',
-        'react-router-dom',
-      ],
-      exclude: ['lucide-react'],
+      include: ['react', 'react-dom'],
     },
 
-    // CSS configuration
+    // CSS configuration with ESM imports
     css: {
       devSourcemap: !isProduction,
       postcss: {
-        plugins: isProduction ? [
-          require('autoprefixer'),
-          require('cssnano')({
-            preset: 'default',
-          }),
-        ] : [],
+        plugins: isProduction ? [autoprefixer, cssnano] : [],
       },
     },
 
     // Environment variables
     define: {
-      __APP_VERSION__: JSON.stringify(process.env.npm_package_version),
-      __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+      __DEV__: !isProduction,
     },
 
-    // Preview configuration for production testing
+    // Preview configuration
     preview: {
       port: 4173,
       host: true,
