@@ -56,11 +56,11 @@ app.add_middleware(
 )
 
 # Mount all service routers
-app.include_router(auth_router, prefix="/api/auth", tags=["authentication"])
-app.include_router(github_router, prefix="/api/github", tags=["github"])
-app.include_router(daifu_router, prefix="/api/daifu", tags=["chat"])
-app.include_router(issue_router, prefix="/api/issues", tags=["issues"])
-app.include_router(filedeps_router, prefix="/api/filedeps", tags=["file-dependencies"])
+app.include_router(auth_router, prefix="/auth", tags=["authentication"])
+app.include_router(github_router, prefix="/github", tags=["github"])
+app.include_router(daifu_router, prefix="/daifu", tags=["chat"])
+app.include_router(issue_router, prefix="/issues", tags=["issues"])
+app.include_router(filedeps_router, prefix="/filedeps", tags=["file-dependencies"])
 
 # Add a unified root endpoint
 @app.get("/")
