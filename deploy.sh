@@ -26,12 +26,6 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Check if running as root
-if [[ $EUID -eq 0 ]]; then
-   print_error "This script should not be run as root. Please run as the yudai user."
-   exit 1
-fi
-
 # Check if .env file exists
 if [ ! -f .env ]; then
     print_error ".env file not found. Please create it from .env.example"
