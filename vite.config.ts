@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react-swc';
 import { resolve } from 'path';
 import autoprefixer from 'autoprefixer';
 import cssnano from 'cssnano';
+import tailwindcss from 'tailwindcss';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -76,7 +77,13 @@ export default defineConfig(({ mode }) => {
     css: {
       devSourcemap: !isProduction,
       postcss: {
-        plugins: isProduction ? [autoprefixer, cssnano] : [],
+        plugins: [
+          tailwindcss(),
+          autoprefixer(),
+          cssnano({
+            preset: 'default',
+          }),
+        ],
       },
     },
 
