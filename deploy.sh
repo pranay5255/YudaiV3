@@ -28,7 +28,7 @@ print_error() {
 
 # Check if .env file exists
 if [ ! -f .env ]; then
-    print_error ".env file not found. Please create it from .env.example"
+    print_error ".env file not found. Please create it following the deployment guide"
     exit 1
 fi
 

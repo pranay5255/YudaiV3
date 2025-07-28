@@ -376,7 +376,7 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
-      - GITHUB_REDIRECT_URI=https://${DOMAIN}/auth/callback
+      - GITHUB_REDIRECT_URI=https://${DOMAIN}/
       - SECRET_KEY=${SECRET_KEY}
       - JWT_SECRET=${JWT_SECRET}
       - NODE_ENV=production

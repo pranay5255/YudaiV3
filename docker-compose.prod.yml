@@ -37,7 +37,7 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
-      - GITHUB_REDIRECT_URI=https://yudai.app/auth/callback
+      - GITHUB_REDIRECT_URI=https://yudai.app/
       - API_DOMAIN=api.yudai.app
       - DEV_DOMAIN=dev.yudai.app
       - SECRET_KEY=${SECRET_KEY}
