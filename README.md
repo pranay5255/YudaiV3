@@ -1,7 +1,7 @@
 # YudaiV3
 
 > **Your AI-Powered Assistant for High-Quality GitHub Issues and Pull Requests**
-
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 ---
 
 ## 🚀 What is YudaiV3?
