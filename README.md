@@ -9,7 +9,7 @@
 ![GitHub](https://img.shields.io/badge/github-%23121011.svg?style-for-the-badge&logo=github&logoColor=white)
 ![Ruff](https://img.shields.io/badge/Ruff-Python%20Linter-FF4500?style-for-the-badge&logo=python&logoColor=white)
 
-===============================================================================================================================================================
+==============================================================================================================
 ![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)
 ![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
 ![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=for-the-badge&logo=typescript&logoColor=white)
