@@ -44,8 +44,8 @@ class TabType(str, Enum):
     IDEAS = "ideas"
 
 class FileType(str, Enum):
-    INTERNAL = "internal"
-    EXTERNAL = "external"
+    INTERNAL = "INTERNAL"
+    EXTERNAL = "EXTERNAL"
 
 # ============================================================================
 # SQLALCHEMY MODELS (Database Schema)
@@ -315,6 +315,12 @@ class ChatSession(Base):
     title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
+    # Repository context (new fields for session backbone)
+    repo_owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    repo_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    repo_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    repo_context: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)  # Store repository metadata as JSON
+    
     # Status and statistics
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     total_messages: Mapped[int] = mapped_column(Integer, default=0)
@@ -574,6 +580,39 @@ class ChatMessageResponse(BaseModel):
     updated_at: Optional[datetime] = None
     
     model_config = ConfigDict(from_attributes=True)
+
+# Session Management Models
+class CreateSessionRequest(BaseModel):
+    repo_owner: str = Field(..., min_length=1, max_length=255)
+    repo_name: str = Field(..., min_length=1, max_length=255)
+    repo_branch: Optional[str] = Field("main", max_length=255)
+    title: Optional[str] = Field(None, max_length=255)
+    description: Optional[str] = Field(None)
+
+class SessionResponse(BaseModel):
+    id: int
+    session_id: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    repo_owner: Optional[str] = None
+    repo_name: Optional[str] = None
+    repo_branch: Optional[str] = None
+    repo_context: Optional[Dict[str, Any]] = None
+    is_active: bool
+    total_messages: int
+    total_tokens: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    last_activity: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class SessionContextResponse(BaseModel):
+    """Complete session context including messages and context cards"""
+    session: SessionResponse
+    messages: List[ChatMessageResponse]
+    context_cards: List[str] = Field(default_factory=list)
+    repository_info: Optional[Dict[str, Any]] = None
 
 # User Issue Models
 class CreateUserIssueRequest(BaseModel):
