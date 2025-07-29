@@ -4,13 +4,21 @@ import { resolve } from 'path';
 import autoprefixer from 'autoprefixer';
 import cssnano from 'cssnano';
 import tailwindcss from 'tailwindcss';
+// @ts-expect-error - vite-plugin-eslint has module resolution issues
+import eslint from 'vite-plugin-eslint';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const isProduction = mode === 'production';
   
   return {
-    plugins: [react()],
+    plugins: [
+      react(),
+      eslint({
+        include: ['src/**/*.{ts,tsx}'],
+        exclude: ['node_modules/**', 'dist/**'],
+      }),
+    ],
     
     // Path aliases for cleaner imports
     resolve: {
