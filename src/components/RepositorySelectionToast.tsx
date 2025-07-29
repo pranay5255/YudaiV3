@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, Github, GitBranch, Check, X, Loader2 } from 'lucide-react';
 import { GitHubRepository, GitHubBranch, SelectedRepository } from '../types';
 import { ApiService } from '../services/api';
@@ -24,35 +24,7 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load repositories when toast opens
-  useEffect(() => {
-    if (isOpen) {
-      loadRepositories();
-    }
-  }, [isOpen]);
-
-  // Load branches when repository is selected
-  useEffect(() => {
-    if (selectedRepository) {
-      loadBranches();
-    }
-  }, [selectedRepository]);
-
-  const loadRepositories = async () => {
-    setLoadingRepos(true);
-    setError(null);
-    try {
-      const repos = await ApiService.getUserRepositories();
-      setRepositories(repos);
-    } catch (error) {
-      console.error('Failed to load repositories:', error);
-      setError('Failed to load repositories. Please try again.');
-    } finally {
-      setLoadingRepos(false);
-    }
-  };
-
-  const loadBranches = async () => {
+  const loadBranches = useCallback(async () => {
     if (!selectedRepository) return;
     
     setLoadingBranches(true);
@@ -78,6 +50,34 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
       setError('Failed to load branches. Please try again.');
     } finally {
       setLoadingBranches(false);
+    }
+  }, [selectedRepository]);
+
+  // Load repositories when toast opens
+  useEffect(() => {
+    if (isOpen) {
+      loadRepositories();
+    }
+  }, [isOpen]);
+
+  // Load branches when repository is selected
+  useEffect(() => {
+    if (selectedRepository) {
+      loadBranches();
+    }
+  }, [selectedRepository, loadBranches]);
+
+  const loadRepositories = async () => {
+    setLoadingRepos(true);
+    setError(null);
+    try {
+      const repos = await ApiService.getUserRepositories();
+      setRepositories(repos);
+    } catch (error) {
+      console.error('Failed to load repositories:', error);
+      setError('Failed to load repositories. Please try again.');
+    } finally {
+      setLoadingRepos(false);
     }
   };
 

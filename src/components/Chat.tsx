@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Send, Plus } from 'lucide-react';
 import { Message, FileItem } from '../types';
 import { ApiService, ChatRequest, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview, UserIssueResponse } from '../services/api';
-import { useRepository } from '../contexts/RepositoryContext';
+import { useRepository } from '../hooks/useRepository';
 
 interface ContextCard {
   id: string;

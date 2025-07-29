@@ -2,7 +2,7 @@ import React from 'react';
 import { ChevronDown, User } from 'lucide-react';
 import { ProgressStep } from '../types';
 import { UserProfile } from './UserProfile';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../hooks/useAuth';
 
 interface TopBarProps {
   currentStep: ProgressStep;

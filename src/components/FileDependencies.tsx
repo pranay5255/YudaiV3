@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronRight, ChevronDown, Plus, Folder, File, RefreshCw } from 'lucide-react';
 import { FileItem } from '../types';
-import { useRepository } from '../contexts/RepositoryContext';
+import { useRepository } from '../hooks/useRepository';
 import { ApiService } from '../services/api';
 
 interface FileDependenciesProps {
