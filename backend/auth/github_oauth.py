@@ -11,7 +11,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from urllib.parse import urlencode, parse_qs, urlparse
-import httpx
+import requests
 from fastapi import HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -99,8 +99,7 @@ async def exchange_code_for_token(code: str, state: str) -> Dict[str, Any]:
         "redirect_uri": GITHUB_REDIRECT_URI
     }
     
-    async with httpx.AsyncClient() as client:
-        response = await client.post(GITHUB_TOKEN_URL, headers=headers, json=data)
+    response = requests.post(GITHUB_TOKEN_URL, headers=headers, json=data)
     
     if response.status_code != 200:
         raise GitHubOAuthError(f"Failed to exchange code for token: {response.text}")
@@ -127,8 +126,7 @@ async def get_github_user_info(access_token: str) -> Dict[str, Any]:
         "Accept": "application/vnd.github.v3+json"
     }
     
-    async with httpx.AsyncClient() as client:
-        response = await client.get(GITHUB_USER_API_URL, headers=headers)
+    response = requests.get(GITHUB_USER_API_URL, headers=headers)
     
     if response.status_code != 200:
         raise GitHubOAuthError(f"Failed to get user info: {response.text}")
