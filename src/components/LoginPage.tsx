@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Github, Shield, Zap, Code, Cat, GitBranch, MessageSquare, FileText } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../hooks/useAuth';
 
 export const LoginPage: React.FC = () => {
   const { login, isLoading } = useAuth();
