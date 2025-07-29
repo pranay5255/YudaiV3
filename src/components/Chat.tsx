@@ -1,48 +1,32 @@
 import React, { useState } from 'react';
-import { Send, Plus } from 'lucide-react';
-import { Message, FileItem } from '../types';
-import { ApiService, ChatRequest, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview, UserIssueResponse } from '../services/api';
+import { Send, Plus, MessageSquare, Code, FileText, Trash2 } from 'lucide-react';
+import { Message, ContextCard } from '../types';
+import { ApiService, ChatRequest } from '../services/api';
 import { useRepository } from '../contexts/RepositoryContext';
-
-interface ContextCard {
-  id: string;
-  title: string;
-  description: string;
-  tokens: number;
-  source: string;
-}
-
-interface IssuePreviewData extends GitHubIssuePreview {
-  userIssue?: UserIssueResponse;
-  conversationContext: ChatContextMessage[];
-  fileContext: FileContextItem[];
-  canCreateGitHubIssue: boolean;
-  repositoryInfo?: {
-    owner: string;
-    name: string;
-    branch?: string;
-  };
-}
+import { useSession } from '../contexts/SessionContext';
 
 interface ChatProps {
-  onAddToContext: (content: string) => void;
-  onCreateIssue?: (conversationContext: Message[]) => void; // Made optional for backward compatibility
-  contextCards?: ContextCard[]; // Context cards from other components
-  fileContext?: FileItem[]; // File dependencies context
-  onShowIssuePreview?: (issuePreview: IssuePreviewData) => void; // Callback to show issue preview in modal
+  onAddToContext: (message: Message) => void;
+  onCreateIssue?: () => void; // Keep for backward compatibility but mark as unused
+  contextCards?: ContextCard[];
+  fileContext?: Record<string, unknown>[];
+  onShowIssuePreview?: (previewData: Record<string, unknown>) => void;
 }
 
 export const Chat: React.FC<ChatProps> = ({ 
   onAddToContext, 
   onCreateIssue, // Keep for backward compatibility but mark as unused
   contextCards = [],
-  fileContext = [],
+  fileContext: _fileContext = [], // Mark as unused
   onShowIssuePreview 
 }) => {
   // Suppress the unused variable warning by referencing it
   void onCreateIssue;
+  void _fileContext;
   
-  const { selectedRepository } = useRepository();
+  const { selectedRepository: _selectedRepository } = useRepository();
+  void _selectedRepository;
+  const { currentSessionId } = useSession();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -65,14 +49,13 @@ export const Chat: React.FC<ChatProps> = ({
   ]);
   const [input, setInput] = useState('');
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | undefined>();
   const [isLoading, setIsLoading] = useState(false);
   const [isCreatingIssue, setIsCreatingIssue] = useState(false);
 
   // Count user messages (messages that are not the initial system messages)
-  const userMessageCount = messages.filter(msg => 
-    msg.id !== '1' && msg.id !== '2'
-  ).length;
+  // const userMessageCount = messages.filter(msg => 
+  //   msg.id !== '1' && msg.id !== '2'
+  // ).length;
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
@@ -93,7 +76,7 @@ export const Chat: React.FC<ChatProps> = ({
     try {
       // Send to Daifu agent
       const request: ChatRequest = {
-        session_id: sessionId,
+        conversation_id: currentSessionId || undefined, // Fixed: use conversation_id instead of session_id
         message: {
           content: currentInput,
           is_code: userMessage.isCode,
@@ -103,11 +86,6 @@ export const Chat: React.FC<ChatProps> = ({
       };
       
       const response = await ApiService.sendChatMessage(request);
-      
-      // Update session ID if provided in response
-      if (response.session_id && !sessionId) {
-        setSessionId(response.session_id);
-      }
       
       // Add Daifu's response
       const daifuMessage: Message = {
@@ -151,73 +129,35 @@ export const Chat: React.FC<ChatProps> = ({
     }
   };
 
-  const handleCreateGitHubIssue = async () => {
-    if (isCreatingIssue) return;
-    
+  const handleAddToContext = (message: Message) => {
+    onAddToContext(message);
+  };
+
+  const handleCreateIssueFromChat = async () => {
+    if (!currentSessionId) {
+      console.error('No active session for issue creation');
+      return;
+    }
+
     setIsCreatingIssue(true);
-    
     try {
-      // Filter out system messages and convert to ChatContextMessage format
-      const conversationMessages: ChatContextMessage[] = messages
-        .filter(msg => msg.id !== '1' && msg.id !== '2')
-        .map(msg => ({
-          id: msg.id,
-          content: msg.content,
-          isCode: msg.isCode,
-          timestamp: msg.timestamp.toISOString()
-        }));
+      // Use the enhanced session-based issue creation
+      const userIssue = await ApiService.createIssueFromSessionEnhanced({
+        session_id: currentSessionId,
+        title: 'Issue from Chat Session',
+        description: 'Issue created from chat conversation',
+        priority: 'medium',
+        use_code_inspector: true,
+        create_github_issue: false
+      });
 
-      // Convert file context to FileContextItem format
-      const fileContextItems: FileContextItem[] = fileContext.map(file => ({
-        id: file.id,
-        name: file.name,
-        type: file.type,
-        tokens: file.tokens,
-        category: file.Category,
-        path: file.path
-      }));
-
-      // Prepare the request
-      const request: CreateIssueWithContextRequest = {
-        title: `Issue from Chat Session ${sessionId || 'default'}`,
-        description: 'This issue was generated from a chat conversation with file dependency context.',
-        chat_messages: conversationMessages,
-        file_context: fileContextItems,
-        repository_info: selectedRepository ? {
-          owner: selectedRepository.repository.full_name.split('/')[0],
-          name: selectedRepository.repository.full_name.split('/')[1],
-          branch: selectedRepository.branch
-        } : undefined,
-        priority: 'medium'
-      };
-
-      // Create issue preview
-      const response = await ApiService.createIssueWithContext(request, true, true);
+      console.log('Issue created successfully:', userIssue);
       
-      if (response.success && onShowIssuePreview) {
-        // Show the issue preview in the DiffModal
-        onShowIssuePreview({
-          ...response.github_preview,
-          userIssue: response.user_issue,
-          conversationContext: conversationMessages,
-          fileContext: fileContextItems,
-          canCreateGitHubIssue: !!selectedRepository,
-          repositoryInfo: request.repository_info
-        });
+      if (onShowIssuePreview) {
+        onShowIssuePreview(userIssue as unknown as Record<string, unknown>);
       }
-      
     } catch (error) {
-      console.error('Failed to create GitHub issue:', error);
-      
-      // Add error message to chat
-      const errorMessage: Message = {
-        id: Date.now().toString(),
-        content: `Failed to create GitHub issue: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        isCode: false,
-        timestamp: new Date(),
-      };
-      
-      setMessages(prev => [...prev, errorMessage]);
+      console.error('Failed to create issue from chat:', error);
     } finally {
       setIsCreatingIssue(false);
     }
@@ -225,91 +165,131 @@ export const Chat: React.FC<ChatProps> = ({
 
   return (
     <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-zinc-800">
+        <div className="flex items-center gap-2">
+          <MessageSquare className="w-5 h-5 text-primary" />
+          <h2 className="text-lg font-semibold">Chat with Daifu</h2>
+        </div>
+        <div className="flex items-center gap-2">
+          {currentSessionId && (
+            <div className="text-xs text-fg/60 bg-zinc-800/50 px-2 py-1 rounded">
+              Session: {currentSessionId.substring(0, 8)}...
+            </div>
+          )}
+          <button
+            onClick={handleCreateIssueFromChat}
+            disabled={isCreatingIssue || !currentSessionId}
+            className="flex items-center gap-2 px-3 py-1.5 bg-primary hover:bg-primary/80 text-white rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isCreatingIssue ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" />
+                <span>Creating...</span>
+              </>
+            ) : (
+              <>
+                <Plus className="w-4 h-4" />
+                <span>Create Issue</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((message) => (
           <div
             key={message.id}
-            className="group relative"
+            className={`flex gap-3 ${
+              message.isCode ? 'bg-zinc-800/50 rounded-lg p-3' : ''
+            }`}
             onMouseEnter={() => setHoveredMessage(message.id)}
             onMouseLeave={() => setHoveredMessage(null)}
           >
-            <div className={`
-              p-4 rounded-xl
-              ${message.isCode 
-                ? 'bg-zinc-900 border border-zinc-800' 
-                : 'bg-zinc-800/50'
-              }
-            `}>
+            <div className="flex-shrink-0 w-8 h-8 bg-primary rounded-full flex items-center justify-center">
               {message.isCode ? (
-                <pre className="text-sm text-fg font-mono overflow-x-auto">
-                  <code>{message.content}</code>
-                </pre>
+                <Code className="w-4 h-4 text-white" />
               ) : (
-                <p className="text-fg prose dark:prose-invert max-w-none">
-                  {message.content}
-                </p>
+                <FileText className="w-4 h-4 text-white" />
               )}
             </div>
-            
-            {/* Add to Context Button */}
-            {hoveredMessage === message.id && (
-              <button
-                onClick={() => onAddToContext(message.content)}
-                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 
-                         transition-opacity duration-200 bg-primary hover:bg-primary/80 
-                         text-white p-1 rounded text-xs flex items-center gap-1"
-              >
-                <Plus className="w-3 h-3" />
-                Add to Context
-              </button>
-            )}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-sm font-medium text-fg">
+                  {message.isCode ? 'Code' : 'Message'}
+                </span>
+                <span className="text-xs text-fg/60">
+                  {message.timestamp.toLocaleTimeString()}
+                </span>
+              </div>
+              <div className="text-sm text-fg/90 whitespace-pre-wrap">
+                {message.content}
+              </div>
+              
+              {/* Action buttons on hover */}
+              {hoveredMessage === message.id && (
+                <div className="flex items-center gap-2 mt-2">
+                  <button
+                    onClick={() => handleAddToContext(message)}
+                    className="flex items-center gap-1 px-2 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 rounded transition-colors"
+                  >
+                    <Plus className="w-3 h-3" />
+                    Add to Context
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMessages(prev => prev.filter(m => m.id !== message.id));
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 text-xs bg-red-600 hover:bg-red-500 rounded transition-colors"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         ))}
+        
+        {isLoading && (
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+            </div>
+            <div className="text-sm text-fg/60">Daifu is thinking...</div>
+          </div>
+        )}
       </div>
 
       {/* Input */}
       <div className="p-4 border-t border-zinc-800">
         <div className="flex gap-2">
-          <input
-            type="text"
+          <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Type your message... Use /add to add context"
-            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 
-                     text-fg placeholder-fg/50 focus:outline-none focus:ring-2 
-                     focus:ring-primary focus:border-transparent"
+            placeholder="Type your message here... Use backticks for code blocks"
+            className="flex-1 p-3 bg-zinc-800 border border-zinc-700 rounded-lg text-fg placeholder-fg/50 resize-none focus:outline-none focus:border-primary"
+            rows={3}
+            disabled={isLoading}
           />
           <button
             onClick={handleSend}
             disabled={!input.trim() || isLoading}
-            className="bg-primary hover:bg-primary/80 disabled:opacity-50 
-                     disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg 
-                     transition-colors flex items-center gap-2"
+            className="px-4 py-3 bg-primary hover:bg-primary/80 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isLoading ? (
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-            ) : (
-              <Send className="w-4 h-4" />
-            )}
+            <Send className="w-5 h-5" />
           </button>
-          {userMessageCount >= 2 && (
-            <button
-              onClick={handleCreateGitHubIssue}
-              disabled={isCreatingIssue}
-              className="bg-green-600 hover:bg-green-700 disabled:opacity-50 
-                       disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg 
-                       transition-colors flex items-center gap-2"
-            >
-              {isCreatingIssue ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-              ) : (
-                'Create Github Issue'
-              )}
-            </button>
-          )}
         </div>
+        
+        {/* Context Cards Info */}
+        {contextCards.length > 0 && (
+          <div className="mt-2 text-xs text-fg/60">
+            {contextCards.length} context card{contextCards.length !== 1 ? 's' : ''} available
+          </div>
+        )}
       </div>
     </div>
   );

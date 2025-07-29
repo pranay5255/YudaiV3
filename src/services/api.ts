@@ -16,7 +16,7 @@ export interface ChatMessage {
 }
 
 export interface ChatRequest {
-  session_id?: string;
+  conversation_id?: string; // Changed from session_id to match backend expectation
   message: ChatMessage;
   context_cards?: string[];
   repo_owner?: string;
@@ -59,6 +59,15 @@ export interface CreateIssueWithContextRequest {
     branch?: string;
   };
   priority?: string;
+}
+
+export interface CreateIssueFromSessionRequest {
+  session_id: string;
+  title: string;
+  description?: string;
+  priority?: string;
+  use_code_inspector?: boolean;
+  create_github_issue?: boolean;
 }
 
 export interface GitHubIssuePreview {
@@ -107,6 +116,8 @@ export interface UserIssueResponse {
   agent_response?: string;
   processing_time?: number;
   tokens_used: number;
+  complexity_score?: string;
+  estimated_hours?: number;
   github_issue_url?: string;
   github_issue_number?: number;
   created_at: string;
@@ -156,6 +167,47 @@ export class ApiService {
     });
 
     return this.handleResponse<ChatResponse>(response);
+  }
+
+  static async createOrGetSession(
+    repoOwner: string,
+    repoName: string,
+    repoBranch: string = 'main',
+    title?: string,
+    description?: string
+  ): Promise<ChatSession> {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({
+        repo_owner: repoOwner,
+        repo_name: repoName,
+        repo_branch: repoBranch,
+        title,
+        description
+      }),
+    });
+
+    return this.handleResponse<ChatSession>(response);
+  }
+
+  static async getSessionContext(sessionId: string): Promise<{
+    session: ChatSession;
+    messages: ChatMessageAPI[];
+    context_cards: string[];
+    repository_info?: Record<string, unknown>;
+  }> {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<{
+      session: ChatSession;
+      messages: ChatMessageAPI[];
+      context_cards: string[];
+      repository_info?: Record<string, unknown>;
+    }>(response);
   }
 
   static async getChatSessions(): Promise<ChatSession[]> {
@@ -308,8 +360,56 @@ export class ApiService {
   static async createIssueWithContext(
     request: CreateIssueWithContextRequest, 
     previewOnly: boolean = false,
-    useSampleData: boolean = true
+    useSampleData: boolean = true,
+    sessionId?: string  // Optional session ID for enhanced creation
   ): Promise<IssueCreationResponse> {
+    // If session ID is provided, use the enhanced session-based endpoint
+    if (sessionId) {
+      const sessionRequest: CreateIssueFromSessionRequest = {
+        session_id: sessionId,
+        title: request.title,
+        description: request.description,
+        priority: request.priority || 'medium',
+        use_code_inspector: true,
+        create_github_issue: false  // Default to false for safety
+      };
+      
+      try {
+        const userIssue = await this.createIssueFromSessionEnhanced(sessionRequest);
+        
+        // Convert UserIssueResponse to IssueCreationResponse format
+        const issueCreationResponse: IssueCreationResponse = {
+          success: true,
+          preview_only: false,
+          github_preview: {
+            title: userIssue.title,
+            body: userIssue.issue_text_raw,
+            labels: ['yudai-assistant', 'session-generated'],
+            assignees: [],
+            repository_info: userIssue.repo_owner && userIssue.repo_name ? {
+              owner: userIssue.repo_owner,
+              name: userIssue.repo_name
+            } : undefined,
+            metadata: {
+              chat_messages_count: 0, // Would need to be calculated from session
+              file_context_count: 0,
+              total_tokens: userIssue.tokens_used,
+              generated_at: userIssue.created_at,
+              generation_method: 'session_enhanced'
+            }
+          },
+          user_issue: userIssue,
+          message: `Issue created successfully with ID: ${userIssue.issue_id}`
+        };
+        
+        return issueCreationResponse;
+      } catch (error) {
+        // Fall back to original method if enhanced creation fails
+        console.warn('Enhanced session-based issue creation failed, falling back to original method:', error);
+      }
+    }
+    
+    // Original implementation for non-session-based creation
     const response = await fetch(`${API_BASE_URL}/issues/create-with-context?preview_only=${previewOnly}&use_sample_data=${useSampleData}`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
@@ -317,6 +417,36 @@ export class ApiService {
     });
 
     return this.handleResponse<IssueCreationResponse>(response);
+  }
+
+  static async createIssueFromSessionEnhanced(
+    request: CreateIssueFromSessionRequest
+  ): Promise<UserIssueResponse> {
+    const response = await fetch(`${API_BASE_URL}/issues/from-session-enhanced`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return this.handleResponse<UserIssueResponse>(response);
+  }
+
+  static async createGitHubIssueFromSession(
+    sessionId: string,
+    title: string,
+    description?: string,
+    priority: string = 'medium'
+  ): Promise<UserIssueResponse> {
+    const request: CreateIssueFromSessionRequest = {
+      session_id: sessionId,
+      title,
+      description,
+      priority,
+      use_code_inspector: true,
+      create_github_issue: true  // This will create the actual GitHub issue
+    };
+
+    return this.createIssueFromSessionEnhanced(request);
   }
 
   static async createGitHubIssueFromUserIssue(issueId: string): Promise<{ success: boolean; github_url: string; message: string }> {
