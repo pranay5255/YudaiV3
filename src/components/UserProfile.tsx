@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User, LogOut, ChevronDown, Github, GitBranch } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
-import { useRepository } from '../contexts/RepositoryContext';
+import { useAuth } from '../hooks/useAuth';
+import { useRepository } from '../hooks/useRepository';
 
 export const UserProfile: React.FC = () => {
   const { user, logout, isLoading } = useAuth();
