@@ -19,7 +19,6 @@ dependencies = [
     "sqlalchemy>=2.0.41",
     "psycopg2-binary>=2.9.10",
     "ghapi>=1.0.6",
-    "httpx>=0.28.1",
 ]
 
 [project.optional-dependencies]

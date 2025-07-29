@@ -11,8 +11,8 @@ import { ToastContainer } from './components/Toast';
 import { RepositorySelectionToast } from './components/RepositorySelectionToast';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { ContextCard, FileItem, IdeaItem, Toast, ProgressStep, TabType, SelectedRepository } from './types';
-import { useAuth } from './hooks/useAuth';
-import { useRepository } from './hooks/useRepository';
+import { useAuth } from './contexts/AuthContext';
+import { useRepository } from './contexts/RepositoryContext';
 import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, UserIssueResponse } from './services/api';
 
 // Interface for issue preview data (matching DiffModal expectations)
@@ -160,6 +160,7 @@ function App() {
       }
     } catch (error) {
       addToast('Failed to generate issue preview', 'error');
+      // eslint-disable-next-line no-console
       console.error('Failed to create GitHub issue from context cards:', error);
     }
   };

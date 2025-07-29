@@ -1,14 +1,6 @@
 import { User, LoginResponse, AuthConfig } from '../types';
 
-// Get base URL and remove /api suffix for auth endpoints  
-const getAuthBaseURL = () => {
-  const apiUrl = import.meta.env.VITE_API_URL || 
-    (import.meta.env.DEV ? 'http://localhost:8000' : 'https://yudai.app/api');
-  // Remove the .replace('/api', '') line
-  return apiUrl;
-};
-
-const AUTH_BASE_URL = getAuthBaseURL();
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export class AuthService {
   private static getAuthHeaders(): HeadersInit {
@@ -21,7 +13,7 @@ export class AuthService {
 
   // GitHub OAuth login - redirects to GitHub
   static async login(): Promise<void> {
-    window.location.href = `${AUTH_BASE_URL}/auth/login`;
+    window.location.href = `${API_BASE_URL}/auth/login`;
   }
 
   // Handle OAuth callback
@@ -29,7 +21,7 @@ export class AuthService {
     const params = new URLSearchParams({ code });
     if (state) params.append('state', state);
     
-    const response = await fetch(`${AUTH_BASE_URL}/auth/callback?${params}`, {
+    const response = await fetch(`${API_BASE_URL}/auth/callback?${params}`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });
@@ -60,7 +52,7 @@ export class AuthService {
 
   // Get current user profile
   static async getProfile(): Promise<User> {
-    const response = await fetch(`${AUTH_BASE_URL}/auth/profile`, {
+    const response = await fetch(`${API_BASE_URL}/auth/profile`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });
@@ -79,7 +71,7 @@ export class AuthService {
   // Logout user
   static async logout(): Promise<void> {
     try {
-      await fetch(`${AUTH_BASE_URL}/auth/logout`, {
+      await fetch(`${API_BASE_URL}/auth/logout`, {
         method: 'POST',
         headers: this.getAuthHeaders(),
       });
@@ -100,7 +92,7 @@ export class AuthService {
     }
 
     try {
-      const response = await fetch(`${AUTH_BASE_URL}/auth/status`, {
+      const response = await fetch(`${API_BASE_URL}/auth/status`, {
         method: 'GET',
         headers: this.getAuthHeaders(),
       });
@@ -126,7 +118,7 @@ export class AuthService {
 
   // Get auth configuration
   static async getAuthConfig(): Promise<AuthConfig> {
-    const response = await fetch(`${AUTH_BASE_URL}/auth/config`, {
+    const response = await fetch(`${API_BASE_URL}/auth/config`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

@@ -44,8 +44,8 @@ class TabType(str, Enum):
     IDEAS = "ideas"
 
 class FileType(str, Enum):
-    INTERNAL = "internal"
-    EXTERNAL = "external"
+    INTERNAL = "INTERNAL"
+    EXTERNAL = "EXTERNAL"
 
 # ============================================================================
 # SQLALCHEMY MODELS (Database Schema)
@@ -315,6 +315,12 @@ class ChatSession(Base):
     title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
+    # Repository context (new fields for session backbone)
+    repo_owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    repo_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    repo_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    repo_context: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)  # Store repository metadata as JSON
+    
     # Status and statistics
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     total_messages: Mapped[int] = mapped_column(Integer, default=0)
@@ -385,10 +391,17 @@ class UserIssue(Base):
     
     # Processing metadata
     priority: Mapped[str] = mapped_column(String(20), default="medium")  # low, medium, high
-    status: Mapped[str] = mapped_column(String(50), default="pending")  # pending, processing, completed, failed
-    agent_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="pending")  # pending, ready_for_swe, swe_processing, completed, failed, cancelled
+    agent_response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Code inspector analysis or SWE execution plan
     processing_time: Mapped[Optional[float]] = mapped_column(nullable=True)
     tokens_used: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # SWE Agent integration
+    swe_agent_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # not_started, running, completed, failed
+    swe_execution_plan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON execution plan for SWE agent
+    swe_result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # SWE agent execution result
+    complexity_score: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)  # S, M, L, XL
+    estimated_hours: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # Estimated effort in hours
     
     # GitHub integration
     github_issue_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
@@ -568,6 +581,39 @@ class ChatMessageResponse(BaseModel):
     
     model_config = ConfigDict(from_attributes=True)
 
+# Session Management Models
+class CreateSessionRequest(BaseModel):
+    repo_owner: str = Field(..., min_length=1, max_length=255)
+    repo_name: str = Field(..., min_length=1, max_length=255)
+    repo_branch: Optional[str] = Field("main", max_length=255)
+    title: Optional[str] = Field(None, max_length=255)
+    description: Optional[str] = Field(None)
+
+class SessionResponse(BaseModel):
+    id: int
+    session_id: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    repo_owner: Optional[str] = None
+    repo_name: Optional[str] = None
+    repo_branch: Optional[str] = None
+    repo_context: Optional[Dict[str, Any]] = None
+    is_active: bool
+    total_messages: int
+    total_tokens: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    last_activity: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class SessionContextResponse(BaseModel):
+    """Complete session context including messages and context cards"""
+    session: SessionResponse
+    messages: List[ChatMessageResponse]
+    context_cards: List[str] = Field(default_factory=list)
+    repository_info: Optional[Dict[str, Any]] = None
+
 # User Issue Models
 class CreateUserIssueRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
@@ -601,6 +647,12 @@ class UserIssueResponse(BaseModel):
     agent_response: Optional[str] = None
     processing_time: Optional[float] = None
     tokens_used: int
+    # SWE Agent fields
+    swe_agent_status: Optional[str] = None
+    swe_execution_plan: Optional[str] = None
+    swe_result: Optional[str] = None
+    complexity_score: Optional[str] = None
+    estimated_hours: Optional[int] = None
     github_issue_url: Optional[str] = None
     github_issue_number: Optional[int] = None
     created_at: datetime

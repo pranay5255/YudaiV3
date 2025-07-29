@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { User, LogOut, ChevronDown, Github, GitBranch } from 'lucide-react';
-import { useAuth } from '../hooks/useAuth';
-import { useRepository } from '../hooks/useRepository';
+import { User, LogOut, ChevronDown, Github, GitBranch, Hash } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { useRepository } from '../contexts/RepositoryContext';
+import { useSession } from '../contexts/SessionContext';
 
 export const UserProfile: React.FC = () => {
   const { user, logout, isLoading } = useAuth();
   const { selectedRepository, clearSelectedRepository } = useRepository();
+  const { currentSessionId, isLoading: sessionLoading } = useSession();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
@@ -85,6 +87,29 @@ export const UserProfile: React.FC = () => {
                   )}
                 </div>
               </div>
+              
+              {/* Current Session Information */}
+              {currentSessionId && (
+                <div className="mt-3 pt-3 border-t border-zinc-700">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-fg/70">ACTIVE SESSION</span>
+                    {sessionLoading && (
+                      <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary" />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 p-2 bg-zinc-700/50 rounded">
+                    <Hash className="w-4 h-4 text-primary" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-fg truncate">
+                        Session ID
+                      </p>
+                      <p className="text-xs text-fg/60 font-mono truncate">
+                        {currentSessionId}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
               
               {/* Selected Repository Information */}
               {selectedRepository && (

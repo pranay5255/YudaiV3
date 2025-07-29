@@ -120,13 +120,22 @@ export interface SelectedRepository {
   branch: string;
 }
 
-// Chat API types
+// Chat API types - Updated to match backend SessionResponse
 export interface ChatSession {
-  id: string;
+  id: number; // Database ID (integer)
+  session_id: string; // Session identifier string
   title?: string;
-  created_at: string;
-  updated_at: string;
+  description?: string;
+  repo_owner?: string;
+  repo_name?: string;
+  repo_branch?: string;
+  repo_context?: Record<string, unknown>;
   is_active: boolean;
+  total_messages: number;
+  total_tokens: number;
+  created_at: string;
+  updated_at?: string;
+  last_activity?: string;
 }
 
 export interface ChatSessionStats {
@@ -136,11 +145,21 @@ export interface ChatSessionStats {
 }
 
 export interface ChatMessageAPI {
-  id: string;
-  content: string;
-  role: 'user' | 'assistant';
-  timestamp: string;
+  id: number; // Changed to match backend (integer)
+  message_id: string; // Added to match backend
+  content: string; // Maps to message_text in backend
+  message_text: string; // Direct backend field
+  role: 'user' | 'assistant' | 'system';
+  sender_type: 'user' | 'assistant' | 'system'; // Added to match backend
+  timestamp: string; // Maps to created_at
+  created_at: string; // Direct backend field
   is_code: boolean;
+  tokens: number; // Added to match backend
+  model_used?: string; // Added to match backend
+  processing_time?: number; // Added to match backend
+  context_cards?: string[]; // Added to match backend
+  referenced_files?: string[]; // Added to match backend
+  error_message?: string; // Added to match backend
 }
 
 export interface CreateIssueFromChatRequest {

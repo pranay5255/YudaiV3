@@ -99,6 +99,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
       }
     } catch (error) {
       // Optionally show error toast or message
+      // eslint-disable-next-line no-console
       console.error('Failed to create GitHub issue from context cards:', error);
     } finally {
       setIsCreatingIssue(false);
