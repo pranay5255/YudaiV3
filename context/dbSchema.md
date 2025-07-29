@@ -1,600 +1,373 @@
-# YudaiV3 Database Schema & State Flow Documentation
+# YudaiV3 Database Schema Documentation
 
-This document provides a comprehensive overview of the YudaiV3 database schema, state management, and data flow patterns between frontend and backend systems.
+This document provides a comprehensive overview of all database tables in the YudaiV3 application, their structure, purpose, and which backend services interact with them.
 
 ## Database Overview
 
-The YudaiV3 application uses PostgreSQL with SQLAlchemy ORM, implementing a **Session Backbone** architecture where all operations are scoped to authenticated user sessions linked to specific GitHub repositories.
+The YudaiV3 application uses PostgreSQL as its primary database with SQLAlchemy ORM for data management. The database supports user authentication via GitHub OAuth, repository management, chat conversations, context management, and issue tracking.
 
-### 🏗️ Architecture Principles
-- **Session-Scoped Operations**: Every chat, issue, and context operation is linked to a session
-- **Repository Context**: Sessions maintain repository metadata (owner, name, branch)
-- **Type Safety**: Frontend TypeScript types match backend Pydantic models exactly
-- **State Persistence**: All user interactions persist across sessions with proper relationships
+## Table Definitions
 
-## Core State Flow Patterns
+### 1. `users` - User Management
+**Purpose**: Stores user account information for GitHub OAuth authentication.
 
-### 🔄 User Authentication & Session Flow
-
-```
-1. GitHub OAuth → auth_tokens table → Frontend localStorage
-2. Repository Selection → Session Creation → chat_sessions table
-3. Chat Operations → chat_messages table (linked to session)
-4. Issue Creation → user_issues table (with session context)
-```
-
-### 📊 Frontend ↔ Backend Type Mapping
-
-| **Frontend Type** | **Backend Model** | **Database Table** | **State Storage** |
-|-------------------|-------------------|-------------------|-------------------|
-| `User` | `User` (SQLAlchemy) | `users` | AuthContext |
-| `ChatSession` | `SessionResponse` | `chat_sessions` | SessionContext |
-| `ChatMessageAPI` | `ChatMessageResponse` | `chat_messages` | Local component state |
-| `FileItem` | `FileItemResponse` | `file_items` | Component state |
-| `UserIssueResponse` | `UserIssueResponse` | `user_issues` | API responses |
-
-## Table Definitions & State Management
-
-### 1. `users` - User Identity & Authentication State
-**Purpose**: Core user identity linked to GitHub OAuth with session-scoped access control.
-
-**Schema**:
-```sql
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    github_username VARCHAR(255) UNIQUE NOT NULL,
-    github_user_id VARCHAR(255) UNIQUE NOT NULL,
-    email VARCHAR(255) UNIQUE,
-    display_name VARCHAR(255),
-    avatar_url VARCHAR(500),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE,
-    last_login TIMESTAMP WITH TIME ZONE
-);
-```
-
-**State Flow**:
-- **Authentication**: GitHub OAuth → `auth_tokens` → Frontend `AuthContext`
-- **Persistence**: User data cached in frontend localStorage
-- **Validation**: All API operations validate user.id from Bearer token
-
-**Frontend Mapping**:
-```typescript
-interface User {
-  id: number;                    // maps to users.id
-  github_username: string;       // maps to users.github_username
-  github_user_id: string;        // maps to users.github_user_id
-  email?: string;               // maps to users.email
-  display_name?: string;        // maps to users.display_name
-  avatar_url?: string;          // maps to users.avatar_url
-  created_at: string;           // maps to users.created_at
-  last_login?: string;          // maps to users.last_login
-}
-```
+**Key Fields**:
+- `id` (Primary Key): Internal user identifier
+- `github_username`: GitHub username (unique)
+- `github_user_id`: GitHub user ID (unique)
+- `email`: User email address
+- `display_name`: User display name
+- `avatar_url`: GitHub profile picture URL
+- `created_at`, `updated_at`, `last_login`: Timestamps
 
 **Used By**:
-- `backend/auth/github_oauth.py` - OAuth flow and token validation
-- `frontend/contexts/AuthContext.tsx` - User state management
-- All protected API endpoints for user validation
+- `backend/auth/github_oauth.py` - OAuth flow and user authentication
+- `backend/auth/auth_routes.py` - Authentication API endpoints
+- `backend/github/github_api.py` - GitHub API operations
+- `backend/github/github_routes.py` - GitHub API endpoints
+- `backend/daifuUserAgent/chat_api.py` - Chat operations (TODO: integrate with auth)
+- `backend/issueChatServices/chat_service.py` - Chat session management
+- `backend/issueChatServices/issue_service.py` - Issue management
+
+**Relationships**:
+- One-to-many with `auth_tokens`
+- One-to-many with `repositories`
+- One-to-many with `chat_sessions`
+- One-to-many with `context_cards`
+- One-to-many with `idea_items`
+- One-to-many with `user_issues`
 
 ---
 
-### 2. `auth_tokens` - Authentication State Persistence  
-**Purpose**: Manages GitHub OAuth tokens with automatic expiration and session security.
+### 2. `auth_tokens` - Authentication Tokens
+**Purpose**: Stores GitHub OAuth access tokens and refresh tokens for authenticated users.
 
-**Schema**:
-```sql
-CREATE TABLE auth_tokens (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    access_token VARCHAR(500) NOT NULL,
-    refresh_token VARCHAR(500),
-    token_type VARCHAR(50) DEFAULT 'bearer',
-    scope VARCHAR(500),
-    expires_at TIMESTAMP WITH TIME ZONE,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE
-);
-```
+**Key Fields**:
+- `id` (Primary Key): Token record identifier
+- `user_id` (Foreign Key): References `users.id`
+- `access_token`: GitHub OAuth access token
+- `refresh_token`: GitHub OAuth refresh token
+- `token_type`: Token type (usually "bearer")
+- `scope`: OAuth token scope
+- `expires_at`: Token expiration timestamp
+- `is_active`: Token status flag
 
-**State Flow**:
-- **Creation**: GitHub OAuth callback → token storage → 8-hour expiration
-- **Usage**: Every API request validates Bearer token against this table
-- **Cleanup**: Expired/inactive tokens automatically invalidated
+**Used By**:
+- `backend/auth/github_oauth.py` - Token management and validation
+- `backend/auth/auth_routes.py` - Authentication endpoints
+- `backend/github/github_api.py` - GitHub API authentication
 
-**Authentication Pattern**:
-```
-Frontend Request: Authorization: Bearer <access_token>
-Backend Validation: auth_tokens.access_token WHERE is_active=true AND expires_at > NOW()
-```
+**Relationships**:
+- Many-to-one with `users`
 
 ---
 
-### 3. `chat_sessions` - Session Backbone Core
-**Purpose**: **CORE TABLE** implementing Session Backbone - links all operations to repository context.
+### 3. `repositories` - Repository Metadata
+**Purpose**: Stores GitHub repository metadata and information.
 
-**Enhanced Schema** (Session Backbone):
-```sql
-CREATE TABLE chat_sessions (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    session_id VARCHAR(255) NOT NULL,  -- External identifier for frontend
-    title VARCHAR(255),
-    description TEXT,
-    
-    -- SESSION BACKBONE FIELDS (Repository Context)
-    repo_owner VARCHAR(255),           -- GitHub repository owner
-    repo_name VARCHAR(255),            -- GitHub repository name  
-    repo_branch VARCHAR(255),          -- Git branch name
-    repo_context JSON,                 -- Repository metadata
-    
-    -- Session State
-    is_active BOOLEAN DEFAULT TRUE,
-    total_messages INTEGER DEFAULT 0,
-    total_tokens INTEGER DEFAULT 0,
-    
-    -- Timestamps
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE,
-    last_activity TIMESTAMP WITH TIME ZONE
-);
+**Key Fields**:
+- `id` (Primary Key): Internal repository identifier
+- `github_repo_id`: GitHub repository ID (unique)
+- `user_id` (Foreign Key): References `users.id`
+- `name`: Repository name
+- `owner`: Repository owner username
+- `full_name`: Full repository name (owner/repo)
+- `description`: Repository description
+- `private`: Private repository flag
+- `html_url`, `clone_url`: Repository URLs
+- `language`: Primary programming language
+- `stargazers_count`, `forks_count`, `open_issues_count`: Repository statistics
+- GitHub timestamps: `github_created_at`, `github_updated_at`, `pushed_at`
 
--- Indexes for Session Backbone
-CREATE INDEX idx_chat_sessions_repo_owner ON chat_sessions(repo_owner);
-CREATE INDEX idx_chat_sessions_repo_name ON chat_sessions(repo_name);
-CREATE INDEX idx_chat_sessions_repo_owner_name ON chat_sessions(repo_owner, repo_name);
-```
+**Used By**:
+- `backend/github/github_api.py` - Repository data management
+- `backend/github/github_routes.py` - Repository API endpoints
+- `backend/repo_processorGitIngest/filedeps.py` - File dependency analysis
 
-**Session Lifecycle State Flow**:
-
-1. **Repository Selection** (Frontend)
-   ```typescript
-   // RepositoryContext.tsx
-   selectedRepository = { repository: GitHubRepo, branch: string }
-   ```
-
-2. **Auto-Session Creation** (Frontend → Backend)
-   ```typescript
-   // SessionContext.tsx - automatic session creation
-   useEffect(() => {
-     if (selectedRepository && !currentSessionId) {
-       createSession(owner, name, branch) // → POST /daifu/sessions
-     }
-   }, [selectedRepository])
-   ```
-
-3. **Session Response** (Backend → Frontend)
-   ```json
-   {
-     "id": 123,                    // Database primary key
-     "session_id": "owner_repo_branch_timestamp",  // Frontend identifier
-     "repo_owner": "pranay5255",
-     "repo_name": "YudaiV3", 
-     "repo_branch": "main",
-     "repo_context": {"owner": "pranay5255", "name": "YudaiV3", ...},
-     "is_active": true,
-     "total_messages": 0,
-     "total_tokens": 0
-   }
-   ```
-
-4. **Frontend State Management**
-   ```typescript
-   // SessionContext stores session_id for all operations
-   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
-   // All chat and issue operations use this session_id
-   ```
-
-**Frontend Type Mapping**:
-```typescript
-interface ChatSession {
-  id: number;                           // chat_sessions.id
-  session_id: string;                   // chat_sessions.session_id (USED BY FRONTEND)
-  title?: string;                       // chat_sessions.title
-  description?: string;                 // chat_sessions.description
-  repo_owner?: string;                  // chat_sessions.repo_owner
-  repo_name?: string;                   // chat_sessions.repo_name
-  repo_branch?: string;                 // chat_sessions.repo_branch
-  repo_context?: Record<string, unknown>; // chat_sessions.repo_context
-  is_active: boolean;                   // chat_sessions.is_active
-  total_messages: number;               // chat_sessions.total_messages
-  total_tokens: number;                 // chat_sessions.total_tokens
-  created_at: string;                   // chat_sessions.created_at
-  updated_at?: string;                  // chat_sessions.updated_at
-  last_activity?: string;               // chat_sessions.last_activity
-}
-```
+**Relationships**:
+- Many-to-one with `users`
+- One-to-many with `issues`
+- One-to-many with `pull_requests`
+- One-to-many with `commits`
+- One-to-many with `file_items`
 
 ---
 
-### 4. `chat_messages` - Conversation State & Context
-**Purpose**: Stores all chat interactions within sessions with full context preservation.
+### 4. `issues` - GitHub Issues (External)
+**Purpose**: Stores GitHub issues fetched from repositories (distinct from user-generated issues).
 
-**Schema**:
-```sql
-CREATE TABLE chat_messages (
-    id SERIAL PRIMARY KEY,
-    session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
-    message_id VARCHAR(255) NOT NULL,    -- UUID for frontend tracking
-    message_text TEXT NOT NULL,
-    sender_type VARCHAR(50) NOT NULL,    -- 'user', 'assistant', 'system'
-    role VARCHAR(50) NOT NULL,           -- 'user', 'assistant', 'system'
-    is_code BOOLEAN DEFAULT FALSE,
-    
-    -- Processing Metadata
-    tokens INTEGER DEFAULT 0,
-    model_used VARCHAR(100),             -- OpenRouter model used
-    processing_time FLOAT,               -- Response time in ms
-    context_cards JSON,                  -- Context cards used for this message
-    referenced_files JSON,               -- Files referenced in response
-    error_message TEXT,                  -- Error details if failed
-    
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE
-);
-```
+**Key Fields**:
+- `id` (Primary Key): Internal issue identifier
+- `github_issue_id`: GitHub issue ID (unique)
+- `repository_id` (Foreign Key): References `repositories.id`
+- `number`: GitHub issue number
+- `title`: Issue title
+- `body`: Issue description
+- `state`: Issue state (open, closed)
+- `html_url`: GitHub issue URL
+- `author_username`: Issue creator username
+- GitHub timestamps: `github_created_at`, `github_updated_at`, `github_closed_at`
 
-**Message State Flow**:
+**Used By**:
+- `backend/github/github_api.py` - GitHub issue synchronization
+- `backend/github/github_routes.py` - GitHub issue API endpoints
 
-1. **User Input** (Frontend)
-   ```typescript
-   // Chat.tsx - user sends message
-   const request: ChatRequest = {
-     conversation_id: currentSessionId,  // Links to chat_sessions.session_id
-     message: { content: input, is_code: boolean },
-     context_cards: string[]             // Context card IDs
-   }
-   ```
-
-2. **Message Processing** (Backend)
-   ```python
-   # backend/daifuUserAgent/chat_api.py
-   # 1. Validate session exists and belongs to user
-   session = SessionService.touch_session(db, user.id, conversation_id)
-   
-   # 2. Store user message
-   user_message = ChatService.create_chat_message(db, user.id, message_request)
-   
-   # 3. Process with OpenRouter
-   reply = call_openrouter_api(prompt)
-   
-   # 4. Store assistant response
-   assistant_message = ChatService.create_chat_message(db, user.id, response_request)
-   ```
-
-3. **State Updates** (Automatic)
-   ```sql
-   -- Session statistics auto-updated on each message
-   UPDATE chat_sessions SET 
-     total_messages = total_messages + 1,
-     total_tokens = total_tokens + message_tokens,
-     last_activity = NOW()
-   WHERE id = session_id;
-   ```
-
-**Frontend Type Mapping**:
-```typescript
-interface ChatMessageAPI {
-  id: number;                       // chat_messages.id
-  message_id: string;               // chat_messages.message_id
-  content: string;                  // maps to message_text
-  message_text: string;             // chat_messages.message_text
-  role: 'user' | 'assistant' | 'system';  // chat_messages.role
-  sender_type: 'user' | 'assistant' | 'system'; // chat_messages.sender_type
-  timestamp: string;                // maps to created_at
-  created_at: string;              // chat_messages.created_at
-  is_code: boolean;                // chat_messages.is_code
-  tokens: number;                  // chat_messages.tokens
-  model_used?: string;             // chat_messages.model_used
-  processing_time?: number;        // chat_messages.processing_time
-  context_cards?: string[];        // chat_messages.context_cards
-  referenced_files?: string[];     // chat_messages.referenced_files
-  error_message?: string;          // chat_messages.error_message
-}
-```
+**Relationships**:
+- Many-to-one with `repositories`
 
 ---
 
-### 5. `user_issues` - Enhanced Issue Management with Session Context
-**Purpose**: Stores user-generated issues with complete session context and CodeInspector analysis.
+### 5. `pull_requests` - GitHub Pull Requests
+**Purpose**: Stores GitHub pull requests fetched from repositories.
 
-**Schema**:
-```sql
-CREATE TABLE user_issues (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    issue_id VARCHAR(255) UNIQUE NOT NULL,    -- UUID for external reference
-    
-    -- Issue Content
-    title VARCHAR(255) NOT NULL,
-    description TEXT,
-    issue_text_raw TEXT NOT NULL,
-    issue_steps JSON,                          -- Array of implementation steps
-    
-    -- Session Backbone Links
-    conversation_id VARCHAR(255),              -- Links to chat_sessions.session_id
-    chat_session_id INTEGER REFERENCES chat_sessions(id),
-    context_cards JSON,                        -- Context card IDs used
-    
-    -- Repository Context (from session)
-    repo_owner VARCHAR(255),
-    repo_name VARCHAR(255),
-    
-    -- Processing State
-    priority VARCHAR(20) DEFAULT 'medium',     -- 'low', 'medium', 'high'
-    status VARCHAR(50) DEFAULT 'pending',      -- State machine values
-    agent_response TEXT,                       -- CodeInspector analysis
-    processing_time FLOAT,
-    tokens_used INTEGER DEFAULT 0,
-    
-    -- CodeInspector Analysis
-    complexity_score VARCHAR(10),              -- 'S', 'M', 'L', 'XL'
-    estimated_hours INTEGER,                   -- Time estimate
-    
-    -- GitHub Integration
-    github_issue_url VARCHAR(1000),
-    github_issue_number INTEGER,
-    
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE,
-    processed_at TIMESTAMP WITH TIME ZONE
-);
-```
+**Key Fields**:
+- `id` (Primary Key): Internal PR identifier
+- `github_pr_id`: GitHub PR ID (unique)
+- `repository_id` (Foreign Key): References `repositories.id`
+- `number`: GitHub PR number
+- `title`: PR title
+- `body`: PR description
+- `state`: PR state (open, closed)
+- `html_url`: GitHub PR URL
+- `author_username`: PR creator username
+- GitHub timestamps: `github_created_at`, `github_updated_at`, `github_closed_at`, `merged_at`
 
-**Issue Creation State Flow**:
+**Used By**:
+- `backend/github/github_api.py` - GitHub PR synchronization
+- `backend/github/github_routes.py` - GitHub PR API endpoints
 
-1. **Enhanced Issue Creation** (Frontend → Backend)
-   ```typescript
-   // Frontend: Chat.tsx or issue creation UI
-   await ApiService.createIssueFromSessionEnhanced({
-     session_id: currentSessionId,     // Links to chat_sessions.session_id
-     title: "Implement Feature X",
-     description: "User request details",
-     priority: "medium",
-     use_code_inspector: true,         // Enable AI analysis
-     create_github_issue: false        // Create GitHub issue if true
-   })
-   ```
-
-2. **Backend Processing** (Session Context Gathering)
-   ```python
-   # backend/issueChatServices/issue_service.py
-   # 1. Validate session exists and belongs to user
-   session_context = SessionService.get_session_context(db, user_id, session_id)
-   
-   # 2. Build comprehensive context bundle
-   session_bundle = {
-     "session_info": {
-       "repo_owner": session.repo_owner,
-       "repo_name": session.repo_name,
-       "repo_branch": session.repo_branch
-     },
-     "messages": [...],               # All chat history
-     "context_cards": [...],          # Context cards from session
-     "repository_info": {...}         # Repository metadata
-   }
-   
-   # 3. CodeInspector Analysis (if enabled)
-   if use_code_inspector:
-     agent_analysis = code_inspector.analyze_session_context(session_bundle)
-     github_issue_data = code_inspector.generate_github_issue(analysis)
-   
-   # 4. Create UserIssue with enhanced context
-   user_issue = IssueService.create_user_issue(db, user_id, enhanced_request)
-   ```
-
-3. **Issue Status State Machine**
-   ```
-   pending → ready_for_swe → swe_processing → completed/failed
-                          ↘ 
-                           github_issue_created
-   ```
-
-**Frontend Integration**:
-```typescript
-interface CreateIssueFromSessionRequest {
-  session_id: string;                    // chat_sessions.session_id
-  title: string;                         // user_issues.title
-  description?: string;                  // user_issues.description
-  priority?: string;                     // user_issues.priority
-  use_code_inspector?: boolean;          // Enables AI analysis
-  create_github_issue?: boolean;         // Auto-creates GitHub issue
-}
-
-interface UserIssueResponse {
-  issue_id: string;                      // user_issues.issue_id
-  title: string;                         // user_issues.title
-  status: string;                        // user_issues.status
-  agent_response?: string;               // user_issues.agent_response (CodeInspector)
-  complexity_score?: string;             // user_issues.complexity_score
-  estimated_hours?: number;              // user_issues.estimated_hours
-  github_issue_url?: string;             // user_issues.github_issue_url
-  repo_owner?: string;                   // user_issues.repo_owner
-  repo_name?: string;                    // user_issues.repo_name
-  // ... other fields
-}
-```
+**Relationships**:
+- Many-to-one with `repositories`
 
 ---
 
-### 6. `file_items` - File Context & Dependencies
-**Purpose**: Repository file structure for context-aware operations.
+### 6. `commits` - Repository Commits
+**Purpose**: Stores commit information from GitHub repositories.
 
-**Schema**:
-```sql
-CREATE TABLE file_items (
-    id SERIAL PRIMARY KEY,
-    repository_id INTEGER REFERENCES repositories(id) ON DELETE CASCADE,
-    name VARCHAR(500) NOT NULL,
-    path VARCHAR(1000) NOT NULL,
-    file_type VARCHAR(50) NOT NULL,        -- 'INTERNAL', 'EXTERNAL' (uppercase)
-    category VARCHAR(100) NOT NULL,
-    tokens INTEGER DEFAULT 0,
-    is_directory BOOLEAN DEFAULT FALSE,
-    parent_id INTEGER REFERENCES file_items(id),  -- Tree structure
-    content TEXT,                          -- File content (optional)
-    content_size INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE
-);
-```
+**Key Fields**:
+- `id` (Primary Key): Internal commit identifier
+- `sha`: Git commit hash (unique)
+- `repository_id` (Foreign Key): References `repositories.id`
+- `message`: Commit message
+- `html_url`: GitHub commit URL
+- `author_name`, `author_email`, `author_date`: Author information
 
-**File Type State Flow**:
-- **Extraction**: GitIngest → Repository analysis → file_items population
-- **Categorization**: Files classified as INTERNAL/EXTERNAL with token counts
-- **Context Usage**: Files referenced in chat_messages.referenced_files
+**Used By**:
+- `backend/github/github_api.py` - Commit data synchronization
+- `backend/github/github_routes.py` - Commit API endpoints
 
-**Frontend Type Mapping**:
-```typescript
-interface FileItem {
-  id: string;                           // file_items.id (as string)
-  name: string;                         // file_items.name
-  path?: string;                        // file_items.path
-  type: 'INTERNAL' | 'EXTERNAL';        // file_items.file_type (enum match)
-  tokens: number;                       // file_items.tokens
-  Category: string;                     // file_items.category
-  isDirectory: boolean;                 // file_items.is_directory
-  children?: FileItem[];                // Recursive structure
-  content?: string;                     // file_items.content
-  content_size?: number;                // file_items.content_size
-}
-```
+**Relationships**:
+- Many-to-one with `repositories`
 
 ---
 
-### 7. Supporting Tables
+### 7. `file_items` - Repository File Analysis
+**Purpose**: Stores file structure and analysis data from repository processing.
 
-#### `repositories` - GitHub Repository Metadata
-```sql
-CREATE TABLE repositories (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id),
-    github_repo_id INTEGER UNIQUE,
-    name VARCHAR(255) NOT NULL,
-    owner VARCHAR(255) NOT NULL,
-    full_name VARCHAR(512) NOT NULL,
-    description TEXT,
-    private BOOLEAN DEFAULT FALSE,
-    html_url VARCHAR(500) NOT NULL,
-    clone_url VARCHAR(500) NOT NULL,
-    language VARCHAR(100),
-    stargazers_count INTEGER DEFAULT 0,
-    forks_count INTEGER DEFAULT 0,
-    open_issues_count INTEGER DEFAULT 0,
-    github_created_at TIMESTAMP WITH TIME ZONE,
-    github_updated_at TIMESTAMP WITH TIME ZONE,
-    pushed_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE
-);
-```
+**Key Fields**:
+- `id` (Primary Key): File item identifier
+- `repository_id` (Foreign Key): References `repositories.id`
+- `name`: File/directory name
+- `path`: Full file path
+- `file_type`: File type classification (INTERNAL, EXTERNAL)
+- `category`: File category
+- `tokens`: Estimated token count
+- `is_directory`: Directory flag
+- `parent_id` (Foreign Key): Self-reference for tree structure
+- `content`: File content (optional)
+- `content_size`: File size in bytes
 
-#### `context_cards` - User Context Management
-```sql
-CREATE TABLE context_cards (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id),
-    title VARCHAR(255) NOT NULL,
-    description TEXT NOT NULL,
-    content TEXT NOT NULL,
-    source VARCHAR(50) NOT NULL,         -- 'chat', 'file-deps', 'upload'
-    tokens INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE
-);
-```
+**Used By**:
+- `backend/repo_processorGitIngest/filedeps.py` - File dependency analysis
+- `backend/repo_processorGitIngest/scraper_script.py` - Repository processing
 
-## State Flow Patterns
+**Relationships**:
+- Many-to-one with `repositories`
+- Self-referencing tree structure (parent/children)
 
-### 🔄 Complete User Journey State Flow
+---
 
-```
-1. Authentication State Flow:
-   GitHub OAuth → auth_tokens → Frontend AuthContext → localStorage
+### 8. `file_analyses` - File Analysis Results
+**Purpose**: Stores results of repository file analysis operations.
 
-2. Repository Selection State Flow:
-   Frontend RepositoryContext → Auto-create session → chat_sessions table
+**Key Fields**:
+- `id` (Primary Key): Analysis identifier
+- `repository_id` (Foreign Key): References `repositories.id`
+- `total_files`: Number of files analyzed
+- `total_tokens`: Total estimated tokens
+- `max_file_size`: Maximum file size limit used
+- `raw_data`: Raw analysis data (JSON)
+- `processed_data`: Processed analysis results (JSON)
+- `status`: Analysis status
+- `processed_at`: Analysis completion timestamp
 
-3. Chat Interaction State Flow:
-   User input → Frontend Chat → Backend validation → OpenRouter → chat_messages table
+**Used By**:
+- `backend/repo_processorGitIngest/filedeps.py` - File analysis operations
 
-4. Issue Creation State Flow:
-   Session context → CodeInspector analysis → user_issues table → Optional GitHub issue
+**Relationships**:
+- Many-to-one with `repositories`
 
-5. Context Preservation:
-   All operations linked via session_id → Complete context recovery
-```
+---
 
-### 📊 Frontend State Management
+### 9. `context_cards` - User Context Cards
+**Purpose**: Stores user-created context cards for chat and issue management.
 
-```typescript
-// Primary State Contexts
-interface AppState {
-  auth: AuthContext;           // User authentication state
-  session: SessionContext;     // Current session management
-  repository: RepositoryContext; // Selected repository
-}
+**Key Fields**:
+- `id` (Primary Key): Context card identifier
+- `user_id` (Foreign Key): References `users.id`
+- `title`: Card title
+- `description`: Card description
+- `content`: Card content
+- `source`: Context source (chat, file-deps, upload)
+- `tokens`: Token count
+- `is_active`: Active status flag
 
-// State Persistence Strategy
-localStorage: {
-  'auth_token': string,        // Authentication token
-  'user_data': User,          // Cached user profile
-  'yudai_current_session_id': string  // Current session identifier
-}
+**Used By**:
+- Context card management APIs (implementation pending)
+- Referenced by `user_issues` for issue context
 
-// State Synchronization
-- AuthContext: Syncs with backend on auth operations
-- SessionContext: Auto-creates sessions, persists session_id
-- Repository operations: All linked to current session
-```
+**Relationships**:
+- Many-to-one with `users`
+- Referenced by `user_issues`
 
-### 🔗 Database Relationship Patterns
+---
 
-```sql
--- Core Relationships (Session Backbone)
-users (1) → (∞) chat_sessions → (∞) chat_messages
-users (1) → (∞) user_issues
-chat_sessions (1) → (∞) user_issues (via conversation_id)
+### 10. `idea_items` - Implementation Ideas
+**Purpose**: Stores user-generated ideas for future implementation.
 
--- Repository Context
-users (1) → (∞) repositories → (∞) file_items
-chat_sessions → repositories (via repo_owner, repo_name)
+**Key Fields**:
+- `id` (Primary Key): Idea identifier
+- `user_id` (Foreign Key): References `users.id`
+- `title`: Idea title
+- `description`: Idea description
+- `complexity`: Complexity level (S, M, L, XL)
+- `status`: Implementation status
+- `is_active`: Active status flag
 
--- Context Linking
-chat_messages.context_cards → context_cards.id[]
-user_issues.context_cards → context_cards.id[]
-user_issues.chat_session_id → chat_sessions.id
-```
+**Used By**:
+- Idea management APIs (implementation pending)
 
-## Migration & Development Notes
+**Relationships**:
+- Many-to-one with `users`
 
-### 🛠️ Schema Evolution
-- **Current Version**: Session Backbone implemented
-- **Type Safety**: Frontend types match backend models exactly
-- **Migration Strategy**: Update models.py → Update frontend types → Database migration
+---
 
-### 🏗️ Development Patterns
-- **Session Validation**: All operations validate session ownership
-- **State Consistency**: Frontend state syncs with backend on operations
-- **Error Handling**: Proper HTTP status codes with session validation
-- **Context Preservation**: All user interactions maintain session context
+### 11. `chat_sessions` - Chat Sessions
+**Purpose**: Manages chat conversation sessions between users and the DAifu agent.
 
-### 📋 Implementation Status
+**Key Fields**:
+- `id` (Primary Key): Session identifier
+- `user_id` (Foreign Key): References `users.id`
+- `session_id`: External session identifier (string)
+- `title`: Session title
+- `description`: Session description
+- `is_active`: Active status flag
+- `total_messages`: Message count
+- `total_tokens`: Total tokens used
+- `last_activity`: Last activity timestamp
 
-**✅ Fully Implemented:**
-- Session Backbone with repository context
-- Type-safe frontend-backend communication
-- Authentication with proper token management
-- Enhanced issue creation with session context
+**Used By**:
+- `backend/issueChatServices/chat_service.py` - Chat session management
+- `backend/daifuUserAgent/chat_api.py` - Chat API endpoints
 
-**🚧 Partially Implemented:**
-- Context cards (schema ready, APIs pending)
-- Idea items (schema ready, APIs pending)
+**Relationships**:
+- Many-to-one with `users`
+- One-to-many with `chat_messages`
+- Referenced by `user_issues`
 
-**🎯 Architecture Benefits:**
-- Complete context preservation across all operations
-- Repository-scoped sessions enable better context awareness
-- Type safety eliminates frontend-backend mismatches
-- Session validation ensures proper data isolation between users
+---
+
+### 12. `chat_messages` - Chat Messages
+**Purpose**: Stores individual chat messages within chat sessions.
+
+**Key Fields**:
+- `id` (Primary Key): Message identifier
+- `session_id` (Foreign Key): References `chat_sessions.id`
+- `message_id`: External message identifier (string)
+- `message_text`: Message content
+- `sender_type`: Sender type (user, assistant, system)
+- `role`: Message role (user, assistant, system)
+- `is_code`: Code message flag
+- `tokens`: Token count
+- `model_used`: AI model used for response
+- `processing_time`: Response processing time (ms)
+- `context_cards`: Referenced context cards (JSON)
+- `referenced_files`: Referenced files (JSON)
+- `error_message`: Error information (if any)
+
+**Used By**:
+- `backend/issueChatServices/chat_service.py` - Message management
+- `backend/daifuUserAgent/chat_api.py` - Chat message processing
+
+**Relationships**:
+- Many-to-one with `chat_sessions`
+
+---
+
+### 13. `user_issues` - User-Generated Issues
+**Purpose**: Stores user-generated issues created from chat conversations for agent processing (distinct from GitHub issues).
+
+**Key Fields**:
+- `id` (Primary Key): Issue identifier
+- `user_id` (Foreign Key): References `users.id`
+- `issue_id`: External issue identifier (string, unique)
+- `context_card_id` (Foreign Key): References `context_cards.id` (optional)
+- `issue_text_raw`: Raw issue text from user
+- `issue_steps`: Issue steps (JSON array)
+- `title`: Issue title
+- `description`: Issue description
+- `conversation_id`: Related chat conversation ID
+- `chat_session_id` (Foreign Key): References `chat_sessions.id` (optional)
+- `context_cards`: Associated context card IDs (JSON)
+- `ideas`: Associated idea IDs (JSON)
+- `repo_owner`, `repo_name`: Target repository information
+- `priority`: Issue priority (low, medium, high)
+- `status`: Processing status (pending, processing, completed, failed)
+- `agent_response`: Agent processing response
+- `processing_time`: Processing time (ms)
+- `tokens_used`: Tokens consumed during processing
+- `github_issue_url`: Created GitHub issue URL
+- `github_issue_number`: Created GitHub issue number
+- `processed_at`: Processing completion timestamp
+
+**Used By**:
+- `backend/issueChatServices/issue_service.py` - Issue management and GitHub integration
+- `backend/daifuUserAgent/chat_api.py` - Issue creation from chat
+
+**Relationships**:
+- Many-to-one with `users`
+- Many-to-one with `context_cards` (optional)
+- Many-to-one with `chat_sessions` (optional)
+
+---
+
+## Unused/Deprecated Tables
+
+Currently, all defined tables are actively used by backend services. However, some tables have limited implementation:
+
+1. **`context_cards`** - Table exists but management APIs are not fully implemented
+2. **`idea_items`** - Table exists but management APIs are not fully implemented
+
+## Database Initialization
+
+The database is initialized through:
+- `backend/db/database.py` - SQLAlchemy engine and session management
+- `backend/db/init_db.py` - Database creation and health checks
+- `backend/db/init.sql` - Initial SQL setup (PostgreSQL extensions)
+
+## Migration Strategy
+
+When making schema changes:
+1. Update models in `backend/models.py`
+2. Update expected tables list in `backend/db/init_db.py`
+3. Update imports in `backend/db/__init__.py`
+4. Run database initialization: `python backend/db/init_db.py --init`
+5. Update this documentation
+
+## Notes
+
+- All timestamps use UTC timezone (`DateTime(timezone=True)`)
+- JSON fields store complex data structures (arrays, objects)
+- Foreign key relationships maintain referential integrity
+- Cascade deletes are used for dependent records (e.g., user deletion removes all related data)
+- Unique constraints prevent duplicate external IDs (GitHub IDs, issue IDs, etc.)
