@@ -91,22 +91,30 @@ export const Chat: React.FC<ChatProps> = ({
     setIsLoading(true);
     
     try {
+      // Generate session ID if not exists
+      const currentSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
       // Send to Daifu agent
       const request: ChatRequest = {
-        session_id: sessionId,
+        conversation_id: currentSessionId,  // Fixed: backend expects conversation_id, not session_id
         message: {
           content: currentInput,
           is_code: userMessage.isCode,
         },
         // Add context cards if available
         context_cards: contextCards.map(card => card.id) || [],
+        // Add repository context if available
+        repo_owner: selectedRepository?.repository.full_name.split('/')[0],
+        repo_name: selectedRepository?.repository.full_name.split('/')[1],
       };
       
       const response = await ApiService.sendChatMessage(request);
       
-      // Update session ID if provided in response
-      if (response.session_id && !sessionId) {
+      // Update session ID if provided in response or if we generated a new one
+      if (response.session_id) {
         setSessionId(response.session_id);
+      } else if (!sessionId) {
+        setSessionId(currentSessionId);
       }
       
       // Add Daifu's response

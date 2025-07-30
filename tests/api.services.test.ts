@@ -117,7 +117,7 @@ describe('API Services Configuration Tests', () => {
 
       await ApiService.sendChatMessage({
         message: { content: 'test', is_code: false },
-        session_id: 'test-session'
+        conversation_id: 'test-session'  // Fixed: use conversation_id instead of session_id
       });
 
       expect(mockFetch).toHaveBeenCalledWith(

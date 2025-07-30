@@ -144,7 +144,7 @@ export interface ChatMessageAPI {
 }
 
 export interface CreateIssueFromChatRequest {
-  session_id: string;
+  conversation_id: string;  // Fixed: backend expects conversation_id, not session_id
   title: string;
   description?: string;
   repository_url?: string;

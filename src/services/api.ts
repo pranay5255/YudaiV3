@@ -20,7 +20,7 @@ export interface ChatMessage {
 }
 
 export interface ChatRequest {
-  session_id?: string;
+  conversation_id?: string; // Fixed: backend expects conversation_id, not session_id
   message: ChatMessage;
   context_cards?: string[];
   repo_owner?: string;
@@ -168,7 +168,8 @@ export class ApiService {
       headers: this.getAuthHeaders(),
     });
 
-    return this.handleResponse<ChatSession[]>(response);
+    const result = await this.handleResponse<{ sessions: ChatSession[] }>(response);
+    return result.sessions; // Fixed: backend returns { sessions: [...] }
   }
 
   static async getSessionMessages(sessionId: string): Promise<ChatMessageAPI[]> {
@@ -177,7 +178,8 @@ export class ApiService {
       headers: this.getAuthHeaders(),
     });
 
-    return this.handleResponse<ChatMessageAPI[]>(response);
+    const result = await this.handleResponse<{ messages: ChatMessageAPI[] }>(response);
+    return result.messages; // Fixed: backend returns { messages: [...] }
   }
 
   static async getSessionStatistics(sessionId: string): Promise<ChatSessionStats> {
@@ -278,7 +280,8 @@ export class ApiService {
       headers: this.getAuthHeaders(),
     });
 
-    return this.handleResponse<any[]>(response);
+    const result = await this.handleResponse<{ repositories: any[] }>(response);
+    return result.repositories || []; // Fixed: handle potential structure difference
   }
 
   // File Dependencies Services
@@ -407,7 +410,7 @@ export class ApiService {
     
     // Send initial message to create session
     const response = await this.sendChatMessage({
-      session_id: sessionId,
+      conversation_id: sessionId, // Fixed: use conversation_id instead of session_id
       message: {
         content: `Starting new session for repository ${repoOwner}/${repoName} on branch ${repoBranch}`,
         is_code: false
@@ -504,5 +507,120 @@ export class ApiService {
     }
 
     return result;
+  }
+
+  // NEW: Additional backend endpoints not previously implemented in frontend
+
+  // Additional Chat/Session Endpoints
+  static async createSession(
+    repoOwner: string,
+    repoName: string,
+    repoBranch: string = 'main',
+    title?: string,
+    description?: string
+  ): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({
+        repo_owner: repoOwner,
+        repo_name: repoName,
+        repo_branch: repoBranch,
+        title,
+        description
+      }),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  static async getSessionContextById(sessionId: string): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  static async touchSession(sessionId: string): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/touch`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  static async getUserSessions(repoOwner?: string, repoName?: string): Promise<any[]> {
+    const params = new URLSearchParams();
+    if (repoOwner) params.append('repo_owner', repoOwner);
+    if (repoName) params.append('repo_name', repoName);
+    
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions?${params}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<any[]>(response);
+  }
+
+  // Additional GitHub Endpoints
+  static async getRepositoryPulls(owner: string, repo: string, state: string = 'open'): Promise<any[]> {
+    const response = await fetch(`${API_BASE_URL}/github/repositories/${owner}/${repo}/pulls?state=${state}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<any[]>(response);
+  }
+
+  static async getRepositoryCommits(owner: string, repo: string, branch: string = 'main'): Promise<any[]> {
+    const response = await fetch(`${API_BASE_URL}/github/repositories/${owner}/${repo}/commits?branch=${branch}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<any[]>(response);
+  }
+
+  // Additional Issue Endpoints
+  static async createUserIssue(request: any): Promise<UserIssueResponse> {
+    const response = await fetch(`${API_BASE_URL}/issues/`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(request),
+    });
+
+    return this.handleResponse<UserIssueResponse>(response);
+  }
+
+  static async createIssueFromChatRequest(chatRequest: any): Promise<UserIssueResponse> {
+    const response = await fetch(`${API_BASE_URL}/issues/from-chat`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(chatRequest),
+    });
+
+    return this.handleResponse<UserIssueResponse>(response);
+  }
+
+  static async getIssueStatistics(): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/issues/statistics`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  // Auth Configuration Endpoint
+  static async getAuthConfig(): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/auth/config`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }, // No auth required for config
+    });
+
+    return this.handleResponse<any>(response);
   }
 }
