@@ -2,12 +2,10 @@
 Database configuration and session management for YudaiV3
 """
 import os
-import random
 import uuid
 from datetime import datetime, timedelta
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 # Import Base from unified models
 from models import Base
@@ -24,6 +22,7 @@ engine = create_engine(
     pool_pre_ping=True,
     echo=bool(os.getenv("DB_ECHO", "false").lower() == "true")
 )
+#TODO: Add pgvector (very important vector db)
 
 # Create session maker
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -43,10 +42,6 @@ def init_db():
     Initialize database - create all tables
     """
     # Import all models here to ensure they are registered
-    from models import (
-        User, AuthToken, Repository, FileItem, ContextCard, IdeaItem,
-        Issue, PullRequest, Commit, FileAnalysis, ChatSession, ChatMessage, UserIssue
-    )
     Base.metadata.create_all(bind=engine)
 
 def create_sample_data():

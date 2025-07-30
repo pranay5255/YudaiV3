@@ -4,17 +4,15 @@ Database initialization script for YudaiV3
 This script can work both with and without the application models
 """
 
-import os
 import sys
 import time
-from datetime import datetime, timedelta
 from pathlib import Path
+
+from sqlalchemy import create_engine, inspect, text
 
 # Add the backend directory to the path
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
-
-from sqlalchemy import create_engine, text, inspect
 
 def wait_for_database(max_retries=30, delay=2):
     """Wait for database to be ready"""
@@ -43,8 +41,8 @@ def wait_for_database(max_retries=30, delay=2):
 def create_tables_with_models(engine):
     """Create tables using SQLAlchemy models (preferred method)"""
     try:
-        from models import Base
         from db import init_db
+        # Import models but don't use Base directly
         
         print("Creating tables using SQLAlchemy models...")
         init_db()

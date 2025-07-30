@@ -7,14 +7,13 @@ a repository and generate GitHub issues.
 
 import os
 import sys
-from typing import List
 
 # Add the backend directory to the path
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 
 from sqlalchemy.orm import Session
-from db.database import get_db, SessionLocal
-from models import Repository, UserIssue
+from db.database import SessionLocal
+from models import Repository
 from daifuUserAgent.architectAgent import CodeInspectorService
 
 
