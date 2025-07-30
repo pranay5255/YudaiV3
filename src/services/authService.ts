@@ -4,8 +4,8 @@ import { User, LoginResponse, AuthConfig } from '../types';
 const getAuthBaseURL = () => {
   const apiUrl = import.meta.env.VITE_API_URL || 
     (import.meta.env.DEV ? 'http://localhost:8000' : 'https://yudai.app');
-  // For auth endpoints, we need to remove the /api suffix if it exists
-  return apiUrl.replace('/api', '');
+  // For auth endpoints, we need to use the API URL directly (not remove /api)
+  return apiUrl;
 };
 
 const AUTH_BASE_URL = getAuthBaseURL();
