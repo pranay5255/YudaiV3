@@ -214,6 +214,217 @@ const authUrl = `${API_BASE_URL}/auth/login`;
 const apiUrl = `${API_BASE_URL}/github/repositories`;
 ```
 
+## Frontend-Backend API Dependency Table
+
+### Overview
+This section documents the complete mapping between frontend components/services and backend API endpoints, including state flow from user interactions to database operations.
+
+### Component-to-API Mapping
+
+#### Authentication Flow
+| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
+|-------------------|------------------|------------------|-------------|----------------|------------|
+| `LoginPage.tsx` | `AuthService.login()` | `/auth/login` | GET | - | Redirect to GitHub OAuth |
+| `AuthProvider.tsx` | `AuthService.handleCallback()` | `/auth/callback` | GET | `users`, `auth_tokens` | OAuth → Create/Update User → Store Token → Update React State |
+| `AuthProvider.tsx` | `AuthService.checkAuthStatus()` | `/auth/status` | GET | `users`, `auth_tokens` | Check Token → Validate User → Update Auth State |
+| `AuthProvider.tsx` | `AuthService.getProfile()` | `/auth/profile` | GET | `users` | Get User Profile → Update User State |
+| `AuthProvider.tsx` | `AuthService.logout()` | `/auth/logout` | POST | `auth_tokens` | Deactivate Token → Clear Local Storage → Reset Auth State |
+| - | `AuthService.getAuthConfig()` | `/auth/config` | GET | - | Get OAuth Configuration |
+
+#### Session Management Flow
+| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
+|-------------------|------------------|------------------|-------------|----------------|------------|
+| `SessionContext.tsx` | `ApiService.createOrGetSession()` | `/daifu/chat/daifu` | POST | `chat_sessions`, `chat_messages` | Create Message → Auto-create Session → Update Session State |
+| `SessionContext.tsx` | `ApiService.getSessionContext()` | `/daifu/chat/sessions` | GET | `chat_sessions` | Get Sessions → Find Session → Return Context |
+| `SessionContext.tsx` | `ApiService.getSessionMessages()` | `/daifu/chat/sessions/{id}/messages` | GET | `chat_messages` | Get Messages → Update Context |
+| `SessionContext.tsx` | `ApiService.getSessionStatistics()` | `/daifu/chat/sessions/{id}/statistics` | GET | `chat_sessions` | Get Stats → Update Repository Info |
+
+#### Chat Interface Flow
+| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
+|-------------------|------------------|------------------|-------------|----------------|------------|
+| `Chat.tsx` | `ApiService.sendChatMessage()` | `/daifu/chat/daifu` | POST | `chat_sessions`, `chat_messages` | User Input → Create Message → AI Response → Update Chat State |
+| `Chat.tsx` | `ApiService.createIssueWithContext()` | `/issues/create-with-context` | POST | `user_issues`, `context_cards` | Chat Context → Create Issue → Preview Response |
+
+#### Repository Management Flow  
+| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
+|-------------------|------------------|------------------|-------------|----------------|------------|
+| `RepositoryProvider.tsx` | Local Storage Only | - | - | - | Select Repository → Store in localStorage → Update Context |
+| Various Components | `ApiService.getUserRepositories()` | `/github/repositories` | GET | `repositories` | Get User Repos → Update Repository Options |
+| Various Components | `ApiService.getRepositoryBranches()` | `/github/repositories/{owner}/{repo}/branches` | GET | - | Get Branches → Update Branch Options |
+| Various Components | `ApiService.searchRepositories()` | `/github/search/repositories` | GET | - | Search Query → Return Results |
+
+#### File Dependencies Flow
+| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
+|-------------------|------------------|------------------|-------------|----------------|------------|
+| `FileDependencies.tsx` | `ApiService.getRepositoryByUrl()` | `/filedeps/repositories?repo_url=` | GET | `repositories`, `file_analyses` | Check DB for Repo → Return if Exists |
+| `FileDependencies.tsx` | `ApiService.getRepositoryFiles()` | `/filedeps/repositories/{id}/files` | GET | `file_items` | Get File Tree → Update File State |
+| `FileDependencies.tsx` | `ApiService.extractFileDependencies()` | `/filedeps/extract` | POST | `repositories`, `file_items`, `file_analyses` | Extract Files → Store Analysis → Return Tree |
+
+#### Issue Management Flow
+| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
+|-------------------|------------------|------------------|-------------|----------------|------------|
+| `Chat.tsx` | `ApiService.createIssueWithContext()` | `/issues/create-with-context` | POST | `user_issues` | Chat + File Context → Create Issue → Return Preview |
+| `DiffModal.tsx` | `ApiService.createGitHubIssueFromUserIssue()` | `/issues/{id}/create-github-issue` | POST | `user_issues` | User Issue → Create GitHub Issue → Update Status |
+| Various Components | `ApiService.getUserIssues()` | `/issues/` | GET | `user_issues` | Get User Issues → Update Issue List |
+| Various Components | `ApiService.getUserIssue()` | `/issues/{id}` | GET | `user_issues` | Get Specific Issue → Show Details |
+
+#### GitHub Integration Flow
+| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
+|-------------------|------------------|------------------|-------------|----------------|------------|
+| Various Components | `ApiService.getRepository()` | `/github/repositories/{owner}/{repo}` | GET | `repositories` | Get Repo Details → Update Repository Info |
+| Various Components | `ApiService.createRepositoryIssue()` | `/github/repositories/{owner}/{repo}/issues` | POST | `issues` | Create GitHub Issue → Store in DB |
+| Various Components | `ApiService.getRepositoryIssues()` | `/github/repositories/{owner}/{repo}/issues` | GET | `issues` | Get GitHub Issues → Update Issue State |
+
+### State Flow Patterns
+
+#### Authentication State Flow
+```
+User Click Login → GitHub OAuth → Callback → Backend Validation → Database Update → Frontend State Update
+```
+
+1. **User Interaction**: Click login button
+2. **Frontend Action**: Redirect to `/auth/login`
+3. **Backend Processing**: Generate OAuth URL, redirect to GitHub
+4. **External Service**: GitHub OAuth flow
+5. **Backend Callback**: Handle `/auth/callback`, validate code
+6. **Database Operations**: 
+   - Query/Create user in `users` table
+   - Deactivate old tokens in `auth_tokens` table  
+   - Create new token in `auth_tokens` table
+7. **Frontend State Update**: Update `AuthContext` with user and token
+8. **Local Storage**: Store token and user data
+
+#### Session Creation State Flow
+```
+Repository Selection → Auto-create Session → Database Insert → Context Update
+```
+
+1. **User Interaction**: Select repository
+2. **Frontend Trigger**: `RepositoryContext` updates
+3. **Auto-trigger**: `SessionContext` detects repository change
+4. **API Call**: `createOrGetSession()` via chat message
+5. **Backend Processing**: 
+   - Check for existing session in `chat_sessions`
+   - Create new session if none exists
+   - Create initial message in `chat_messages`
+6. **Database Operations**:
+   - INSERT into `chat_sessions` table
+   - INSERT into `chat_messages` table
+7. **Frontend State Update**: Update `SessionContext` with session ID
+8. **Local Storage**: Store session ID
+
+#### Chat Message State Flow
+```
+User Input → API Call → AI Processing → Database Storage → UI Update
+```
+
+1. **User Interaction**: Type and send message
+2. **Frontend Processing**: Add message to local state immediately
+3. **API Call**: `sendChatMessage()` to `/daifu/chat/daifu`
+4. **Backend Processing**:
+   - Validate session/create if needed
+   - Process message with AI
+   - Generate response
+5. **Database Operations**:
+   - INSERT user message into `chat_messages`
+   - INSERT AI response into `chat_messages`
+   - UPDATE session statistics in `chat_sessions`
+6. **Frontend State Update**: Add AI response to chat state
+
+#### File Context State Flow
+```
+Repository Selection → File Extraction → Database Storage → Context Cards
+```
+
+1. **User Interaction**: Select repository in `FileDependencies`
+2. **Frontend Check**: Look for existing analysis
+3. **API Calls**: 
+   - `getRepositoryByUrl()` - check if exists
+   - `extractFileDependencies()` - if not exists
+4. **Backend Processing**:
+   - Extract repository files
+   - Analyze file structure
+   - Calculate tokens and categories
+5. **Database Operations**:
+   - INSERT/UPDATE in `repositories` table
+   - INSERT files into `file_items` table
+   - INSERT analysis into `file_analyses` table
+6. **Frontend State Update**: Build file tree, update context cards
+
+#### Issue Creation State Flow
+```
+Chat Context → Issue Preview → GitHub Issue → Database Update
+```
+
+1. **User Interaction**: Click "Create GitHub Issue" in chat
+2. **Frontend Processing**: Gather chat messages and file context
+3. **API Call**: `createIssueWithContext()` with preview=true
+4. **Backend Processing**:
+   - Generate issue preview
+   - Store user issue
+5. **Database Operations**:
+   - INSERT into `user_issues` table
+6. **Frontend Display**: Show preview modal
+7. **User Confirmation**: Approve GitHub issue creation
+8. **API Call**: `createGitHubIssueFromUserIssue()`
+9. **Backend Processing**:
+   - Create GitHub issue via API
+   - Update user issue with GitHub details
+10. **Database Operations**:
+    - UPDATE `user_issues` with GitHub URL and number
+11. **Frontend State Update**: Show success and GitHub link
+
+### Error Handling Patterns
+
+#### Authentication Errors
+- **401 Unauthorized**: Clear auth state, redirect to login
+- **Token Expiration**: Auto-refresh or force re-login
+- **Network Errors**: Show error message, maintain state
+
+#### Session Errors  
+- **Session Not Found**: Create new session automatically
+- **Invalid Session**: Clear session state, create new
+- **Timeout**: Retry with exponential backoff
+
+#### API Rate Limiting
+- **GitHub API Limits**: Show friendly error, suggest retry
+- **Backend Rate Limits**: Queue requests, show loading state
+
+### Performance Optimizations
+
+#### Caching Strategy
+- **Auth Token**: Local storage with expiration check
+- **User Profile**: Local storage with refresh capability
+- **Repository List**: Cache for session duration
+- **File Tree**: Cache per repository with refresh option
+
+#### Lazy Loading
+- **File Dependencies**: Load on repository selection
+- **Chat History**: Paginated loading of old messages
+- **Issue History**: Load on demand
+
+#### State Management
+- **Context Optimization**: Minimize re-renders with memo
+- **Local Storage**: Persist critical state across sessions
+- **Error Boundaries**: Graceful error handling per component
+
+### Security Considerations
+
+#### Token Management
+- **Storage**: HttpOnly cookies preferred, localStorage as fallback  
+- **Expiration**: Automatic refresh before expiration
+- **Validation**: Server-side validation on every request
+
+#### CORS Configuration
+- **Production**: Restricted to `https://yudai.app`
+- **Development**: Localhost origins only
+- **Preflight**: Proper OPTIONS handling
+
+#### Data Sanitization
+- **User Input**: Sanitize before API calls
+- **Response Data**: Validate structure before state updates
+- **File Content**: Limit file sizes and types
+
 ## Environment Variables
 
 ### Required Environment Variables

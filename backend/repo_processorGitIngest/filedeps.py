@@ -6,36 +6,31 @@ This router provides endpoints to extract repository data using GitIngest
 and transform it to match the FileDependencies component interface.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status
-from typing import List, Optional, Dict, Any
-import os
 import json
+import os
 from pathlib import Path
-from sqlalchemy.orm import Session
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 # Import database session
-from db.database import get_db, init_db
+from db.database import get_db
+from fastapi import APIRouter, Depends, HTTPException
 
 # Import authentication
-from auth import get_current_user_optional
-
 # Import unified models
 from models import (
-    RepositoryRequest,
-    FileItemResponse,
-    Repository,
-    RepositoryResponse,
     FileAnalysis,
     FileItem,
     FileItemDBResponse,
+    FileItemResponse,
+    Repository,
+    RepositoryRequest,
+    RepositoryResponse,
 )
+from sqlalchemy.orm import Session
 
 # Import functions from scraper_script.py
-from .scraper_script import (
-    extract_repository_data,
-    categorize_file
-)
+from .scraper_script import categorize_file, extract_repository_data
 
 # Create router for file dependencies endpoints
 router = APIRouter( tags=["file-dependencies"])
@@ -299,7 +294,7 @@ def process_gitingest_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
     # Extract raw response data
     raw_response = raw_data.get('raw_response', {})
     tree = raw_response.get('tree', '')
-    content = raw_response.get('content', '')
+    # content = raw_response.get('content', '')  # Unused variable
     
     # Parse tree structure to extract files
     files = []

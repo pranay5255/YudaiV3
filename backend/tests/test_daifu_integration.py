@@ -5,9 +5,7 @@ These tests verify the integration between DAifu chat and GitHub authentication,
 including context sharing and authenticated chat functionality.
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
-import json
+from unittest.mock import patch
 
 
 class TestDaifuChatIntegration:

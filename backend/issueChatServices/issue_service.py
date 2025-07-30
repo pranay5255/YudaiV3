@@ -6,29 +6,35 @@ user-generated issues that are created from chat conversations and can be
 processed by agents to create GitHub issues.
 """
 
+import os
+import re
 import uuid
-import time
 from datetime import datetime
-from typing import List, Optional, Dict, Any
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, desc, or_
-from fastapi import APIRouter, HTTPException, Depends, status, Query
+from typing import Any, Dict, List, Optional
 
-from models import (
-    UserIssue, User, ChatSession, ContextCard,
-    CreateUserIssueRequest, UserIssueResponse,
-    ChatRequest, CreateChatMessageRequest, FileItemResponse
-)
-from db.database import get_db
+import requests
 from auth.github_oauth import get_current_user
-from github.github_api import create_issue as create_github_issue, GitHubAPIError
+from daifuUserAgent.architectAgent.promptTemplate import build_architect_prompt
+from db.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from github.github_api import GitHubAPIError
+from github.github_api import create_issue as create_github_issue
+from issueChatServices.chat_service import FileEmbeddingService, SessionService
+from models import (
+    ChatRequest,
+    ChatSession,
+    CreateFileEmbeddingRequest,
+    CreateUserIssueRequest,
+    User,
+    UserIssue,
+    UserIssueResponse,
+)
 
 # Add new imports at the top
 from pydantic import BaseModel, Field
-import os
-import requests
-from daifuUserAgent.architectAgent.promptTemplate import build_architect_prompt
-import re
+from sqlalchemy import and_, desc
+from sqlalchemy.orm import Session
+
 
 class FileContextItem(BaseModel):
     id: str
@@ -330,9 +336,11 @@ class IssueService:
     @staticmethod
     def generate_github_issue_preview(
         request: CreateIssueWithContextRequest,
-        use_sample_data: bool = False
+        use_sample_data: bool = False,
+        db: Optional[Session] = None,
+        user_id: Optional[int] = None
     ) -> GitHubIssuePreview:
-        """Generate a GitHub issue preview with optional sample data or via LLM (architect agent)"""
+        """Generate a GitHub issue preview using the architect agent with session context"""
         
         if use_sample_data:
             # Generate sample data when LLM is not available
@@ -385,31 +393,95 @@ class IssueService:
                     "generation_method": "sample_data"
                 }
             )
-        # --- LLM/Architect Agent Integration ---
-        # Prepare conversation context
-        conversation_context = "\n".join(
-            f"{'Code' if m.isCode else 'User'}: {m.content}" for m in request.chat_messages
-        )
-        # Prepare file dependencies context
-        file_dependencies_context = "\n".join(
-            f"{f.name} ({f.type}, {f.tokens} tokens): {f.category}" for f in request.file_context
-        )
-        # Optionally, code-aware context (could be empty or summary)
+        
+        # Enhanced context gathering with session information
+        conversation_context = ""
+        file_dependencies_context = ""
         code_aware_context = ""
+        
+        # Prepare conversation context
+        if request.chat_messages:
+            conversation_context = "\n".join(
+                f"{'Code' if m.isCode else 'User'}: {m.content}" for m in request.chat_messages
+            )
+        
+        # Prepare file dependencies context
+        if request.file_context:
+            file_dependencies_context = "\n".join(
+                f"{f.name} ({f.type}, {f.tokens} tokens): {f.category}" for f in request.file_context
+            )
+        
+        # Enhanced context gathering from session if available
+        if db and user_id and request.repository_info:
+            try:
+                # Get session context for additional information
+                sessions = SessionService.get_user_sessions_by_repo(
+                    db, user_id, 
+                    request.repository_info.get("owner"),
+                    request.repository_info.get("name")
+                )
+                
+                if sessions:
+                    latest_session = sessions[0]  # Most recent session
+                    session_context = SessionService.get_session_context(
+                        db, user_id, latest_session.session_id
+                    )
+                    
+                    if session_context:
+                        # Add file embeddings context
+                        embeddings = FileEmbeddingService.get_session_embeddings(
+                            db, latest_session.id, limit=20
+                        )
+                        
+                        if embeddings:
+                            code_aware_context = f"""
+## File Context from Session
+Repository: {latest_session.repo_owner}/{latest_session.repo_name} (branch: {latest_session.repo_branch})
+Total file embeddings: {len(embeddings)}
+
+Key files analyzed:
+""" + "\n".join([f"- {emb.file_path}: {emb.chunk_text[:100]}..." for emb in embeddings[:10]])
+                            
+                        # Enhance conversation context with session messages
+                        if session_context.messages:
+                            session_messages = "\n".join([
+                                f"{msg.sender_type}: {msg.message_text[:200]}..." 
+                                for msg in session_context.messages[-10:]  # Last 10 messages
+                            ])
+                            conversation_context = f"""
+## Session Messages
+{session_messages}
+
+## Direct Chat Context
+{conversation_context}
+"""
+            except Exception as e:
+                print(f"Warning: Could not enhance context with session data: {e}")
+        
+        # Build architect prompt
         prompt = build_architect_prompt(
             conversation_context=conversation_context,
             file_dependencies_context=file_dependencies_context,
             code_aware_context=code_aware_context,
         )
+        
+        # Make LLM call to architect agent
         api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENROUTER_API_KEY not configured")
+            
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
+        
         body = {
             "model": "deepseek/deepseek-r1-0528:free",
             "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+            "max_tokens": 4000
         }
+        
         try:
             resp = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -419,35 +491,42 @@ class IssueService:
             )
             resp.raise_for_status()
             llm_reply = resp.json()["choices"][0]["message"]["content"].strip()
-            # --- Parse LLM output for GitHub issue fields ---
-            # Expecting output in markdown or YAML frontmatter or similar
-            # Try to extract title, body, labels, etc. Fallback to using the whole output as body
+            
+            # Parse LLM output for GitHub issue fields
             title = request.title
-            labels = ["yudai-assistant"]
+            labels = ["yudai-assistant", "architect-agent"]
             assignees = []
             body_text = llm_reply
+            
             # Try to extract a markdown H1 or 'Title:'
-            m = re.search(r"^# (.+)$", llm_reply, re.MULTILINE)
-            if m:
-                title = m.group(1).strip()
-                body_text = llm_reply[m.end():].strip()
+            title_match = re.search(r"^# (.+)$", llm_reply, re.MULTILINE)
+            if title_match:
+                title = title_match.group(1).strip()
+                body_text = llm_reply[title_match.end():].strip()
             else:
-                m2 = re.search(r"^Title:\s*(.+)$", llm_reply, re.MULTILINE)
-                if m2:
-                    title = m2.group(1).strip()
-                    body_text = llm_reply[m2.end():].strip()
-            # Try to extract labels if present
-            m3 = re.search(r"Labels?:\s*\[(.*?)\]", llm_reply, re.IGNORECASE)
-            if m3:
-                labels = [l.strip().strip('"') for l in m3.group(1).split(",") if l.strip()]
-            # Try to extract assignees if present
-            m4 = re.search(r"Assignees?:\s*\[(.*?)\]", llm_reply, re.IGNORECASE)
-            if m4:
-                assignees = [a.strip().strip('"') for a in m4.group(1).split(",") if a.strip()]
+                title_match = re.search(r"^Title:\s*(.+)$", llm_reply, re.MULTILINE)
+                if title_match:
+                    title = title_match.group(1).strip()
+                    body_text = llm_reply[title_match.end():].strip()
+            
+            # Extract labels if present
+            labels_match = re.search(r"Labels?:\s*\[(.*?)\]", llm_reply, re.IGNORECASE)
+            if labels_match:
+                extracted_labels = [label.strip().strip('"') for label in labels_match.group(1).split(",") if label.strip()]
+                labels.extend(extracted_labels)
+            
+            # Extract assignees if present
+            assignees_match = re.search(r"Assignees?:\s*\[(.*?)\]", llm_reply, re.IGNORECASE)
+            if assignees_match:
+                assignees = [a.strip().strip('"') for a in assignees_match.group(1).split(",") if a.strip()]
+            
+            # Add priority-based label
+            labels.append(f"priority-{request.priority}")
+            
             return GitHubIssuePreview(
                 title=title,
                 body=body_text,
-                labels=labels,
+                labels=list(set(labels)),  # Remove duplicates
                 assignees=assignees,
                 repository_info=request.repository_info,
                 metadata={
@@ -455,21 +534,26 @@ class IssueService:
                     "file_context_count": len(request.file_context),
                     "total_tokens": sum(f.tokens for f in request.file_context),
                     "generated_at": datetime.utcnow().isoformat(),
-                    "generation_method": "architect_agent_llm"
+                    "generation_method": "architect_agent_llm",
+                    "enhanced_with_session": bool(db and user_id)
                 }
             )
+            
         except Exception as e:
-            # Fallback to static template if LLM fails
+            print(f"LLM call failed, using fallback: {e}")
+            # Fallback to context analysis
             context_summary = ""
             if request.chat_messages:
-                context_summary += f"## Chat Context\n"
+                context_summary += "## Chat Context\n"
                 for msg in request.chat_messages[-5:]:  # Last 5 messages
                     role = "User" if not msg.isCode else "Code"
                     context_summary += f"**{role}**: {msg.content[:100]}...\n\n"
+            
             if request.file_context:
-                context_summary += f"## File Context\n"
+                context_summary += "## File Context\n"
                 for file in request.file_context[:10]:  # Top 10 files
                     context_summary += f"- **{file.name}** ({file.type}, {file.tokens} tokens): {file.category}\n"
+            
             return GitHubIssuePreview(
                 title=request.title,
                 body=f"""{request.description or ''}
@@ -485,9 +569,9 @@ Based on the analyzed context, this issue requires attention to the following fi
 3. Create detailed implementation plan
 4. Begin development with proper testing
 
-*Generated from chat and file dependency analysis*
+*Generated from chat and file dependency analysis (LLM fallback)*
 """,
-                labels=["enhancement", "yudai-assistant"],
+                labels=["enhancement", "yudai-assistant", f"priority-{request.priority}"],
                 assignees=[],
                 repository_info=request.repository_info,
                 metadata={
@@ -495,7 +579,7 @@ Based on the analyzed context, this issue requires attention to the following fi
                     "file_context_count": len(request.file_context),
                     "total_tokens": sum(f.tokens for f in request.file_context),
                     "generated_at": datetime.utcnow().isoformat(),
-                    "generation_method": "context_analysis|llm_fallback",
+                    "generation_method": "context_analysis_fallback",
                     "error": str(e)
                 }
             )
@@ -572,7 +656,7 @@ async def create_issue_with_context(
     """
     try:
         # Generate GitHub issue preview
-        github_preview = IssueService.generate_github_issue_preview(request, use_sample_data)
+        github_preview = IssueService.generate_github_issue_preview(request, use_sample_data, db, current_user.id)
         
         if preview_only:
             return {
@@ -601,6 +685,45 @@ async def create_issue_with_context(
         )
         
         user_issue = IssueService.create_user_issue(db, current_user.id, issue_request)
+        
+        # If we have repository info and session context, create file embeddings
+        if request.repository_info and request.file_context:
+            try:
+                # Find or create a session for this repository
+                session_response = SessionService.get_or_create_session(
+                    db=db,
+                    user_id=current_user.id,
+                    repo_owner=request.repository_info.get("owner", ""),
+                    repo_name=request.repository_info.get("name", ""),
+                    repo_branch=request.repository_info.get("branch", "main")
+                )
+                
+                # Create file embeddings for session context
+                for file_item in request.file_context[:10]:  # Limit to 10 files
+                    try:
+                        embedding_request = CreateFileEmbeddingRequest(
+                            file_path=file_item.path or file_item.name,
+                            file_name=file_item.name,
+                            file_type=file_item.type,
+                            chunk_text=f"File: {file_item.name}, Category: {file_item.category}, Tokens: {file_item.tokens}",
+                            tokens=file_item.tokens,
+                            file_metadata={
+                                "category": file_item.category,
+                                "source": "issue_creation",
+                                "issue_id": user_issue.issue_id
+                            }
+                        )
+                        
+                        FileEmbeddingService.create_file_embedding(
+                            db=db,
+                            session_id=session_response.id,
+                            request=embedding_request
+                        )
+                    except Exception as emb_error:
+                        print(f"Warning: Could not create file embedding for {file_item.name}: {emb_error}")
+                        
+            except Exception as session_error:
+                print(f"Warning: Could not create session embeddings: {session_error}")
         
         return {
             "success": True,

@@ -9,12 +9,11 @@ These tests verify the complete authentication flow including:
 - Profile management
 """
 
-import pytest
-import json
-from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
-from models import User, AuthToken
+import pytest
+from models import AuthToken, User
 
 
 class TestGitHubAuthIntegration:
@@ -282,7 +281,7 @@ class TestTokenManagement:
         # Query for active, non-expired tokens
         active_tokens = test_db.query(AuthToken).filter(
             AuthToken.user_id == dummy_user.id,
-            AuthToken.is_active == True,
+            AuthToken.is_active,
             AuthToken.expires_at > datetime.utcnow()
         ).all()
         
@@ -303,7 +302,7 @@ class TestTokenManagement:
         
         active_tokens = test_db.query(AuthToken).filter(
             AuthToken.user_id == dummy_user.id,
-            AuthToken.is_active == True,
+            AuthToken.is_active,
             AuthToken.expires_at > datetime.utcnow()
         ).all()
         

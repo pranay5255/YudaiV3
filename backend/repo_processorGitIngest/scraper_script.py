@@ -224,7 +224,7 @@ Examples:
     print("EXTRACTION SUMMARY")
     print("="*50)
     print(f"Repository: {args.repo_url}")
-    print(f"Raw response saved with summary, tree, and content sections")
+    print("Raw response saved with summary, tree, and content sections")
     print(f"Output file: {args.output_file}")
 
 

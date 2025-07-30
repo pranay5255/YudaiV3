@@ -14,7 +14,6 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 from auth.github_oauth import get_github_api
-from github.github_api import GitHubAPIError
 
 
 class TestGitHubAPIIntegration:

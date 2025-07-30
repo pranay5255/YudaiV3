@@ -8,8 +8,7 @@ for authenticated users, including repository management, issues, and more.
 
 from typing import List, Optional
 from fastapi import Depends
-from sqlalchemy.orm import Session, joinedload
-from ghapi.all import GhApi
+from sqlalchemy.orm import Session
 
 from db.database import get_db
 from models import (
