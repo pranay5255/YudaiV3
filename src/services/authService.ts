@@ -1,11 +1,11 @@
 import { User, LoginResponse, AuthConfig } from '../types';
 
-// Get base URL and remove /api suffix for auth endpoints  
+// Get base URL for auth endpoints (different from API endpoints)
 const getAuthBaseURL = () => {
   const apiUrl = import.meta.env.VITE_API_URL || 
-    (import.meta.env.DEV ? 'http://localhost:8000' : 'https://yudai.app/api');
-  // Remove the .replace('/api', '') line
-  return apiUrl;
+    (import.meta.env.DEV ? 'http://localhost:8000' : 'https://yudai.app');
+  // For auth endpoints, we need to remove the /api suffix if it exists
+  return apiUrl.replace('/api', '');
 };
 
 const AUTH_BASE_URL = getAuthBaseURL();
