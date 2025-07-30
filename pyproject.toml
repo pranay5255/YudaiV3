@@ -20,6 +20,8 @@ dependencies = [
     "psycopg2-binary>=2.9.10",
     "ghapi>=1.0.6",
     "httpx>=0.28.1",
+    "black>=25.1.0",
+    "ruff>=0.12.7",
 ]
 
 [project.optional-dependencies]
