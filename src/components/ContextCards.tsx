@@ -45,8 +45,8 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   };
 
   const getTokenHeatColor = (tokens: number) => {
-    if (tokens < 3000) return 'from-teal-500 to-teal-500';
-    if (tokens < 7000) return 'from-teal-500 to-amber-500';
+    if (tokens < 300) return 'from-teal-500 to-teal-500';
+    if (tokens < 700) return 'from-teal-500 to-amber-500';
     return 'from-amber-500 to-red-500';
   };
 

@@ -191,15 +191,15 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
 
   const getTokenBadgeColor = useCallback((tokens: number) => {
     if (tokens === 0) return 'bg-zinc-700 text-fg/60';
-    if (tokens < 10000) return 'bg-red-900/20 text-red-900';
-    if (tokens < 8000) return 'bg-red-600/20 text-red-600';
-    if (tokens < 7000) return 'bg-red-500/20 text-red-500';
-    if (tokens < 6000) return 'bg-red-400/20 text-red-400';
-    if (tokens < 5000) return 'bg-orange-500/20 text-orange-500';
-    if (tokens < 4000) return 'bg-amber-500/20 text-amber-500';
-    if (tokens < 3000) return 'bg-yellow-500/20 text-yellow-500';
-    if (tokens < 2000) return 'bg-lime-500/20 text-lime-500';
-    if (tokens < 1000) return 'bg-green-500/20 text-green-500';
+    if (tokens < 1000) return 'bg-red-900/20 text-red-900';
+    if (tokens < 800) return 'bg-red-600/20 text-red-600';
+    if (tokens < 700) return 'bg-red-500/20 text-red-500';
+    if (tokens < 600) return 'bg-red-400/20 text-red-400';
+    if (tokens < 500) return 'bg-orange-500/20 text-orange-500';
+    if (tokens < 400) return 'bg-amber-500/20 text-amber-500';
+    if (tokens < 300) return 'bg-yellow-500/20 text-yellow-500';
+    if (tokens < 200) return 'bg-lime-500/20 text-lime-500';
+    if (tokens < 100) return 'bg-green-500/20 text-green-500';
     return 'bg-emerald-500/20 text-emerald-500';
   }, []);
 
