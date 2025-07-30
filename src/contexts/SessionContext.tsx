@@ -1,12 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { ApiService } from '../services/api';
-import { useRepository } from './RepositoryContext';
-import { useAuth } from './AuthContext';
+import { useRepository } from '../hooks/useRepository';
+import { useAuth } from '../hooks/useAuth';
 
 interface SessionContextValue {
   currentSessionId: string | null;
   setCurrentSessionId: (sessionId: string | null) => void;
-  createSession: (repoOwner: string, repoName: string, repoBranch?: string, title?: string, description?: string) => Promise<string>;
+  createSession: (repoOwner: string, repoName: string, repoBranch?: string, title?: string) => Promise<string>;
   getSessionContext: (sessionId: string) => Promise<{
     session: import('../types').ChatSession;
     messages: import('../types').ChatMessageAPI[];
@@ -66,8 +66,7 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
     repoOwner: string, 
     repoName: string, 
     repoBranch: string = 'main',
-    title?: string,
-    description?: string
+    title?: string
   ): Promise<string> => {
     if (!isAuthenticated) {
       throw new Error('User must be authenticated to create a session');
@@ -81,11 +80,10 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
         repoOwner,
         repoName,
         repoBranch,
-        title,
-        description
+        title
       );
 
-      const sessionId = session.session_id; // Use session_id field instead of id
+      const sessionId = session.id; // Use id field from ChatSession
       setCurrentSessionId(sessionId);
       return sessionId;
     } catch (error) {
@@ -119,8 +117,7 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
         selectedRepository.repository.full_name.split('/')[0],
         selectedRepository.repository.name,
         selectedRepository.branch,
-        `Session for ${selectedRepository.repository.full_name}`,
-        `Working on ${selectedRepository.repository.name}`
+        `Session for ${selectedRepository.repository.full_name}`
       ).catch(error => {
         console.error('Failed to auto-create session:', error);
       });

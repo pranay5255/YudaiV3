@@ -1,4 +1,6 @@
 // API service for communicating with the backend
+// This service provides complete coverage of all backend endpoints documented in context/APIDOCS.md
+// State flow from frontend calls to database operations is documented in context/dbSchema.md
 import { 
   ChatSession, 
   ChatSessionStats, 
@@ -216,15 +218,11 @@ export class ApiService {
     return this.handleResponse<{ issue_id: string; github_issue_url?: string }>(response);
   }
 
-  // GitHub Services
+  // GitHub Services - Deprecated: Use getUserRepositories() instead
   /* eslint-disable @typescript-eslint/no-explicit-any */
   static async getRepositories(): Promise<any[]> {
-    const response = await fetch(`${API_BASE_URL}/github/repositories`, {
-      method: 'GET',
-      headers: this.getAuthHeaders(),
-    });
-
-    return this.handleResponse<any[]>(response);
+    console.warn('getRepositories() is deprecated. Use getUserRepositories() instead.');
+    return this.getUserRepositories();
   }
 
   static async getRepository(owner: string, repo: string): Promise<any> {
@@ -382,5 +380,129 @@ export class ApiService {
     });
 
     return this.handleResponse<any[]>(response);
+  }
+
+  // Session Management Services (for SessionContext)
+  static async createOrGetSession(
+    repoOwner: string,
+    repoName: string,
+    repoBranch: string = 'main',
+    title?: string
+  ): Promise<ChatSession> {
+    // First try to get existing session, then create if none exists
+    const sessions = await this.getChatSessions();
+    const existingSession = sessions.find(session => 
+      session.title?.includes(`${repoOwner}/${repoName}`)
+    );
+
+    if (existingSession) {
+      return existingSession;
+    }
+
+    // Create new session by sending a welcome message
+    const sessionTitle = title || `Session for ${repoOwner}/${repoName}`;
+    
+    // Generate a unique session ID
+    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Send initial message to create session
+    const response = await this.sendChatMessage({
+      session_id: sessionId,
+      message: {
+        content: `Starting new session for repository ${repoOwner}/${repoName} on branch ${repoBranch}`,
+        is_code: false
+      },
+      repo_owner: repoOwner,
+      repo_name: repoName
+    });
+
+    // Get the created session
+    const allSessions = await this.getChatSessions();
+    const newSession = allSessions.find(s => s.id === response.session_id);
+    
+    if (!newSession) {
+      throw new Error('Failed to create session');
+    }
+
+    // Update session title if needed
+    if (newSession.title !== sessionTitle) {
+      await this.updateSessionTitle(newSession.id, sessionTitle);
+      newSession.title = sessionTitle;
+    }
+
+    return newSession;
+  }
+
+  static async getSessionContext(sessionId: string): Promise<{
+    session: ChatSession;
+    messages: ChatMessageAPI[];
+    context_cards: string[];
+    repository_info?: Record<string, unknown>;
+  }> {
+    // Get session details and messages in parallel
+    const [sessions, messages, sessionStats] = await Promise.all([
+      this.getChatSessions(),
+      this.getSessionMessages(sessionId),
+      this.getSessionStatistics(sessionId)
+    ]);
+
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    // Context cards would need to be extracted from a different source
+    // as ChatMessageAPI doesn't have context_cards field
+    const context_cards: string[] = [];
+
+    return {
+      session,
+      messages,
+      context_cards,
+      repository_info: {
+        session_id: sessionId,
+        session_title: session.title,
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+        is_active: session.is_active,
+        ...sessionStats
+      }
+    };
+  }
+
+  // Authentication Services
+  static async getAuthStatus(): Promise<{ authenticated: boolean; user?: any }> {
+    const response = await fetch(`${API_BASE_URL}/auth/status`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<{ authenticated: boolean; user?: any }>(response);
+  }
+
+  static async getUserProfile(): Promise<any> {
+    const response = await fetch(`${API_BASE_URL}/auth/profile`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  static async logout(): Promise<{ success: boolean; message: string }> {
+    const response = await fetch(`${API_BASE_URL}/auth/logout`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+    });
+
+    const result = await this.handleResponse<{ success: boolean; message: string }>(response);
+    
+    // Clear local storage on successful logout
+    if (result.success) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user_data');
+    }
+
+    return result;
   }
 }

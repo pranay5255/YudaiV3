@@ -80,7 +80,7 @@ services:
     networks:
       - yudai-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://yudai.app/health"]
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
       timeout: 5s
       retries: 3

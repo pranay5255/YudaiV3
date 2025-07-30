@@ -1,1 +1,1 @@
-from .filedeps import app
+from .filedeps import app as app
