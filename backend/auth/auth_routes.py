@@ -6,27 +6,33 @@ This module provides FastAPI routes for GitHub OAuth authentication,
 including login, callback, logout, and user profile endpoints.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status
-from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
 from typing import Optional
 
 from db.database import get_db
-from models import User, AuthToken, UserProfile, AuthResponse  # Import types from models.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import RedirectResponse
+from models import (  # Import types from models.py
+    AuthResponse,
+    AuthToken,
+    User,
+    UserProfile,
+)
+from sqlalchemy.orm import Session
+
 from .github_oauth import (
-    generate_oauth_state,
-    get_github_oauth_url,
-    exchange_code_for_token,
-    get_github_user_info,
-    create_or_update_user,
-    get_current_user,
-    get_current_user_optional,
-    validate_github_config,
-    oauth_states,
-    GitHubOAuthError,
     GITHUB_CLIENT_ID,
     GITHUB_CLIENT_SECRET,
-    GITHUB_REDIRECT_URI
+    GITHUB_REDIRECT_URI,
+    GitHubOAuthError,
+    create_or_update_user,
+    exchange_code_for_token,
+    generate_oauth_state,
+    get_current_user,
+    get_current_user_optional,
+    get_github_oauth_url,
+    get_github_user_info,
+    oauth_states,
+    validate_github_config,
 )
 
 # Create router for auth endpoints
@@ -121,7 +127,7 @@ async def logout(
     """
     db.query(AuthToken).filter(
         AuthToken.user_id == current_user.id,
-        AuthToken.is_active == True
+        AuthToken.is_active
     ).update({"is_active": False})
     db.commit()
     return {"success": True, "message": "Logged out successfully"}

@@ -9,16 +9,16 @@ and user authentication using the ghapi library.
 import os
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
-from urllib.parse import urlencode, parse_qs, urlparse
-import httpx
-from fastapi import HTTPException, Depends, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
-from ghapi.all import GhApi
+from typing import Any, Dict, Optional
+from urllib.parse import urlencode
 
+import httpx
 from db.database import get_db
-from models import User, AuthToken
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from ghapi.all import GhApi
+from models import AuthToken, User
+from sqlalchemy.orm import Session
 
 # Security scheme for JWT-like token authentication
 security = HTTPBearer()
@@ -181,7 +181,7 @@ async def create_or_update_user(db: Session, github_user: Dict[str, Any], access
         # Deactivate any existing active tokens for this user
         db.query(AuthToken).filter(
             AuthToken.user_id == user.id,
-            AuthToken.is_active == True
+            AuthToken.is_active
         ).update({"is_active": False})
         
         # Create new token
@@ -220,7 +220,7 @@ def get_github_api(user_id: int, db: Session) -> GhApi:
     # Get user's active auth token
     auth_token = db.query(AuthToken).filter(
         AuthToken.user_id == user_id,
-        AuthToken.is_active == True,
+        AuthToken.is_active,
         AuthToken.expires_at > datetime.utcnow()
     ).first()
     
@@ -252,7 +252,7 @@ async def get_current_user(
     # Find user by token
     auth_token = db.query(AuthToken).filter(
         AuthToken.access_token == token,
-        AuthToken.is_active == True,
+        AuthToken.is_active,
         AuthToken.expires_at > datetime.utcnow()
     ).first()
     

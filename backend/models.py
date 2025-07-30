@@ -2,11 +2,10 @@
 Unified models for YudaiV3 - SQLAlchemy and Pydantic models in one place
 """
 from pydantic import BaseModel, Field, validator, ConfigDict
-from typing import Optional, List, Literal, Union, Dict, Any, ForwardRef
+from typing import Optional, List, Literal, Dict, Any
 from datetime import datetime
 from enum import Enum
-import uuid
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, JSON
+from sqlalchemy import Integer, String, Text, DateTime, Boolean, ForeignKey, JSON
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 from sqlalchemy.sql import func
 from sqlalchemy.ext.declarative import declarative_base
@@ -315,6 +314,12 @@ class ChatSession(Base):
     title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
+    # Repository context (session backbone)
+    repo_owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    repo_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    repo_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default="main")
+    repo_context: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)  # Repository metadata
+    
     # Status and statistics
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     total_messages: Mapped[int] = mapped_column(Integer, default=0)
@@ -328,6 +333,7 @@ class ChatSession(Base):
     # Relationships
     user: Mapped["User"] = relationship()
     messages: Mapped[List["ChatMessage"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+    file_embeddings: Mapped[List["FileEmbedding"]] = relationship(back_populates="session", cascade="all, delete-orphan")
 
 class ChatMessage(Base):
     """Individual chat messages within sessions"""
@@ -403,6 +409,37 @@ class UserIssue(Base):
     user: Mapped["User"] = relationship()
     context_card: Mapped[Optional["ContextCard"]] = relationship()
     chat_session: Mapped[Optional["ChatSession"]] = relationship()
+
+class FileEmbedding(Base):
+    """File embeddings for semantic search using pgvector"""
+    __tablename__ = "file_embeddings"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id"), nullable=False)
+    repository_id: Mapped[Optional[int]] = mapped_column(ForeignKey("repositories.id"), nullable=True)
+    
+    # File information
+    file_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    file_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Embedding data
+    embedding: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Store as JSON for now
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
+    chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
+    tokens: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Metadata (renamed to avoid SQLAlchemy conflict)
+    file_metadata: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    session: Mapped["ChatSession"] = relationship(back_populates="file_embeddings")
+    repository: Mapped[Optional["Repository"]] = relationship()
 
 # ============================================================================
 # PYDANTIC MODELS (API Request/Response)
@@ -565,6 +602,65 @@ class ChatMessageResponse(BaseModel):
     error_message: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+# Session Management Models
+class CreateSessionRequest(BaseModel):
+    repo_owner: str = Field(..., min_length=1, max_length=255)
+    repo_name: str = Field(..., min_length=1, max_length=255)
+    repo_branch: Optional[str] = Field("main", max_length=255)
+    title: Optional[str] = Field(None, max_length=255)
+    description: Optional[str] = Field(None)
+
+class SessionResponse(BaseModel):
+    id: int
+    session_id: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    repo_owner: Optional[str] = None
+    repo_name: Optional[str] = None
+    repo_branch: Optional[str] = None
+    repo_context: Optional[Dict[str, Any]] = None
+    is_active: bool
+    total_messages: int
+    total_tokens: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    last_activity: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class SessionContextResponse(BaseModel):
+    """Complete session context including messages and context cards"""
+    session: SessionResponse
+    messages: List[ChatMessageResponse]
+    context_cards: List[str] = Field(default_factory=list)
+    repository_info: Optional[Dict[str, Any]] = None
+    file_embeddings_count: int = 0
+
+# File Embedding Models
+class CreateFileEmbeddingRequest(BaseModel):
+    file_path: str = Field(..., min_length=1, max_length=1000)
+    file_name: str = Field(..., min_length=1, max_length=500)
+    file_type: str = Field(..., min_length=1, max_length=100)
+    file_content: Optional[str] = Field(None)
+    chunk_text: str = Field(..., min_length=1)
+    chunk_index: int = Field(default=0, ge=0)
+    tokens: int = Field(default=0, ge=0)
+    file_metadata: Optional[Dict[str, Any]] = Field(None)
+
+class FileEmbeddingResponse(BaseModel):
+    id: int
+    session_id: int
+    repository_id: Optional[int] = None
+    file_path: str
+    file_name: str
+    file_type: str
+    chunk_index: int
+    tokens: int
+    file_metadata: Optional[Dict[str, Any]] = None
+    created_at: datetime
     
     model_config = ConfigDict(from_attributes=True)
 

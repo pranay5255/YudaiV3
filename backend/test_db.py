@@ -4,15 +4,15 @@ Enhanced test script to verify database initialization and connectivity
 Works both locally and in Docker containers
 """
 
-import sys
 import os
+import sys
 from pathlib import Path
+
+from sqlalchemy import create_engine, inspect, text
 
 # Add the backend directory to the path
 backend_dir = Path(__file__).parent
 sys.path.insert(0, str(backend_dir))
-
-from sqlalchemy import create_engine, text, inspect
 
 def get_database_url():
     """Get database URL from environment or use defaults"""
@@ -31,7 +31,7 @@ def test_database():
     """Test database connection and verify tables exist"""
     database_url = get_database_url()
     
-    print(f"🔍 Testing database connection...")
+    print("🔍 Testing database connection...")
     print(f"   URL: {database_url}")
     
     try:
@@ -100,7 +100,7 @@ def test_database():
             
     except Exception as e:
         print(f"❌ Database test failed: {e}")
-        print(f"🔍 Debug information:")
+        print("🔍 Debug information:")
         print(f"   - Database URL: {database_url}")
         print(f"   - Environment: {'Docker' if os.getenv('DATABASE_URL') else 'Local'}")
         print(f"   - Current working directory: {os.getcwd()}")

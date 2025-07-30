@@ -8,8 +8,7 @@ It's an internal agent class used by the backend, not an API service.
 import json
 import os
 import uuid
-import time
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 import requests
@@ -18,8 +17,7 @@ from sqlalchemy.orm import Session
 from models import (
     UserIssue, 
     CreateUserIssueRequest,
-    Repository,
-    GitHubIssue as GitHubIssueModel
+    Repository
 )
 from .promptTemplate import (
     build_code_inspector_prompt,

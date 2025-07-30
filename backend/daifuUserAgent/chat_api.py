@@ -2,18 +2,26 @@
 from __future__ import annotations
 
 import os
-import uuid
 import time
-from typing import Dict, List, Tuple
+import uuid
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends
 import requests
+from auth.github_oauth import get_current_user
+from db.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, status
+from issueChatServices.chat_service import ChatService, SessionService
+from issueChatServices.issue_service import IssueService
+from models import (
+    ChatRequest,
+    CreateChatMessageRequest,
+    CreateSessionRequest,
+    SessionContextResponse,
+    SessionResponse,
+    User,
+)
 from sqlalchemy.orm import Session
 
-from models import ChatRequest, CreateChatMessageRequest
-from db.database import get_db
-from issueChatServices.chat_service import ChatService
-from issueChatServices.issue_service import IssueService
 from .prompt import build_daifu_prompt
 
 router = APIRouter()
@@ -27,50 +35,161 @@ GITHUB_CONTEXT = (
 )
 
 
+@router.post("/sessions", response_model=SessionResponse)
+async def create_or_get_session(
+    request: CreateSessionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create or get existing session for repository selection"""
+    try:
+        session = SessionService.get_or_create_session(
+            db=db,
+            user_id=current_user.id,
+            repo_owner=request.repo_owner,
+            repo_name=request.repo_name,
+            repo_branch=request.repo_branch,
+            title=request.title,
+            description=request.description
+        )
+        return session
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create/get session: {str(e)}"
+        )
+
+
+@router.get("/sessions/{session_id}", response_model=SessionContextResponse)
+async def get_session_context(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get complete session context including messages and context cards"""
+    try:
+        context = SessionService.get_session_context(db, current_user.id, session_id)
+        if not context:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+        return context
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get session context: {str(e)}"
+        )
+
+
+@router.post("/sessions/{session_id}/touch")
+async def touch_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update last_activity for a session"""
+    try:
+        session = SessionService.touch_session(db, current_user.id, session_id)
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+        return {"success": True, "session": session}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to touch session: {str(e)}"
+        )
+
+
+@router.get("/sessions", response_model=List[SessionResponse])
+async def get_user_sessions(
+    repo_owner: Optional[str] = None,
+    repo_name: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get user sessions filtered by repository"""
+    try: #TODO: session:repository mapping is one to many, a user can have multiple sessions for the same repository
+        sessions = SessionService.get_user_sessions_by_repo(
+            db, current_user.id, repo_owner, repo_name
+        )
+        return sessions
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get sessions: {str(e)}"
+        )
+
+
 @router.post("/chat/daifu")
 async def chat_daifu(
     request: ChatRequest,
     db: Session = Depends(get_db),
-    user_id: int = 1  # TODO: Get from authentication
+    current_user: User = Depends(get_current_user)
 ):
     """Process a chat message via the DAifu agent and store in database."""
     start_time = time.time()
     
-    # Generate unique message ID
-    message_id = str(uuid.uuid4())
+    # Validate session_id is provided
+    if not request.conversation_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="session_id (conversation_id) is required"
+        )
     
-    # Store user message in database
-    user_message_request = CreateChatMessageRequest(
-        session_id=request.conversation_id or "default",
-        message_id=message_id,
-        message_text=request.message.content,
-        sender_type="user",
-        role="user",
-        is_code=request.message.is_code,
-        tokens=len(request.message.content.split()),  # Simple token estimation
-        context_cards=request.context_cards
-    )
-    
-    user_message = ChatService.create_chat_message(db, user_id, user_message_request)
-    
-    # Get conversation history from database
-    history_messages = ChatService.get_chat_messages(
-        db, user_id, request.conversation_id or "default", limit=50
-    )
-    
-    # Convert to format expected by prompt builder
-    history = []
-    for msg in history_messages:
-        sender = "User" if msg.sender_type == "user" else "DAifu"
-        history.append((sender, msg.message_text))
-    
-    # Build prompt
-    prompt = build_daifu_prompt(GITHUB_CONTEXT, history)
-
     try:
+        # Touch session to update last_activity
+        session = SessionService.touch_session(db, current_user.id, request.conversation_id)
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+        
+        # Generate unique message ID
+        message_id = str(uuid.uuid4())
+        
+        # Store user message in database
+        user_message_request = CreateChatMessageRequest(
+            session_id=request.conversation_id,
+            message_id=message_id,
+            message_text=request.message.content,
+            sender_type="user",
+            role="user",
+            is_code=request.message.is_code,
+            tokens=len(request.message.content.split()),
+            context_cards=request.context_cards
+        )
+        
+        ChatService.create_chat_message(db, current_user.id, user_message_request)
+        
+        # Get conversation history from database
+        history_messages = ChatService.get_chat_messages(
+            db, current_user.id, request.conversation_id, limit=50
+        )
+        
+        # Convert to format expected by prompt builder
+        history = []
+        for msg in history_messages:
+            sender = "User" if msg.sender_type == "user" else "DAifu"
+            history.append((sender, msg.message_text))
+        
+        # Build prompt with session context
+        prompt = build_daifu_prompt(GITHUB_CONTEXT, history)
+
         api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
-            raise RuntimeError("OPENROUTER_API_KEY not configured")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="OPENROUTER_API_KEY not configured"
+            )
 
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -92,27 +211,55 @@ async def chat_daifu(
         reply = resp.json()["choices"][0]["message"]["content"].strip()
         
         # Calculate processing time
-        processing_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+        processing_time = (time.time() - start_time) * 1000
         
         # Store assistant response in database
         assistant_message_request = CreateChatMessageRequest(
-            session_id=request.conversation_id or "default",
+            session_id=request.conversation_id,
             message_id=str(uuid.uuid4()),
             message_text=reply,
             sender_type="assistant",
             role="assistant",
             is_code=False,
-            tokens=len(reply.split()),  # Simple token estimation
+            tokens=len(reply.split()),
             model_used="deepseek/deepseek-r1-0528:free",
             processing_time=processing_time
         )
         
-        assistant_message = ChatService.create_chat_message(db, user_id, assistant_message_request)
+        ChatService.create_chat_message(db, current_user.id, assistant_message_request)
         
-    except Exception as e:  # pragma: no cover - network failures
+        return {
+            "reply": reply,
+            "conversation": history + [("User", request.message.content), ("DAifu", reply)],
+            "message_id": message_id,
+            "processing_time": processing_time,
+            "session_id": request.conversation_id
+        }
+        
+    except HTTPException:
+        raise
+    except requests.RequestException as e:
         # Store error message in database
         error_message_request = CreateChatMessageRequest(
-            session_id=request.conversation_id or "default",
+            session_id=request.conversation_id,
+            message_id=str(uuid.uuid4()),
+            message_text=f"Error: Network request failed - {str(e)}",
+            sender_type="system",
+            role="system",
+            is_code=False,
+            tokens=0,
+            error_message=str(e)
+        )
+        
+        ChatService.create_chat_message(db, current_user.id, error_message_request)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"LLM service unavailable: {str(e)}"
+        )
+    except Exception as e:
+        # Store error message in database
+        error_message_request = CreateChatMessageRequest(
+            session_id=request.conversation_id,
             message_id=str(uuid.uuid4()),
             message_text=f"Error: {str(e)}",
             sender_type="system",
@@ -122,51 +269,70 @@ async def chat_daifu(
             error_message=str(e)
         )
         
-        ChatService.create_chat_message(db, user_id, error_message_request)
-        raise HTTPException(status_code=500, detail=f"LLM call failed: {e}")
-
-    return {
-        "reply": reply, 
-        "conversation": history + [("User", request.message.content), ("DAifu", reply)],
-        "message_id": message_id,
-        "processing_time": processing_time
-    }
+        ChatService.create_chat_message(db, current_user.id, error_message_request)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"LLM call failed: {str(e)}"
+        )
 
 
 @router.get("/chat/sessions")
 async def get_chat_sessions(
     db: Session = Depends(get_db),
-    user_id: int = 1,  # TODO: Get from authentication
+    current_user: User = Depends(get_current_user),
     limit: int = 50
 ):
     """Get all chat sessions for a user."""
-    sessions = ChatService.get_user_chat_sessions(db, user_id, limit)
-    return {"sessions": sessions}
+    try:
+        sessions = ChatService.get_user_chat_sessions(db, current_user.id, limit)
+        return {"sessions": sessions}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get chat sessions: {str(e)}"
+        )
 
 
 @router.get("/chat/sessions/{session_id}/messages")
 async def get_chat_messages(
     session_id: str,
     db: Session = Depends(get_db),
-    user_id: int = 1,  # TODO: Get from authentication
+    current_user: User = Depends(get_current_user),
     limit: int = 100
 ):
     """Get messages for a specific chat session."""
-    messages = ChatService.get_chat_messages(db, user_id, session_id, limit)
-    return {"messages": messages}
+    try:
+        messages = ChatService.get_chat_messages(db, current_user.id, session_id, limit)
+        return {"messages": messages}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get chat messages: {str(e)}"
+        )
 
 
 @router.get("/chat/sessions/{session_id}/statistics")
 async def get_session_statistics(
     session_id: str,
     db: Session = Depends(get_db),
-    user_id: int = 1  # TODO: Get from authentication
+    current_user: User = Depends(get_current_user)
 ):
     """Get statistics for a chat session."""
-    stats = ChatService.get_session_statistics(db, user_id, session_id)
-    if not stats:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return stats
+    try:
+        stats = ChatService.get_session_statistics(db, current_user.id, session_id)
+        if not stats:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+        return stats
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get session statistics: {str(e)}"
+        )
 
 
 @router.put("/chat/sessions/{session_id}/title")
@@ -174,38 +340,60 @@ async def update_session_title(
     session_id: str,
     title: str,
     db: Session = Depends(get_db),
-    user_id: int = 1  # TODO: Get from authentication
+    current_user: User = Depends(get_current_user)
 ):
     """Update the title of a chat session."""
-    session = ChatService.update_session_title(db, user_id, session_id, title)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return session
+    try:
+        session = ChatService.update_session_title(db, current_user.id, session_id, title)
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+        return session
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update session title: {str(e)}"
+        )
 
 
 @router.delete("/chat/sessions/{session_id}")
 async def deactivate_session(
     session_id: str,
     db: Session = Depends(get_db),
-    user_id: int = 1  # TODO: Get from authentication
+    current_user: User = Depends(get_current_user)
 ):
     """Deactivate a chat session."""
-    success = ChatService.deactivate_session(db, user_id, session_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return {"message": "Session deactivated successfully"}
+    try:
+        success = ChatService.deactivate_session(db, current_user.id, session_id)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+        return {"message": "Session deactivated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to deactivate session: {str(e)}"
+        )
 
 
 @router.post("/chat/create-issue")
 async def create_issue_from_chat(
     request: ChatRequest,
     db: Session = Depends(get_db),
-    user_id: int = 1  # TODO: Get from authentication
+    current_user: User = Depends(get_current_user)
 ):
     """Create an issue from a chat conversation."""
     try:
         # Create the issue from the chat request
-        issue = IssueService.create_issue_from_chat(db, user_id, request)
+        issue = IssueService.create_issue_from_chat(db, current_user.id, request)
         
         return {
             "success": True,
@@ -214,4 +402,7 @@ async def create_issue_from_chat(
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create issue: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create issue: {str(e)}"
+        )

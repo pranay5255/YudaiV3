@@ -1,7 +1,6 @@
 # DAifu Prompt Template
 """Utility to build prompts for the DAifu agent."""
 from textwrap import dedent
-from datetime import datetime
 from typing import List, Tuple, Dict, Any
 
 SYSTEM_HEADER = dedent(
@@ -115,8 +114,6 @@ def get_github_context(github_context: str) -> str:
         get_repository_pulls,
     )
     from models import User
-    from db.database import get_db
-    from fastapi import Depends
 
     import asyncio
 
