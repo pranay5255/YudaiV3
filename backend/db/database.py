@@ -16,11 +16,20 @@ DATABASE_URL = os.getenv(
     "postgresql://yudai_user:yudai_password@db:5432/yudai_db"
 )
 
-# Create engine
+# Create engine optimized for real-time features and SSE
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
-    echo=bool(os.getenv("DB_ECHO", "false").lower() == "true")
+    pool_size=20,  # Increased for concurrent SSE connections
+    max_overflow=30,  # Allow burst connections for real-time updates
+    pool_recycle=3600,  # Recycle connections every hour
+    pool_timeout=30,  # Connection timeout
+    echo=bool(os.getenv("DB_ECHO", "false").lower() == "true"),
+    # Additional SSE-friendly settings
+    connect_args={
+        "application_name": "yudai_v3_sse",
+        "options": "-c timezone=UTC"
+    }
 )
 #TODO: Add pgvector (very important vector db)
 
@@ -39,10 +48,18 @@ def get_db():
 
 def init_db():
     """
-    Initialize database - create all tables
+    Initialize database - create all tables using SQLAlchemy models
     """
-    # Import all models here to ensure they are registered
-    Base.metadata.create_all(bind=engine)
+    try:
+        print("Initializing database with SQLAlchemy models...")
+        # Import all models here to ensure they are registered
+        Base.metadata.create_all(bind=engine)
+        print("✓ Database initialized successfully with SQLAlchemy models")
+        return True
+    except Exception as e:
+        print(f"✗ Failed to initialize database with SQLAlchemy models: {e}")
+        print("Falling back to standalone SQL initialization...")
+        return False
 
 def create_sample_data():
     """
@@ -50,7 +67,7 @@ def create_sample_data():
     """
     from models import (
         User, AuthToken, Repository, FileItem, ContextCard, IdeaItem,
-        Issue, PullRequest, Commit, FileAnalysis, ChatSession, ChatMessage, UserIssue
+        Issue, PullRequest, Commit, FileAnalysis, ChatSession, ChatMessage, UserIssue, FileEmbedding
     )
     
     db = SessionLocal()
@@ -343,13 +360,24 @@ def create_sample_data():
             db.add(idea)
         db.commit()
         
-        # Sample ChatSessions
+        # Sample ChatSessions with repository context
         sample_sessions = [
             ChatSession(
                 user_id=1,
                 session_id="session_001",
                 title="Authentication Discussion",
                 description="Discussion about implementing OAuth2 authentication",
+                repo_owner="alice_dev",
+                repo_name="awesome-project",
+                repo_branch="main",
+                repo_context={
+                    "owner": "alice_dev",
+                    "name": "awesome-project",
+                    "branch": "main",
+                    "full_name": "alice_dev/awesome-project",
+                    "html_url": "https://github.com/alice_dev/awesome-project",
+                    "created_at": datetime.utcnow().isoformat()
+                },
                 is_active=True,
                 total_messages=5,
                 total_tokens=1200,
@@ -360,6 +388,17 @@ def create_sample_data():
                 session_id="session_002",
                 title="Database Design",
                 description="Planning the database schema for the new feature",
+                repo_owner="bob_coder",
+                repo_name="cool-app",
+                repo_branch="development",
+                repo_context={
+                    "owner": "bob_coder",
+                    "name": "cool-app",
+                    "branch": "development",
+                    "full_name": "bob_coder/cool-app",
+                    "html_url": "https://github.com/bob_coder/cool-app",
+                    "created_at": datetime.utcnow().isoformat()
+                },
                 is_active=True,
                 total_messages=3,
                 total_tokens=800,
@@ -425,6 +464,46 @@ def create_sample_data():
         
         for user_issue in sample_user_issues:
             db.add(user_issue)
+        db.commit()
+        
+        # Sample FileEmbeddings for session context
+        sample_file_embeddings = [
+            FileEmbedding(
+                session_id=1,
+                repository_id=1,
+                file_path="src/main.py",
+                file_name="main.py",
+                file_type="python",
+                file_content="# Main application file\n\ndef main():\n    print('Hello, World!')\n\nif __name__ == '__main__':\n    main()",
+                chunk_index=0,
+                chunk_text="# Main application file\n\ndef main():\n    print('Hello, World!')",
+                tokens=25,
+                file_metadata={
+                    "size": 500,
+                    "encoding": "utf-8",
+                    "lines": 6
+                }
+            ),
+            FileEmbedding(
+                session_id=1,
+                repository_id=1,
+                file_path="requirements.txt",
+                file_name="requirements.txt",
+                file_type="text",
+                file_content="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
+                chunk_index=0,
+                chunk_text="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
+                tokens=15,
+                file_metadata={
+                    "size": 200,
+                    "encoding": "utf-8",
+                    "lines": 3
+                }
+            )
+        ]
+        
+        for file_embedding in sample_file_embeddings:
+            db.add(file_embedding)
         db.commit()
         
         print("✓ Sample data created successfully")

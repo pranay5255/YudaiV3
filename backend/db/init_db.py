@@ -223,6 +223,10 @@ def create_tables_standalone(engine):
             session_id VARCHAR(255) UNIQUE NOT NULL,
             title VARCHAR(255),
             description TEXT,
+            repo_owner VARCHAR(255),
+            repo_name VARCHAR(255),
+            repo_branch VARCHAR(255) DEFAULT 'main',
+            repo_context JSON,
             is_active BOOLEAN DEFAULT TRUE,
             total_messages INTEGER DEFAULT 0,
             total_tokens INTEGER DEFAULT 0,
@@ -277,15 +281,137 @@ def create_tables_standalone(engine):
             updated_at TIMESTAMP WITH TIME ZONE,
             processed_at TIMESTAMP WITH TIME ZONE
         )
+        """,
         """
+        CREATE TABLE IF NOT EXISTS file_embeddings (
+            id SERIAL PRIMARY KEY,
+            session_id INTEGER REFERENCES chat_sessions(id),
+            repository_id INTEGER REFERENCES repositories(id),
+            file_path VARCHAR(1000) NOT NULL,
+            file_name VARCHAR(500) NOT NULL,
+            file_type VARCHAR(100) NOT NULL,
+            file_content TEXT,
+            embedding TEXT,
+            chunk_index INTEGER DEFAULT 0,
+            chunk_text TEXT NOT NULL,
+            tokens INTEGER DEFAULT 0,
+            file_metadata JSON,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE
+        )
+        """
+    ]
+    
+    # Index creation for performance optimization
+    create_indexes_sql = [
+        # High-frequency access indexes (SessionContext.tsx usage patterns)
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_active ON chat_sessions(user_id, is_active)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_repo_lookup ON chat_sessions(user_id, repo_owner, repo_name, repo_branch, is_active)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_session_id ON chat_sessions(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_last_activity ON chat_sessions(last_activity DESC)",
+        
+        # Message-related indexes (frequent chat operations)
+        "CREATE INDEX IF NOT EXISTS idx_chat_messages_session_time ON chat_messages(session_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_messages_message_id ON chat_messages(message_id)",
+        
+        # Context and file embedding indexes (real-time context loading)
+        "CREATE INDEX IF NOT EXISTS idx_context_cards_user_active ON context_cards(user_id, is_active)",
+        "CREATE INDEX IF NOT EXISTS idx_file_embeddings_session ON file_embeddings(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_file_embeddings_file_path ON file_embeddings(file_path)",
+        
+        # Authentication and user indexes (login/auth flows)
+        "CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_active ON auth_tokens(user_id, is_active)",
+        "CREATE INDEX IF NOT EXISTS idx_users_github_id ON users(github_user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_users_github_username ON users(github_username)",
+        
+        # Repository and GitHub data indexes (moderate frequency)
+        "CREATE INDEX IF NOT EXISTS idx_repositories_user_name ON repositories(user_id, name)",
+        "CREATE INDEX IF NOT EXISTS idx_repositories_full_name ON repositories(full_name)",
+        "CREATE INDEX IF NOT EXISTS idx_repositories_github_id ON repositories(github_repo_id)",
+        
+        # Issue and PR indexes (moderate frequency)
+        "CREATE INDEX IF NOT EXISTS idx_user_issues_user_status ON user_issues(user_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_user_issues_repo ON user_issues(repo_owner, repo_name)",
+        "CREATE INDEX IF NOT EXISTS idx_user_issues_session ON user_issues(chat_session_id)",
+        
+        # File system indexes (occasional access)
+        "CREATE INDEX IF NOT EXISTS idx_file_items_repo_path ON file_items(repository_id, path)",
+        "CREATE INDEX IF NOT EXISTS idx_file_items_directory ON file_items(repository_id, is_directory)",
+        "CREATE INDEX IF NOT EXISTS idx_file_analyses_repo_status ON file_analyses(repository_id, status)",
+        
+        # GitHub data indexes (low frequency)
+        "CREATE INDEX IF NOT EXISTS idx_issues_repo_state ON issues(repository_id, state)",
+        "CREATE INDEX IF NOT EXISTS idx_pull_requests_repo_state ON pull_requests(repository_id, state)",
+        "CREATE INDEX IF NOT EXISTS idx_commits_repo_date ON commits(repository_id, author_date DESC)"
     ]
     
     with engine.connect() as conn:
         for sql in create_tables_sql:
             conn.execute(text(sql))
+        
+        # Create indexes after tables
+        for sql in create_indexes_sql:
+            conn.execute(text(sql))
+        
+        # Create triggers for real-time SSE notifications
+        create_triggers_sql = [
+            # Updated_at triggers for automatic timestamp updates
+            """
+            CREATE TRIGGER update_chat_sessions_updated_at 
+                BEFORE UPDATE ON chat_sessions 
+                FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()
+            """,
+            """
+            CREATE TRIGGER update_chat_messages_updated_at 
+                BEFORE UPDATE ON chat_messages 
+                FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()
+            """,
+            """
+            CREATE TRIGGER update_context_cards_updated_at 
+                BEFORE UPDATE ON context_cards 
+                FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()
+            """,
+            """
+            CREATE TRIGGER update_user_issues_updated_at 
+                BEFORE UPDATE ON user_issues 
+                FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()
+            """,
+            """
+            CREATE TRIGGER update_file_embeddings_updated_at 
+                BEFORE UPDATE ON file_embeddings 
+                FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()
+            """,
+            
+            # Real-time notification triggers for SSE
+            """
+            CREATE TRIGGER notify_chat_sessions_change 
+                AFTER INSERT OR UPDATE OR DELETE ON chat_sessions 
+                FOR EACH ROW EXECUTE FUNCTION notify_session_update()
+            """,
+            """
+            CREATE TRIGGER notify_chat_messages_change 
+                AFTER INSERT OR UPDATE OR DELETE ON chat_messages 
+                FOR EACH ROW EXECUTE FUNCTION notify_session_update()
+            """,
+            """
+            CREATE TRIGGER notify_context_cards_change 
+                AFTER INSERT OR UPDATE OR DELETE ON context_cards 
+                FOR EACH ROW EXECUTE FUNCTION notify_session_update()
+            """,
+            """
+            CREATE TRIGGER notify_file_embeddings_change 
+                AFTER INSERT OR UPDATE OR DELETE ON file_embeddings 
+                FOR EACH ROW EXECUTE FUNCTION notify_session_update()
+            """
+        ]
+        
+        for sql in create_triggers_sql:
+            conn.execute(text(sql))
+        
         conn.commit()
     
-    print("✓ Tables created successfully using standalone SQL")
+    print("✓ Tables, indexes, and triggers created successfully using standalone SQL")
 
 def create_sample_data_with_models(engine):
     """Create sample data using SQLAlchemy models (preferred method)"""
@@ -398,11 +524,11 @@ requests==2.26.0', 500, NOW(), NOW()),
             ON CONFLICT DO NOTHING
         """))
         
-        # Sample ChatSessions
+        # Sample ChatSessions with repository context
         db.execute(text("""
-            INSERT INTO chat_sessions (user_id, session_id, title, description, is_active, total_messages, total_tokens, created_at, updated_at, last_activity) VALUES
-            (1, 'session_001', 'Authentication Discussion', 'Discussion about implementing OAuth2 authentication', true, 5, 1200, NOW(), NOW(), NOW() - INTERVAL '2 hours'),
-            (2, 'session_002', 'Database Design', 'Planning the database schema for the new feature', true, 3, 800, NOW(), NOW(), NOW() - INTERVAL '1 hour')
+            INSERT INTO chat_sessions (user_id, session_id, title, description, repo_owner, repo_name, repo_branch, repo_context, is_active, total_messages, total_tokens, created_at, updated_at, last_activity) VALUES
+            (1, 'session_001', 'Authentication Discussion', 'Discussion about implementing OAuth2 authentication', 'alice_dev', 'awesome-project', 'main', '{"owner": "alice_dev", "name": "awesome-project", "branch": "main", "full_name": "alice_dev/awesome-project", "html_url": "https://github.com/alice_dev/awesome-project"}', true, 5, 1200, NOW(), NOW(), NOW() - INTERVAL '2 hours'),
+            (2, 'session_002', 'Database Design', 'Planning the database schema for the new feature', 'bob_coder', 'cool-app', 'development', '{"owner": "bob_coder", "name": "cool-app", "branch": "development", "full_name": "bob_coder/cool-app", "html_url": "https://github.com/bob_coder/cool-app"}', true, 3, 800, NOW(), NOW(), NOW() - INTERVAL '1 hour')
             ON CONFLICT (session_id) DO NOTHING
         """))
         
@@ -421,6 +547,14 @@ requests==2.26.0', 500, NOW(), NOW()),
             ON CONFLICT (issue_id) DO NOTHING
         """))
         
+        # Sample FileEmbeddings for session context
+        db.execute(text("""
+            INSERT INTO file_embeddings (session_id, repository_id, file_path, file_name, file_type, file_content, chunk_index, chunk_text, tokens, file_metadata, created_at, updated_at) VALUES
+            (1, 1, 'src/main.py', 'main.py', 'python', '# Main application file\n\ndef main():\n    print(''Hello, World!'')\n\nif __name__ == ''__main__'':\n    main()', 0, '# Main application file\n\ndef main():\n    print(''Hello, World!'')', 25, '{"size": 500, "encoding": "utf-8", "lines": 6}', NOW(), NOW()),
+            (1, 1, 'requirements.txt', 'requirements.txt', 'text', 'flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0', 0, 'flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0', 15, '{"size": 200, "encoding": "utf-8", "lines": 3}', NOW(), NOW())
+            ON CONFLICT DO NOTHING
+        """))
+        
         db.commit()
         print("✓ Sample data created successfully using standalone SQL")
         
@@ -434,29 +568,57 @@ requests==2.26.0', 500, NOW(), NOW()),
 def create_database():
     """Create the database and initialize all tables"""
     try:
-        print("Initializing database...")
+        print("🏗️  Initializing YudaiV3 database with SSE optimization...")
         
         # Wait for database to be ready
         engine = wait_for_database()
         if not engine:
+            print("❌ Could not connect to database")
             return False
         
-        # Try to create tables using models first, fall back to standalone if needed
-        if not create_tables_with_models(engine):
+        # Always try SQLAlchemy models first (preferred for consistency)
+        print("🏗️  Attempting SQLAlchemy model-based initialization...")
+        if create_tables_with_models(engine):
+            print("✅ Using SQLAlchemy models for table creation")
+        else:
+            print("⚠️  Falling back to standalone SQL for table creation")
             create_tables_standalone(engine)
+        
+        # Create sample data (models preferred)
+        print("📊 Creating sample data...")
+        if create_sample_data_with_models(engine):
+            print("✅ Using SQLAlchemy models for sample data")
+        else:
+            print("⚠️  Falling back to standalone SQL for sample data")
+            create_sample_data_standalone(engine)
         
         # Verify tables were created
         inspector = inspect(engine)
         tables = inspector.get_table_names()
         
-        print(f"✓ Created {len(tables)} tables:")
-        for table in tables:
-            print(f"  - {table}")
+        print(f"\n📋 Created {len(tables)} tables:")
+        for table in sorted(tables):
+            print(f"  ✓ {table}")
+        
+        # Check database health and performance
+        check_database_health()
+        
+        print("\n" + "="*60)
+        print("🎉 DATABASE INITIALIZATION COMPLETE")
+        print("   ✓ Tables created with performance indexes")
+        print("   ✓ Repository context fields added to chat_sessions")
+        print("   ✓ SSE-optimized connection pool configured")
+        print("   ✓ Sample data populated for testing")
+        print("="*60)
         
         return True
         
     except Exception as e:
-        print(f"✗ Database initialization failed: {e}")
+        print(f"\n❌ CRITICAL ERROR: Database initialization failed: {e}")
+        print("🔍 This may be due to:")
+        print("   - Database connection issues")
+        print("   - Schema conflicts")
+        print("   - Missing dependencies")
         return False
 
 def create_sample_data_wrapper():
