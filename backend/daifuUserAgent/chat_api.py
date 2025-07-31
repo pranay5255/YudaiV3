@@ -10,6 +10,7 @@ import requests
 from auth.github_oauth import get_current_user
 from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from issueChatServices.chat_service import ChatService
 from issueChatServices.session_service import SessionService
 from issueChatServices.issue_service import IssueService
@@ -308,6 +309,51 @@ async def get_chat_sessions(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get chat sessions: {str(e)}"
         )
+
+
+@router.get("/sessions/{session_id}/events")
+async def session_events_stream(
+    session_id: str,
+    token: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Server-Sent Events endpoint for real-time session updates."""
+    
+    def event_stream():
+        """Generate SSE events for the session."""
+        try:
+            # Verify session exists and user has access
+            context = SessionService.get_comprehensive_session_context(
+                db, current_user.id, session_id
+            )
+            if not context:
+                yield f"event: error\ndata: {{\"error\": \"Session not found\"}}\n\n"
+                return
+            
+            # Send initial session state
+            yield f"event: session_state\ndata: {{\"session_id\": \"{session_id}\", \"status\": \"connected\"}}\n\n"
+            
+            # Keep connection alive with periodic heartbeats
+            import time
+            while True:
+                # Send heartbeat every 30 seconds
+                yield f"event: heartbeat\ndata: {{\"timestamp\": {int(time.time())}}}\n\n"
+                time.sleep(30)
+                
+        except Exception as e:
+            yield f"event: error\ndata: {{\"error\": \"Connection failed: {str(e)}\"}}\n\n"
+    
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control"
+        }
+    )
 
 
 @router.get("/chat/sessions/{session_id}/messages")
