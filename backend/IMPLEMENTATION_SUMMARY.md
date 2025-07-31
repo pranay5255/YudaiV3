@@ -164,21 +164,6 @@ All frontend components use the same flow:
 - **Backward compatible** - existing data preserved
 - **Automatic table creation** via SQLAlchemy
 
-### Configuration Required
-```bash
-# Environment variables
-OPENROUTER_API_KEY=your_api_key
-GITHUB_CLIENT_ID=your_github_client_id
-GITHUB_CLIENT_SECRET=your_github_client_secret
-```
-
-### Docker Deployment
-- Uses existing `docker-compose.yml`
-#TODO: this is supposed to be `docker-compose.prod.yml`
-- PostgreSQL database with yudai_db
-- No additional services required
-
-## ⚠️ Potential Inconsistencies to Address
 
 ### 1. Frontend Session Management
 - Frontend may need to handle session creation when repository is selected
