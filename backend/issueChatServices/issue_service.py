@@ -19,7 +19,7 @@ from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from github.github_api import GitHubAPIError
 from github.github_api import create_issue as create_github_issue
-from issueChatServices.chat_service import FileEmbeddingService, SessionService
+from issueChatServices.session_service import SessionService
 from models import (
     ChatRequest,
     ChatSession,
@@ -32,10 +32,11 @@ from models import (
 
 # Add new imports at the top
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, desc
+from sqlalchemy import and_, desc, func
 from sqlalchemy.orm import Session
 
 
+# Use local unified data models for frontend-backend consistency
 class FileContextItem(BaseModel):
     id: str
     name: str
@@ -209,19 +210,48 @@ class IssueService:
         user_id: int,
         chat_request: ChatRequest
     ) -> UserIssueResponse:
-        """Create an issue from a chat request with context"""
-        # Extract issue information from chat request
-        title = f"Issue from chat: {chat_request.message.content[:50]}..."
+        """
+        Create an issue from a chat request with context
+        Links to the session for unified state management
+        """
+        # Get session information if conversation_id is provided
+        session = None
+        if chat_request.conversation_id:
+            # Use SessionService to get session context
+            session_response = SessionService.get_session_by_id(
+                db, user_id, chat_request.conversation_id
+            )
+            if session_response:
+                session_context = SessionService.get_comprehensive_session_context(
+                    db, user_id, chat_request.conversation_id
+                )
         
-        # Create issue request
+        # Extract repository info from session or request
+        repo_owner = chat_request.repo_owner
+        repo_name = chat_request.repo_name
+        
+        if session_context and session_context.session.repo_owner:
+            repo_owner = session_context.session.repo_owner
+            repo_name = session_context.session.repo_name
+        
+        # Create comprehensive issue request
+        title = f"Issue from chat: {chat_request.message.content[:50]}..."
+        description = f"Generated from chat conversation: {chat_request.conversation_id}"
+        
+        # Add session context if available
+        if session_context:
+            description += f"\n\nSession: {session_context.session.title}"
+            description += f"\nRepository: {repo_owner}/{repo_name}"
+            description += f"\nTotal messages in session: {len(session_context.messages)}"
+        
         issue_request = CreateUserIssueRequest(
             title=title,
             issue_text_raw=chat_request.message.content,
-            description=f"Generated from chat conversation: {chat_request.conversation_id}",
+            description=description,
             conversation_id=chat_request.conversation_id,
             context_cards=chat_request.context_cards,
-            repo_owner=chat_request.repo_owner,
-            repo_name=chat_request.repo_name
+            repo_owner=repo_owner,
+            repo_name=repo_name
         )
         
         return IssueService.create_user_issue(db, user_id, issue_request)
@@ -301,7 +331,7 @@ class IssueService:
         db: Session,
         user_id: int
     ) -> Dict[str, Any]:
-        """Get statistics for user issues"""
+        """Get comprehensive statistics for user issues with session context"""
         total_issues = db.query(UserIssue).filter(UserIssue.user_id == user_id).count()
         
         pending_issues = db.query(UserIssue).filter(
@@ -325,12 +355,31 @@ class IssueService:
             )
         ).count()
         
+        # Get issues linked to sessions
+        issues_with_sessions = db.query(UserIssue).filter(
+            and_(
+                UserIssue.user_id == user_id,
+                UserIssue.conversation_id.isnot(None)
+            )
+        ).count()
+        
+        # Get average processing time
+        avg_processing_time = db.query(func.avg(UserIssue.processing_time)).filter(
+            and_(
+                UserIssue.user_id == user_id,
+                UserIssue.processing_time.isnot(None)
+            )
+        ).scalar() or 0
+        
         return {
             "total_issues": total_issues,
             "pending_issues": pending_issues,
             "completed_issues": completed_issues,
             "failed_issues": failed_issues,
-            "success_rate": completed_issues / total_issues if total_issues > 0 else 0
+            "issues_with_sessions": issues_with_sessions,
+            "avg_processing_time": float(avg_processing_time),
+            "success_rate": completed_issues / total_issues if total_issues > 0 else 0,
+            "session_integration_rate": issues_with_sessions / total_issues if total_issues > 0 else 0
         }
 
     @staticmethod
@@ -414,8 +463,8 @@ class IssueService:
         # Enhanced context gathering from session if available
         if db and user_id and request.repository_info:
             try:
-                # Get session context for additional information
-                sessions = SessionService.get_user_sessions_by_repo(
+                # Get session context for additional information using unified SessionService
+                sessions = SessionService.get_user_sessions(
                     db, user_id, 
                     request.repository_info.get("owner"),
                     request.repository_info.get("name")
@@ -423,24 +472,20 @@ class IssueService:
                 
                 if sessions:
                     latest_session = sessions[0]  # Most recent session
-                    session_context = SessionService.get_session_context(
+                    session_context = SessionService.get_comprehensive_session_context(
                         db, user_id, latest_session.session_id
                     )
                     
                     if session_context:
-                        # Add file embeddings context
-                        embeddings = FileEmbeddingService.get_session_embeddings(
-                            db, latest_session.id, limit=20
-                        )
-                        
-                        if embeddings:
+                        # Add file embeddings context from session
+                        if session_context.file_embeddings:
                             code_aware_context = f"""
 ## File Context from Session
 Repository: {latest_session.repo_owner}/{latest_session.repo_name} (branch: {latest_session.repo_branch})
-Total file embeddings: {len(embeddings)}
+Total file embeddings: {len(session_context.file_embeddings)}
 
 Key files analyzed:
-""" + "\n".join([f"- {emb.file_path}: {emb.chunk_text[:100]}..." for emb in embeddings[:10]])
+""" + "\n".join([f"- {emb.file_path}: {emb.chunk_text[:100]}..." for emb in session_context.file_embeddings[:10]])
                             
                         # Enhance conversation context with session messages
                         if session_context.messages:
@@ -686,10 +731,10 @@ async def create_issue_with_context(
         
         user_issue = IssueService.create_user_issue(db, current_user.id, issue_request)
         
-        # If we have repository info and session context, create file embeddings
+        # If we have repository info and session context, link to existing session
         if request.repository_info and request.file_context:
             try:
-                # Find or create a session for this repository
+                # Find or create a session for this repository using unified SessionService
                 session_response = SessionService.get_or_create_session(
                     db=db,
                     user_id=current_user.id,
@@ -698,32 +743,22 @@ async def create_issue_with_context(
                     repo_branch=request.repository_info.get("branch", "main")
                 )
                 
-                # Create file embeddings for session context
-                for file_item in request.file_context[:10]:  # Limit to 10 files
-                    try:
-                        embedding_request = CreateFileEmbeddingRequest(
-                            file_path=file_item.path or file_item.name,
-                            file_name=file_item.name,
-                            file_type=file_item.type,
-                            chunk_text=f"File: {file_item.name}, Category: {file_item.category}, Tokens: {file_item.tokens}",
-                            tokens=file_item.tokens,
-                            file_metadata={
-                                "category": file_item.category,
-                                "source": "issue_creation",
-                                "issue_id": user_issue.issue_id
-                            }
-                        )
-                        
-                        FileEmbeddingService.create_file_embedding(
-                            db=db,
-                            session_id=session_response.id,
-                            request=embedding_request
-                        )
-                    except Exception as emb_error:
-                        print(f"Warning: Could not create file embedding for {file_item.name}: {emb_error}")
+                # Link the user issue to the session for unified state management
+                if session_response:
+                    # Update the user issue with session information
+                    existing_issue = db.query(UserIssue).filter(
+                        UserIssue.issue_id == user_issue.issue_id
+                    ).first()
+                    
+                    if existing_issue:
+                        existing_issue.conversation_id = session_response.session_id
+                        # Note: chat_session_id will be set by foreign key relationship
+                        db.commit()
+                        db.refresh(existing_issue)
+                        user_issue = UserIssueResponse.model_validate(existing_issue)
                         
             except Exception as session_error:
-                print(f"Warning: Could not create session embeddings: {session_error}")
+                print(f"Warning: Could not link issue to session: {session_error}")
         
         return {
             "success": True,

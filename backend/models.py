@@ -632,12 +632,15 @@ class SessionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class SessionContextResponse(BaseModel):
-    """Complete session context including messages and context cards"""
+    """Complete session context including messages, context cards, and unified state"""
     session: SessionResponse
     messages: List[ChatMessageResponse]
     context_cards: List[str] = Field(default_factory=list)
     repository_info: Optional[Dict[str, Any]] = None
     file_embeddings_count: int = 0
+    statistics: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    user_issues: Optional[List["UserIssueResponse"]] = Field(default_factory=list)
+    file_embeddings: Optional[List["FileEmbeddingResponse"]] = Field(default_factory=list)
 
 # File Embedding Models
 class CreateFileEmbeddingRequest(BaseModel):

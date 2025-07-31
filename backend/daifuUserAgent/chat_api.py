@@ -10,7 +10,8 @@ import requests
 from auth.github_oauth import get_current_user
 from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, status
-from issueChatServices.chat_service import ChatService, SessionService
+from issueChatServices.chat_service import ChatService
+from issueChatServices.session_service import SessionService
 from issueChatServices.issue_service import IssueService
 from models import (
     ChatRequest,
@@ -41,7 +42,7 @@ async def create_or_get_session(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Create or get existing session for repository selection"""
+    """Create or get existing session for repository selection using unified SessionService"""
     try:
         session = SessionService.get_or_create_session(
             db=db,
@@ -66,9 +67,9 @@ async def get_session_context(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get complete session context including messages and context cards"""
+    """Get comprehensive session context including messages, context cards, and unified state"""
     try:
-        context = SessionService.get_session_context(db, current_user.id, session_id)
+        context = SessionService.get_comprehensive_session_context(db, current_user.id, session_id)
         if not context:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -112,13 +113,14 @@ async def touch_session(
 async def get_user_sessions(
     repo_owner: Optional[str] = None,
     repo_name: Optional[str] = None,
+    limit: int = 50,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get user sessions filtered by repository"""
-    try: #TODO: session:repository mapping is one to many, a user can have multiple sessions for the same repository
-        sessions = SessionService.get_user_sessions_by_repo(
-            db, current_user.id, repo_owner, repo_name
+    """Get user sessions filtered by repository using unified SessionService"""
+    try:
+        sessions = SessionService.get_user_sessions(
+            db, current_user.id, repo_owner, repo_name, limit
         )
         return sessions
     except Exception as e:
@@ -282,10 +284,25 @@ async def get_chat_sessions(
     current_user: User = Depends(get_current_user),
     limit: int = 50
 ):
-    """Get all chat sessions for a user."""
+    """Get all chat sessions for a user (legacy endpoint - use /sessions instead)"""
     try:
-        sessions = ChatService.get_user_chat_sessions(db, current_user.id, limit)
-        return {"sessions": sessions}
+        # Use unified SessionService instead of ChatService
+        sessions = SessionService.get_user_sessions(db, current_user.id, limit=limit)
+        # Convert to legacy format for backward compatibility
+        legacy_sessions = [
+            {
+                "id": session.id,
+                "session_id": session.session_id,
+                "title": session.title,
+                "is_active": session.is_active,
+                "total_messages": session.total_messages,
+                "total_tokens": session.total_tokens,
+                "created_at": session.created_at,
+                "last_activity": session.last_activity
+            }
+            for session in sessions
+        ]
+        return {"sessions": legacy_sessions}
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -317,9 +334,9 @@ async def get_session_statistics(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get statistics for a chat session."""
+    """Get comprehensive statistics for a session using unified SessionService"""
     try:
-        stats = ChatService.get_session_statistics(db, current_user.id, session_id)
+        stats = SessionService.get_session_statistics(db, current_user.id, session_id)
         if not stats:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -342,9 +359,9 @@ async def update_session_title(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Update the title of a chat session."""
+    """Update the title of a session using unified SessionService"""
     try:
-        session = ChatService.update_session_title(db, current_user.id, session_id, title)
+        session = SessionService.update_session_title(db, current_user.id, session_id, title)
         if not session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -366,9 +383,9 @@ async def deactivate_session(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Deactivate a chat session."""
+    """Deactivate a session using unified SessionService"""
     try:
-        success = ChatService.deactivate_session(db, current_user.id, session_id)
+        success = SessionService.deactivate_session(db, current_user.id, session_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
