@@ -3,7 +3,7 @@ Streamlined Chat Service for managing chat messages within sessions
 Session management is handled by SessionService - this focuses on messages only
 """
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import List
 
 from models import (
     ChatMessage,

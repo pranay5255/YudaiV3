@@ -9,6 +9,10 @@ gitingest>=0.1.4
 sqlalchemy>=2.0.41
 psycopg2-binary>=2.9.10
 ghapi>=1.0.6
+httpx>=0.28.1
+black>=25.1.0
+ruff>=0.12.7
+websockets>=15.0.1
 
 [dev]
 datasets>=2.16.0

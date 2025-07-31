@@ -612,9 +612,26 @@ export class ApiService {
   // NEW: Additional backend endpoints not previously implemented in frontend
 
   /**
-   * Establishes Server-Sent Events connection for real-time session updates
+   * Establishes WebSocket connection for real-time session updates
+   * @param sessionId - Session ID to listen for updates
+   * @returns WebSocket - WebSocket connection for real-time updates
+   */
+  static createSessionWebSocket(sessionId: string, token: string | null): WebSocket {
+    const wsUrl = API_BASE_URL.replace('http', 'ws');
+    const url = new URL(`${wsUrl}/daifu/sessions/${sessionId}/ws`);
+    
+    if (token) {
+      url.searchParams.append('token', token);
+    }
+    
+    return new WebSocket(url.toString());
+  }
+
+  /**
+   * Establishes Server-Sent Events connection for real-time session updates (Legacy)
    * @param sessionId - Session ID to listen for updates
    * @returns EventSource - SSE connection for real-time updates
+   * @deprecated Use createSessionWebSocket instead
    */
   static createSessionEventSource(sessionId: string): EventSource {
     const token = localStorage.getItem('auth_token');

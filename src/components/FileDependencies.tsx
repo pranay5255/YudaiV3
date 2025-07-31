@@ -1,26 +1,15 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronRight, ChevronDown, Plus, Folder, File, RefreshCw } from 'lucide-react';
-import { FileItem } from '../types';
+import { UnifiedFileEmbedding } from '../types/unifiedState';
 import { useRepository } from '../hooks/useRepository';
 import { ApiService } from '../services/api';
 
 interface FileDependenciesProps {
-  onAddToContext: (file: FileItem) => void;
-  onShowDetails: (file: FileItem) => void;
+  onAddToContext: (file: UnifiedFileEmbedding) => void;
+  onShowDetails: (file: UnifiedFileEmbedding) => void;
   repoUrl?: string; // Optional repository URL to analyze
 }
 
-// Type definition for the API response structure - matches backend exactly
-interface ApiFileItem {
-  id: string;
-  name: string;
-  type: 'INTERNAL' | 'EXTERNAL';
-  tokens: number;
-  Category: string;
-  isDirectory: boolean;
-  children: ApiFileItem[] | null;
-  expanded?: boolean;
-}
 
 // Flat file item returned from database
 interface DbFileItem {
@@ -33,43 +22,31 @@ interface DbFileItem {
   is_directory: boolean;
 }
 
-const buildFileTreeFromDb = (items: DbFileItem[]): FileItem[] => {
-  const directories: Record<string, FileItem> = {};
-  const roots: FileItem[] = [];
+const buildFileTreeFromDb = (items: DbFileItem[]): UnifiedFileEmbedding[] => {
+  const fileMap: { [key: string]: UnifiedFileEmbedding & { children: UnifiedFileEmbedding[] } } = {};
+  const roots: UnifiedFileEmbedding[] = [];
 
-  // Sort so that parent directories appear before children
-  const sorted = [...items].sort((a, b) => a.path.localeCompare(b.path));
-
-  for (const item of sorted) {
-    const pathParts = item.path.split('/');
-    const parentPath = pathParts.slice(0, -1).join('/');
-    const file: FileItem = {
-      id: String(item.id),
-      name: pathParts[pathParts.length - 1],
-      type: item.file_type,
-      tokens: item.tokens,
-      Category: item.category,
-      isDirectory: item.is_directory,
-      expanded: false,
-      children: item.is_directory ? [] : undefined,
+  items.forEach(item => {
+    fileMap[item.path] = {
+        id: item.id,
+        session_id: '',
+        file_name: item.name,
+        file_path: item.path,
+        file_type: item.file_type,
+        tokens: item.tokens,
+        created_at: new Date().toISOString(),
+        children: []
     };
+  });
 
-    if (item.is_directory) {
-      directories[item.path] = file;
-    }
-
-    if (parentPath) {
-      const parent = directories[parentPath];
-      if (parent) {
-        if (!parent.children) parent.children = [];
-        parent.children.push(file);
-      } else {
-        roots.push(file);
-      }
+  items.forEach(item => {
+    const parentPath = item.path.substring(0, item.path.lastIndexOf('/'));
+    if (parentPath && fileMap[parentPath]) {
+      fileMap[parentPath].children.push(fileMap[item.path]);
     } else {
-      roots.push(file);
+      roots.push(fileMap[item.path]);
     }
-  }
+  });
 
   return roots;
 };
@@ -82,7 +59,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
   repoUrl 
 }) => {
   const { selectedRepository } = useRepository();
-  const [files, setFiles] = useState<FileItem[]>([]);
+  const [files, setFiles] = useState<UnifiedFileEmbedding[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -107,22 +84,21 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
       }
 
       // If not found or no files, fall back to extraction endpoint
-      const data: ApiFileItem = await ApiService.extractFileDependencies(url, 30000);
+      // const data: ApiFileItem = await ApiService.extractFileDependencies(url, 30000);
 
-      const transformData = (item: ApiFileItem): FileItem => ({
-        id: item.id || 'unknown',
-        name: item.name || 'Unknown',
-        type: item.type || 'INTERNAL',
-        tokens: item.tokens || 0,
-        Category: item.Category || 'File',
-        isDirectory: item.isDirectory || false,
-        expanded: item.expanded || false,
-        children: item.children ? item.children.map(transformData) : undefined
-      });
+      // const transformData = (item: ApiFileItem): UnifiedFileEmbedding => ({
+      //   id: Number(item.id) || 0,
+      //   session_id: '',
+      //   file_name: item.name || 'Unknown',
+      //   file_path: item.name,
+      //   file_type: 'INTERNAL',
+      //   tokens: item.tokens || 0,
+      //   created_at: new Date().toISOString()
+      // });
 
-      const rootItem = transformData(data);
-      const transformedData = rootItem.children || [];
-      setFiles(transformedData);
+       // const rootItem = transformData(data);
+       // const transformedData = rootItem.children || [];
+       // setFiles(transformedData);
     } catch (err) {
       console.error('Failed to fetch repository data:', err);
       
@@ -174,19 +150,19 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     }
   }, [selectedRepository, repoUrl, fetchRepositoryData]);
 
-  const toggleExpanded = useCallback((id: string) => {
-    const updateFiles = (items: FileItem[]): FileItem[] => {
+  const toggleExpanded = useCallback((id: number) => {
+    const updateFiles = (items: (UnifiedFileEmbedding & { children: UnifiedFileEmbedding[], expanded: boolean })[]): (UnifiedFileEmbedding & { children: UnifiedFileEmbedding[], expanded: boolean })[] => {
       return items.map(item => {
         if (item.id === id) {
           return { ...item, expanded: !item.expanded };
         }
         if (item.children) {
-          return { ...item, children: updateFiles(item.children) };
+          return { ...item, children: updateFiles(item.children as (UnifiedFileEmbedding & { children: UnifiedFileEmbedding[], expanded: boolean })[]) };
         }
         return item;
       });
     };
-    setFiles(updateFiles(files));
+    setFiles(updateFiles(files as (UnifiedFileEmbedding & { children: UnifiedFileEmbedding[], expanded: boolean })[]));
   }, [files]);
 
   const getTokenBadgeColor = useCallback((tokens: number) => {
@@ -203,16 +179,16 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     return 'bg-emerald-500/20 text-emerald-500';
   }, []);
 
-  const renderFileTree = useCallback((items: FileItem[], depth = 0) => {
+  const renderFileTree = useCallback((items: (UnifiedFileEmbedding & { children: UnifiedFileEmbedding[], expanded: boolean })[], depth = 0) => {
     return items.map((item) => (
       <React.Fragment key={item.id}>
-        <tr 
+        <tr
           className="hover:bg-zinc-800/50 transition-colors cursor-pointer group"
-          onClick={() => item.isDirectory ? toggleExpanded(item.id) : onShowDetails(item)}
+          onClick={() => (item.children && item.children.length > 0) ? toggleExpanded(item.id) : onShowDetails(item)}
         >
           <td className="px-4 py-3">
             <div className="flex items-center gap-2" style={{ marginLeft: `${depth * 1.5}rem` }}>
-              {item.isDirectory ? (
+              {(item.children && item.children.length > 0) ? (
                 <>
                   <button
                     onClick={(e) => {
@@ -235,23 +211,23 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
                   <File className="w-4 h-4 text-fg/60" />
                 </>
               )}
-              <span className="text-sm text-fg">{item.name}</span>
+              <span className="text-sm text-fg">{item.file_name}</span>
             </div>
           </td>
           <td className="px-4 py-3">
             <span className={`
               px-2 py-0.5 rounded text-xs font-medium
-              ${item.type === 'INTERNAL' 
-                ? 'bg-primary/20 text-primary' 
+              ${item.file_type === 'INTERNAL'
+                ? 'bg-primary/20 text-primary'
                 : 'bg-zinc-700 text-fg/80'
               }
             `}>
-              {item.type}
+              {item.file_type}
             </span>
           </td>
           <td className="px-4 py-3">
             <span className="text-sm text-fg/80">
-              {item.Category}
+              File
             </span>
           </td>
           <td className="px-4 py-3">
@@ -265,7 +241,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
             )}
           </td>
           <td className="px-4 py-3">
-            {!item.isDirectory && (
+            {!(item.children && item.children.length > 0) && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -280,8 +256,8 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
             )}
           </td>
         </tr>
-        {item.isDirectory && item.expanded && item.children && (
-          renderFileTree(item.children, depth + 1)
+        {(item.children && item.children.length > 0) && item.expanded && (
+          renderFileTree(item.children as (UnifiedFileEmbedding & { children: UnifiedFileEmbedding[], expanded: boolean })[], depth + 1)
         )}
       </React.Fragment>
     ));
@@ -361,7 +337,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800 text-sm">
-              {renderFileTree(files)}
+              {renderFileTree(files as (UnifiedFileEmbedding & { children: UnifiedFileEmbedding[], expanded: boolean })[])}
             </tbody>
           </table>
         )}

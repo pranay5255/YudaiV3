@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Trash2, FileText, MessageCircle, Upload } from 'lucide-react';
-import { ContextCard } from '../types';
+import { UnifiedContextCard, ContextCardSource } from '../types/unifiedState';
 import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview, UserIssueResponse } from '../services/api';
 
 interface IssuePreviewData extends GitHubIssuePreview {
@@ -16,7 +16,7 @@ interface IssuePreviewData extends GitHubIssuePreview {
 }
 
 interface ContextCardsProps {
-  cards: ContextCard[];
+  cards: UnifiedContextCard[];
   onRemoveCard: (id: string) => void;
   onCreateIssue?: () => void; // <-- add this
   onShowIssuePreview?: (issuePreview: IssuePreviewData) => void;
@@ -36,11 +36,12 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
 }) => {
   const [isCreatingIssue, setIsCreatingIssue] = useState(false);
 
-  const getSourceIcon = (source: ContextCard['source']) => {
+  const getSourceIcon = (source: ContextCardSource) => {
     switch (source) {
-      case 'chat': return MessageCircle;
-      case 'file-deps': return FileText;
-      case 'upload': return Upload;
+      case ContextCardSource.CHAT: return MessageCircle;
+      case ContextCardSource.FILE: return FileText;
+      case ContextCardSource.GITHUB: return FileText; // Or a new icon
+      case ContextCardSource.MANUAL: return Upload;
     }
   };
 
@@ -58,8 +59,8 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
     setIsCreatingIssue(true);
     try {
       // Separate chat and file context
-      const chatCards = cards.filter(card => card.source === 'chat');
-      const fileCards = cards.filter(card => card.source === 'file-deps');
+      const chatCards = cards.filter(card => card.source === ContextCardSource.CHAT);
+      const fileCards = cards.filter(card => card.source === ContextCardSource.FILE);
 
       // Convert to API formats
       const conversationMessages: ChatContextMessage[] = chatCards.map(card => ({

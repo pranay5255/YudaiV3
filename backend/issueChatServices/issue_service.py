@@ -23,7 +23,6 @@ from issueChatServices.session_service import SessionService
 from models import (
     ChatRequest,
     ChatSession,
-    CreateFileEmbeddingRequest,
     CreateUserIssueRequest,
     User,
     UserIssue,
@@ -215,7 +214,6 @@ class IssueService:
         Links to the session for unified state management
         """
         # Get session information if conversation_id is provided
-        session = None
         if chat_request.conversation_id:
             # Use SessionService to get session context
             session_response = SessionService.get_session_by_id(

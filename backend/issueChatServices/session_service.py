@@ -7,18 +7,15 @@ from typing import Any, Dict, List, Optional
 
 from models import (
     ChatMessage,
-    ChatMessageResponse,
     ChatSession,
     ContextCard,
-    CreateSessionRequest,
     FileEmbedding,
-    FileEmbeddingResponse,
-    SessionContextResponse,
     SessionResponse,
     UserIssue,
 )
-from sqlalchemy import and_, desc, func
+from sqlalchemy import and_, desc
 from sqlalchemy.orm import Session
+from unified_state import StateConverter, UnifiedSessionState
 
 
 class SessionService:
@@ -95,7 +92,7 @@ class SessionService:
                 ChatSession.repo_owner == repo_owner,
                 ChatSession.repo_name == repo_name,
                 ChatSession.repo_branch == repo_branch,
-                ChatSession.is_active == True
+                ChatSession.is_active
             )
         ).first()
         
@@ -142,7 +139,7 @@ class SessionService:
         query = db.query(ChatSession).filter(
             and_(
                 ChatSession.user_id == user_id,
-                ChatSession.is_active == True
+                ChatSession.is_active
             )
         )
         
@@ -183,10 +180,9 @@ class SessionService:
         db: Session,
         user_id: int,
         session_id: str
-    ) -> Optional[SessionContextResponse]:
+    ) -> Optional[UnifiedSessionState]:
         """
-        Get complete session context including messages, context cards, file embeddings
-        This is the unified state that frontend SessionContext needs
+        Get complete session context and return it as a UnifiedSessionState object
         """
         # Get session
         session = db.query(ChatSession).filter(
@@ -199,50 +195,27 @@ class SessionService:
         if not session:
             return None
         
-        # Get all messages for session
-        messages = db.query(ChatMessage).filter(
-            ChatMessage.session_id == session.id
-        ).order_by(ChatMessage.created_at).all()
+        # Get all related data
+        messages = db.query(ChatMessage).filter(ChatMessage.session_id == session.id).order_by(ChatMessage.created_at).all()
         
-        # Get context cards from messages (extract unique context card IDs)
-        context_cards_set = set()
+        context_card_ids = set()
         for msg in messages:
             if msg.context_cards:
-                context_cards_set.update(msg.context_cards)
+                context_card_ids.update(msg.context_cards)
         
-        # Get file embeddings for session (represents file context)
-        file_embeddings = db.query(FileEmbedding).filter(
-            FileEmbedding.session_id == session.id
-        ).order_by(FileEmbedding.created_at).all()
+        context_cards = db.query(ContextCard).filter(ContextCard.id.in_(list(context_card_ids))).all() if context_card_ids else []
         
-        # Get user issues associated with this session
-        user_issues = db.query(UserIssue).filter(
-            and_(
-                UserIssue.user_id == user_id,
-                UserIssue.chat_session_id == session.id
-            )
-        ).order_by(desc(UserIssue.created_at)).all()
+        file_embeddings = db.query(FileEmbedding).filter(FileEmbedding.session_id == session.id).order_by(FileEmbedding.created_at).all()
         
-        # Calculate statistics
-        statistics = {
-            "total_messages": len(messages),
-            "total_tokens": session.total_tokens,
-            "total_cost": 0.0,  # TODO: Implement cost calculation
-            "session_duration": 0,  # TODO: Calculate duration
-            "user_issues_count": len(user_issues),
-            "file_embeddings_count": len(file_embeddings)
-        }
-        
-        return SessionContextResponse(
-            session=SessionResponse.model_validate(session),
-            messages=[ChatMessageResponse.model_validate(msg) for msg in messages],
-            context_cards=list(context_cards_set),
-            repository_info=session.repo_context,
-            file_embeddings_count=len(file_embeddings),
-            statistics=statistics,
-            user_issues=[UserIssue.model_validate(issue) for issue in user_issues],
-            file_embeddings=[FileEmbeddingResponse.model_validate(emb) for emb in file_embeddings]
+        # Convert to unified state
+        unified_state = StateConverter.chat_session_to_unified(
+            chat_session=session,
+            messages=messages,
+            context_cards=context_cards,
+            file_embeddings=file_embeddings
         )
+        
+        return unified_state
     
     @staticmethod
     def update_session_statistics(

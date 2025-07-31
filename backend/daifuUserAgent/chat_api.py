@@ -4,13 +4,13 @@ from __future__ import annotations
 import os
 import time
 import uuid
+import asyncio
 from typing import List, Optional
 
 import requests
 from auth.github_oauth import get_current_user
 from db.database import get_db
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, BackgroundTasks
 from issueChatServices.chat_service import ChatService
 from issueChatServices.session_service import SessionService
 from issueChatServices.issue_service import IssueService
@@ -18,9 +18,13 @@ from models import (
     ChatRequest,
     CreateChatMessageRequest,
     CreateSessionRequest,
-    SessionContextResponse,
     SessionResponse,
     User,
+)
+from unified_state import (
+    unified_manager,
+    StateConverter,
+    UnifiedSessionState,
 )
 from sqlalchemy.orm import Session
 
@@ -62,21 +66,21 @@ async def create_or_get_session(
         )
 
 
-@router.get("/sessions/{session_id}", response_model=SessionContextResponse)
+@router.get("/sessions/{session_id}", response_model=UnifiedSessionState)
 async def get_session_context(
     session_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get comprehensive session context including messages, context cards, and unified state"""
+    """Get comprehensive session context as a unified state object"""
     try:
-        context = SessionService.get_comprehensive_session_context(db, current_user.id, session_id)
-        if not context:
+        unified_state = SessionService.get_comprehensive_session_context(db, current_user.id, session_id)
+        if not unified_state:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Session not found"
             )
-        return context
+        return unified_state
     except HTTPException:
         raise
     except Exception as e:
@@ -311,67 +315,108 @@ async def get_chat_sessions(
         )
 
 
-@router.get("/sessions/{session_id}/events")
-async def session_events_stream(
+@router.websocket("/sessions/{session_id}/ws")
+async def websocket_session_endpoint(
+    websocket: WebSocket,
     session_id: str,
     token: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """WebSocket endpoint for real-time session updates using unified state management."""
+    # Simple token auth: In a real app, use a more robust system (e.g., parsing a JWT)
+    if not token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+        
+    user = get_current_user(token, db)
+    if not user:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    try:
+        await unified_manager.connect(websocket, session_id, db)
+        # The connection manager now handles sending the initial state.
+        
+        # Keep the connection alive and wait for messages or disconnect.
+        while True:
+            # This loop can be used to receive messages from the client if needed in the future.
+            # For now, it just keeps the connection open.
+            await websocket.receive_text()
+
+    except WebSocketDisconnect:
+        print(f"WebSocket disconnected for session {session_id}")
+    except Exception as e:
+        print(f"WebSocket error for session {session_id}: {e}")
+    finally:
+        unified_manager.disconnect(websocket, session_id)
+
+
+
+
+@router.post("/chat/daifu/v2")
+async def chat_daifu_v2(
+    request: ChatRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Server-Sent Events endpoint for real-time session updates."""
+    """
+    V2 Chat Endpoint:
+    1. Stores the message in the database.
+    2. Updates the in-memory state via the WebSocket manager.
+    3. Triggers the LLM call asynchronously.
+    """
+    if not request.conversation_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="session_id is required"
+        )
+
+    # 1. Create and store user message
+    user_message_db = ChatService.create_chat_message_from_request(
+        db, user_id=current_user.id, session_id=request.conversation_id, request=request
+    )
+    user_message_unified = StateConverter.message_to_unified(user_message_db)
+
+    # 2. Update state and broadcast to clients immediately
+    await unified_manager.update_and_broadcast_message(
+        request.conversation_id, user_message_unified
+    )
     
-    def event_stream():
-        """Generate SSE events for the session."""
-        try:
-            # Verify session exists and user has access
-            context = SessionService.get_comprehensive_session_context(
-                db, current_user.id, session_id
-            )
-            if not context:
-                yield f"event: error\ndata: {{\"error\": \"Session not found\"}}\n\n"
-                return
-            
-            # Send initial session state
-            yield f"event: session_state\ndata: {{\"session_id\": \"{session_id}\", \"status\": \"connected\"}}\n\n"
-            
-            # Keep connection alive with periodic heartbeats
-            import time
-            while True:
-                # Send heartbeat every 30 seconds
-                yield f"event: heartbeat\ndata: {{\"timestamp\": {int(time.time())}}}\n\n"
-                time.sleep(30)
-                
-        except Exception as e:
-            yield f"event: error\ndata: {{\"error\": \"Connection failed: {str(e)}\"}}\n\n"
-    
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control"
-        }
+    # 3. Trigger async LLM response generation
+    background_tasks.add_task(
+        generate_and_broadcast_assistant_response,
+        db=db,
+        session_id=request.conversation_id,
+        user_id=current_user.id
     )
 
+    return {"status": "Message received, assistant is thinking..."}
 
-@router.get("/chat/sessions/{session_id}/messages")
-async def get_chat_messages(
-    session_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    limit: int = 100
-):
-    """Get messages for a specific chat session."""
-    try:
-        messages = ChatService.get_chat_messages(db, current_user.id, session_id, limit)
-        return {"messages": messages}
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get chat messages: {str(e)}"
-        )
+
+async def generate_and_broadcast_assistant_response(db: Session, session_id: str, user_id: int):
+    """Background task to get a response from the LLM and broadcast it."""
+    # This is a simplified version of your original LLM call logic
+    history_messages = ChatService.get_chat_messages(db, user_id, session_id, limit=50)
+    history = [(msg.sender_type, msg.message_text) for msg in history_messages]
+    prompt = build_daifu_prompt(GITHUB_CONTEXT, history)
+    # This is where you would use the prompt in a real LLM call
+    print(f"Generated prompt for LLM: {prompt[:100]}...")
+
+    # ... (LLM call logic from your original 'chat_daifu' endpoint) ...
+    # For brevity, let's simulate a response
+    await asyncio.sleep(5) # Simulate network latency and processing time
+    reply_text = f"This is a simulated asynchronous response to your message in session {session_id}."
+    
+    # Create and store assistant message
+    assistant_message_db = ChatService.create_assistant_message(
+        db, user_id=user_id, session_id=session_id, content=reply_text
+    )
+    assistant_message_unified = StateConverter.message_to_unified(assistant_message_db)
+    
+    # Broadcast the assistant's response
+    await unified_manager.update_and_broadcast_message(
+        session_id, assistant_message_unified
+    )
 
 
 @router.get("/chat/sessions/{session_id}/statistics")

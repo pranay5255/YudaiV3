@@ -1,12 +1,12 @@
 import React from 'react';
 import { X, FileText, Plus } from 'lucide-react';
-import { FileItem } from '../types';
+import { UnifiedFileEmbedding } from '../types/unifiedState';
 
 interface DetailModalProps {
   isOpen: boolean;
   onClose: () => void;
-  file: FileItem | null;
-  onAddToContext: (file: FileItem) => void;
+  file: UnifiedFileEmbedding | null;
+  onAddToContext: (file: UnifiedFileEmbedding) => void;
 }
 
 export const DetailModal: React.FC<DetailModalProps> = ({ 
@@ -17,7 +17,7 @@ export const DetailModal: React.FC<DetailModalProps> = ({
 }) => {
   if (!isOpen || !file) return null;
 
-  const mockContent = `// Sample file content for ${file.name}
+  const mockContent = `// Sample file content for ${file.file_name}
 import React from 'react';
 import { useState, useEffect } from 'react';
 
@@ -49,9 +49,9 @@ export const Component: React.FC<Props> = ({ title, description }) => {
           <div className="flex items-center gap-3">
             <FileText className="w-5 h-5 text-primary" />
             <div>
-              <h2 className="text-lg font-semibold text-fg">{file.name}</h2>
+              <h2 className="text-lg font-semibold text-fg">{file.file_name}</h2>
               <p className="text-sm text-fg/60">
-                {file.type} • {file.tokens} tokens
+                {file.file_type} • {file.tokens} tokens
               </p>
             </div>
           </div>
