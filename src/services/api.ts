@@ -385,92 +385,192 @@ export class ApiService {
     return this.handleResponse<any[]>(response);
   }
 
-  // Session Management Services (for SessionContext)
+  // Enhanced Session Management Services using unused API endpoints
+  
+  /**
+   * Creates a new session using the dedicated session creation endpoint
+   * This replaces the legacy createOrGetSession method
+   * @param repoOwner - Repository owner username
+   * @param repoName - Repository name
+   * @param repoBranch - Repository branch (defaults to 'main')
+   * @param title - Optional session title
+   * @param description - Optional session description
+   * @returns Promise<SessionResponse> - Complete session information
+   */
+  static async createSession(
+    repoOwner: string,
+    repoName: string,
+    repoBranch: string = 'main',
+    title?: string,
+    description?: string
+  ): Promise<import('../types').SessionResponse> {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({
+        repo_owner: repoOwner,
+        repo_name: repoName,
+        repo_branch: repoBranch,
+        title: title || `Session for ${repoOwner}/${repoName}`,
+        description: description || `Working session for ${repoOwner}/${repoName} on ${repoBranch} branch`
+      }),
+    });
+
+    return this.handleResponse<import('../types').SessionResponse>(response);
+  }
+
+  /**
+   * Gets comprehensive session context including messages, context cards, and repository info
+   * @param sessionId - Session ID to retrieve context for
+   * @returns Promise<SessionContextResponse> - Complete session context
+   */
+  static async getSessionContextById(sessionId: string): Promise<import('../types').SessionContextResponse> {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<import('../types').SessionContextResponse>(response);
+  }
+
+  /**
+   * Updates session activity timestamp - used for real-time session management
+   * @param sessionId - Session ID to touch
+   * @returns Promise<{success: boolean}> - Operation result
+   */
+  static async touchSession(sessionId: string): Promise<{success: boolean}> {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/touch`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<{success: boolean}>(response);
+  }
+
+  /**
+   * Gets all user sessions with optional filtering by repository
+   * @param repoOwner - Optional repository owner filter
+   * @param repoName - Optional repository name filter
+   * @returns Promise<SessionResponse[]> - Array of user sessions
+   */
+  static async getUserSessions(
+    repoOwner?: string, 
+    repoName?: string
+  ): Promise<import('../types').SessionResponse[]> {
+    const params = new URLSearchParams();
+    if (repoOwner) params.append('repo_owner', repoOwner);
+    if (repoName) params.append('repo_name', repoName);
+    
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions?${params}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    return this.handleResponse<import('../types').SessionResponse[]>(response);
+  }
+
+  /**
+   * Legacy method for backward compatibility - now uses new session creation
+   * @deprecated Use createSession instead
+   */
   static async createOrGetSession(
     repoOwner: string,
     repoName: string,
     repoBranch: string = 'main',
     title?: string
   ): Promise<ChatSession> {
-    // First try to get existing session, then create if none exists
-    const sessions = await this.getChatSessions();
-    const existingSession = sessions.find(session => 
-      session.title?.includes(`${repoOwner}/${repoName}`)
+    console.warn('createOrGetSession is deprecated. Use createSession instead.');
+    
+    // Try to get existing session first
+    const existingSessions = await this.getUserSessions(repoOwner, repoName);
+    const activeSession = existingSessions.find(session => 
+      session.is_active && session.repo_branch === repoBranch
     );
 
-    if (existingSession) {
-      return existingSession;
+    if (activeSession) {
+      // Convert SessionResponse to ChatSession for backward compatibility
+      return {
+        id: activeSession.id,
+        title: activeSession.title,
+        created_at: activeSession.created_at,
+        updated_at: activeSession.updated_at,
+        is_active: activeSession.is_active
+      };
     }
 
-    // Create new session by sending a welcome message
-    const sessionTitle = title || `Session for ${repoOwner}/${repoName}`;
+    // Create new session
+    const newSession = await this.createSession(repoOwner, repoName, repoBranch, title);
     
-    // Generate a unique session ID
-    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Send initial message to create session
-    const response = await this.sendChatMessage({
-      conversation_id: sessionId, // Fixed: use conversation_id instead of session_id
-      message: {
-        content: `Starting new session for repository ${repoOwner}/${repoName} on branch ${repoBranch}`,
-        is_code: false
-      },
-      repo_owner: repoOwner,
-      repo_name: repoName
-    });
-
-    // Get the created session
-    const allSessions = await this.getChatSessions();
-    const newSession = allSessions.find(s => s.id === response.session_id);
-    
-    if (!newSession) {
-      throw new Error('Failed to create session');
-    }
-
-    // Update session title if needed
-    if (newSession.title !== sessionTitle) {
-      await this.updateSessionTitle(newSession.id, sessionTitle);
-      newSession.title = sessionTitle;
-    }
-
-    return newSession;
+    // Convert SessionResponse to ChatSession for backward compatibility
+    return {
+      id: newSession.id,
+      title: newSession.title,
+      created_at: newSession.created_at,
+      updated_at: newSession.updated_at,
+      is_active: newSession.is_active
+    };
   }
 
+  /**
+   * Legacy getSessionContext method - now uses enhanced session context endpoint
+   * @deprecated Use getSessionContextById instead for full context
+   */
   static async getSessionContext(sessionId: string): Promise<{
     session: ChatSession;
     messages: ChatMessageAPI[];
     context_cards: string[];
     repository_info?: Record<string, unknown>;
   }> {
-    // Get session details and messages in parallel
-    const [sessions, messages, sessionStats] = await Promise.all([
-      this.getChatSessions(),
-      this.getSessionMessages(sessionId),
-      this.getSessionStatistics(sessionId)
-    ]);
+    console.warn('getSessionContext is deprecated. Use getSessionContextById for enhanced context.');
+    
+    try {
+      // Try to get enhanced context first
+      const enhancedContext = await this.getSessionContextById(sessionId);
+      
+      return {
+        session: {
+          id: enhancedContext.session.id,
+          title: enhancedContext.session.title,
+          created_at: enhancedContext.session.created_at,
+          updated_at: enhancedContext.session.updated_at,
+          is_active: enhancedContext.session.is_active
+        },
+        messages: enhancedContext.messages,
+        context_cards: enhancedContext.context_cards,
+        repository_info: {
+          ...enhancedContext.repository_info,
+          ...enhancedContext.statistics
+        }
+      };
+    } catch (error) {
+      // Fallback to legacy implementation
+      console.warn('Enhanced context failed, falling back to legacy:', error);
+      
+      const [sessions, messages, sessionStats] = await Promise.all([
+        this.getChatSessions(),
+        this.getSessionMessages(sessionId),
+        this.getSessionStatistics(sessionId)
+      ]);
 
-    const session = sessions.find(s => s.id === sessionId);
-    if (!session) {
-      throw new Error('Session not found');
-    }
-
-    // Context cards would need to be extracted from a different source
-    // as ChatMessageAPI doesn't have context_cards field
-    const context_cards: string[] = [];
-
-    return {
-      session,
-      messages,
-      context_cards,
-      repository_info: {
-        session_id: sessionId,
-        session_title: session.title,
-        created_at: session.created_at,
-        updated_at: session.updated_at,
-        is_active: session.is_active,
-        ...sessionStats
+      const session = sessions.find(s => s.id === sessionId);
+      if (!session) {
+        throw new Error('Session not found');
       }
-    };
+
+      return {
+        session,
+        messages,
+        context_cards: [],
+        repository_info: {
+          session_id: sessionId,
+          session_title: session.title,
+          created_at: session.created_at,
+          updated_at: session.updated_at,
+          is_active: session.is_active,
+          ...sessionStats
+        }
+      };
+    }
   }
 
   // Authentication Services
@@ -511,58 +611,45 @@ export class ApiService {
 
   // NEW: Additional backend endpoints not previously implemented in frontend
 
-  // Additional Chat/Session Endpoints
-  static async createSession(
-    repoOwner: string,
-    repoName: string,
-    repoBranch: string = 'main',
-    title?: string,
-    description?: string
-  ): Promise<any> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions`, {
+  /**
+   * Establishes Server-Sent Events connection for real-time session updates
+   * @param sessionId - Session ID to listen for updates
+   * @returns EventSource - SSE connection for real-time updates
+   */
+  static createSessionEventSource(sessionId: string): EventSource {
+    const token = localStorage.getItem('auth_token');
+    const url = new URL(`${API_BASE_URL}/daifu/sessions/${sessionId}/events`);
+    
+    if (token) {
+      url.searchParams.append('token', token);
+    }
+    
+    return new EventSource(url.toString());
+  }
+
+  /**
+   * Sends enhanced chat message with session context
+   * @param request - Enhanced chat request with session context
+   * @returns Promise<ChatResponse> - Enhanced chat response
+   */
+  static async sendEnhancedChatMessage(request: {
+    session_id: string;
+    message: ChatMessage;
+    context_cards?: string[];
+    file_context?: string[];
+  }): Promise<ChatResponse> {
+    const response = await fetch(`${API_BASE_URL}/daifu/chat/daifu`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
       body: JSON.stringify({
-        repo_owner: repoOwner,
-        repo_name: repoName,
-        repo_branch: repoBranch,
-        title,
-        description
+        conversation_id: request.session_id,
+        message: request.message,
+        context_cards: request.context_cards || [],
+        file_context: request.file_context || []
       }),
     });
 
-    return this.handleResponse<any>(response);
-  }
-
-  static async getSessionContextById(sessionId: string): Promise<any> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
-      method: 'GET',
-      headers: this.getAuthHeaders(),
-    });
-
-    return this.handleResponse<any>(response);
-  }
-
-  static async touchSession(sessionId: string): Promise<any> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/touch`, {
-      method: 'POST',
-      headers: this.getAuthHeaders(),
-    });
-
-    return this.handleResponse<any>(response);
-  }
-
-  static async getUserSessions(repoOwner?: string, repoName?: string): Promise<any[]> {
-    const params = new URLSearchParams();
-    if (repoOwner) params.append('repo_owner', repoOwner);
-    if (repoName) params.append('repo_name', repoName);
-    
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions?${params}`, {
-      method: 'GET',
-      headers: this.getAuthHeaders(),
-    });
-
-    return this.handleResponse<any[]>(response);
+    return this.handleResponse<ChatResponse>(response);
   }
 
   // Additional GitHub Endpoints
@@ -622,5 +709,23 @@ export class ApiService {
     });
 
     return this.handleResponse<any>(response);
+  }
+
+  /**
+   * Global health check for API and real-time connections
+   * @returns Promise<{api: boolean, realtime: boolean}> - Service health status
+   */
+  static async checkHealth(): Promise<{api: boolean, realtime: boolean}> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/health`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      
+      const health = await this.handleResponse<{api: boolean, realtime: boolean}>(response);
+      return health;
+    } catch (error) {
+      return { api: false, realtime: false };
+    }
   }
 }

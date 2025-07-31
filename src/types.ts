@@ -88,6 +88,18 @@ export interface AuthConfig {
   redirect_uri: string;
 }
 
+// Tab management with session persistence
+export interface TabState {
+  activeTab: TabType;
+  refreshKeys: {
+    chat: number;
+    'file-deps': number;
+    context: number;
+    ideas: number;
+  };
+  tabHistory: TabType[];
+}
+
 // GitHub types
 export interface GitHubRepository {
   id: number;
@@ -148,6 +160,162 @@ export interface CreateIssueFromChatRequest {
   title: string;
   description?: string;
   repository_url?: string;
+}
+
+// Enhanced Session Types for comprehensive state management
+export interface SessionCreateRequest {
+  repo_owner: string;
+  repo_name: string;
+  repo_branch: string;
+  title?: string;
+  description?: string;
+}
+
+export interface SessionResponse {
+  id: string;
+  repo_owner: string;
+  repo_name: string;
+  repo_branch: string;
+  title: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+  last_activity: string;
+  is_active: boolean;
+  context_card_count: number;
+  message_count: number;
+}
+
+export interface SessionContextResponse {
+  session: SessionResponse;
+  messages: ChatMessageAPI[];
+  context_cards: string[];  // Changed to match backend (array of IDs)
+  repository_info: {
+    owner: string;
+    name: string;
+    branch: string;
+    full_name: string;
+    html_url: string;
+  };
+  file_embeddings_count: number;
+  statistics: {
+    total_messages: number;
+    total_tokens: number;
+    total_cost: number;
+    session_duration: number;
+    user_issues_count?: number;
+    file_embeddings_count?: number;
+  };
+  user_issues?: UserIssueResponse[];
+  file_embeddings?: FileEmbeddingResponse[];
+}
+
+// File embedding response interface to match backend
+export interface FileEmbeddingResponse {
+  id: number;
+  session_id: number;
+  repository_id?: number;
+  file_path: string;
+  file_name: string;
+  file_type: string;
+  chunk_index: number;
+  tokens: number;
+  file_metadata?: Record<string, any>;
+  created_at: string;
+}
+
+// User issue response interface to match backend
+export interface UserIssueResponse {
+  id: number;
+  issue_id: string;
+  user_id: number;
+  title: string;
+  description?: string;
+  issue_text_raw: string;
+  issue_steps?: string[];
+  conversation_id?: string;
+  context_card_id?: number;
+  context_cards?: string[];
+  ideas?: string[];
+  repo_owner?: string;
+  repo_name?: string;
+  priority: string;
+  status: string;
+  agent_response?: string;
+  processing_time?: number;
+  tokens_used: number;
+  github_issue_url?: string;
+  github_issue_number?: number;
+  created_at: string;
+  updated_at?: string;
+  processed_at?: string;
+}
+
+// Real-time update types for Server-Sent Events
+export interface SessionUpdateEvent {
+  type: 'message' | 'context_card' | 'session_update' | 'agent_status' | 'repository_update';
+  session_id: string;
+  data: any;
+  timestamp: string;
+}
+
+export interface AgentStatus {
+  type: 'daifu' | 'architect' | 'coder' | 'tester';
+  status: 'idle' | 'processing' | 'completed' | 'error';
+  progress?: number;
+  message?: string;
+  started_at?: string;
+  completed_at?: string;
+}
+
+// Comprehensive Session State Interface
+export interface SessionState {
+  // Core session data
+  sessionId: string | null;
+  session: SessionResponse | null;
+  
+  // Repository context
+  repository: GitHubRepository | null;
+  branch: string;
+  repositoryInfo: {
+    owner: string;
+    name: string;
+    branch: string;
+    full_name: string;
+    html_url: string;
+  } | null;
+  
+  // Chat data
+  messages: ChatMessageAPI[];
+  isLoadingMessages: boolean;
+  messageRefreshKey: number;
+  
+  // Context management
+  contextCards: ContextCard[];
+  fileContext: FileItem[];
+  totalTokens: number;
+  
+  // Issue management
+  userIssues: UserIssueResponse[];
+  currentIssue: UserIssueResponse | null;
+  
+  // Agent orchestration
+  agentStatus: AgentStatus;
+  agentHistory: AgentStatus[];
+  
+  // Session statistics
+  statistics: {
+    total_messages: number;
+    total_tokens: number;
+    total_cost: number;
+    session_duration: number;
+  };
+  
+  // UI state
+  isLoading: boolean;
+  error: string | null;
+  lastUpdated: Date;
+  connectionStatus: 'connected' | 'disconnected' | 'reconnecting';
 }
 
 // GitHub Issue Context Structure

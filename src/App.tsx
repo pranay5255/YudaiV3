@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { Chat } from './components/Chat';
@@ -10,10 +10,11 @@ import { DetailModal } from './components/DetailModal';
 import { ToastContainer } from './components/Toast';
 import { RepositorySelectionToast } from './components/RepositorySelectionToast';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { SessionProvider, useSession, useConnectionStatus } from './contexts/SessionContext';
 import { ContextCard, FileItem, IdeaItem, Toast, ProgressStep, TabType, SelectedRepository } from './types';
 import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
-import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, UserIssueResponse } from './services/api';
+import { ChatContextMessage, FileContextItem, UserIssueResponse } from './services/api';
 
 // Interface for issue preview data (matching DiffModal expectations)
 interface IssuePreviewData {
@@ -44,20 +45,37 @@ interface IssuePreviewData {
   };
 }
 
-function App() {
+/**
+ * Main App Content Component
+ * Uses SessionContext for comprehensive state management
+ * Handles UI state and coordinates between different sections
+ */
+function AppContent() {
+  // Session context provides all application state
+  const {
+    sessionState,
+    tabState,
+    addContextCard,
+    removeContextCard,
+    addFileContext,
+    removeFileContext,
+    createIssue,
+    setActiveTab,
+    refreshTab,
+    updateRepositoryInfo
+  } = useSession();
+  
+  const connectionStatus = useConnectionStatus();
+  
   // Auth and repository contexts
   const { user, isAuthenticated } = useAuth();
   const { setSelectedRepository, hasSelectedRepository } = useRepository();
   
-  // State management
-  const [activeTab, setActiveTab] = useState<TabType>('chat');
+  // Local UI state (not session-related)
   const [currentStep, setCurrentStep] = useState<ProgressStep>('DAifu');
   const [errorStep] = useState<ProgressStep | undefined>();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  
-  const [contextCards, setContextCards] = useState<ContextCard[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  
   const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
@@ -68,7 +86,7 @@ function App() {
 
   // Show repository selection after login if no repository is selected
   useEffect(() => {
-    if (isAuthenticated && user && !hasSelectedRepository) {
+    if (isAuthenticated && user && !hasSelectedRepository && !sessionState.sessionId) {
       // Add a small delay to let the user see they've logged in
       const timer = setTimeout(() => {
         setShowRepositorySelection(true);
@@ -76,13 +94,27 @@ function App() {
       
       return () => clearTimeout(timer);
     }
-  }, [isAuthenticated, user, hasSelectedRepository]);
+  }, [isAuthenticated, user, hasSelectedRepository, sessionState.sessionId]);
+  
+  // Real-time repository info updates
+  useEffect(() => {
+    if (sessionState.repositoryInfo) {
+      // Update repository context when session repository changes
+      updateRepositoryInfo(sessionState.repositoryInfo);
+    }
+  }, [sessionState.repositoryInfo, updateRepositoryInfo]);
 
-  // Repository selection handlers
+  /**
+   * Handles repository selection and creates a new session
+   * Integrates with SessionContext for unified state management
+   */
   const handleRepositoryConfirm = (selection: SelectedRepository) => {
     setSelectedRepository(selection);
     setShowRepositorySelection(false);
     addToast('Repository selected successfully', 'success');
+    
+    // The SessionContext will automatically create a session via useEffect
+    // when selectedRepository changes
   };
 
   const handleRepositoryCancel = () => {
@@ -110,61 +142,17 @@ function App() {
     addToast('Issue preview generated successfully!', 'success');
   };
 
-  // Enhanced issue creation with conversation context (legacy)
-  const handleCreateIssueWithContext = async () => {
-    // Collect conversation context (not used, handled via contextCards)
-    // Collect file dependencies context (already in contextCards)
-    const fileContext = contextCards.filter(card => card.source === 'file-deps');
-    const chatContextCards = contextCards.filter(card => card.source === 'chat');
 
-    // Convert to API formats
-    const conversationMessages: ChatContextMessage[] = chatContextCards.map(card => ({
-      id: card.id,
-      content: card.title + '\n' + card.description,
-      isCode: false,
-      timestamp: new Date().toISOString(),
-    }));
-    const fileContextItems: FileContextItem[] = fileContext.map(card => ({
-      id: card.id,
-      name: card.title,
-      type: 'INTERNAL',
-      tokens: card.tokens,
-      category: 'Context File',
-      path: card.title,
-    }));
-
-    const request: CreateIssueWithContextRequest = {
-      title: `Issue from Context Cards`,
-      description: 'This issue was generated from context cards.',
-      chat_messages: conversationMessages,
-      file_context: fileContextItems,
-      repository_info: undefined, // TODO: pass real repo info if available
-      priority: 'medium',
-    };
-
-    try {
-      addToast('Preparing GitHub issue with collected context...', 'info');
-      setCurrentStep('Architect');
-      const response = await ApiService.createIssueWithContext(request, true, true);
-      if (response.success) {
-        handleShowIssuePreview({
-          ...response.github_preview,
-          userIssue: response.user_issue,
-          conversationContext: conversationMessages,
-          fileContext: fileContextItems,
-          canCreateGitHubIssue: false, // TODO: set true if repo info is available
-          repositoryInfo: request.repository_info,
-        });
-      } else {
-        addToast('Failed to generate issue preview', 'error');
-      }
-    } catch (error) {
-      addToast('Failed to generate issue preview', 'error');
-      console.error('Failed to create GitHub issue from context cards:', error);
-    }
-  };
-
-  // Context management
+  /**
+   * Context management functions - now integrated with SessionContext
+   * These functions maintain backward compatibility while using session state
+   */
+  
+  /**
+   * Adds chat content to context cards
+   * @param content - The content to add to context
+   * @param source - The source of the content (chat, file-deps, upload)
+   */
   const addToContext = (content: string, source: ContextCard['source'] = 'chat') => {
     const newCard: ContextCard = {
       id: Date.now().toString(),
@@ -174,10 +162,14 @@ function App() {
       source,
     };
     
-    setContextCards(prev => [...prev, newCard]);
+    addContextCard(newCard);
     addToast('Added to context successfully', 'success');
   };
 
+  /**
+   * Adds a file to context cards
+   * @param file - The file item to add to context
+   */
   const addFileToContext = (file: FileItem) => {
     const newCard: ContextCard = {
       id: Date.now().toString(),
@@ -187,78 +179,170 @@ function App() {
       source: 'file-deps',
     };
     
-    setContextCards(prev => [...prev, newCard]);
+    addContextCard(newCard);
+    addFileContext(file);
     addToast(`Added ${file.name} to context`, 'success');
   };
 
-  const removeContextCard = (id: string) => {
-    setContextCards(prev => prev.filter(card => card.id !== id));
+  /**
+   * Removes a context card by ID
+   * @param id - The ID of the context card to remove
+   */
+  const removeContextCardHandler = (id: string) => {
+    removeContextCard(id);
+    // Also remove from file context if it's a file-deps item
+    const card = sessionState.contextCards.find(c => c.id === id);
+    if (card && card.source === 'file-deps') {
+      removeFileContext(id);
+    }
     addToast('Removed from context', 'info');
   };
 
-  // Modal handlers
+  /**
+   * Modal handlers for file details and issue creation
+   */
   const handleShowFileDetails = (file: FileItem) => {
     setSelectedFile(file);
     setIsDetailModalOpen(true);
   };
 
-  // Updated create issue function for ContextCards
-  const handleCreateIssue = () => {
-    handleCreateIssueWithContext();
+  /**
+   * Enhanced issue creation using SessionContext
+   * Creates issue with current session context including messages and files
+   */
+  const handleCreateIssue = async () => {
+    try {
+      addToast('Creating issue with session context...', 'info');
+      setCurrentStep('Architect');
+      
+      const issue = await createIssue(
+        `Issue from Session ${sessionState.sessionId}`,
+        'This issue was generated from the current session context.'
+      );
+      
+      addToast('Issue created successfully!', 'success');
+      
+      // Show issue preview
+      handleShowIssuePreview({
+        title: issue.title,
+        body: issue.issue_text_raw,
+        labels: [],
+        assignees: [],
+        metadata: {
+          chat_messages_count: sessionState.messages.length,
+          file_context_count: sessionState.fileContext.length,
+          total_tokens: sessionState.totalTokens,
+          generated_at: new Date().toISOString(),
+          generation_method: 'session-based',
+        },
+        userIssue: issue,
+        conversationContext: sessionState.messages.map(msg => ({
+          id: msg.id,
+          content: msg.content,
+          isCode: msg.is_code,
+          timestamp: msg.timestamp,
+        })),
+        fileContext: sessionState.fileContext.map(file => ({
+          id: file.id,
+          name: file.name,
+          type: file.type,
+          tokens: file.tokens,
+          category: file.Category,
+          path: file.path,
+        })),
+        canCreateGitHubIssue: !!sessionState.repositoryInfo,
+        repositoryInfo: sessionState.repositoryInfo ? {
+          owner: sessionState.repositoryInfo.owner,
+          name: sessionState.repositoryInfo.name,
+          branch: sessionState.repositoryInfo.branch
+        } : undefined,
+      });
+    } catch (error) {
+      addToast('Failed to create issue', 'error');
+      console.error('Failed to create issue:', error);
+    }
   };
 
+  /**
+   * Creates issue from idea items
+   * @param idea - The idea item to create an issue from
+   */
   const handleCreateIdeaIssue = (idea: IdeaItem) => {
     addToast(`Creating issue for: ${idea.title}`, 'info');
     handleCreateIssue();
   };
 
-  // Get file context from context cards for Chat component
-  const getFileContext = (): FileItem[] => {
-    return contextCards
-      .filter(card => card.source === 'file-deps')
-      .map(card => ({
-        id: card.id,
-        name: card.title,
-        type: 'INTERNAL' as const,
-        tokens: card.tokens,
-        Category: 'Context File',
-        isDirectory: false,
-        path: card.title
-      }));
+  /**
+   * Tab management with session-aware refresh
+   * Maintains tab state while preserving session context
+   */
+  const handleTabChange = (newTab: TabType) => {
+    setActiveTab(newTab);
+    // Don't reset tab content - maintain state across tab switches
   };
+  
+  /**
+   * Refreshes specific tab content without affecting session state
+   * @param tab - The tab to refresh
+   */
+  const handleTabRefresh = (tab: TabType) => {
+    refreshTab(tab);
+    addToast(`Refreshed ${tab} tab`, 'info');
+  };
+  
+  // Use handleTabRefresh on double-click for tabs (future enhancement)
+  // This function is available for future tab refresh functionality
 
-  // Render tab content
+  /**
+   * Renders tab content with session-aware props
+   * All components receive session state and refresh keys for proper updates
+   */
   const renderTabContent = () => {
-    switch (activeTab) {
+    const currentTab = tabState.activeTab;
+    const refreshKey = tabState.refreshKeys[currentTab];
+    
+    switch (currentTab) {
       case 'chat':
         return (
           <Chat 
-            onAddToContext={addToContext} 
-            onCreateIssue={handleCreateIssueWithContext}
-            contextCards={contextCards}
-            fileContext={getFileContext()}
+            key={`chat-${refreshKey}-${sessionState.messageRefreshKey}`}
+            onAddToContext={addToContext}
+            onCreateIssue={handleCreateIssue}
+            contextCards={sessionState.contextCards}
+            fileContext={sessionState.fileContext}
             onShowIssuePreview={handleShowIssuePreview}
           />
         );
       case 'file-deps':
-        return (
-          <FileDependencies 
-            onAddToContext={addFileToContext}
-            onShowDetails={handleShowFileDetails}
-          />
-        );
+          return (
+            <FileDependencies 
+              key={`file-deps-${refreshKey}`}
+              onAddToContext={addFileToContext}
+              onShowDetails={handleShowFileDetails}
+            />
+          );
       case 'context':
         return (
           <ContextCards 
-            cards={contextCards}
-            onRemoveCard={removeContextCard}
+            key={`context-${refreshKey}`}
+            cards={sessionState.contextCards}
+            onRemoveCard={removeContextCardHandler}
             onCreateIssue={handleCreateIssue}
             onShowIssuePreview={handleShowIssuePreview}
-            repositoryInfo={/* pass repository info if available */ undefined}
+            repositoryInfo={sessionState.repositoryInfo ? {
+              owner: sessionState.repositoryInfo.owner,
+              name: sessionState.repositoryInfo.name,
+              branch: sessionState.repositoryInfo.branch
+            } : undefined}
           />
         );
       case 'ideas':
-        return <IdeasToImplement onCreateIssue={handleCreateIdeaIssue} />;
+        return (
+          <IdeasToImplement 
+            key={`ideas-${refreshKey}`}
+            onCreateIssue={handleCreateIdeaIssue}
+          />
+        );
       default:
         return null;
     }
@@ -267,15 +351,27 @@ function App() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-bg text-fg font-sans">
-        {/* Top Bar */}
-        <TopBar currentStep={currentStep} errorStep={errorStep} />
+        {/* Connection Status Indicator */}
+        {connectionStatus !== 'connected' && sessionState.sessionId && (
+          <div className={`fixed top-0 left-0 right-0 z-50 p-2 text-center text-sm ${
+            connectionStatus === 'reconnecting' ? 'bg-yellow-600' : 'bg-red-600'
+          } text-white`}>
+            {connectionStatus === 'reconnecting' ? 'Reconnecting...' : 'Connection lost - Some features may be limited'}
+          </div>
+        )}
+        
+        {/* Top Bar with Session Info */}
+        <TopBar 
+          currentStep={currentStep} 
+          errorStep={errorStep}
+        />
         
         {/* Main Layout */}
-        <div className="flex h-[calc(100vh-56px)]">
-          {/* Sidebar */}
+        <div className={`flex ${connectionStatus !== 'connected' && sessionState.sessionId ? 'h-[calc(100vh-96px)] mt-8' : 'h-[calc(100vh-56px)]'}`}>
+          {/* Sidebar with Session State */}
           <Sidebar 
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
+            activeTab={tabState.activeTab}
+            onTabChange={handleTabChange}
             isCollapsed={sidebarCollapsed}
             onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
           />
@@ -305,7 +401,7 @@ function App() {
           onAddToContext={addFileToContext}
         />
 
-        {/* Repository Selection Toast */}
+        {/* Repository Selection Toast with Session Integration */}
         <RepositorySelectionToast
           isOpen={showRepositorySelection}
           onConfirm={handleRepositoryConfirm}
@@ -314,8 +410,38 @@ function App() {
 
         {/* Toast Container */}
         <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
+        
+        {/* Session Debug Info (Development Only) */}
+        {process.env.NODE_ENV === 'development' && (
+          <div className="fixed bottom-4 right-4 bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-xs font-mono max-w-sm">
+            <div className="text-zinc-400 mb-2">Session Debug</div>
+            <div>ID: {sessionState.sessionId?.slice(-8) || 'None'}</div>
+            <div>Messages: {sessionState.messages.length}</div>
+            <div>Context: {sessionState.contextCards.length}</div>
+            <div>Files: {sessionState.fileContext.length}</div>
+            <div>Tokens: {sessionState.totalTokens.toLocaleString()}</div>
+            <div className={`${
+              connectionStatus === 'connected' ? 'text-green-400' : 
+              connectionStatus === 'reconnecting' ? 'text-yellow-400' : 'text-red-400'
+            }`}>
+              Status: {connectionStatus}
+            </div>
+          </div>
+        )}
       </div>
     </ProtectedRoute>
+  );
+}
+
+/**
+ * Main App Component with SessionProvider
+ * Wraps the entire application with session context
+ */
+function App() {
+  return (
+    <SessionProvider>
+      <AppContent />
+    </SessionProvider>
   );
 }
 
