@@ -285,6 +285,8 @@ function AppContent() {
    * Refreshes specific tab content without affecting session state
    * @param tab - The tab to refresh
    */
+  // Tab refresh handler - available for future use
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleTabRefresh = (tab: TabType) => {
     refreshTab(tab);
     addToast(`Refreshed ${tab} tab`, 'info');
