@@ -9,7 +9,8 @@ import {
   FileItem, 
   ChatMessageAPI,
   AgentStatus,
-  TabState
+  TabState,
+  TabType
 } from '../types';
 import { UserIssueResponse } from '../services/api';
 
@@ -62,7 +63,7 @@ interface SessionContextValue {
   refreshTab: (tab: string) => void;
   
   // Repository management
-  updateRepositoryInfo: (repoInfo: any) => void;
+  updateRepositoryInfo: (repoInfo: Partial<NonNullable<SessionState['repositoryInfo']>>) => void;
   
   // Utility functions
   exportSessionData: () => SessionState;
@@ -253,55 +254,6 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
   };
 
   /**
-   * Establishes Server-Sent Events connection for real-time updates
-   * Handles automatic reconnection and error recovery
-   */
-  const establishRealtimeConnection = useCallback(async (sessionId: string) => {
-    if (eventSource) {
-      eventSource.close();
-    }
-
-    try {
-      setConnectionStatus('reconnecting');
-      
-      const newEventSource = ApiService.createSessionEventSource(sessionId);
-      
-      newEventSource.onopen = () => {
-        console.log('Real-time connection established for session:', sessionId);
-        setConnectionStatus('connected');
-        setSessionState(prev => ({ ...prev, connectionStatus: 'connected' }));
-      };
-      
-      newEventSource.onmessage = (event) => {
-        try {
-          const updateEvent: SessionUpdateEvent = JSON.parse(event.data);
-          handleRealtimeUpdate(updateEvent);
-        } catch (error) {
-          console.error('Failed to parse real-time update:', error);
-        }
-      };
-      
-      newEventSource.onerror = (error) => {
-        console.error('Real-time connection error:', error);
-        setConnectionStatus('disconnected');
-        setSessionState(prev => ({ ...prev, connectionStatus: 'disconnected' }));
-        
-        // Attempt to reconnect after 5 seconds
-        setTimeout(() => {
-          if (sessionState.sessionId) {
-            establishRealtimeConnection(sessionState.sessionId);
-          }
-        }, 5000);
-      };
-      
-      setEventSource(newEventSource);
-    } catch (error) {
-      console.error('Failed to establish real-time connection:', error);
-      setConnectionStatus('disconnected');
-    }
-  }, [eventSource, sessionState.sessionId]);
-  
-  /**
    * Handles real-time updates from Server-Sent Events
    * Updates appropriate parts of session state based on event type
    */
@@ -357,6 +309,55 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
         console.warn('Unknown real-time event type:', event.type);
     }
   }, []);
+
+  /**
+   * Establishes Server-Sent Events connection for real-time updates
+   * Handles automatic reconnection and error recovery
+   */
+  const establishRealtimeConnection = useCallback(async (sessionId: string) => {
+    if (eventSource) {
+      eventSource.close();
+    }
+
+    try {
+      setConnectionStatus('reconnecting');
+      
+      const newEventSource = ApiService.createSessionEventSource(sessionId);
+      
+      newEventSource.onopen = () => {
+        console.log('Real-time connection established for session:', sessionId);
+        setConnectionStatus('connected');
+        setSessionState(prev => ({ ...prev, connectionStatus: 'connected' }));
+      };
+      
+      newEventSource.onmessage = (event) => {
+        try {
+          const updateEvent: SessionUpdateEvent = JSON.parse(event.data);
+          handleRealtimeUpdate(updateEvent);
+        } catch (error) {
+          console.error('Failed to parse real-time update:', error);
+        }
+      };
+      
+      newEventSource.onerror = (error) => {
+        console.error('Real-time connection error:', error);
+        setConnectionStatus('disconnected');
+        setSessionState(prev => ({ ...prev, connectionStatus: 'disconnected' }));
+        
+        // Attempt to reconnect after 5 seconds
+        setTimeout(() => {
+          if (sessionState.sessionId) {
+            establishRealtimeConnection(sessionState.sessionId);
+          }
+        }, 5000);
+      };
+      
+      setEventSource(newEventSource);
+    } catch (error) {
+      console.error('Failed to establish real-time connection:', error);
+      setConnectionStatus('disconnected');
+    }
+  }, [eventSource, sessionState.sessionId, handleRealtimeUpdate]);
   
   /**
    * Loads comprehensive session context from the enhanced endpoint
@@ -369,7 +370,7 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
         ...prev,
         session: context.session,
         messages: context.messages,
-        contextCards: context.context_cards.map(id => ({ id, title: '', description: '', tokens: 0, source: 'chat' as any })),
+        contextCards: context.context_cards.map(id => ({ id, title: '', description: '', tokens: 0, source: 'chat' as ContextCard['source'] })),
         fileContext: context.file_embeddings?.map(emb => ({
           id: emb.id.toString(),
           name: emb.file_name,
@@ -403,7 +404,7 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
         console.error('Failed to auto-create session:', error);
       });
     }
-  }, [isAuthenticated, selectedRepository, sessionState.sessionId]);
+  }, [isAuthenticated, selectedRepository, sessionState.sessionId, createSession]);
   
   // Clean up real-time connection on unmount
   useEffect(() => {
@@ -774,8 +775,8 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
   const setActiveTab = (tab: string): void => {
     setTabState(prev => ({
       ...prev,
-      activeTab: tab as any,
-      tabHistory: [tab as any, ...prev.tabHistory.filter(t => t !== tab)].slice(0, 10)
+      activeTab: tab as TabType,
+      tabHistory: [tab as TabType, ...prev.tabHistory.filter(t => t !== tab)].slice(0, 10)
     }));
   };
   
@@ -784,16 +785,16 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
       ...prev,
       refreshKeys: {
         ...prev.refreshKeys,
-        [tab]: (prev.refreshKeys as any)[tab] + 1
+        [tab]: (prev.refreshKeys as Record<string, number>)[tab] + 1
       }
     }));
   };
   
   // Repository management
-  const updateRepositoryInfo = (repoInfo: any): void => {
+  const updateRepositoryInfo = (repoInfo: Partial<NonNullable<SessionState['repositoryInfo']>>): void => {
     setSessionState(prev => ({
       ...prev,
-      repositoryInfo: { ...prev.repositoryInfo, ...repoInfo },
+      repositoryInfo: prev.repositoryInfo ? { ...prev.repositoryInfo, ...repoInfo } : null,
       lastUpdated: new Date()
     }));
   };

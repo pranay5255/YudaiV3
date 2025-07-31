@@ -724,7 +724,7 @@ export class ApiService {
       
       const health = await this.handleResponse<{api: boolean, realtime: boolean}>(response);
       return health;
-    } catch (error) {
+    } catch {
       return { api: false, realtime: false };
     }
   }

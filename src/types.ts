@@ -220,7 +220,7 @@ export interface FileEmbeddingResponse {
   file_type: string;
   chunk_index: number;
   tokens: number;
-  file_metadata?: Record<string, any>;
+  file_metadata?: Record<string, unknown>;
   created_at: string;
 }
 
@@ -255,7 +255,7 @@ export interface UserIssueResponse {
 export interface SessionUpdateEvent {
   type: 'message' | 'context_card' | 'session_update' | 'agent_status' | 'repository_update';
   session_id: string;
-  data: any;
+  data: unknown;
   timestamp: string;
 }
 
