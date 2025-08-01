@@ -5,33 +5,66 @@ A unified FastAPI server that combines all backend services for the YudaiV3 appl
 ## Services Included
 
 ### 🔐 Authentication (`/auth`)
-- GitHub OAuth authentication
-- User session management
-- Profile management
+- **Purpose**: Handles user authentication, session management, and profile retrieval.
+- **Functions**:
+  - `github_login()`: [Used] Initiates the GitHub OAuth2 flow.
+  - `github_callback()`: [Used] Handles the callback from GitHub after authentication.
+  - `get_user_profile()`: [Used] Retrieves the authenticated user's profile.
+  - `logout()`: [Used] Logs the user out and invalidates their session.
+  - `auth_status()`: [Used] Checks the current authentication status.
+  - `get_auth_config()`: [Used] Provides public authentication configuration.
 
 ### 🐙 GitHub Integration (`/github`)
-- Repository management
-- Issue creation and management
-- Pull request handling
-- Repository search
+- **Purpose**: Manages interactions with the GitHub API, including repositories, issues, and pull requests.
+- **Functions**:
+  - `get_my_repositories()`: [Used] Fetches the authenticated user's repositories.
+  - `get_repository_info()`: [Used] Retrieves details for a specific repository.
+  - `create_repository_issue()`: [Used] Creates a new issue in a repository.
+  - `get_repository_issues_list()`: [Used] Lists issues for a repository.
+  - `get_repository_pulls_list()`: [Used] Lists pull requests for a repository.
+  - `get_repository_commits_list()`: [Used] Lists commits for a repository.
+  - `get_repository_branches_list()`: [Used] Lists branches for a repository.
+  - `search_github_repositories()`: [Used] Searches for repositories on GitHub.
 
 ### 💬 Chat Services (`/daifu`)
-- DAifu AI agent integration
-- Chat session management
-- Message history
-- Issue creation from chat
+- **Purpose**: Integrates with the DAifu AI agent, manages chat sessions, and handles real-time communication.
+- **Functions**:
+  - `create_or_get_session()`: [Used] Creates or retrieves a chat session.
+  - `get_session_context()`: [Used] Gets the comprehensive context for a session.
+  - `touch_session()`: [Used] Updates the last activity timestamp for a session.
+  - `get_user_sessions()`: [Used] Retrieves all sessions for a user.
+  - `chat_daifu()`: [Used] Processes a chat message with the DAifu agent (legacy).
+  - `get_chat_sessions()`: [Used] Retrieves chat sessions (legacy).
+  - `websocket_session_endpoint()`: [Used] Handles WebSocket connections for real-time updates.
+  - `handle_websocket_message()`: [Used] Processes incoming WebSocket messages.
+  - `handle_new_message_realtime()`: [Used] Manages new messages in real-time.
+  - `process_ai_response_async()`: [Used] Asynchronously processes AI responses.
+  - `generate_daifu_response_async()`: [Used] Generates DAifu responses asynchronously.
+  - `chat_daifu_v2()`: [Used] Processes a chat message with WebSocket support.
+  - `get_session_statistics()`: [Used] Retrieves statistics for a session.
+  - `update_session_title()`: [Used] Updates the title of a session.
+  - `deactivate_session()`: [Used] Deactivates a chat session.
+  - `create_issue_from_chat()`: [Used] Creates an issue from a chat conversation.
 
 ### 📋 Issue Management (`/issues`)
-- User issue creation and management
-- Issue status tracking
-- GitHub issue conversion
-- Issue statistics
+- **Purpose**: Manages user-generated issues, tracks their status, and integrates with GitHub issues.
+- **Functions**:
+  - `create_issue()`: [Used] Creates a new user issue.
+  - `get_issues()`: [Used] Retrieves a list of user issues.
+  - `get_issue()`: [Used] Retrieves a specific user issue.
+  - `create_issue_with_context()`: [Used] Creates an issue with context from a chat.
+  - `update_issue_status()`: [Used] Updates the status of an issue.
+  - `create_github_issue_from_user_issue()`: [Used] Converts a user issue to a GitHub issue.
+  - `create_issue_from_chat()`: [Used] Creates an issue directly from a chat request.
+  - `get_issue_statistics()`: [Used] Retrieves statistics for user issues.
 
 ### 📁 File Dependencies (`/filedeps`)
-- Repository file structure extraction
-- File dependency analysis
-- GitIngest integration
-- File categorization
+- **Purpose**: Analyzes repository file structures and dependencies.
+- **Functions**:
+  - `root()`: [Used] Provides basic API information.
+  - `get_repository_by_url()`: [Used] Retrieves a repository by its URL.
+  - `get_repository_files()`: [Used] Lists files for a repository.
+  - `extract_file_dependencies()`: [Used] Extracts file dependencies from a repository.
 
 ## Quick Start
 
@@ -106,7 +139,7 @@ The production setup uses nginx as a reverse proxy with SSL termination. There a
 
 #### `nginx.prod.conf` - Production Configuration
 - **SSL/TLS**: Full SSL configuration with modern ciphers
-- **Multiple Domains**: 
+- **Multiple Domains**:
   - `yudai.app` (main application)
   - `api.yudai.app` (API subdomain)
   - `dev.yudai.app` (development subdomain)
@@ -225,14 +258,14 @@ const apiUrl = `${API_BASE_URL}/github/repositories`;
 ### 1. **BROKEN WEBSOCKET URL CONSTRUCTION** ⚠️
 **Issue**: WebSocket connections fail in production due to incorrect URL construction
 ```typescript
-// BROKEN: src/services/api.ts:615-622
+// BROKEN: src/services/api.ts:619-637
 static createSessionWebSocket(sessionId: string, token: string | null): WebSocket {
   const wsUrl = API_BASE_URL.replace('http', 'ws'); // ❌ WRONG
   const url = new URL(`${wsUrl}/daifu/sessions/${sessionId}/ws`);
   // ...
 }
 ```
-**Problem**: 
+**Problem**:
 - `API_BASE_URL` is `https://yudai.app/api` in production
 - `replace('http', 'ws')` creates `wss://yudai.app/api/daifu/sessions/...`
 - Backend expects `wss://yudai.app/daifu/sessions/...` (no `/api` prefix)
@@ -248,7 +281,7 @@ export interface ChatRequest {
   // ...
 }
 
-// But in SessionContext: src/contexts/SessionContext.tsx:99
+// But in SessionContext: src/contexts/SessionContext.tsx
 const ws = ApiService.createSessionWebSocket(activeSessionId, token); // ❌ Uses session_id
 ```
 
@@ -259,7 +292,7 @@ const ws = ApiService.createSessionWebSocket(activeSessionId, token); // ❌ Use
 @router.post("/chat/daifu")        # Legacy endpoint
 @router.post("/chat/daifu/v2")     # New WebSocket-enabled endpoint
 ```
-**Problem**: 
+**Problem**:
 - Frontend uses legacy endpoint (`/chat/daifu`)
 - WebSocket functionality only works with `/chat/daifu/v2`
 - **Result**: Real-time updates don't work
@@ -267,262 +300,13 @@ const ws = ApiService.createSessionWebSocket(activeSessionId, token); // ❌ Use
 ### 4. **INSECURE WEBSOCKET AUTHENTICATION** ⚠️
 **Issue**: WebSocket authentication is insecure
 ```python
-# Backend: backend/daifuUserAgent/chat_api.py:325-330
+# Backend: backend/daifuUserAgent/chat_api.py:320-380
 if not token:
     await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
     return
-    
+
 user = get_current_user(token, db)  # ❌ Simple token lookup, no JWT validation
 ```
-
-## Frontend-Backend API Dependency Table
-
-### Overview
-This section documents the complete mapping between frontend components/services and backend API endpoints, including state flow from user interactions to database operations.
-
-### Component-to-API Mapping
-
-#### Authentication Flow
-| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
-|-------------------|------------------|------------------|-------------|----------------|------------|
-| `LoginPage.tsx` | `AuthService.login()` | `/auth/login` | GET | - | Redirect to GitHub OAuth |
-| `AuthProvider.tsx` | `AuthService.handleCallback()` | `/auth/callback` | GET | `users`, `auth_tokens` | OAuth → Create/Update User → Store Token → Update React State |
-| `AuthProvider.tsx` | `AuthService.checkAuthStatus()` | `/auth/status` | GET | `users`, `auth_tokens` | Check Token → Validate User → Update Auth State |
-| `AuthProvider.tsx` | `AuthService.getProfile()` | `/auth/profile` | GET | `users` | Get User Profile → Update User State |
-| `AuthProvider.tsx` | `AuthService.logout()` | `/auth/logout` | POST | `auth_tokens` | Deactivate Token → Clear Local Storage → Reset Auth State |
-| - | `AuthService.getAuthConfig()` | `/auth/config` | GET | - | Get OAuth Configuration |
-
-#### Session Management Flow
-| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
-|-------------------|------------------|------------------|-------------|----------------|------------|
-| `SessionContext.tsx` | `ApiService.createOrGetSession()` | `/daifu/chat/daifu` | POST | `chat_sessions`, `chat_messages` | Create Message → Auto-create Session → Update Session State |
-| `SessionContext.tsx` | `ApiService.getSessionContext()` | `/daifu/chat/sessions` | GET | `chat_sessions` | Get Sessions → Find Session → Return Context |
-| `SessionContext.tsx` | `ApiService.getSessionMessages()` | `/daifu/chat/sessions/{id}/messages` | GET | `chat_messages` | Get Messages → Update Context |
-| `SessionContext.tsx` | `ApiService.getSessionStatistics()` | `/daifu/chat/sessions/{id}/statistics` | GET | `chat_sessions` | Get Stats → Update Repository Info |
-
-#### Chat Interface Flow
-| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
-|-------------------|------------------|------------------|-------------|----------------|------------|
-| `Chat.tsx` | `ApiService.sendChatMessage()` | `/daifu/chat/daifu` | POST | `chat_sessions`, `chat_messages` | User Input → Create Message → AI Response → Update Chat State |
-| `Chat.tsx` | `ApiService.createIssueWithContext()` | `/issues/create-with-context` | POST | `user_issues`, `context_cards` | Chat Context → Create Issue → Preview Response |
-
-#### Repository Management Flow  
-| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
-|-------------------|------------------|------------------|-------------|----------------|------------|
-| `RepositoryProvider.tsx` | Local Storage Only | - | - | - | Select Repository → Store in localStorage → Update Context |
-| Various Components | `ApiService.getUserRepositories()` | `/github/repositories` | GET | `repositories` | Get User Repos → Update Repository Options |
-| Various Components | `ApiService.getRepositoryBranches()` | `/github/repositories/{owner}/{repo}/branches` | GET | - | Get Branches → Update Branch Options |
-| Various Components | `ApiService.searchRepositories()` | `/github/search/repositories` | GET | - | Search Query → Return Results |
-
-#### File Dependencies Flow
-| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
-|-------------------|------------------|------------------|-------------|----------------|------------|
-| `FileDependencies.tsx` | `ApiService.getRepositoryByUrl()` | `/filedeps/repositories?repo_url=` | GET | `repositories`, `file_analyses` | Check DB for Repo → Return if Exists |
-| `FileDependencies.tsx` | `ApiService.getRepositoryFiles()` | `/filedeps/repositories/{id}/files` | GET | `file_items` | Get File Tree → Update File State |
-| `FileDependencies.tsx` | `ApiService.extractFileDependencies()` | `/filedeps/extract` | POST | `repositories`, `file_items`, `file_analyses` | Extract Files → Store Analysis → Return Tree |
-
-#### Issue Management Flow
-| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
-|-------------------|------------------|------------------|-------------|----------------|------------|
-| `Chat.tsx` | `ApiService.createIssueWithContext()` | `/issues/create-with-context` | POST | `user_issues` | Chat + File Context → Create Issue → Return Preview |
-| `DiffModal.tsx` | `ApiService.createGitHubIssueFromUserIssue()` | `/issues/{id}/create-github-issue` | POST | `user_issues` | User Issue → Create GitHub Issue → Update Status |
-| Various Components | `ApiService.getUserIssues()` | `/issues/` | GET | `user_issues` | Get User Issues → Update Issue List |
-| Various Components | `ApiService.getUserIssue()` | `/issues/{id}` | GET | `user_issues` | Get Specific Issue → Show Details |
-
-#### GitHub Integration Flow
-| Frontend Component | Frontend Service | Backend Endpoint | HTTP Method | Database Table | State Flow |
-|-------------------|------------------|------------------|-------------|----------------|------------|
-| Various Components | `ApiService.getRepository()` | `/github/repositories/{owner}/{repo}` | GET | `repositories` | Get Repo Details → Update Repository Info |
-| Various Components | `ApiService.createRepositoryIssue()` | `/github/repositories/{owner}/{repo}/issues` | POST | `issues` | Create GitHub Issue → Store in DB |
-| Various Components | `ApiService.getRepositoryIssues()` | `/github/repositories/{owner}/{repo}/issues` | GET | `issues` | Get GitHub Issues → Update Issue State |
-
-### WebSocket Integration
-
-#### Real-Time Session Updates
-| Frontend Component | WebSocket Endpoint | Message Types | Status |
-|-------------------|-------------------|---------------|--------|
-| `SessionContext.tsx` | `WS /daifu/sessions/{session_id}/ws` | `SESSION_UPDATE`, `MESSAGE`, `CONTEXT_CARD` | ⚠️ Broken (URL issues) |
-
-**WebSocket Message Flow**:
-```typescript
-// Frontend: src/contexts/SessionContext.tsx:99-120
-const ws = ApiService.createSessionWebSocket(activeSessionId, token);
-
-ws.onmessage = (event) => {
-  const message: UnifiedWebSocketMessage = JSON.parse(event.data);
-  switch (message.type) {
-    case WebSocketMessageType.SESSION_UPDATE:
-      return message.data as UnifiedSessionState;
-    case WebSocketMessageType.MESSAGE:
-      return { ...prevState, messages: [...prevState.messages, message.data] };
-    // ...
-  }
-};
-```
-
-**Backend WebSocket Handler**:
-```python
-# backend/daifuUserAgent/chat_api.py:317-351
-@router.websocket("/sessions/{session_id}/ws")
-async def websocket_session_endpoint(
-    websocket: WebSocket,
-    session_id: str,
-    token: Optional[str] = None,
-    db: Session = Depends(get_db)
-):
-    await unified_manager.connect(websocket, session_id, db)
-    # Real-time message broadcasting
-```
-
-### State Flow Patterns
-
-#### Authentication State Flow
-```
-User Click Login → GitHub OAuth → Callback → Backend Validation → Database Update → Frontend State Update
-```
-
-1. **User Interaction**: Click login button
-2. **Frontend Action**: Redirect to `/auth/login`
-3. **Backend Processing**: Generate OAuth URL, redirect to GitHub
-4. **External Service**: GitHub OAuth flow
-5. **Backend Callback**: Handle `/auth/callback`, validate code
-6. **Database Operations**: 
-   - Query/Create user in `users` table
-   - Deactivate old tokens in `auth_tokens` table  
-   - Create new token in `auth_tokens` table
-7. **Frontend State Update**: Update `AuthContext` with user and token
-8. **Local Storage**: Store token and user data
-
-#### Session Creation State Flow
-```
-Repository Selection → Auto-create Session → Database Insert → Context Update
-```
-
-1. **User Interaction**: Select repository
-2. **Frontend Trigger**: `RepositoryContext` updates
-3. **Auto-trigger**: `SessionContext` detects repository change
-4. **API Call**: `createOrGetSession()` via chat message
-5. **Backend Processing**: 
-   - Check for existing session in `chat_sessions`
-   - Create new session if none exists
-   - Create initial message in `chat_messages`
-6. **Database Operations**:
-   - INSERT into `chat_sessions` table
-   - INSERT into `chat_messages` table
-7. **Frontend State Update**: Update `SessionContext` with session ID
-8. **Local Storage**: Store session ID
-
-#### Chat Message State Flow
-```
-User Input → API Call → AI Processing → Database Storage → UI Update
-```
-
-1. **User Interaction**: Type and send message
-2. **Frontend Processing**: Add message to local state immediately
-3. **API Call**: `sendChatMessage()` to `/daifu/chat/daifu`
-4. **Backend Processing**:
-   - Validate session/create if needed
-   - Process message with AI
-   - Generate response
-5. **Database Operations**:
-   - INSERT user message into `chat_messages`
-   - INSERT AI response into `chat_messages`
-   - UPDATE session statistics in `chat_sessions`
-6. **Frontend State Update**: Add AI response to chat state
-
-#### File Context State Flow
-```
-Repository Selection → File Extraction → Database Storage → Context Cards
-```
-
-1. **User Interaction**: Select repository in `FileDependencies`
-2. **Frontend Check**: Look for existing analysis
-3. **API Calls**: 
-   - `getRepositoryByUrl()` - check if exists
-   - `extractFileDependencies()` - if not exists
-4. **Backend Processing**:
-   - Extract repository files
-   - Analyze file structure
-   - Calculate tokens and categories
-5. **Database Operations**:
-   - INSERT/UPDATE in `repositories` table
-   - INSERT files into `file_items` table
-   - INSERT analysis into `file_analyses` table
-6. **Frontend State Update**: Build file tree, update context cards
-
-#### Issue Creation State Flow
-```
-Chat Context → Issue Preview → GitHub Issue → Database Update
-```
-
-1. **User Interaction**: Click "Create GitHub Issue" in chat
-2. **Frontend Processing**: Gather chat messages and file context
-3. **API Call**: `createIssueWithContext()` with preview=true
-4. **Backend Processing**:
-   - Generate issue preview
-   - Store user issue
-5. **Database Operations**:
-   - INSERT into `user_issues` table
-6. **Frontend Display**: Show preview modal
-7. **User Confirmation**: Approve GitHub issue creation
-8. **API Call**: `createGitHubIssueFromUserIssue()`
-9. **Backend Processing**:
-   - Create GitHub issue via API
-   - Update user issue with GitHub details
-10. **Database Operations**:
-    - UPDATE `user_issues` with GitHub URL and number
-11. **Frontend State Update**: Show success and GitHub link
-
-### Error Handling Patterns
-
-#### Authentication Errors
-- **401 Unauthorized**: Clear auth state, redirect to login
-- **Token Expiration**: Auto-refresh or force re-login
-- **Network Errors**: Show error message, maintain state
-
-#### Session Errors  
-- **Session Not Found**: Create new session automatically
-- **Invalid Session**: Clear session state, create new
-- **Timeout**: Retry with exponential backoff
-
-#### API Rate Limiting
-- **GitHub API Limits**: Show friendly error, suggest retry
-- **Backend Rate Limits**: Queue requests, show loading state
-
-### Performance Optimizations
-
-#### Caching Strategy
-- **Auth Token**: Local storage with expiration check
-- **User Profile**: Local storage with refresh capability
-- **Repository List**: Cache for session duration
-- **File Tree**: Cache per repository with refresh option
-
-#### Lazy Loading
-- **File Dependencies**: Load on repository selection
-- **Chat History**: Paginated loading of old messages
-- **Issue History**: Load on demand
-
-#### State Management
-- **Context Optimization**: Minimize re-renders with memo
-- **Local Storage**: Persist critical state across sessions
-- **Error Boundaries**: Graceful error handling per component
-
-### Security Considerations
-
-#### Token Management
-- **Storage**: HttpOnly cookies preferred, localStorage as fallback  
-- **Expiration**: Automatic refresh before expiration
-- **Validation**: Server-side validation on every request
-
-#### CORS Configuration
-- **Production**: Restricted to `https://yudai.app`
-- **Development**: Localhost origins only
-- **Preflight**: Proper OPTIONS handling
-
-#### Data Sanitization
-- **User Input**: Sanitize before API calls
-- **Response Data**: Validate structure before state updates
-- **File Content**: Limit file sizes and types
 
 ## Environment Variables
 
@@ -678,4 +462,3 @@ wscat -c "wss://yudai.app/daifu/sessions/test/ws?token=test"
 8. **Implement missing WebSocket message handlers** - Incomplete real-time features
 9. **Add comprehensive error boundaries** - Better error recovery
 10. **Implement connection health monitoring** - Proactive issue detection
-
