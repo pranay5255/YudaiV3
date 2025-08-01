@@ -29,7 +29,7 @@ export class AuthService {
     const params = new URLSearchParams({ code });
     if (state) params.append('state', state);
     
-    const response = await fetch(`${AUTH_BASE_URL}/auth/callback?${params}`, {
+    const response = await fetch(`${AUTH_BASE_URL}/auth/callback/data?${params}`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });

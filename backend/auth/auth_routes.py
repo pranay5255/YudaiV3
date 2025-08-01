@@ -57,19 +57,44 @@ async def github_login():
         )
 
 @router.get("/callback")
-async def github_callback(
-    code: str,
-    state: str,
-    db: Session = Depends(get_db)
-):
+async def github_callback(code: str, state: str, db: Session = Depends(get_db)):
     """
-    Handle GitHub OAuth callback
+    Handle GitHub OAuth callback - redirect to frontend with auth status
     """
     try:
         token_data = await exchange_code_for_token(code, state)
         access_token = token_data["access_token"]
         github_user = await get_github_user_info(access_token)
         user = await create_or_update_user(db, github_user, access_token)
+        
+        # Redirect to frontend with success
+        # The frontend will detect the success and handle the authentication
+        redirect_url = f"/?auth=success&code={code}&state={state}"
+        return RedirectResponse(url=redirect_url)
+        
+    except GitHubOAuthError as e:
+        # Redirect to frontend with error
+        error_message = str(e).replace(" ", "+")  # URL encode spaces
+        redirect_url = f"/?auth=error&error={error_message}"
+        return RedirectResponse(url=redirect_url)
+        
+    except Exception as e:
+        # Redirect to frontend with unexpected error
+        error_message = f"Unexpected+error:+{str(e)}"
+        redirect_url = f"/?auth=error&error={error_message}"
+        return RedirectResponse(url=redirect_url)
+
+@router.get("/callback/data")
+async def get_callback_data(code: str, state: str, db: Session = Depends(get_db)):
+    """
+    API endpoint for frontend to fetch authentication data after OAuth callback
+    """
+    try:
+        token_data = await exchange_code_for_token(code, state)
+        access_token = token_data["access_token"]
+        github_user = await get_github_user_info(access_token)
+        user = await create_or_update_user(db, github_user, access_token)
+        
         user_profile = UserProfile(
             id=user.id,
             github_username=user.github_username,
@@ -78,25 +103,25 @@ async def github_callback(
             display_name=user.display_name,
             avatar_url=user.avatar_url,
             created_at=user.created_at.isoformat(),
-            last_login=user.last_login.isoformat() if user.last_login else None
+            last_login=user.last_login.isoformat() if user.last_login else None,
         )
+        
         return AuthResponse(
             success=True,
             message="Authentication successful",
             user=user_profile,
-            access_token=access_token
+            access_token=access_token,
         )
+        
     except GitHubOAuthError as e:
         return AuthResponse(
-            success=False,
-            message="Authentication failed",
-            error=str(e)
+            success=False, message="Authentication failed", error=str(e)
         )
     except Exception as e:
         return AuthResponse(
             success=False,
             message="Authentication failed",
-            error=f"Unexpected error: {str(e)}"
+            error=f"Unexpected error: {str(e)}",
         )
 
 @router.get("/profile", response_model=UserProfile)
