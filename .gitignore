@@ -2,5 +2,26 @@ node_modules
 .venv
 .env
 .env.local
+.env.development
+.env.production
+.env.staging
 ssl/
+*.log
+.DS_Store
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
 

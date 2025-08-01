@@ -42,7 +42,6 @@ export enum WebSocketMessageType {
   SESSION_UPDATE = "session_update",
   MESSAGE = "message",
   CONTEXT_CARD = "context_card",
-  FILE_EMBEDDING = "file_embedding",
   AGENT_STATUS = "agent_status",
   STATISTICS = "statistics",
   HEARTBEAT = "heartbeat",
@@ -84,17 +83,7 @@ export interface UnifiedContextCard {
   created_at: string; // ISO 8601 timestamp
 }
 
-export interface UnifiedFileEmbedding {
-  id: number;
-  session_id: string;
-  file_name: string;
-  file_path: string;
-  file_type: string;
-  content_summary?: string;
-  tokens: number;
-  embedding_vector?: number[];
-  created_at: string; // ISO 8601 timestamp
-}
+
 
 export interface UnifiedAgentStatus {
   type: AgentType;
@@ -125,7 +114,6 @@ export interface UnifiedSessionState {
   repository: UnifiedRepository | null;
   messages: UnifiedMessage[];
   context_cards: UnifiedContextCard[];
-  file_embeddings: UnifiedFileEmbedding[];
   agent_status: UnifiedAgentStatus;
   statistics: UnifiedStatistics;
   last_activity: string; // ISO 8601 timestamp
@@ -152,7 +140,6 @@ export type UnifiedWebSocketData =
   | UnifiedSessionState // For full 'session_update'
   | UnifiedMessage
   | ContextCardUpdateData
-  | UnifiedFileEmbedding
   | UnifiedAgentStatus
   | UnifiedStatistics
   | { error: string }

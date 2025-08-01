@@ -1,0 +1,87 @@
+
+services:
+  # PostgreSQL Database
+  db:
+    build:
+      context: ./backend/db
+      dockerfile: Dockerfile
+    container_name: yudai-db-dev
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-yudai_db}
+      - POSTGRES_USER=${POSTGRES_USER:-yudai_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-yudai_password}
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - yudai-network-dev
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-yudai_user} -d ${POSTGRES_DB:-yudai_db}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: yudai-be-dev
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-yudai_user}:${POSTGRES_PASSWORD:-yudai_password}@db:5432/${POSTGRES_DB:-yudai_db}
+      - DB_ECHO=true
+      - PYTHONPATH=/app
+      - DOCKER_COMPOSE=true
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI:-http://localhost:5173/auth/callback}
+      - SECRET_KEY=${SECRET_KEY:-dev_secret}
+      - JWT_SECRET=${JWT_SECRET:-dev_jwt_secret}
+      - NODE_ENV=development
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+    networks:
+      - yudai-network-dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend Service (Development with nginx)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: yudai-fe-dev
+    restart: unless-stopped
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - yudai-network-dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data_dev:
+    driver: local
+
+networks:
+  yudai-network-dev:
+    driver: bridge 

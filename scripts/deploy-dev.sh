@@ -1,71 +1,35 @@
 #!/bin/bash
 
+# Development deployment script
 set -e
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+echo "🚀 Deploying to Development Environment..."
 
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-# Configuration for development
-COMPOSE_FILE="docker-compose.yml"
-ENV_FILE=".env"
-
-# Check if we're in the right directory
-if [ ! -f "$COMPOSE_FILE" ]; then
-    log_error "Docker Compose file not found: $COMPOSE_FILE"
-    exit 1
-fi
-
-log_info "Starting development deployment..."
-
-# Build and deploy
-log_info "Building and deploying containers..."
-docker compose -f $COMPOSE_FILE down
-docker compose -f $COMPOSE_FILE build --no-cache
-docker compose -f $COMPOSE_FILE up -d
-
-# Wait for services to be ready
-log_info "Waiting for services to be ready..."
-sleep 30
-
-# Health checks
-log_info "Running health checks..."
-
-# Check backend
-if curl -f http://localhost:8000/health > /dev/null 2>&1; then
-    log_success "Backend is healthy"
+# Load development environment variables
+if [ -f .env.development ]; then
+    export $(cat .env.development | grep -v '^#' | xargs)
+    echo "✅ Loaded development environment variables"
 else
-    log_error "Backend health check failed"
-    exit 1
+    echo "⚠️  .env.development not found, using defaults"
 fi
 
-# Check database
-if docker exec yudai-db pg_isready -U yudai_user -d yudai_db > /dev/null 2>&1; then
-    log_success "Database is healthy"
-else
-    log_error "Database health check failed"
-    exit 1
-fi
+# Stop existing containers
+echo "🛑 Stopping existing development containers..."
+docker compose -f docker-compose.dev.yml down --remove-orphans
 
-log_success "Development deployment completed successfully!"
-log_info "Backend API: http://localhost:8000"
-log_info "API Docs: http://localhost:8000/docs" 
+# Build and start development environment
+echo "🔨 Building and starting development environment..."
+docker compose -f docker-compose.dev.yml up --build -d
+
+# Wait for services to be healthy
+echo "⏳ Waiting for services to be healthy..."
+sleep 10
+
+# Check health
+echo "🏥 Checking service health..."
+docker compose -f docker-compose.dev.yml ps
+
+echo "✅ Development deployment complete!"
+echo "🌐 Frontend: http://localhost:5173"
+echo "🔧 Backend: http://localhost:8000"
+echo "📚 API Docs: http://localhost:8000/docs" 

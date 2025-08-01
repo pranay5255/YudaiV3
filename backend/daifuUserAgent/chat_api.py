@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+import json
 import asyncio
 from typing import List, Optional
 
@@ -29,6 +30,7 @@ from unified_state import (
 from sqlalchemy.orm import Session
 
 from .prompt import build_daifu_prompt
+import requests
 
 router = APIRouter()
 
@@ -322,26 +324,53 @@ async def websocket_session_endpoint(
     token: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """WebSocket endpoint for real-time session updates using unified state management."""
-    # Simple token auth: In a real app, use a more robust system (e.g., parsing a JWT)
+    """Enhanced WebSocket endpoint for real-time session updates with proper message handling."""
+    # Enhanced token authentication
     if not token:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Missing authentication token")
         return
         
-    user = get_current_user(token, db)
-    if not user:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    try:
+        user = get_current_user(token, db)
+        if not user:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid authentication token")
+            return
+    except Exception as e:
+        print(f"Authentication error for session {session_id}: {e}")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Authentication failed")
         return
 
     try:
-        await unified_manager.connect(websocket, session_id, db)
-        # The connection manager now handles sending the initial state.
+        # Connect to unified manager with user context
+        await unified_manager.connect(websocket, session_id, db, user_id=user.id)
         
-        # Keep the connection alive and wait for messages or disconnect.
+        # Enhanced message handling loop
         while True:
-            # This loop can be used to receive messages from the client if needed in the future.
-            # For now, it just keeps the connection open.
-            await websocket.receive_text()
+            try:
+                # Receive and parse messages
+                data = await websocket.receive_text()
+                message = json.loads(data)
+                
+                # Handle different message types
+                await handle_websocket_message(websocket, session_id, user.id, message, db)
+                
+            except WebSocketDisconnect:
+                print(f"WebSocket disconnected for session {session_id}")
+                break
+            except json.JSONDecodeError as e:
+                print(f"Invalid JSON from session {session_id}: {e}")
+                await websocket.send_json({
+                    "type": "error",
+                    "data": {"message": "Invalid JSON format"},
+                    "timestamp": time.time()
+                })
+            except Exception as e:
+                print(f"Message handling error for session {session_id}: {e}")
+                await websocket.send_json({
+                    "type": "error",
+                    "data": {"message": "Message processing failed"},
+                    "timestamp": time.time()
+                })
 
     except WebSocketDisconnect:
         print(f"WebSocket disconnected for session {session_id}")
@@ -349,6 +378,197 @@ async def websocket_session_endpoint(
         print(f"WebSocket error for session {session_id}: {e}")
     finally:
         unified_manager.disconnect(websocket, session_id)
+
+
+async def handle_websocket_message(
+    websocket: WebSocket,
+    session_id: str,
+    user_id: int,
+    message: dict,
+    db: Session
+):
+    """Handle incoming WebSocket messages with proper real-time broadcasting."""
+    message_type = message.get("type")
+    message_data = message.get("data", {})
+    
+    try:
+        if message_type == "HEARTBEAT":
+            # Respond to heartbeat
+            await websocket.send_json({
+                "type": "heartbeat",
+                "data": {"timestamp": time.time()},
+                "timestamp": time.time()
+            })
+            
+        elif message_type == "SEND_MESSAGE":
+            # Handle new chat message with real-time broadcasting
+            await handle_new_message_realtime(session_id, user_id, message_data, db)
+            
+        elif message_type == "REQUEST_CONTEXT":
+            # Send session context update
+            from issueChatServices.session_service import SessionService
+            context = SessionService.get_comprehensive_session_context(db, user_id, session_id)
+            if context:
+                await unified_manager.broadcast_to_session(session_id, {
+                    "type": "session_update",
+                    "data": context,
+                    "timestamp": time.time()
+                })
+                
+        elif message_type == "UPDATE_AGENT_STATUS":
+            # Update agent status and broadcast
+            await unified_manager.broadcast_to_session(session_id, {
+                "type": "agent_status",
+                "data": message_data,
+                "timestamp": time.time()
+            })
+            
+        else:
+            print(f"Unknown message type: {message_type}")
+            await websocket.send_json({
+                "type": "error",
+                "data": {"message": f"Unknown message type: {message_type}"},
+                "timestamp": time.time()
+            })
+            
+    except Exception as e:
+        print(f"Error handling WebSocket message {message_type}: {e}")
+        await websocket.send_json({
+            "type": "error",
+            "data": {"message": "Internal server error"},
+            "timestamp": time.time()
+        })
+
+
+async def handle_new_message_realtime(
+    session_id: str,
+    user_id: int,
+    message_data: dict,
+    db: Session
+):
+    """Handle new message with immediate real-time broadcasting."""
+    try:
+        # Create message request object
+        from models import ChatRequest, CreateChatMessageRequest
+        
+        chat_request = ChatRequest(
+            conversation_id=session_id,
+            message=CreateChatMessageRequest(
+                content=message_data.get("content", ""),
+                is_code=message_data.get("is_code", False)
+            )
+        )
+        
+        # Store user message
+        user_message_db = ChatService.create_chat_message_from_request(
+            db, user_id=user_id, session_id=session_id, request=chat_request
+        )
+        user_message_unified = StateConverter.message_to_unified(user_message_db)
+        
+        # Broadcast user message immediately
+        await unified_manager.broadcast_to_session(session_id, {
+            "type": "message",
+            "data": user_message_unified,
+            "timestamp": time.time()
+        })
+        
+        # Process with AI asynchronously
+        asyncio.create_task(process_ai_response_async(session_id, user_id, chat_request, db))
+        
+    except Exception as e:
+        print(f"Error handling new message: {e}")
+        await unified_manager.broadcast_to_session(session_id, {
+            "type": "error",
+            "data": {"message": "Failed to process message"},
+            "timestamp": time.time()
+        })
+
+
+async def process_ai_response_async(
+    session_id: str,
+    user_id: int,
+    request: ChatRequest,
+    db: Session
+):
+    """Process AI response asynchronously and broadcast when ready."""
+    try:
+        # Generate AI response
+        response_content = await generate_daifu_response_async(request, db)
+        
+        # Create AI message
+        ai_message_request = ChatRequest(
+            conversation_id=session_id,
+            message=CreateChatMessageRequest(
+                content=response_content,
+                is_code=False
+            )
+        )
+        
+        # Store AI message
+        ai_message_db = ChatService.create_ai_message_from_request(
+            db, session_id=session_id, request=ai_message_request
+        )
+        ai_message_unified = StateConverter.message_to_unified(ai_message_db)
+        
+        # Broadcast AI response
+        await unified_manager.broadcast_to_session(session_id, {
+            "type": "message",
+            "data": ai_message_unified,
+            "timestamp": time.time()
+        })
+        
+        # Update session statistics
+        updated_stats = SessionService.get_session_statistics(db, session_id)
+        if updated_stats:
+            await unified_manager.broadcast_to_session(session_id, {
+                "type": "statistics",
+                "data": updated_stats,
+                "timestamp": time.time()
+            })
+            
+    except Exception as e:
+        print(f"Error processing AI response: {e}")
+        await unified_manager.broadcast_to_session(session_id, {
+            "type": "error",
+            "data": {"message": "AI processing failed"},
+            "timestamp": time.time()
+        })
+
+
+async def generate_daifu_response_async(request: ChatRequest, db: Session) -> str:
+    """Generate DAifu response asynchronously."""
+    try:
+        # Use existing prompt building logic
+        prompt = build_daifu_prompt(
+            repo_context=GITHUB_CONTEXT,
+            conversation_history=[request.message.content]
+        )
+        
+        # Call OpenRouter API
+        openrouter_response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "openai/gpt-3.5-turbo",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.7,
+                "max_tokens": 1000
+            },
+            timeout=30
+        )
+        
+        if openrouter_response.status_code == 200:
+            data = openrouter_response.json()
+            return data["choices"][0]["message"]["content"]
+        else:
+            return "I apologize, but I'm having trouble processing your request right now. Please try again."
+            
+    except Exception as e:
+        print(f"Error generating DAifu response: {e}")
+        return "I encountered an error while processing your request. Please try again later."
 
 
 

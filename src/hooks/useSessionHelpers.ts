@@ -5,7 +5,6 @@ import { useAuth } from './useAuth';
 import { 
   AgentType,
   UnifiedContextCard,
-  UnifiedFileEmbedding,
 } from '../types/unifiedState';
 
 /**
@@ -38,15 +37,34 @@ export const useSessionHelpers = () => {
   const sendMessage = useCallback(async (content: string, isCode: boolean = false) => {
     if (!sessionState.session_id) throw new Error('No active session');
     
-    // Use the v2 endpoint, which will handle broadcasting via WebSocket
-    await ApiService.sendEnhancedChatMessage({
-      session_id: sessionState.session_id,
-      message: { content, is_code: isCode },
-      context_cards: sessionState.context_cards.map((c: UnifiedContextCard) => c.id),
-      file_context: sessionState.file_embeddings.map((f: UnifiedFileEmbedding) => f.id.toString())
-    });
-
-  }, [sessionState.session_id, sessionState.context_cards, sessionState.file_embeddings]);
+    // Get real-time capabilities from session context
+    const session = useSession();
+    
+    // First, send optimistic update for immediate UI feedback
+    session.sendOptimisticUpdate('SEND_MESSAGE', { content, is_code: isCode });
+    
+    try {
+      // Send through real-time WebSocket for immediate broadcasting
+      session.sendRealtimeMessage({
+        type: 'SEND_MESSAGE',
+        data: {
+          session_id: sessionState.session_id,
+          content,
+          is_code: isCode,
+          context_cards: sessionState.context_cards.map((c: UnifiedContextCard) => c.id)
+        }
+      });
+    } catch (error) {
+      console.error('Failed to send real-time message:', error);
+      
+      // Fallback to HTTP API if WebSocket fails
+      await ApiService.sendEnhancedChatMessage({
+        session_id: sessionState.session_id,
+        message: { content, is_code: isCode },
+        context_cards: sessionState.context_cards.map((c: UnifiedContextCard) => c.id)
+      });
+    }
+  }, [sessionState.session_id, sessionState.context_cards]);
 
   const addContextCard = useCallback(async (card: Omit<UnifiedContextCard, 'id' | 'session_id' | 'created_at'>) => {
     if (!sessionState.session_id) throw new Error('No active session');
@@ -61,17 +79,7 @@ export const useSessionHelpers = () => {
       console.log('removeContextCard (local simulation):', cardId);
   }, [sessionState.session_id]);
 
-  const addFileContext = useCallback(async (file: UnifiedFileEmbedding) => {
-    if (!sessionState.session_id) throw new Error('No active session');
-    // In a real implementation, this would call an API endpoint
-    console.log('addFileContext (local simulation):', file);
-  }, [sessionState.session_id]);
 
-  const removeFileContext = useCallback(async (fileId: number) => {
-      if (!sessionState.session_id) throw new Error('No active session');
-      // In a real implementation, this would call an API endpoint
-      console.log('removeFileContext (local simulation):', fileId);
-  }, [sessionState.session_id]);
 
   const startAgent = useCallback(async (agentType: AgentType) => {
       if (!sessionState.session_id) throw new Error('No active session');
@@ -87,8 +95,6 @@ export const useSessionHelpers = () => {
     sendMessage,
     addContextCard,
     removeContextCard,
-    addFileContext,
-    removeFileContext,
     startAgent,
   };
 };

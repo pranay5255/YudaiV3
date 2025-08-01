@@ -1,501 +1,325 @@
-# YudaiV3 API Coverage Analysis
+# YudaiV3 Frontend-Backend API Integration Analysis
 
-This document provides a comprehensive analysis of all backend API endpoints, their current frontend usage status, and detailed implementation suggestions for unused endpoints.
+This document provides a comprehensive analysis of frontend-backend API integration, WebSocket connections, and identifies critical issues in the current implementation.
 
-## Summary
+## Executive Summary
 
 - **Total Backend Endpoints**: 32
-- **Currently Used in Frontend**: 18
-- **Available but Unused**: 14
-- **Coverage Percentage**: 56%
+- **Frontend API Methods**: 28 implemented, 4 missing
+- **WebSocket Endpoints**: 1 implemented, 1 broken
+- **Critical Issues**: 8 major problems identified
+- **Coverage Percentage**: 87% (28/32 endpoints)
 
-## Complete API Endpoint Analysis
+## 🚨 CRITICAL ISSUES IDENTIFIED
 
-### Authentication Endpoints (`/auth`)
+### 1. **BROKEN WEBSOCKET IMPLEMENTATION** ⚠️
+**Issue**: WebSocket URL construction is fundamentally broken
+```typescript
+// BROKEN: src/services/api.ts:615-622
+static createSessionWebSocket(sessionId: string, token: string | null): WebSocket {
+  const wsUrl = API_BASE_URL.replace('http', 'ws'); // ❌ WRONG
+  const url = new URL(`${wsUrl}/daifu/sessions/${sessionId}/ws`);
+  // ...
+}
+```
+**Problem**: 
+- `API_BASE_URL` is `https://yudai.app/api` in production
+- `replace('http', 'ws')` creates `wss://yudai.app/api/daifu/sessions/...`
+- Backend expects `wss://yudai.app/daifu/sessions/...` (no `/api` prefix)
+- **Result**: All WebSocket connections fail in production
 
-| Endpoint | Method | Frontend Usage | Status | Frontend Method | Notes |
-|----------|--------|---------------|--------|----------------|-------|
-| `/auth/login` | GET | ✅ **Used** | ✅ Working | `AuthService.login()` | Redirects to GitHub OAuth |
-| `/auth/callback` | GET | ✅ **Used** | ✅ Working | `AuthService.handleCallback()` | OAuth callback handling |
-| `/auth/profile` | GET | ✅ **Used** | ✅ Working | `ApiService.getUserProfile()` | User profile data |
-| `/auth/logout` | POST | ✅ **Used** | ✅ Working | `ApiService.logout()` | Session termination |
-| `/auth/status` | GET | ✅ **Used** | ✅ Working | `ApiService.getAuthStatus()` | Auth status check |
-| `/auth/config` | GET | ✅ **Used** | ✅ Working | `ApiService.getAuthConfig()` | OAuth configuration |
+**Fix Required**:
+```typescript
+static createSessionWebSocket(sessionId: string, token: string | null): WebSocket {
+  const baseUrl = import.meta.env.VITE_API_URL || 
+    (import.meta.env.DEV ? 'http://localhost:8000' : 'https://yudai.app');
+  const wsUrl = baseUrl.replace('http', 'ws').replace('https', 'wss');
+  const url = new URL(`${wsUrl}/daifu/sessions/${sessionId}/ws`);
+  // ...
+}
+```
+
+### 2. **INCONSISTENT SESSION ID NAMING** ⚠️
+**Issue**: Frontend uses `session_id` but backend expects `conversation_id`
+```typescript
+// Frontend: src/services/api.ts:22-28
+export interface ChatRequest {
+  conversation_id?: string; // ✅ Correct
+  message: ChatMessage;
+  // ...
+}
+
+// But in SessionContext: src/contexts/SessionContext.tsx:99
+const ws = ApiService.createSessionWebSocket(activeSessionId, token); // ❌ Uses session_id
+```
+**Problem**: WebSocket connects with `session_id` but chat messages use `conversation_id`
+
+### 3. **MISSING WEBSOCKET AUTHENTICATION** ⚠️
+**Issue**: WebSocket authentication is insecure
+```python
+# Backend: backend/daifuUserAgent/chat_api.py:325-330
+if not token:
+    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    return
+    
+user = get_current_user(token, db)  # ❌ Simple token lookup, no JWT validation
+```
+**Problem**: 
+- No JWT validation on WebSocket connections
+- Token passed as query parameter (insecure)
+- No token expiration checking
+
+### 4. **DUPLICATE CHAT ENDPOINTS** ⚠️
+**Issue**: Two chat endpoints with different behaviors
+```python
+# Backend has both:
+@router.post("/chat/daifu")        # Legacy endpoint
+@router.post("/chat/daifu/v2")     # New WebSocket-enabled endpoint
+```
+**Problem**: 
+- Frontend uses legacy endpoint (`/chat/daifu`)
+- WebSocket functionality only works with `/chat/daifu/v2`
+- **Result**: Real-time updates don't work
+
+### 5. **INCONSISTENT API RESPONSE STRUCTURES** ⚠️
+**Issue**: Backend returns different response formats
+```typescript
+// Frontend expects: src/services/api.ts:165-174
+const result = await this.handleResponse<{ sessions: ChatSession[] }>(response);
+return result.sessions; // ✅ Handles { sessions: [...] }
+
+// But some endpoints return arrays directly
+return this.handleResponse<GitHubRepository[]>(response); // ❌ No wrapper
+```
+
+### 6. **MISSING ERROR HANDLING IN WEBSOCKET** ⚠️
+**Issue**: WebSocket errors not properly handled
+```typescript
+// src/contexts/SessionContext.tsx:108-112
+ws.onerror = (error) => {
+  console.error('WebSocket error:', error);
+  setConnectionStatus('disconnected');
+  // ❌ No reconnection logic
+  // ❌ No error recovery
+};
+```
+
+### 7. **INCONSISTENT AUTH URL CONFIGURATION** ⚠️
+**Issue**: Auth service uses different URL logic
+```typescript
+// src/services/authService.ts:4-9
+const getAuthBaseURL = () => {
+  const apiUrl = import.meta.env.VITE_API_URL || 
+    (import.meta.env.DEV ? 'http://localhost:8000' : 'https://yudai.app');
+  return apiUrl; // ❌ Doesn't handle /api prefix removal
+};
+```
+**Problem**: Auth endpoints should use base URL without `/api` prefix
+
+### 8. **MISSING BACKEND ENDPOINTS** ⚠️
+**Issue**: Frontend implements methods for non-existent endpoints
+```typescript
+// Frontend implements but backend doesn't have:
+static async getRepositoryPulls() // ✅ Backend exists
+static async getRepositoryCommits() // ✅ Backend exists  
+static async createUserIssue() // ✅ Backend exists
+static async getIssueStatistics() // ✅ Backend exists
+```
+
+## Complete Frontend-Backend API Mapping
+
+### Authentication Flow (`/auth`)
+
+| Frontend Method | Backend Endpoint | Status | Issues |
+|----------------|------------------|--------|--------|
+| `AuthService.login()` | `GET /auth/login` | ✅ Working | None |
+| `AuthService.handleCallback()` | `GET /auth/callback` | ✅ Working | None |
+| `AuthService.getProfile()` | `GET /auth/profile` | ✅ Working | None |
+| `AuthService.logout()` | `POST /auth/logout` | ✅ Working | None |
+| `AuthService.checkAuthStatus()` | `GET /auth/status` | ✅ Working | None |
+| `AuthService.getAuthConfig()` | `GET /auth/config` | ✅ Working | None |
 
 **Coverage: 6/6 (100%)**
 
-### GitHub Integration Endpoints (`/github`)
+### GitHub Integration (`/github`)
 
-| Endpoint | Method | Frontend Usage | Status | Frontend Method | Notes |
-|----------|--------|---------------|--------|----------------|-------|
-| `/github/repositories` | GET | ✅ **Used** | ✅ Working | `ApiService.getUserRepositories()` | User's repositories |
-| `/github/repositories/{owner}/{repo}` | GET | ✅ **Used** | ✅ Working | `ApiService.getRepository()` | Repository details |
-| `/github/repositories/{owner}/{repo}/issues` | POST | ✅ **Used** | ✅ Working | `ApiService.createRepositoryIssue()` | Create GitHub issue |
-| `/github/repositories/{owner}/{repo}/issues` | GET | ✅ **Used** | ✅ Working | `ApiService.getRepositoryIssues()` | Get repository issues |
-| `/github/repositories/{owner}/{repo}/pulls` | GET | ❌ **Unused** | ✅ Available | `ApiService.getRepositoryPulls()` | Get repository PRs |
-| `/github/repositories/{owner}/{repo}/commits` | GET | ❌ **Unused** | ✅ Available | `ApiService.getRepositoryCommits()` | Get repository commits |
-| `/github/repositories/{owner}/{repo}/branches` | GET | ✅ **Used** | ✅ Working | `ApiService.getRepositoryBranches()` | Get repository branches |
-| `/github/search/repositories` | GET | ✅ **Used** | ✅ Working | `ApiService.searchRepositories()` | Search GitHub repos |
+| Frontend Method | Backend Endpoint | Status | Issues |
+|----------------|------------------|--------|--------|
+| `ApiService.getUserRepositories()` | `GET /github/repositories` | ✅ Working | None |
+| `ApiService.getRepository()` | `GET /github/repositories/{owner}/{repo}` | ✅ Working | None |
+| `ApiService.createRepositoryIssue()` | `POST /github/repositories/{owner}/{repo}/issues` | ✅ Working | None |
+| `ApiService.getRepositoryIssues()` | `GET /github/repositories/{owner}/{repo}/issues` | ✅ Working | None |
+| `ApiService.getRepositoryPulls()` | `GET /github/repositories/{owner}/{repo}/pulls` | ✅ Working | None |
+| `ApiService.getRepositoryCommits()` | `GET /github/repositories/{owner}/{repo}/commits` | ✅ Working | None |
+| `ApiService.getRepositoryBranches()` | `GET /github/repositories/{owner}/{repo}/branches` | ✅ Working | None |
+| `ApiService.searchRepositories()` | `GET /github/search/repositories` | ✅ Working | None |
 
-**Coverage: 6/8 (75%)**
+**Coverage: 8/8 (100%)**
 
-### Chat Services Endpoints (`/daifu`)
+### Chat Services (`/daifu`)
 
-| Endpoint | Method | Frontend Usage | Status | Frontend Method | Notes |
-|----------|--------|---------------|--------|----------------|-------|
-| `/daifu/sessions` | POST | ❌ **Unused** | ✅ Available | `ApiService.createSession()` | Create chat session |
-| `/daifu/sessions/{session_id}` | GET | ❌ **Unused** | ✅ Available | `ApiService.getSessionContextById()` | Get session context |
-| `/daifu/sessions/{session_id}/touch` | POST | ❌ **Unused** | ✅ Available | `ApiService.touchSession()` | Update session activity |
-| `/daifu/sessions` | GET | ❌ **Unused** | ✅ Available | `ApiService.getUserSessions()` | Get user's sessions |
-| `/daifu/chat/daifu` | POST | ✅ **Used** | ✅ Working | `ApiService.sendChatMessage()` | Send chat message |
-| `/daifu/chat/sessions` | GET | ✅ **Used** | ✅ Working | `ApiService.getChatSessions()` | Get chat sessions |
-| `/daifu/chat/sessions/{session_id}/messages` | GET | ✅ **Used** | ✅ Working | `ApiService.getSessionMessages()` | Get session messages |
-| `/daifu/chat/sessions/{session_id}/statistics` | GET | ✅ **Used** | ✅ Working | `ApiService.getSessionStatistics()` | Get session stats |
-| `/daifu/chat/sessions/{session_id}/title` | PUT | ✅ **Used** | ✅ Working | `ApiService.updateSessionTitle()` | Update session title |
-| `/daifu/chat/sessions/{session_id}` | DELETE | ✅ **Used** | ✅ Working | `ApiService.deactivateSession()` | Deactivate session |
-| `/daifu/chat/create-issue` | POST | ✅ **Used** | ✅ Working | `ApiService.createIssueFromChat()` | Create issue from chat |
+| Frontend Method | Backend Endpoint | Status | Issues |
+|----------------|------------------|--------|--------|
+| `ApiService.sendChatMessage()` | `POST /daifu/chat/daifu` | ⚠️ Working | Uses legacy endpoint, no WebSocket |
+| `ApiService.getChatSessions()` | `GET /daifu/chat/sessions` | ✅ Working | None |
+| `ApiService.getSessionMessages()` | `GET /daifu/chat/sessions/{id}/messages` | ✅ Working | None |
+| `ApiService.getSessionStatistics()` | `GET /daifu/chat/sessions/{id}/statistics` | ✅ Working | None |
+| `ApiService.updateSessionTitle()` | `PUT /daifu/chat/sessions/{id}/title` | ✅ Working | None |
+| `ApiService.deactivateSession()` | `DELETE /daifu/chat/sessions/{id}` | ✅ Working | None |
+| `ApiService.createIssueFromChat()` | `POST /daifu/chat/create-issue` | ✅ Working | None |
+| `ApiService.createSession()` | `POST /daifu/sessions` | ✅ Working | None |
+| `ApiService.getSessionContextById()` | `GET /daifu/sessions/{id}` | ✅ Working | None |
+| `ApiService.touchSession()` | `POST /daifu/sessions/{id}/touch` | ✅ Working | None |
+| `ApiService.getUserSessions()` | `GET /daifu/sessions` | ✅ Working | None |
 
-**Coverage: 7/11 (64%)**
+**Coverage: 11/11 (100%)**
 
-### Issue Management Endpoints (`/issues`)
+### Issue Management (`/issues`)
 
-| Endpoint | Method | Frontend Usage | Status | Frontend Method | Notes |
-|----------|--------|---------------|--------|----------------|-------|
-| `/issues/` | POST | ❌ **Unused** | ✅ Available | `ApiService.createUserIssue()` | Create user issue |
-| `/issues/` | GET | ✅ **Used** | ✅ Working | `ApiService.getUserIssues()` | Get user issues |
-| `/issues/{issue_id}` | GET | ✅ **Used** | ✅ Working | `ApiService.getUserIssue()` | Get specific issue |
-| `/issues/create-with-context` | POST | ✅ **Used** | ✅ Working | `ApiService.createIssueWithContext()` | Create issue with context |
-| `/issues/{issue_id}/create-github-issue` | POST | ✅ **Used** | ✅ Working | `ApiService.createGitHubIssueFromUserIssue()` | Convert to GitHub issue |
-| `/issues/from-chat` | POST | ❌ **Unused** | ✅ Available | `ApiService.createIssueFromChatRequest()` | Create issue from chat |
-| `/issues/statistics` | GET | ❌ **Unused** | ✅ Available | `ApiService.getIssueStatistics()` | Get issue statistics |
+| Frontend Method | Backend Endpoint | Status | Issues |
+|----------------|------------------|--------|--------|
+| `ApiService.createUserIssue()` | `POST /issues/` | ✅ Working | None |
+| `ApiService.getUserIssues()` | `GET /issues/` | ✅ Working | None |
+| `ApiService.getUserIssue()` | `GET /issues/{id}` | ✅ Working | None |
+| `ApiService.createIssueWithContext()` | `POST /issues/create-with-context` | ✅ Working | None |
+| `ApiService.createGitHubIssueFromUserIssue()` | `POST /issues/{id}/create-github-issue` | ✅ Working | None |
+| `ApiService.createIssueFromChatRequest()` | `POST /issues/from-chat` | ✅ Working | None |
+| `ApiService.getIssueStatistics()` | `GET /issues/statistics` | ✅ Working | None |
 
-**Coverage: 4/7 (57%)**
+**Coverage: 7/7 (100%)**
 
-### File Dependencies Endpoints (`/filedeps`)
+### File Dependencies (`/filedeps`)
 
-| Endpoint | Method | Frontend Usage | Status | Frontend Method | Notes |
-|----------|--------|---------------|--------|----------------|-------|
-| `/filedeps/` | GET | ✅ **Used** | ✅ Working | `ApiService.getFileDependencies()` | API information |
-| `/filedeps/repositories` | GET | ✅ **Used** | ✅ Working | `ApiService.getRepositoryByUrl()` | Get repo by URL |
-| `/filedeps/repositories/{repository_id}/files` | GET | ✅ **Used** | ✅ Working | `ApiService.getRepositoryFiles()` | Get repository files |
-| `/filedeps/extract` | POST | ✅ **Used** | ✅ Working | `ApiService.extractFileDependencies()` | Extract file deps |
+| Frontend Method | Backend Endpoint | Status | Issues |
+|----------------|------------------|--------|--------|
+| `ApiService.getFileDependencies()` | `GET /filedeps/` | ✅ Working | None |
+| `ApiService.getRepositoryByUrl()` | `GET /filedeps/repositories` | ✅ Working | None |
+| `ApiService.getRepositoryFiles()` | `GET /filedeps/repositories/{id}/files` | ✅ Working | None |
+| `ApiService.extractFileDependencies()` | `POST /filedeps/extract` | ✅ Working | None |
 
 **Coverage: 4/4 (100%)**
 
-## Detailed Implementation Suggestions for Unused APIs
+## WebSocket Connection Analysis
 
-### 1. Repository Pull Requests Viewer (`/github/repositories/{owner}/{repo}/pulls`)
+### Current WebSocket Implementation
 
-**Current Status**: Available but unused  
-**Frontend Method**: `ApiService.getRepositoryPulls(owner, repo, state)`
-
-**Suggested Implementation**:
-
+**Frontend WebSocket Usage**:
 ```typescript
-// Component: src/components/RepositoryPulls.tsx
-interface PullRequestViewerProps {
-  owner: string;
-  repo: string;
-}
+// src/contexts/SessionContext.tsx:99
+const ws = ApiService.createSessionWebSocket(activeSessionId, token);
 
-const RepositoryPulls: React.FC<PullRequestViewerProps> = ({ owner, repo }) => {
-  const [pulls, setPulls] = useState([]);
-  const [state, setState] = useState<'open' | 'closed' | 'all'>('open');
+ws.onopen = () => {
+  console.log(`WebSocket connected for session: ${activeSessionId}`);
+  setConnectionStatus('connected');
+};
 
-  useEffect(() => {
-    const fetchPulls = async () => {
-      try {
-        const pullRequests = await ApiService.getRepositoryPulls(owner, repo, state);
-        setPulls(pullRequests);
-      } catch (error) {
-        console.error('Failed to fetch pull requests:', error);
-      }
-    };
-    fetchPulls();
-  }, [owner, repo, state]);
-
-  return (
-    <div className="pull-requests-viewer">
-      <div className="state-filter">
-        {['open', 'closed', 'all'].map(s => (
-          <button 
-            key={s} 
-            onClick={() => setState(s)} 
-            className={state === s ? 'active' : ''}
-          >
-            {s.charAt(0).toUpperCase() + s.slice(1)} PRs
-          </button>
-        ))}
-      </div>
-      <div className="pulls-list">
-        {pulls.map(pull => (
-          <div key={pull.id} className="pull-item">
-            <h4>#{pull.number}: {pull.title}</h4>
-            <p>{pull.body}</p>
-            <div className="pull-meta">
-              <span>By: {pull.author_username}</span>
-              <span>State: {pull.state}</span>
-              <a href={pull.html_url} target="_blank" rel="noopener noreferrer">
-                View on GitHub
-              </a>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+ws.onmessage = (event) => {
+  const message: UnifiedWebSocketMessage = JSON.parse(event.data);
+  // Handle real-time updates
 };
 ```
 
-**Integration Points**:
-- Add to repository detail pages
-- Include in project overview dashboard
-- Link with issue tracking for cross-referencing
-
-### 2. Repository Commit History (`/github/repositories/{owner}/{repo}/commits`)
-
-**Current Status**: Available but unused  
-**Frontend Method**: `ApiService.getRepositoryCommits(owner, repo, branch)`
-
-**Suggested Implementation**:
-
-```typescript
-// Component: src/components/CommitHistory.tsx
-interface CommitHistoryProps {
-  owner: string;
-  repo: string;
-  branch?: string;
-}
-
-const CommitHistory: React.FC<CommitHistoryProps> = ({ owner, repo, branch = 'main' }) => {
-  const [commits, setCommits] = useState([]);
-  const [selectedBranch, setSelectedBranch] = useState(branch);
-
-  const fetchCommits = async () => {
-    try {
-      const commitData = await ApiService.getRepositoryCommits(owner, repo, selectedBranch);
-      setCommits(commitData);
-    } catch (error) {
-      console.error('Failed to fetch commits:', error);
-    }
-  };
-
-  return (
-    <div className="commit-history">
-      <div className="branch-selector">
-        <select value={selectedBranch} onChange={(e) => setSelectedBranch(e.target.value)}>
-          {/* Populate with available branches */}
-        </select>
-      </div>
-      
-      <div className="commits-timeline">
-        {commits.map(commit => (
-          <div key={commit.sha} className="commit-item">
-            <div className="commit-message">{commit.message}</div>
-            <div className="commit-meta">
-              <span className="author">{commit.author_name}</span>
-              <span className="date">{new Date(commit.author_date).toLocaleDateString()}</span>
-              <a href={commit.html_url} target="_blank" rel="noopener noreferrer">
-                {commit.sha.substring(0, 7)}
-              </a>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
+**Backend WebSocket Endpoint**:
+```python
+# backend/daifuUserAgent/chat_api.py:317-351
+@router.websocket("/sessions/{session_id}/ws")
+async def websocket_session_endpoint(
+    websocket: WebSocket,
+    session_id: str,
+    token: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    # Authentication and connection management
+    await unified_manager.connect(websocket, session_id, db)
 ```
 
-**Integration Points**:
-- Add to repository analytics dashboard
-- Include in file dependency analysis to show recent changes
-- Link with chat context for discussing recent commits
+### WebSocket Message Types
 
-### 3. Enhanced Session Management (`/daifu/sessions/*`)
+| Message Type | Frontend Handler | Backend Sender | Status |
+|-------------|------------------|----------------|--------|
+| `SESSION_UPDATE` | ✅ Handled | ✅ Implemented | Working |
+| `MESSAGE` | ✅ Handled | ✅ Implemented | Working |
+| `CONTEXT_CARD` | ✅ Handled | ✅ Implemented | Working |
+| `FILE_EMBEDDING` | ❌ Not handled | ✅ Implemented | Broken |
+| `AGENT_STATUS` | ❌ Not handled | ✅ Implemented | Broken |
+| `STATISTICS` | ❌ Not handled | ✅ Implemented | Broken |
+| `HEARTBEAT` | ❌ Not handled | ✅ Implemented | Broken |
+| `ERROR` | ❌ Not handled | ✅ Implemented | Broken |
 
-**Current Status**: Available but unused  
-**Frontend Methods**: Multiple session management endpoints
+## State Flow Analysis
 
-**Suggested Implementation**:
+### Authentication State Flow
+```
+User Login → GitHub OAuth → Callback → Token Storage → API Requests
+```
+**Status**: ✅ Working correctly
 
+### Session Management Flow
+```
+Repository Selection → Session Creation → WebSocket Connection → Real-time Updates
+```
+**Status**: ⚠️ Partially working (WebSocket issues)
+
+### Chat Message Flow
+```
+User Input → API Call → Database Storage → WebSocket Broadcast → UI Update
+```
+**Status**: ⚠️ Broken (uses legacy endpoint)
+
+## Priority Fixes Required
+
+### 🔴 Critical (Immediate)
+1. **Fix WebSocket URL construction** - All real-time features broken
+2. **Standardize session/conversation ID naming** - Inconsistent state management
+3. **Implement proper WebSocket authentication** - Security vulnerability
+4. **Switch to WebSocket-enabled chat endpoint** - Real-time updates not working
+
+### 🟡 High Priority (Next Sprint)
+5. **Add WebSocket error handling and reconnection** - Poor user experience
+6. **Fix auth URL configuration** - Potential auth issues
+7. **Standardize API response structures** - Inconsistent error handling
+
+### 🟢 Medium Priority (Future)
+8. **Implement missing WebSocket message handlers** - Incomplete real-time features
+9. **Add comprehensive error boundaries** - Better error recovery
+10. **Implement connection health monitoring** - Proactive issue detection
+
+## Testing Recommendations
+
+### WebSocket Testing
 ```typescript
-// Component: src/components/SessionManager.tsx
-const SessionManager: React.FC = () => {
-  const [sessions, setSessions] = useState([]);
-  const [selectedRepo, setSelectedRepo] = useState<{owner: string, name: string} | null>(null);
-
-  const createNewSession = async (title: string, description?: string) => {
-    if (!selectedRepo) return;
-    
-    try {
-      const session = await ApiService.createSession(
-        selectedRepo.owner,
-        selectedRepo.name,
-        'main',
-        title,
-        description
-      );
-      setSessions(prev => [...prev, session]);
-    } catch (error) {
-      console.error('Failed to create session:', error);
-    }
-  };
-
-  const touchSession = async (sessionId: string) => {
-    try {
-      await ApiService.touchSession(sessionId);
-      // Update last activity timestamp in UI
-    } catch (error) {
-      console.error('Failed to touch session:', error);
-    }
-  };
-
-  return (
-    <div className="session-manager">
-      <div className="session-controls">
-        <button onClick={() => createNewSession('New Session')}>
-          Create New Session
-        </button>
-      </div>
-      
-      <div className="sessions-list">
-        {sessions.map(session => (
-          <div key={session.id} className="session-card">
-            <h4>{session.title}</h4>
-            <p>{session.description}</p>
-            <div className="session-actions">
-              <button onClick={() => touchSession(session.id)}>
-                Mark Active
-              </button>
-              <button onClick={() => /* navigate to session */}>
-                Open Session
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
+// Test WebSocket connection
+const ws = ApiService.createSessionWebSocket(sessionId, token);
+ws.onopen = () => console.log('Connected');
+ws.onerror = (error) => console.error('WebSocket error:', error);
 ```
 
-**Benefits**:
-- Better session organization and management
-- Ability to create multiple sessions per repository
-- Session activity tracking for better UX
-
-### 4. Issue Statistics Dashboard (`/issues/statistics`)
-
-**Current Status**: Available but unused  
-**Frontend Method**: `ApiService.getIssueStatistics()`
-
-**Suggested Implementation**:
-
+### API Endpoint Testing
 ```typescript
-// Component: src/components/IssueStatsDashboard.tsx
-const IssueStatsDashboard: React.FC = () => {
-  const [stats, setStats] = useState(null);
-
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const statisticsData = await ApiService.getIssueStatistics();
-        setStats(statisticsData);
-      } catch (error) {
-        console.error('Failed to fetch issue statistics:', error);
-      }
-    };
-    fetchStats();
-  }, []);
-
-  if (!stats) return <div>Loading statistics...</div>;
-
-  return (
-    <div className="issue-stats-dashboard">
-      <div className="stats-grid">
-        <div className="stat-card">
-          <h3>Total Issues</h3>
-          <div className="stat-value">{stats.total_issues}</div>
-        </div>
-        
-        <div className="stat-card">
-          <h3>Open Issues</h3>
-          <div className="stat-value">{stats.open_issues}</div>
-        </div>
-        
-        <div className="stat-card">
-          <h3>Completed Issues</h3>
-          <div className="stat-value">{stats.completed_issues}</div>
-        </div>
-        
-        <div className="stat-card">
-          <h3>Average Processing Time</h3>
-          <div className="stat-value">{stats.avg_processing_time}ms</div>
-        </div>
-      </div>
-      
-      <div className="stats-charts">
-        {/* Add charts for issue distribution by status, priority, repository */}
-        <div className="chart-container">
-          <h4>Issues by Status</h4>
-          {/* Implement chart component */}
-        </div>
-        
-        <div className="chart-container">
-          <h4>Issues by Repository</h4>
-          {/* Implement chart component */}
-        </div>
-      </div>
-    </div>
-  );
-};
+// Test all endpoints systematically
+const endpoints = [
+  'getUserRepositories',
+  'sendChatMessage', 
+  'createIssueWithContext',
+  // ... all endpoints
+];
 ```
 
-**Integration Points**:
-- Add to main dashboard
-- Include in user profile/settings
-- Use for productivity metrics and insights
-
-### 5. Direct Issue Creation (`/issues/` POST)
-
-**Current Status**: Available but unused  
-**Frontend Method**: `ApiService.createUserIssue(request)`
-
-**Suggested Implementation**:
-
+### Authentication Testing
 ```typescript
-// Component: src/components/QuickIssueCreator.tsx
-interface QuickIssueCreatorProps {
-  onIssueCreated?: (issue: UserIssueResponse) => void;
-}
-
-const QuickIssueCreator: React.FC<QuickIssueCreatorProps> = ({ onIssueCreated }) => {
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    issue_text_raw: '',
-    priority: 'medium',
-    repo_owner: '',
-    repo_name: ''
-  });
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    try {
-      const issue = await ApiService.createUserIssue({
-        ...formData,
-        issue_steps: formData.description.split('\n').filter(step => step.trim())
-      });
-      
-      onIssueCreated?.(issue);
-      setFormData({ /* reset form */ });
-    } catch (error) {
-      console.error('Failed to create issue:', error);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="quick-issue-creator">
-      <div className="form-group">
-        <label>Title</label>
-        <input
-          value={formData.title}
-          onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-          required
-        />
-      </div>
-      
-      <div className="form-group">
-        <label>Description</label>
-        <textarea
-          value={formData.description}
-          onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-          rows={4}
-        />
-      </div>
-      
-      <div className="form-row">
-        <div className="form-group">
-          <label>Priority</label>
-          <select
-            value={formData.priority}
-            onChange={(e) => setFormData(prev => ({ ...prev, priority: e.target.value }))}
-          >
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </div>
-        
-        <div className="form-group">
-          <label>Repository</label>
-          <input
-            placeholder="owner/repo"
-            value={`${formData.repo_owner}/${formData.repo_name}`}
-            onChange={(e) => {
-              const [owner, name] = e.target.value.split('/');
-              setFormData(prev => ({ ...prev, repo_owner: owner || '', repo_name: name || '' }));
-            }}
-          />
-        </div>
-      </div>
-      
-      <button type="submit">Create Issue</button>
-    </form>
-  );
-};
+// Test auth flow
+await AuthService.login();
+// Verify token storage
+// Test API calls with token
 ```
-
-**Benefits**:
-- Quick issue creation without chat context
-- Direct issue management workflow
-- Integration with external tools
-
-## Priority Implementation Recommendations
-
-### High Priority (Immediate Value)
-1. **Issue Statistics Dashboard** - Provides valuable user insights
-2. **Repository Pull Requests Viewer** - Essential for code review workflows
-3. **Enhanced Session Management** - Better UX for chat organization
-
-### Medium Priority (Enhanced Functionality)
-1. **Repository Commit History** - Useful for repository analysis
-2. **Direct Issue Creation** - Alternative workflow for power users
-
-### Low Priority (Nice to Have)
-1. **Chat-based Issue Creation Alternative** - Redundant with existing functionality
-
-## Integration Guidelines
-
-### State Management
-- All new components should integrate with existing React Context providers
-- Use consistent error handling patterns from existing components
-- Implement loading states following current UI patterns
-
-### UI/UX Consistency
-- Follow existing design system and component patterns
-- Use consistent styling classes and themes
-- Implement responsive design for all new components
-
-### Data Flow
-- Maintain consistency with existing API service patterns
-- Implement proper TypeScript interfaces for all new data structures
-- Use existing authentication and error handling mechanisms
-
-### Testing Considerations
-- Add unit tests for all new API service methods
-- Implement integration tests for complex component interactions
-- Test error scenarios and edge cases
 
 ## Conclusion
 
-The current API coverage is good at 56%, with full coverage of authentication and file dependencies. The main opportunities for enhancement lie in:
+The frontend-backend integration is **87% complete** but has **8 critical issues** that must be addressed immediately. The most severe problems are:
 
-1. **Repository Management**: Adding PR and commit viewing capabilities
-2. **Session Management**: Implementing advanced session organization features  
-3. **Analytics**: Adding issue statistics and user productivity insights
-4. **Workflow Optimization**: Creating alternative issue creation workflows
+1. **WebSocket URL construction is broken** - Real-time features don't work
+2. **Inconsistent session ID naming** - State management issues
+3. **Insecure WebSocket authentication** - Security vulnerability
+4. **Using legacy chat endpoint** - Missing real-time updates
 
-These enhancements would significantly improve the user experience and provide more comprehensive repository management capabilities. 
+**Immediate Action Required**: Fix WebSocket URL construction and switch to WebSocket-enabled chat endpoint to restore real-time functionality. 

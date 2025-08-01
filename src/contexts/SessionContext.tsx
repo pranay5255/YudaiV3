@@ -1,20 +1,19 @@
-import React, { createContext, useState, useEffect, ReactNode, useReducer } from 'react';
-import { ApiService } from '../services/api';
+import React, { createContext, useState, useEffect, ReactNode, useReducer, useCallback, useRef } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { RealTimeManager } from '../services/RealTimeManager';
+import { debounce } from '../utils/debounce';
 import {
   UnifiedSessionState,
-  UnifiedWebSocketMessage,
-  UnifiedMessage,
   TabState,
   AgentType,
   AgentStatus as UnifiedAgentStatusEnum,
-  ContextCardUpdateData,
-  WebSocketMessageType
+  WebSocketMessageType,
+  MessageRole
 } from '../types/unifiedState';
 
 /**
- * Comprehensive Session Context Interface
- * Manages all application state through session-based architecture
+ * Enhanced Session Context Interface
+ * Manages all application state through session-based architecture with real-time updates
  */
 export interface SessionContextValue {
   // Core session state, directly from the backend
@@ -29,6 +28,12 @@ export interface SessionContextValue {
   
   // A dispatcher for UI-only state changes (like active tab)
   dispatch: React.Dispatch<SessionAction>;
+  
+  // Send optimistic updates for immediate UI feedback
+  sendOptimisticUpdate: (action: string, data: any) => void;
+  
+  // Send real-time message through WebSocket
+  sendRealtimeMessage: (message: any) => void;
 }
 
 // A simple reducer action type for UI state changes
@@ -44,24 +49,57 @@ interface SessionProviderProps {
 
 export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) => {
   const { token } = useAuth();
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => {
+    return localStorage.getItem('activeSessionId');
+  });
 
-  const [sessionState, setSessionState] = useState<UnifiedSessionState>({
+  const initialSessionState: UnifiedSessionState = {
     session_id: null,
     user_id: null,
     repository: null,
     messages: [],
     context_cards: [],
-    file_embeddings: [],
-    agent_status: { type: AgentType.DAIFU, status: UnifiedAgentStatusEnum.IDLE },
-    statistics: { total_messages: 0, total_tokens: 0, total_cost: 0, session_duration: 0, agent_actions: 0, files_processed: 0 },
+    agent_status: {
+      type: AgentType.DAIFU,
+      status: UnifiedAgentStatusEnum.IDLE
+    },
+    statistics: {
+      total_messages: 0,
+      total_tokens: 0,
+      total_cost: 0,
+      session_duration: 0,
+      agent_actions: 0,
+      files_processed: 0
+    },
     last_activity: new Date().toISOString(),
     is_active: false
-  });
+  };
 
+  const [sessionState, setSessionState] = useState<UnifiedSessionState>(initialSessionState);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('disconnected');
+  
+  // Refs for managing real-time updates
+  const realTimeManagerRef = useRef<RealTimeManager | null>(null);
+  const stateUpdateQueueRef = useRef<Set<string>>(new Set());
+  const lastUpdateRef = useRef<Record<string, number>>({});
+  
+  // Save the active session ID in localStorage whenever it changes
+  useEffect(() => {
+    if (activeSessionId) {
+      localStorage.setItem('activeSessionId', activeSessionId);
+    } else {
+      localStorage.removeItem('activeSessionId');
+    }
+  }, [activeSessionId]);
+  
   const initialTabState: TabState = {
     activeTab: 'chat',
-    refreshKeys: { chat: 0, 'file-deps': 0, context: 0, ideas: 0 },
+    refreshKeys: {
+      'chat': 0,
+      'file-deps': 0,
+      'context': 0,
+      'ideas': 0
+    },
     tabHistory: ['chat']
   };
 
@@ -88,74 +126,189 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
 
   const [tabState, dispatch] = useReducer(tabReducer, initialTabState);
   
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('disconnected');
+  // Debounced state update to prevent excessive re-renders
+  const debouncedSetSessionState = useCallback(
+    debounce((updater: (prev: UnifiedSessionState) => UnifiedSessionState) => {
+      setSessionState(updater);
+    }, 50), // 50ms debounce for real-time feel
+    []
+  );
 
-  // This effect manages the WebSocket connection lifecycle.
+  // Handle real-time updates with conflict resolution
+  const handleRealTimeUpdate = useCallback((update: any) => {
+    const updateId = `${update.type}-${update.timestamp || Date.now()}`;
+    
+    // Prevent duplicate updates within 50ms
+    if (stateUpdateQueueRef.current.has(updateId)) {
+      return;
+    }
+    
+    // Check if this update is newer than the last one
+    const lastUpdate = lastUpdateRef.current[update.type] || 0;
+    if (update.timestamp && update.timestamp < lastUpdate) {
+      console.log('⏭️ Skipping outdated update:', update.type);
+      return;
+    }
+    
+    stateUpdateQueueRef.current.add(updateId);
+    lastUpdateRef.current[update.type] = update.timestamp || Date.now();
+
+    debouncedSetSessionState(prevState => {
+      switch (update.type) {
+        case WebSocketMessageType.SESSION_UPDATE:
+          return { ...prevState, ...update.data };
+        
+        case WebSocketMessageType.MESSAGE:
+          // Prevent duplicate messages
+          const messageExists = prevState.messages.some(m => m.id === update.data.id);
+          if (messageExists) return prevState;
+          
+          return {
+            ...prevState,
+            messages: [...prevState.messages, update.data]
+          };
+        
+        case WebSocketMessageType.CONTEXT_CARD:
+          if (update.data.action === 'batch') {
+            // Handle batch context card updates
+            const newCards = update.data.cards.filter((card: any) => 
+              !prevState.context_cards.some(existing => existing.id === card.id)
+            );
+            return {
+              ...prevState,
+              context_cards: [...prevState.context_cards, ...newCards]
+            };
+          } else {
+            // Handle single context card update
+            const { action, card } = update.data;
+            if (action === 'add') {
+              return {
+                ...prevState,
+                context_cards: [...prevState.context_cards, card]
+              };
+            } else if (action === 'remove') {
+              return {
+                ...prevState,
+                context_cards: prevState.context_cards.filter(c => c.id !== card.id)
+              };
+            }
+          }
+          return prevState;
+        
+        case WebSocketMessageType.AGENT_STATUS:
+          return {
+            ...prevState,
+            agent_status: { ...prevState.agent_status, ...update.data }
+          };
+        
+        case WebSocketMessageType.STATISTICS:
+          return {
+            ...prevState,
+            statistics: { ...prevState.statistics, ...update.data }
+          };
+        
+
+        
+        case WebSocketMessageType.ERROR:
+          console.error('Real-time error:', update.data);
+          return prevState;
+        
+        default:
+          return prevState;
+      }
+    });
+
+    // Clean up update ID after processing
+    setTimeout(() => {
+      stateUpdateQueueRef.current.delete(updateId);
+    }, 1000);
+  }, [debouncedSetSessionState]);
+
+  // Initialize real-time connection when session changes
   useEffect(() => {
     if (!activeSessionId || !token) {
+      if (realTimeManagerRef.current) {
+        realTimeManagerRef.current.disconnect();
+        realTimeManagerRef.current = null;
+      }
+      setConnectionStatus('disconnected');
       return;
     }
 
     setConnectionStatus('reconnecting');
-    const ws = ApiService.createSessionWebSocket(activeSessionId, token);
+    
+    // Create new real-time manager
+    realTimeManagerRef.current = new RealTimeManager({
+      sessionId: activeSessionId,
+      token,
+      onMessage: handleRealTimeUpdate,
+      onError: (error) => {
+        console.error('Real-time error:', error);
+        setConnectionStatus('disconnected');
+      },
+      onConnectionStatusChange: setConnectionStatus
+    });
 
-    ws.onopen = () => {
-      console.log(`WebSocket connected for session: ${activeSessionId}`);
-      setConnectionStatus('connected');
-    };
+    realTimeManagerRef.current.connect();
 
-    ws.onmessage = (event) => {
-      try {
-        const message: UnifiedWebSocketMessage = JSON.parse(event.data);
-        console.log('Real-time update received:', message);
-        
-        // Use a reducer-like pattern to update state based on message type
-        setSessionState(prevState => {
-            switch (message.type) {
-                case WebSocketMessageType.SESSION_UPDATE:
-                    return message.data as UnifiedSessionState;
-                case WebSocketMessageType.MESSAGE:
-                    return { ...prevState, messages: [...prevState.messages, message.data as UnifiedMessage] };
-                case WebSocketMessageType.CONTEXT_CARD: {
-                    const { action, card } = message.data as ContextCardUpdateData;
-                    return { ...prevState, context_cards: action === 'add' ? [...prevState.context_cards, card] : prevState.context_cards.filter(c => c.id !== card.id) };
-                }
-                // ... other cases
-                default:
-                    return prevState;
-            }
-        });
-
-      } catch (error) {
-        console.error('Failed to parse WebSocket message:', error);
+    return () => {
+      if (realTimeManagerRef.current) {
+        realTimeManagerRef.current.disconnect();
+        realTimeManagerRef.current = null;
       }
     };
+  }, [activeSessionId, token, handleRealTimeUpdate]);
 
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
-      setConnectionStatus('disconnected');
-    };
+  // Optimistic updates for user actions
+  const sendOptimisticUpdate = useCallback((action: string, data: any) => {
+    // Apply optimistic update immediately
+    debouncedSetSessionState(prevState => {
+      switch (action) {
+        case 'SEND_MESSAGE':
+          const optimisticMessage = {
+            id: `temp-${Date.now()}`,
+            session_id: activeSessionId || '',
+            content: data.content,
+            role: MessageRole.USER,
+            is_code: data.is_code || false,
+            timestamp: new Date().toISOString(),
+            tokens: 0,
+            metadata: { status: 'sending' }
+          };
+          return {
+            ...prevState,
+            messages: [...prevState.messages, optimisticMessage]
+          };
+        
+        default:
+          return prevState;
+      }
+    });
 
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
-      setConnectionStatus('disconnected');
-      // Optionally add reconnect logic here
-    };
+    // Send to backend via WebSocket
+    if (realTimeManagerRef.current) {
+      realTimeManagerRef.current.send({ type: action, data });
+    }
+  }, [debouncedSetSessionState, activeSessionId]);
 
-    // Cleanup on component unmount or when activeSessionId changes
-    return () => {
-      ws.close();
-    };
-  }, [activeSessionId, token]);
+  // Send real-time message
+  const sendRealtimeMessage = useCallback((message: any) => {
+    if (realTimeManagerRef.current) {
+      realTimeManagerRef.current.send(message);
+    } else {
+      console.warn('RealTimeManager not available');
+    }
+  }, []);
 
-  // The context value now only provides state and a way to change the active session.
-  // All other logic will be moved to the `useSessionHelpers` hook.
+  // The context value now provides enhanced real-time capabilities
   const value: SessionContextValue = {
     sessionState,
     tabState,
     connectionStatus,
     setActiveSessionId,
     dispatch: dispatch,
+    sendOptimisticUpdate,
+    sendRealtimeMessage,
   };
 
   return (

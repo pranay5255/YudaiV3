@@ -7,6 +7,8 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from enum import Enum
+import time
+import json
 
 
 class AgentType(str, Enum):
@@ -40,7 +42,6 @@ class WebSocketMessageType(str, Enum):
     SESSION_UPDATE = "session_update"
     MESSAGE = "message"
     CONTEXT_CARD = "context_card"
-    FILE_EMBEDDING = "file_embedding"
     AGENT_STATUS = "agent_status"
     STATISTICS = "statistics"
     HEARTBEAT = "heartbeat"
@@ -88,21 +89,7 @@ class UnifiedContextCard(BaseModel):
         }
 
 
-class UnifiedFileEmbedding(BaseModel):
-    id: int
-    session_id: str
-    file_name: str
-    file_path: str
-    file_type: str
-    content_summary: Optional[str] = None
-    tokens: int
-    embedding_vector: Optional[List[float]] = None
-    created_at: datetime
 
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
 
 
 class UnifiedAgentStatus(BaseModel):
@@ -135,7 +122,7 @@ class UnifiedSessionState(BaseModel):
     repository: Optional[UnifiedRepository]
     messages: List[UnifiedMessage] = []
     context_cards: List[UnifiedContextCard] = []
-    file_embeddings: List[UnifiedFileEmbedding] = []
+
     agent_status: UnifiedAgentStatus
     statistics: UnifiedStatistics
     last_activity: datetime
@@ -172,7 +159,7 @@ class UnifiedWebSocketManager:
         # {session_id: UnifiedSessionState}
         self.session_states: Dict[str, UnifiedSessionState] = {}
 
-    async def connect(self, websocket: Any, session_id: str, db_session):
+    async def connect(self, websocket: Any, session_id: str, db_session, user_id: int = None):
         """
         Connect a WebSocket to a session. If it's the first connection
         for this session, load the state from the database.
@@ -222,10 +209,15 @@ class UnifiedWebSocketManager:
                     del self.session_states[session_id]
                     print(f"Session state for {session_id} cleared from memory.")
     
-    async def broadcast_to_session(self, session_id: str, message: UnifiedWebSocketMessage):
+    async def broadcast_to_session(self, session_id: str, message):
         """Broadcast a message to all connections for a session"""
         if session_id in self.connections:
-            message_json = message.json()
+            # Handle both dict and UnifiedWebSocketMessage
+            if isinstance(message, dict):
+                message_json = json.dumps(message)
+            else:
+                message_json = message.json()
+                
             disconnected = []
             
             for connection in self.connections[session_id]:
@@ -307,7 +299,7 @@ class StateConverter:
     """
     
     @staticmethod
-    def chat_session_to_unified(chat_session, messages=None, context_cards=None, file_embeddings=None) -> UnifiedSessionState:
+    def chat_session_to_unified(chat_session, messages=None, context_cards=None) -> UnifiedSessionState:
         """Convert SQLAlchemy ChatSession to UnifiedSessionState"""
         return UnifiedSessionState(
             session_id=chat_session.session_id,
@@ -321,7 +313,7 @@ class StateConverter:
             ) if chat_session.repo_owner and chat_session.repo_name else None,
             messages=[StateConverter.message_to_unified(msg) for msg in (messages or [])],
             context_cards=[StateConverter.context_card_to_unified(card) for card in (context_cards or [])],
-            file_embeddings=[StateConverter.file_embedding_to_unified(emb) for emb in (file_embeddings or [])],
+
             agent_status=UnifiedAgentStatus(
                 type=AgentType.DAIFU,  # Default agent type
                 status=AgentStatus.IDLE
@@ -361,20 +353,7 @@ class StateConverter:
             created_at=card.created_at if hasattr(card, 'created_at') else datetime.utcnow()
         )
     
-    @staticmethod
-    def file_embedding_to_unified(embedding) -> UnifiedFileEmbedding:
-        """Convert SQLAlchemy FileEmbedding to UnifiedFileEmbedding"""
-        return UnifiedFileEmbedding(
-            id=embedding.id,
-            session_id=embedding.session_id,
-            file_name=embedding.file_name,
-            file_path=embedding.file_path,
-            file_type=embedding.file_type,
-            content_summary=embedding.content_summary,
-            tokens=embedding.tokens,
-            embedding_vector=embedding.embedding_vector,
-            created_at=embedding.created_at
-        )
+
 
 
 # Global unified WebSocket manager instance

@@ -617,7 +617,16 @@ export class ApiService {
    * @returns WebSocket - WebSocket connection for real-time updates
    */
   static createSessionWebSocket(sessionId: string, token: string | null): WebSocket {
-    const wsUrl = API_BASE_URL.replace('http', 'ws');
+    // Get the base URL without /api prefix
+    const baseUrl = import.meta.env.VITE_API_URL || 
+      (import.meta.env.DEV ? 'http://localhost:8000' : 'https://yudai.app');
+    
+    // Remove /api prefix if present
+    const cleanBaseUrl = baseUrl.replace('/api', '');
+    
+    // Convert to WebSocket URL
+    const wsUrl = cleanBaseUrl.replace('http', 'ws').replace('https', 'wss');
+    
     const url = new URL(`${wsUrl}/daifu/sessions/${sessionId}/ws`);
     
     if (token) {
@@ -627,25 +636,11 @@ export class ApiService {
     return new WebSocket(url.toString());
   }
 
-  /**
-   * Establishes Server-Sent Events connection for real-time session updates (Legacy)
-   * @param sessionId - Session ID to listen for updates
-   * @returns EventSource - SSE connection for real-time updates
-   * @deprecated Use createSessionWebSocket instead
-   */
-  static createSessionEventSource(sessionId: string): EventSource {
-    const token = localStorage.getItem('auth_token');
-    const url = new URL(`${API_BASE_URL}/daifu/sessions/${sessionId}/events`);
-    
-    if (token) {
-      url.searchParams.append('token', token);
-    }
-    
-    return new EventSource(url.toString());
-  }
+
 
   /**
-   * Sends enhanced chat message with session context
+   * Sends enhanced chat message with session context (WebSocket-enabled)
+   * Uses the v2 endpoint that supports real-time WebSocket broadcasting
    * @param request - Enhanced chat request with session context
    * @returns Promise<ChatResponse> - Enhanced chat response
    */
@@ -655,7 +650,7 @@ export class ApiService {
     context_cards?: string[];
     file_context?: string[];
   }): Promise<ChatResponse> {
-    const response = await fetch(`${API_BASE_URL}/daifu/chat/daifu`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/chat/daifu/v2`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
       body: JSON.stringify({

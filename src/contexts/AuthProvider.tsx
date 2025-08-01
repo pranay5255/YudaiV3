@@ -25,34 +25,36 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       setAuthState(prev => ({ ...prev, isLoading: true }));
 
-      // Check if we have a stored token
       const storedToken = AuthService.getStoredToken();
       const storedUser = AuthService.getStoredUserData();
 
       if (storedToken && storedUser) {
-        // Verify the token is still valid
-        const statusCheck = await AuthService.checkAuthStatus();
-        
-        if (statusCheck.authenticated && statusCheck.user) {
+        try {
+          const statusCheck = await AuthService.checkAuthStatus();
+          
+          if (statusCheck.authenticated && statusCheck.user) {
+            setAuthState({
+              user: statusCheck.user,
+              token: storedToken,
+              isAuthenticated: true,
+              isLoading: false,
+            });
+            AuthService.storeUserData(statusCheck.user);
+          } else {
+            clearAuthState();
+          }
+        } catch (error) {
+          console.warn('Auth status check failed, but keeping stored token:', error);
+          // Keep the stored token and user data as fallback
           setAuthState({
-            user: statusCheck.user,
+            user: storedUser,
             token: storedToken,
             isAuthenticated: true,
             isLoading: false,
           });
-          
-          // Update stored user data if it changed
-          AuthService.storeUserData(statusCheck.user);
-        } else {
-          // Token is invalid, clear auth state
-          clearAuthState();
         }
       } else {
-        // No stored auth data
-        setAuthState(prev => ({ 
-          ...prev, 
-          isLoading: false 
-        }));
+        setAuthState(prev => ({ ...prev, isLoading: false }));
       }
     } catch (error) {
       console.error('Auth initialization failed:', error);

@@ -1,12 +1,12 @@
 import React from 'react';
 import { X, FileText, Plus } from 'lucide-react';
-import { UnifiedFileEmbedding } from '../types/unifiedState';
+import { FileItem } from '../types/fileDependencies';
 
 interface DetailModalProps {
   isOpen: boolean;
   onClose: () => void;
-  file: UnifiedFileEmbedding | null;
-  onAddToContext: (file: UnifiedFileEmbedding) => void;
+  file: FileItem | null;
+  onAddToContext: (file: FileItem) => void;
 }
 
 export const DetailModal: React.FC<DetailModalProps> = ({ 

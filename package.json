@@ -15,7 +15,10 @@
     "test:prod:typescript": "bash scripts/run-tests.sh --typescript-only",
     "test:prod:external": "bash scripts/run-tests.sh --shell-only",
     "test:prod:docker": "bash scripts/run-tests.sh --docker-only",
-    "test:connectivity": "npm test tests/prod-connectivity.test.ts"
+    "deploy:dev": "bash scripts/deploy-dev.sh",
+    "deploy:prod": "bash scripts/deploy-prod.sh",
+    "docker:dev": "docker compose -f docker-compose.dev.yml",
+    "docker:prod": "docker compose -f docker-compose.prod.yml"
   },
   "dependencies": {
     "axios": "^1.11.0",

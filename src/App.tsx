@@ -13,7 +13,8 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { SessionProvider } from './contexts/SessionContext';
 import { useSession } from './hooks/useSession';
 import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository } from './types';
-import { UnifiedContextCard, UnifiedFileEmbedding, ContextCardSource, UnifiedMessage } from './types/unifiedState';
+import { UnifiedContextCard, ContextCardSource, UnifiedMessage } from './types/unifiedState';
+import { FileItem } from './types/fileDependencies';
 import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
 import { useSessionHelpers } from './hooks/useSessionHelpers';
@@ -60,8 +61,6 @@ function AppContent() {
       createSession,
       addContextCard,
       removeContextCard,
-      addFileContext,
-      removeFileContext,
       // createIssue // This will be redefined locally for now
     } = useSessionHelpers();
 
@@ -76,7 +75,7 @@ function AppContent() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<UnifiedFileEmbedding | null>(null);
+  const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [issuePreviewData, setIssuePreviewData] = useState<IssuePreviewData | undefined>(undefined);
   
   // Repository selection state
@@ -179,7 +178,7 @@ function AppContent() {
    * Adds a file to context cards
    * @param file - The file item to add to context
    */
-  const addFileToContext = (file: UnifiedFileEmbedding) => {
+  const addFileToContext = (file: FileItem) => {
     const newCard: UnifiedContextCard = {
       id: Date.now().toString(),
       session_id: sessionState.session_id || '',
@@ -192,7 +191,7 @@ function AppContent() {
     };
     
     addContextCard(newCard);
-    addFileContext(file);
+    addFileToContext(file);
     addToast(`Added ${file.file_name} to context`, 'success');
   };
 
@@ -205,10 +204,7 @@ function AppContent() {
     // Also remove from file context if it's a file-deps item
     const card = sessionState.context_cards.find((c: UnifiedContextCard) => c.id === id);
     if (card && card.source === ContextCardSource.FILE) {
-      const fileEmbedding = sessionState.file_embeddings.find((f: UnifiedFileEmbedding) => f.file_name === card.title);
-      if (fileEmbedding) {
-        removeFileContext(fileEmbedding.id);
-      }
+      // Note: File context is now handled separately from session state
     }
     addToast('Removed from context', 'info');
   };
@@ -216,7 +212,7 @@ function AppContent() {
   /**
    * Modal handlers for file details and issue creation
    */
-  const handleShowFileDetails = (file: UnifiedFileEmbedding) => {
+  const handleShowFileDetails = (file: FileItem) => {
     setSelectedFile(file);
     setIsDetailModalOpen(true);
   };
@@ -257,7 +253,7 @@ function AppContent() {
         assignees: [],
         metadata: {
           chat_messages_count: sessionState.messages.length,
-          file_context_count: sessionState.file_embeddings.length,
+          file_context_count: 0, // File context now handled separately
           total_tokens: sessionState.statistics.total_tokens,
           generated_at: new Date().toISOString(),
           generation_method: 'session-based',
@@ -269,14 +265,8 @@ function AppContent() {
           isCode: msg.is_code,
           timestamp: msg.timestamp,
         })),
-        fileContext: sessionState.file_embeddings.map((file: UnifiedFileEmbedding) => ({
-          id: file.id.toString(),
-          name: file.file_name,
-          type: 'INTERNAL',
-          tokens: file.tokens,
-          category: 'INTERNAL',
-          path: file.file_path,
-        })),
+
+        fileContext: [], // File context now handled separately
         canCreateGitHubIssue: !!sessionState.repository,
         repositoryInfo: sessionState.repository ? {
           owner: sessionState.repository.owner,
@@ -313,10 +303,7 @@ function AppContent() {
    */
   // Tab refresh handler - available for future use
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const handleTabRefresh = (tab: TabType) => {
-    dispatch({ type: 'REFRESH_TAB', payload: tab });
-    addToast(`Refreshed ${tab} tab`, 'info');
-  };
+
   
   // Use handleTabRefresh on double-click for tabs (future enhancement)
   // This function is available for future tab refresh functionality
@@ -337,7 +324,7 @@ function AppContent() {
             onAddToContext={addToContext}
             onCreateIssue={handleCreateIssue}
             contextCards={sessionState.context_cards}
-            fileContext={sessionState.file_embeddings.map((f: UnifiedFileEmbedding) => ({...f, id: f.id.toString(), name: f.file_name, type: 'INTERNAL', Category: 'INTERNAL', path: f.file_path, isDirectory: false}))}
+            fileContext={[]}
             onShowIssuePreview={handleShowIssuePreview}
           />
         );
@@ -346,7 +333,7 @@ function AppContent() {
             <FileDependencies 
               key={`file-deps-${refreshKey}`}
               onAddToContext={addFileToContext}
-              onShowDetails={(file) => handleShowFileDetails(file as unknown as UnifiedFileEmbedding)}
+              onShowDetails={(file) => handleShowFileDetails(file as unknown as FileItem)}
             />
           );
       case 'context':
@@ -446,7 +433,7 @@ function AppContent() {
             <div>ID: {sessionState.session_id?.slice(-8) || 'None'}</div>
             <div>Messages: {sessionState.messages.length}</div>
             <div>Context: {sessionState.context_cards.length}</div>
-            <div>Files: {sessionState.file_embeddings.length}</div>
+            
             <div>Tokens: {sessionState.statistics.total_tokens.toLocaleString()}</div>
             <div className={`${
               connectionStatus === 'connected' ? 'text-green-400' : 

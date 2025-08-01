@@ -166,12 +166,18 @@ docker compose -f docker-compose.prod.yml up -d --build
 
 ### Chat Services (`/daifu`)
 - `POST /daifu/chat/daifu` - Chat with DAifu agent (requires auth)
+- `POST /daifu/chat/daifu/v2` - WebSocket-enabled chat (requires auth)
 - `GET /daifu/chat/sessions` - Chat sessions (requires auth)
 - `GET /daifu/chat/sessions/{session_id}/messages` - Session messages
 - `GET /daifu/chat/sessions/{session_id}/statistics` - Session statistics
 - `PUT /daifu/chat/sessions/{session_id}/title` - Update session title
 - `DELETE /daifu/chat/sessions/{session_id}` - Deactivate session
 - `POST /daifu/chat/create-issue` - Create issue from chat
+- `POST /daifu/sessions` - Create new session
+- `GET /daifu/sessions/{session_id}` - Get session context
+- `POST /daifu/sessions/{session_id}/touch` - Update session activity
+- `GET /daifu/sessions` - Get user sessions
+- `WS /daifu/sessions/{session_id}/ws` - WebSocket for real-time updates
 
 ### Issue Management (`/issues`)
 - `POST /issues/` - Create user issue (requires auth)
@@ -212,6 +218,61 @@ const authUrl = `${API_BASE_URL}/auth/login`;
 
 // API endpoints (with /api prefix)
 const apiUrl = `${API_BASE_URL}/github/repositories`;
+```
+
+## 🚨 CRITICAL FRONTEND-BACKEND INTEGRATION ISSUES
+
+### 1. **BROKEN WEBSOCKET URL CONSTRUCTION** ⚠️
+**Issue**: WebSocket connections fail in production due to incorrect URL construction
+```typescript
+// BROKEN: src/services/api.ts:615-622
+static createSessionWebSocket(sessionId: string, token: string | null): WebSocket {
+  const wsUrl = API_BASE_URL.replace('http', 'ws'); // ❌ WRONG
+  const url = new URL(`${wsUrl}/daifu/sessions/${sessionId}/ws`);
+  // ...
+}
+```
+**Problem**: 
+- `API_BASE_URL` is `https://yudai.app/api` in production
+- `replace('http', 'ws')` creates `wss://yudai.app/api/daifu/sessions/...`
+- Backend expects `wss://yudai.app/daifu/sessions/...` (no `/api` prefix)
+- **Result**: All WebSocket connections fail in production
+
+### 2. **INCONSISTENT SESSION ID NAMING** ⚠️
+**Issue**: Frontend uses `session_id` but backend expects `conversation_id`
+```typescript
+// Frontend: src/services/api.ts:22-28
+export interface ChatRequest {
+  conversation_id?: string; // ✅ Correct
+  message: ChatMessage;
+  // ...
+}
+
+// But in SessionContext: src/contexts/SessionContext.tsx:99
+const ws = ApiService.createSessionWebSocket(activeSessionId, token); // ❌ Uses session_id
+```
+
+### 3. **DUPLICATE CHAT ENDPOINTS** ⚠️
+**Issue**: Two chat endpoints with different behaviors
+```python
+# Backend has both:
+@router.post("/chat/daifu")        # Legacy endpoint
+@router.post("/chat/daifu/v2")     # New WebSocket-enabled endpoint
+```
+**Problem**: 
+- Frontend uses legacy endpoint (`/chat/daifu`)
+- WebSocket functionality only works with `/chat/daifu/v2`
+- **Result**: Real-time updates don't work
+
+### 4. **INSECURE WEBSOCKET AUTHENTICATION** ⚠️
+**Issue**: WebSocket authentication is insecure
+```python
+# Backend: backend/daifuUserAgent/chat_api.py:325-330
+if not token:
+    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    return
+    
+user = get_current_user(token, db)  # ❌ Simple token lookup, no JWT validation
 ```
 
 ## Frontend-Backend API Dependency Table
@@ -274,6 +335,44 @@ This section documents the complete mapping between frontend components/services
 | Various Components | `ApiService.getRepository()` | `/github/repositories/{owner}/{repo}` | GET | `repositories` | Get Repo Details → Update Repository Info |
 | Various Components | `ApiService.createRepositoryIssue()` | `/github/repositories/{owner}/{repo}/issues` | POST | `issues` | Create GitHub Issue → Store in DB |
 | Various Components | `ApiService.getRepositoryIssues()` | `/github/repositories/{owner}/{repo}/issues` | GET | `issues` | Get GitHub Issues → Update Issue State |
+
+### WebSocket Integration
+
+#### Real-Time Session Updates
+| Frontend Component | WebSocket Endpoint | Message Types | Status |
+|-------------------|-------------------|---------------|--------|
+| `SessionContext.tsx` | `WS /daifu/sessions/{session_id}/ws` | `SESSION_UPDATE`, `MESSAGE`, `CONTEXT_CARD` | ⚠️ Broken (URL issues) |
+
+**WebSocket Message Flow**:
+```typescript
+// Frontend: src/contexts/SessionContext.tsx:99-120
+const ws = ApiService.createSessionWebSocket(activeSessionId, token);
+
+ws.onmessage = (event) => {
+  const message: UnifiedWebSocketMessage = JSON.parse(event.data);
+  switch (message.type) {
+    case WebSocketMessageType.SESSION_UPDATE:
+      return message.data as UnifiedSessionState;
+    case WebSocketMessageType.MESSAGE:
+      return { ...prevState, messages: [...prevState.messages, message.data] };
+    // ...
+  }
+};
+```
+
+**Backend WebSocket Handler**:
+```python
+# backend/daifuUserAgent/chat_api.py:317-351
+@router.websocket("/sessions/{session_id}/ws")
+async def websocket_session_endpoint(
+    websocket: WebSocket,
+    session_id: str,
+    token: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    await unified_manager.connect(websocket, session_id, db)
+    # Real-time message broadcasting
+```
 
 ### State Flow Patterns
 
@@ -535,6 +634,11 @@ All endpoints include proper error handling with appropriate HTTP status codes:
    - Verify PostgreSQL container health
    - Validate network connectivity
 
+5. **WebSocket Connection Failures** ⚠️
+   - Check WebSocket URL construction
+   - Verify nginx WebSocket proxy configuration
+   - Validate token authentication
+
 ### Debug Commands
 ```bash
 # Check container status
@@ -552,5 +656,26 @@ curl -I http://localhost:8000/health
 
 # Test frontend connectivity
 curl -I https://yudai.app/health
+
+# Test WebSocket connection (requires wscat)
+wscat -c "wss://yudai.app/daifu/sessions/test/ws?token=test"
 ```
+
+## Priority Fixes Required
+
+### 🔴 Critical (Immediate)
+1. **Fix WebSocket URL construction** - All real-time features broken
+2. **Standardize session/conversation ID naming** - Inconsistent state management
+3. **Implement proper WebSocket authentication** - Security vulnerability
+4. **Switch to WebSocket-enabled chat endpoint** - Real-time updates not working
+
+### 🟡 High Priority (Next Sprint)
+5. **Add WebSocket error handling and reconnection** - Poor user experience
+6. **Fix auth URL configuration** - Potential auth issues
+7. **Standardize API response structures** - Inconsistent error handling
+
+### 🟢 Medium Priority (Future)
+8. **Implement missing WebSocket message handlers** - Incomplete real-time features
+9. **Add comprehensive error boundaries** - Better error recovery
+10. **Implement connection health monitoring** - Proactive issue detection
 

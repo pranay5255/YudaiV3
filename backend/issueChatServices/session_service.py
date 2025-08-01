@@ -205,14 +205,14 @@ class SessionService:
         
         context_cards = db.query(ContextCard).filter(ContextCard.id.in_(list(context_card_ids))).all() if context_card_ids else []
         
-        file_embeddings = db.query(FileEmbedding).filter(FileEmbedding.session_id == session.id).order_by(FileEmbedding.created_at).all()
+        # Note: File embeddings are kept in database only for filedeps functionality
+        # They are not included in real-time frontend state
         
         # Convert to unified state
         unified_state = StateConverter.chat_session_to_unified(
             chat_session=session,
             messages=messages,
-            context_cards=context_cards,
-            file_embeddings=file_embeddings
+            context_cards=context_cards
         )
         
         return unified_state
