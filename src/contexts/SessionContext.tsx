@@ -8,8 +8,29 @@ import {
   AgentType,
   AgentStatus as UnifiedAgentStatusEnum,
   WebSocketMessageType,
-  MessageRole
+  MessageRole,
+  UnifiedContextCard,
+  UnifiedMessage
 } from '../types/unifiedState';
+
+// Define proper types for the context
+interface RealTimeUpdate {
+  type: WebSocketMessageType;
+  data: unknown;
+  timestamp?: number;
+}
+
+interface OptimisticUpdateData {
+  content?: string;
+  is_code?: boolean;
+  [key: string]: unknown;
+}
+
+interface RealtimeMessage {
+  type: string;
+  data: Record<string, unknown>;
+  [key: string]: unknown;
+}
 
 /**
  * Enhanced Session Context Interface
@@ -30,10 +51,10 @@ export interface SessionContextValue {
   dispatch: React.Dispatch<SessionAction>;
   
   // Send optimistic updates for immediate UI feedback
-  sendOptimisticUpdate: (action: string, data: any) => void;
+  sendOptimisticUpdate: (action: string, data: OptimisticUpdateData) => void;
   
   // Send real-time message through WebSocket
-  sendRealtimeMessage: (message: any) => void;
+  sendRealtimeMessage: (message: RealtimeMessage) => void;
 }
 
 // A simple reducer action type for UI state changes
@@ -41,6 +62,8 @@ export type SessionAction =
   | { type: 'SET_ACTIVE_TAB'; payload: import('../types/unifiedState').TabType }
   | { type: 'REFRESH_TAB'; payload: import('../types/unifiedState').TabType };
 
+// Export the context but suppress the fast refresh warning with eslint-disable
+// eslint-disable-next-line react-refresh/only-export-components
 export const SessionContext = createContext<SessionContextValue | undefined>(undefined);
 
 interface SessionProviderProps {
@@ -105,13 +128,14 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
 
   const tabReducer = (state: TabState, action: SessionAction): TabState => {
     switch (action.type) {
-      case 'SET_ACTIVE_TAB':
+      case 'SET_ACTIVE_TAB': {
         return {
           ...state,
           activeTab: action.payload,
           tabHistory: [action.payload, ...state.tabHistory.filter(t => t !== action.payload)].slice(0, 10)
         };
-      case 'REFRESH_TAB':
+      }
+      case 'REFRESH_TAB': {
         return {
           ...state,
           refreshKeys: {
@@ -119,6 +143,7 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
             [action.payload]: state.refreshKeys[action.payload] + 1
           }
         };
+      }
       default:
         return state;
     }
@@ -127,15 +152,15 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
   const [tabState, dispatch] = useReducer(tabReducer, initialTabState);
   
   // Debounced state update to prevent excessive re-renders
-  const debouncedSetSessionState = useCallback(
-    debounce((updater: (prev: UnifiedSessionState) => UnifiedSessionState) => {
+  const debouncedSetSessionState = useCallback((updater: (prev: UnifiedSessionState) => UnifiedSessionState) => {
+    const debouncedUpdate = debounce(() => {
       setSessionState(updater);
-    }, 50), // 50ms debounce for real-time feel
-    []
-  );
+    }, 50);
+    debouncedUpdate();
+  }, []);
 
   // Handle real-time updates with conflict resolution
-  const handleRealTimeUpdate = useCallback((update: any) => {
+  const handleRealTimeUpdate = useCallback((update: RealTimeUpdate) => {
     const updateId = `${update.type}-${update.timestamp || Date.now()}`;
     
     // Prevent duplicate updates within 50ms
@@ -156,22 +181,25 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
     debouncedSetSessionState(prevState => {
       switch (update.type) {
         case WebSocketMessageType.SESSION_UPDATE:
-          return { ...prevState, ...update.data };
+          return { ...prevState, ...(update.data as Record<string, unknown>) };
         
-        case WebSocketMessageType.MESSAGE:
+        case WebSocketMessageType.MESSAGE: {
           // Prevent duplicate messages
-          const messageExists = prevState.messages.some(m => m.id === update.data.id);
+          const messageData = update.data as unknown as UnifiedMessage;
+          const messageExists = prevState.messages.some(m => m.id === messageData.id);
           if (messageExists) return prevState;
           
           return {
             ...prevState,
-            messages: [...prevState.messages, update.data]
+            messages: [...prevState.messages, messageData]
           };
+        }
         
-        case WebSocketMessageType.CONTEXT_CARD:
-          if (update.data.action === 'batch') {
+        case WebSocketMessageType.CONTEXT_CARD: {
+          const contextData = update.data as { action: string; cards?: UnifiedContextCard[]; card?: UnifiedContextCard };
+          if (contextData.action === 'batch') {
             // Handle batch context card updates
-            const newCards = update.data.cards.filter((card: any) => 
+            const newCards = (contextData.cards || []).filter((card: UnifiedContextCard) => 
               !prevState.context_cards.some(existing => existing.id === card.id)
             );
             return {
@@ -180,13 +208,13 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
             };
           } else {
             // Handle single context card update
-            const { action, card } = update.data;
-            if (action === 'add') {
+            const { action, card } = contextData;
+            if (action === 'add' && card) {
               return {
                 ...prevState,
                 context_cards: [...prevState.context_cards, card]
               };
-            } else if (action === 'remove') {
+            } else if (action === 'remove' && card) {
               return {
                 ...prevState,
                 context_cards: prevState.context_cards.filter(c => c.id !== card.id)
@@ -194,24 +222,41 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
             }
           }
           return prevState;
+        }
         
         case WebSocketMessageType.AGENT_STATUS:
           return {
             ...prevState,
-            agent_status: { ...prevState.agent_status, ...update.data }
+            agent_status: { ...prevState.agent_status, ...(update.data as Record<string, unknown>) }
           };
         
         case WebSocketMessageType.STATISTICS:
           return {
             ...prevState,
-            statistics: { ...prevState.statistics, ...update.data }
+            statistics: { ...prevState.statistics, ...(update.data as Record<string, unknown>) }
           };
         
-
-        
-        case WebSocketMessageType.ERROR:
-          console.error('Real-time error:', update.data);
+        case WebSocketMessageType.HEARTBEAT:
+          // Heartbeat responses don't need state updates, but we can log them
+          console.log('💓 Heartbeat received');
           return prevState;
+        
+        case WebSocketMessageType.ERROR: {
+          console.error('Real-time error:', update.data);
+          // Handle different types of errors
+          const errorData = update.data as { message: string; permanent?: boolean; code?: string };
+          
+          if (errorData.permanent) {
+            // Permanent error - show user notification
+            console.error('Permanent WebSocket error:', errorData.message);
+          } else if (errorData.code === 'AUTH_FAILED') {
+            // Authentication error - trigger re-auth
+            console.error('Authentication failed, redirecting to login');
+            // Could trigger logout here if needed
+          }
+          
+          return prevState;
+        }
         
         default:
           return prevState;
@@ -242,7 +287,7 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
       sessionId: activeSessionId,
       token,
       onMessage: handleRealTimeUpdate,
-      onError: (error) => {
+      onError: (error: Error) => {
         console.error('Real-time error:', error);
         setConnectionStatus('disconnected');
       },
@@ -260,15 +305,15 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
   }, [activeSessionId, token, handleRealTimeUpdate]);
 
   // Optimistic updates for user actions
-  const sendOptimisticUpdate = useCallback((action: string, data: any) => {
+  const sendOptimisticUpdate = useCallback((action: string, data: OptimisticUpdateData) => {
     // Apply optimistic update immediately
     debouncedSetSessionState(prevState => {
       switch (action) {
-        case 'SEND_MESSAGE':
+        case 'SEND_MESSAGE': {
           const optimisticMessage = {
             id: `temp-${Date.now()}`,
             session_id: activeSessionId || '',
-            content: data.content,
+            content: data.content || '',
             role: MessageRole.USER,
             is_code: data.is_code || false,
             timestamp: new Date().toISOString(),
@@ -279,6 +324,7 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
             ...prevState,
             messages: [...prevState.messages, optimisticMessage]
           };
+        }
         
         default:
           return prevState;
@@ -292,7 +338,7 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
   }, [debouncedSetSessionState, activeSessionId]);
 
   // Send real-time message
-  const sendRealtimeMessage = useCallback((message: any) => {
+  const sendRealtimeMessage = useCallback((message: RealtimeMessage) => {
     if (realTimeManagerRef.current) {
       realTimeManagerRef.current.send(message);
     } else {

@@ -23,13 +23,19 @@ interface ApiFileItem {
   expanded?: boolean;
 }
 
+// Extended FileItem type with expanded property
+interface ExtendedFileItem extends FileItem {
+  children: ExtendedFileItem[];
+  expanded: boolean;
+}
+
 export const FileDependencies: React.FC<FileDependenciesProps> = ({ 
   onAddToContext, 
   onShowDetails, 
   repoUrl 
 }) => {
   // Repository context removed - using repoUrl prop directly
-  const [files, setFiles] = useState<FileItem[]>([]);
+  const [files, setFiles] = useState<ExtendedFileItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadingStates, setLoadingStates] = useState<{[key: string]: boolean}>({});
@@ -37,13 +43,21 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
   // Use the repoUrl prop directly
   const targetRepoUrl = repoUrl;
 
-  useEffect(() => {
-    if (targetRepoUrl) {
-      loadFileDependencies();
-    }
-  }, [targetRepoUrl]);
+  const transformData = useCallback((items: ApiFileItem[]): ExtendedFileItem[] => {
+    return items.map(item => ({
+      id: item.id,
+      file_name: item.name,
+      file_path: item.name,
+      file_type: item.type,
+      content_summary: item.Category,
+      tokens: item.tokens,
+      created_at: new Date().toISOString(),
+      children: item.children ? transformData(item.children) : [],
+      expanded: item.expanded || false
+    }));
+  }, []);
 
-  const loadFileDependencies = async () => {
+  const loadFileDependencies = useCallback(async () => {
     if (!targetRepoUrl) return;
     
     setLoading(true);
@@ -63,43 +77,35 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [targetRepoUrl, transformData]);
 
-  const transformData = (items: ApiFileItem[]): FileItem[] => {
-    return items.map(item => ({
-      id: item.id,
-      file_name: item.name,
-      file_path: item.name,
-      file_type: item.type,
-      content_summary: item.Category,
-      tokens: item.tokens,
-      created_at: new Date().toISOString(),
-      children: item.children ? transformData(item.children) : [],
-      expanded: item.expanded || false
-    }));
-  };
+  useEffect(() => {
+    if (targetRepoUrl) {
+      loadFileDependencies();
+    }
+  }, [targetRepoUrl, loadFileDependencies]);
 
-  const updateFiles = (items: (FileItem & { children: FileItem[], expanded: boolean })[]): (FileItem & { children: FileItem[], expanded: boolean })[] => {
+  const updateFiles = (items: ExtendedFileItem[]): ExtendedFileItem[] => {
     return items.map(item => {
       if (item.children && item.children.length > 0) {
-        return { ...item, children: updateFiles(item.children as (FileItem & { children: FileItem[], expanded: boolean })[]) };
+        return { ...item, children: updateFiles(item.children) };
       }
       return item;
     });
   };
 
   const handleRefresh = () => {
-    setFiles(updateFiles(files as (FileItem & { children: FileItem[], expanded: boolean })[]));
+    setFiles(updateFiles(files));
   };
 
   const toggleExpanded = useCallback((targetId: string) => {
-    const toggleInTree = (items: FileItem[]): FileItem[] => {
+    const toggleInTree = (items: ExtendedFileItem[]): ExtendedFileItem[] => {
       return items.map(item => {
         if (item.id === targetId) {
-          return { ...item, expanded: !(item as any).expanded };
+          return { ...item, expanded: !item.expanded };
         }
-        if ((item as any).children) {
-          return { ...item, children: toggleInTree((item as any).children) };
+        if (item.children) {
+          return { ...item, children: toggleInTree(item.children) };
         }
         return item;
       });
@@ -107,7 +113,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     setFiles(toggleInTree(files));
   }, [files]);
 
-  const renderFileTree = useCallback((items: (FileItem & { children: FileItem[], expanded: boolean })[], depth = 0) => {
+  const renderFileTree = useCallback((items: ExtendedFileItem[], depth = 0) => {
     return items.map((item) => {
       const hasChildren = item.children && item.children.length > 0;
       const isDirectory = hasChildren;
@@ -175,7 +181,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
           
           {hasChildren && item.expanded && (
             <div>
-              {renderFileTree(item.children as (FileItem & { children: FileItem[], expanded: boolean })[], depth + 1)}
+              {renderFileTree(item.children, depth + 1)}
             </div>
           )}
         </div>
@@ -238,7 +244,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
           </div>
         ) : (
           <div className="p-2">
-            {renderFileTree(files as (FileItem & { children: FileItem[], expanded: boolean })[])}
+            {renderFileTree(files)}
           </div>
         )}
       </div>

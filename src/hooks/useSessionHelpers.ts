@@ -13,7 +13,7 @@ import {
  * functions for components to use.
  */
 export const useSessionHelpers = () => {
-  const { sessionState, setActiveSessionId } = useSession();
+  const { sessionState, setActiveSessionId, sendOptimisticUpdate, sendRealtimeMessage } = useSession();
   const { isAuthenticated } = useAuth();
 
   const createSession = useCallback(async (
@@ -37,15 +37,12 @@ export const useSessionHelpers = () => {
   const sendMessage = useCallback(async (content: string, isCode: boolean = false) => {
     if (!sessionState.session_id) throw new Error('No active session');
     
-    // Get real-time capabilities from session context
-    const session = useSession();
-    
     // First, send optimistic update for immediate UI feedback
-    session.sendOptimisticUpdate('SEND_MESSAGE', { content, is_code: isCode });
+    sendOptimisticUpdate('SEND_MESSAGE', { content, is_code: isCode });
     
     try {
       // Send through real-time WebSocket for immediate broadcasting
-      session.sendRealtimeMessage({
+      sendRealtimeMessage({
         type: 'SEND_MESSAGE',
         data: {
           session_id: sessionState.session_id,
@@ -64,7 +61,7 @@ export const useSessionHelpers = () => {
         context_cards: sessionState.context_cards.map((c: UnifiedContextCard) => c.id)
       });
     }
-  }, [sessionState.session_id, sessionState.context_cards]);
+  }, [sessionState.session_id, sessionState.context_cards, sendOptimisticUpdate, sendRealtimeMessage]);
 
   const addContextCard = useCallback(async (card: Omit<UnifiedContextCard, 'id' | 'session_id' | 'created_at'>) => {
     if (!sessionState.session_id) throw new Error('No active session');

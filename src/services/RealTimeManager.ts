@@ -11,22 +11,36 @@
 
 import { 
   UnifiedWebSocketMessage, 
-  WebSocketMessageType
+  WebSocketMessageType,
+  UnifiedMessage,
+  UnifiedContextCard,
+  UnifiedAgentStatus,
 } from '../types/unifiedState';
 
 interface RealTimeManagerOptions {
   sessionId: string;
   token: string;
-  onMessage: (data: any) => void;
-  onError: (error: any) => void;
+  onMessage: (data: RealTimeUpdate) => void;
+  onError: (error: Error) => void;
   onConnectionStatusChange: (status: 'connected' | 'disconnected' | 'reconnecting') => void;
 }
 
 interface QueuedMessage {
   id: string;
   type: WebSocketMessageType;
-  data: any;
+  data: unknown;
   timestamp: number;
+}
+
+interface RealTimeUpdate {
+  type: WebSocketMessageType;
+  data: unknown;
+  timestamp: number;
+}
+
+interface BatchedContextCardUpdate {
+  action: 'batch';
+  cards: UnifiedContextCard[];
 }
 
 /**
@@ -42,6 +56,8 @@ export class RealTimeManager {
   private isProcessing = false;
   private lastUpdateTimestamps: Record<string, number> = {};
   private pendingUpdates = new Set<string>();
+  private lastHeartbeatTime: number | null = null;
+  private connectionStartTime: number | null = null;
 
   constructor(private options: RealTimeManagerOptions) {}
 
@@ -61,6 +77,7 @@ export class RealTimeManager {
       this.options.onConnectionStatusChange('connected');
       this.startHeartbeat();
       this.processMessageQueue();
+      this.connectionStartTime = Date.now();
     };
 
     this.ws.onmessage = (event) => {
@@ -69,19 +86,45 @@ export class RealTimeManager {
         this.handleMessage(message);
       } catch (error) {
         console.error('Failed to parse WebSocket message:', error);
+        // Send error message to UI
+        this.options.onMessage({
+          type: WebSocketMessageType.ERROR,
+          data: { message: 'Failed to parse message', error: error instanceof Error ? error.message : 'Unknown error' },
+          timestamp: Date.now()
+        });
       }
     };
 
     this.ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      this.options.onError(error);
+      // Convert Event to Error properly
+      const errorMessage = error instanceof Error ? error.message : 'WebSocket connection error';
+      this.options.onError(new Error(errorMessage));
+      // Don't change connection status here, let onclose handle it
     };
 
     this.ws.onclose = (event) => {
       console.log('🔌 WebSocket closed:', event.code, event.reason);
       this.stopHeartbeat();
-      this.options.onConnectionStatusChange('disconnected');
-      this.handleReconnection();
+      
+      // Handle different close codes
+      if (event.code === 1000) {
+        // Normal closure
+        this.options.onConnectionStatusChange('disconnected');
+      } else if (event.code === 1008) {
+        // Policy violation (authentication failed)
+        console.error('Authentication failed for WebSocket connection');
+        this.options.onError(new Error('Authentication failed. Please log in again.'));
+        this.options.onConnectionStatusChange('disconnected');
+      } else if (event.code === 1011) {
+        // Internal error
+        console.error('Server error in WebSocket connection');
+        this.options.onError(new Error('Server error. Please try again later.'));
+        this.handleReconnection();
+      } else {
+        // Other errors, attempt reconnection
+        this.handleReconnection();
+      }
     };
   }
 
@@ -100,7 +143,7 @@ export class RealTimeManager {
   /**
    * Send message through WebSocket with queuing support
    */
-  send(message: any): void {
+  send(message: Record<string, unknown>): void {
     const messageWithId = {
       ...message,
       id: `${Date.now()}-${Math.random()}`,
@@ -112,11 +155,11 @@ export class RealTimeManager {
         this.ws.send(JSON.stringify(messageWithId));
       } catch (error) {
         console.error('Failed to send WebSocket message:', error);
-        this.queueMessage(messageWithId);
+        this.queueMessage(messageWithId as QueuedMessage);
       }
     } else {
       console.log('⏳ WebSocket not ready, queuing message');
-      this.queueMessage(messageWithId);
+      this.queueMessage(messageWithId as QueuedMessage);
     }
   }
 
@@ -239,20 +282,21 @@ export class RealTimeManager {
   /**
    * Batch messages of the same type to prevent conflicting updates
    */
-  private batchMessages(type: WebSocketMessageType, messages: QueuedMessage[]): any {
+  private batchMessages(type: WebSocketMessageType, messages: QueuedMessage[]): RealTimeUpdate | null {
     if (messages.length === 0) return null;
 
     switch (type) {
-      case WebSocketMessageType.MESSAGE:
+      case WebSocketMessageType.MESSAGE: {
         // For messages, only take the latest to prevent duplicates
         const latestMessage = messages[messages.length - 1];
         return {
           type,
-          data: latestMessage.data,
+          data: latestMessage.data as UnifiedMessage,
           timestamp: latestMessage.timestamp
         };
+      }
 
-      case WebSocketMessageType.SESSION_UPDATE:
+      case WebSocketMessageType.SESSION_UPDATE: {
         // For session updates, merge all updates with latest taking precedence
         const mergedSession = messages.reduce((latest, current) => 
           current.timestamp > latest.timestamp ? current : latest
@@ -262,51 +306,45 @@ export class RealTimeManager {
           data: mergedSession.data,
           timestamp: mergedSession.timestamp
         };
+      }
 
-      case WebSocketMessageType.CONTEXT_CARD:
+      case WebSocketMessageType.CONTEXT_CARD: {
         // For context cards, batch all operations
+        const batchedUpdate: BatchedContextCardUpdate = {
+          action: 'batch',
+          cards: messages.map(m => m.data as UnifiedContextCard)
+        };
         return {
           type,
-          data: {
-            action: 'batch',
-            cards: messages.map(m => m.data)
-          },
+          data: batchedUpdate,
           timestamp: Math.max(...messages.map(m => m.timestamp))
         };
+      }
 
-      case WebSocketMessageType.AGENT_STATUS:
+      case WebSocketMessageType.AGENT_STATUS: {
         // For agent status, only keep the latest
         const latestStatus = messages[messages.length - 1];
         return {
           type,
-          data: latestStatus.data,
+          data: latestStatus.data as UnifiedAgentStatus,
           timestamp: latestStatus.timestamp
         };
+      }
 
-      case WebSocketMessageType.STATISTICS:
-        // For statistics, merge all updates
-        const mergedStats = messages.reduce((acc, current) => ({
-          ...acc.data,
-          ...current.data
-        }), { data: {} });
-        return {
-          type,
-          data: mergedStats.data,
-          timestamp: Math.max(...messages.map(m => m.timestamp))
-        };
 
       case WebSocketMessageType.HEARTBEAT:
         // Heartbeat responses don't need processing
         return null;
 
-      case WebSocketMessageType.ERROR:
+      case WebSocketMessageType.ERROR: {
         // Process all errors
         messages.forEach(msg => {
           console.error('WebSocket error:', msg.data);
         });
         return null;
+      }
 
-      default:
+      default: {
         // For unknown types, just take the latest
         const latest = messages[messages.length - 1];
         return {
@@ -314,6 +352,7 @@ export class RealTimeManager {
           data: latest.data,
           timestamp: latest.timestamp
         };
+      }
     }
   }
 
@@ -327,6 +366,7 @@ export class RealTimeManager {
           type: WebSocketMessageType.HEARTBEAT, 
           timestamp: Date.now() 
         });
+        this.lastHeartbeatTime = Date.now();
       }
     }, 30000); // 30 second heartbeat
   }
@@ -342,17 +382,30 @@ export class RealTimeManager {
   }
 
   /**
-   * Handle reconnection with exponential backoff
+   * Handle reconnection with exponential backoff and user feedback
    */
   private handleReconnection(): void {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
       const delay = Math.min(
-        this.reconnectDelay * Math.pow(2, this.reconnectAttempts), 
+        this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), 
         30000
       );
       
       console.log(`🔄 Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+      
+      // Notify UI about reconnection attempt
+      this.options.onMessage({
+        type: WebSocketMessageType.AGENT_STATUS,
+        data: { 
+          status: 'reconnecting',
+          message: `Reconnecting... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
+          reconnectDelay: delay
+        },
+        timestamp: Date.now()
+      });
+      
+      this.options.onConnectionStatusChange('reconnecting');
       
       setTimeout(() => {
         console.log(`🔄 Attempting reconnection...`);
@@ -360,7 +413,18 @@ export class RealTimeManager {
       }, delay);
     } else {
       console.error('❌ Max reconnection attempts reached');
-      this.options.onError(new Error('WebSocket connection failed permanently'));
+      this.options.onError(new Error('WebSocket connection failed permanently. Please refresh the page.'));
+      this.options.onConnectionStatusChange('disconnected');
+      
+      // Notify UI about permanent failure
+      this.options.onMessage({
+        type: WebSocketMessageType.ERROR,
+        data: { 
+          message: 'Connection failed permanently. Please refresh the page.',
+          permanent: true
+        },
+        timestamp: Date.now()
+      });
     }
   }
 
@@ -376,5 +440,24 @@ export class RealTimeManager {
    */
   get reconnectionAttempts(): number {
     return this.reconnectAttempts;
+  }
+
+  /**
+   * Get connection health status
+   */
+  getConnectionHealth(): {
+    isConnected: boolean;
+    reconnectAttempts: number;
+    maxReconnectAttempts: number;
+    lastHeartbeat: number | null;
+    connectionAge: number | null;
+  } {
+    return {
+      isConnected: this.isConnected,
+      reconnectAttempts: this.reconnectAttempts,
+      maxReconnectAttempts: this.maxReconnectAttempts,
+      lastHeartbeat: this.lastHeartbeatTime || null,
+      connectionAge: this.connectionStartTime ? Date.now() - this.connectionStartTime : null
+    };
   }
 }

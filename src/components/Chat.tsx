@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Send, Plus } from 'lucide-react';
 import { Message, FileItem } from '../types';
-import { ApiService, ChatRequest, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview, UserIssueResponse } from '../services/api';
+import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview, UserIssueResponse } from '../services/api';
 import { useRepository } from '../hooks/useRepository';
 
 interface ContextCard {
@@ -95,20 +95,17 @@ export const Chat: React.FC<ChatProps> = ({
       const currentSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       
       // Send to Daifu agent
-      const request: ChatRequest = {
-        conversation_id: currentSessionId,  // Fixed: backend expects conversation_id, not session_id
+      const response = await ApiService.sendEnhancedChatMessage({
+        session_id: currentSessionId,
         message: {
           content: currentInput,
           is_code: userMessage.isCode,
         },
         // Add context cards if available
         context_cards: contextCards.map(card => card.id) || [],
-        // Add repository context if available
-        repo_owner: selectedRepository?.repository.full_name.split('/')[0],
-        repo_name: selectedRepository?.repository.full_name.split('/')[1],
-      };
-      
-      const response = await ApiService.sendChatMessage(request);
+        // Add file context if available
+        file_context: fileContext.map(file => file.id) || [],
+      });
       
       // Update session ID if provided in response or if we generated a new one
       if (response.session_id) {

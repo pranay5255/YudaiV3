@@ -302,7 +302,7 @@ function AppContent() {
    * @param tab - The tab to refresh
    */
   // Tab refresh handler - available for future use
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
 
   
   // Use handleTabRefresh on double-click for tabs (future enhancement)
