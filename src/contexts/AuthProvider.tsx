@@ -94,10 +94,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Handle OAuth callback on page load
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
+    const auth = urlParams.get('auth');
     const code = urlParams.get('code');
     const state = urlParams.get('state');
+    const error = urlParams.get('error');
 
-    if (code) {
+    if (auth === 'success' && code) {
+      handleOAuthCallback(code, state || undefined);
+    } else if (auth === 'error') {
+      console.error('OAuth authentication failed:', error);
+      clearAuthState();
+      // Clean up URL parameters
+      window.history.replaceState({}, document.title, '/');
+    } else if (code) {
+      // Fallback for direct callback with code (old behavior)
       handleOAuthCallback(code, state || undefined);
     }
   }, [handleOAuthCallback]);
