@@ -16,8 +16,8 @@ RUN pnpm install
 # Copy source code
 COPY . .
 
-# Build the application
-RUN pnpm run build
+# Build the application (development mode)
+RUN pnpm run build:dev
 
 # Verify build output
 RUN ls -la /app/dist/ && test -f /app/dist/index.html
