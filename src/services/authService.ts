@@ -24,40 +24,9 @@ export class AuthService {
     window.location.href = `${AUTH_BASE_URL}/auth/login`;
   }
 
-  // Handle GitHub App OAuth callback
-  // Note: For GitHub App flow, the callback redirects to frontend with user_id
-  // We need to fetch the user profile separately
-  static async handleCallback(code: string, state?: string): Promise<LoginResponse> {
-    // Exchange code for token by calling backend endpoint
-    const response = await fetch(`${AUTH_BASE_URL}/auth/callback`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        code,
-        state
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to exchange code for token');
-    }
-
-    const data = await response.json();
-
-    // Store the access token
-    localStorage.setItem('auth_token', data.access_token);
-
-    // Get user profile using the new token
-    const user = await this.getProfile();
-
-    return {
-      access_token: data.access_token,
-      token_type: data.token_type,
-      user: user
-    };
-  }
+  // Note: handleCallback method removed - OAuth flow uses redirects, not direct API calls
+  // The backend /auth/callback endpoint handles the OAuth redirect and then redirects to frontend
+  // Frontend should use handleAuthSuccess() or handleAuthError() to process the redirect
 
   // Get current user profile
   static async getProfile(): Promise<User> {

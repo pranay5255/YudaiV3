@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { AuthService } from '../services/authService';
+import { useAuth } from '../hooks/useAuth';
 
 interface AuthCallbackProps {
   onSuccess?: () => void;
@@ -9,6 +10,7 @@ interface AuthCallbackProps {
 export const AuthCallback: React.FC<AuthCallbackProps> = ({ onSuccess, onError }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { refreshAuth } = useAuth();
 
   useEffect(() => {
     const handleAuthCallback = async () => {
@@ -33,6 +35,9 @@ export const AuthCallback: React.FC<AuthCallbackProps> = ({ onSuccess, onError }
         // Store user data
         AuthService.storeUserData(loginResponse.user);
         
+        // Refresh auth state in the context
+        await refreshAuth();
+        
         // Call the success callback
         onSuccess?.();
         
@@ -49,7 +54,7 @@ export const AuthCallback: React.FC<AuthCallbackProps> = ({ onSuccess, onError }
     };
 
     handleAuthCallback();
-  }, [onSuccess, onError]);
+  }, [onSuccess, onError, refreshAuth]);
 
   if (isLoading) {
     return (

@@ -62,45 +62,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, []);
 
-  const handleOAuthCallback = useCallback(async (code: string, state: string | null | undefined) => {
-    try {
-      setAuthState(prev => ({ ...prev, isLoading: true }));
-
-      const loginResponse = await AuthService.handleCallback(code, state || undefined);
-      
-      setAuthState({
-        user: loginResponse.user,
-        token: loginResponse.access_token,
-        isAuthenticated: true,
-        isLoading: false,
-      });
-
-      // Store user data
-      AuthService.storeUserData(loginResponse.user);
-
-      // Clean up URL parameters - remove the OAuth callback parameters
-      window.history.replaceState({}, document.title, '/');
-    } catch (error) {
-      console.error('OAuth callback failed:', error);
-      clearAuthState();
-    }
-  }, []);
-
   // Initialize auth state on mount
   useEffect(() => {
     initializeAuth();
   }, [initializeAuth]);
-
-  // Handle OAuth callback on page load
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
-    const state = urlParams.get('state');
-
-    if (code) {
-      handleOAuthCallback(code, state || undefined);
-    }
-  }, [handleOAuthCallback]);
 
   const login = async (): Promise<void> => {
     try {
