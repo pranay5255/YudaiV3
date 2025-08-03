@@ -8,12 +8,12 @@ import './index.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <SessionProvider>
-      <AuthProvider>
+    <AuthProvider>
+      <SessionProvider>
         <RepositoryProvider>
           <App />
         </RepositoryProvider>
-      </AuthProvider>
-    </SessionProvider>
+      </SessionProvider>
+    </AuthProvider>
   </StrictMode>
 );

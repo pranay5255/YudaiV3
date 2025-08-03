@@ -9,8 +9,8 @@ import { DiffModal } from './components/DiffModal';
 import { DetailModal } from './components/DetailModal';
 import { ToastContainer } from './components/Toast';
 import { RepositorySelectionToast } from './components/RepositorySelectionToast';
-import { ProtectedRoute } from './components/ProtectedRoute';
 import { AuthCallback } from './components/AuthCallback';
+import { ProtectedRoute } from './components/ProtectedRoute';
 import { useSession } from './hooks/useSession';
 import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository } from './types';
 import { UnifiedContextCard, ContextCardSource } from './types/unifiedState';
@@ -386,87 +386,85 @@ function AppContent() {
   };
 
   return (
-    <ProtectedRoute>
-      <div className="min-h-screen bg-bg text-fg font-sans">
-        {/* Connection Status Indicator */}
-        {connectionStatus !== 'connected' && sessionState.session_id && (
-          <div className={`fixed top-0 left-0 right-0 z-50 p-2 text-center text-sm ${
-            connectionStatus === 'reconnecting' ? 'bg-yellow-600' : 'bg-red-600'
-          } text-white`}>
-            {connectionStatus === 'reconnecting' ? 'Reconnecting...' : 'Connection lost - Some features may be limited'}
-          </div>
-        )}
-        
-        {/* Top Bar with Session Info */}
-        <TopBar 
-          currentStep={currentStep} 
-          errorStep={undefined} // ⚠️ UNUSED
-        />
-        
-        {/* Main Layout */}
-        <div className={`flex ${connectionStatus !== 'connected' && sessionState.session_id ? 'h-[calc(100vh-96px)] mt-8' : 'h-[calc(100vh-56px)]'}`}>
-          {/* Sidebar with Session State */}
-          <Sidebar 
-            activeTab={tabState.activeTab}
-            onTabChange={handleTabChange}
-            isCollapsed={sidebarCollapsed}
-            onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-          />
-          
-          {/* Main Content */}
-          <main className="flex-1 p-6">
-            <div className="h-full bg-bg/80 backdrop-blur rounded-2xl shadow-md border border-zinc-800/50 overflow-hidden">
-              {renderTabContent()}
-            </div>
-          </main>
+    <div className="min-h-screen bg-bg text-fg font-sans">
+      {/* Connection Status Indicator */}
+      {connectionStatus !== 'connected' && sessionState.session_id && (
+        <div className={`fixed top-0 left-0 right-0 z-50 p-2 text-center text-sm ${
+          connectionStatus === 'reconnecting' ? 'bg-yellow-600' : 'bg-red-600'
+        } text-white`}>
+          {connectionStatus === 'reconnecting' ? 'Reconnecting...' : 'Connection lost - Some features may be limited'}
         </div>
-
-        {/* Modals */}
-        <DiffModal 
-          isOpen={isDiffModalOpen}
-          onClose={() => {
-            setIsDiffModalOpen(false);
-            setIssuePreviewData(undefined);
-          }}
-          issuePreview={issuePreviewData}
+      )}
+      
+      {/* Top Bar with Session Info */}
+      <TopBar 
+        currentStep={currentStep} 
+        errorStep={undefined} // ⚠️ UNUSED
+      />
+      
+      {/* Main Layout */}
+      <div className={`flex ${connectionStatus !== 'connected' && sessionState.session_id ? 'h-[calc(100vh-96px)] mt-8' : 'h-[calc(100vh-56px)]'}`}>
+        {/* Sidebar with Session State */}
+        <Sidebar 
+          activeTab={tabState.activeTab}
+          onTabChange={handleTabChange}
+          isCollapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
         
-        <DetailModal 
-          isOpen={isDetailModalOpen}
-          onClose={() => setIsDetailModalOpen(false)}
-          file={selectedFile}
-          onAddToContext={addFileToContext}
-        />
-
-        {/* Repository Selection Toast with Session Integration */}
-        <RepositorySelectionToast
-          isOpen={showRepositorySelection}
-          onConfirm={handleRepositoryConfirm}
-          onCancel={handleRepositoryCancel}
-        />
-
-        {/* Toast Container */}
-        <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
-        
-        {/* Session Debug Info (Development Only) */}
-        {process.env.NODE_ENV === 'development' && (
-          <div className="fixed bottom-4 right-4 bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-xs font-mono max-w-sm">
-            <div className="text-zinc-400 mb-2">Session Debug</div>
-            <div>ID: {sessionState.session_id?.slice(-8) || 'None'}</div>
-            <div>Messages: {sessionState.messages.length}</div>
-            <div>Context: {sessionState.context_cards.length}</div>
-            
-            <div>Tokens: {sessionState.statistics.total_tokens.toLocaleString()}</div>
-            <div className={`${
-              connectionStatus === 'connected' ? 'text-green-400' : 
-              connectionStatus === 'reconnecting' ? 'text-yellow-400' : 'text-red-400'
-            }`}>
-              Status: {connectionStatus}
-            </div>
+        {/* Main Content */}
+        <main className="flex-1 p-6">
+          <div className="h-full bg-bg/80 backdrop-blur rounded-2xl shadow-md border border-zinc-800/50 overflow-hidden">
+            {renderTabContent()}
           </div>
-        )}
+        </main>
       </div>
-    </ProtectedRoute>
+
+      {/* Modals */}
+      <DiffModal 
+        isOpen={isDiffModalOpen}
+        onClose={() => {
+          setIsDiffModalOpen(false);
+          setIssuePreviewData(undefined);
+        }}
+        issuePreview={issuePreviewData}
+      />
+      
+      <DetailModal 
+        isOpen={isDetailModalOpen}
+        onClose={() => setIsDetailModalOpen(false)}
+        file={selectedFile}
+        onAddToContext={addFileToContext}
+      />
+
+      {/* Repository Selection Toast with Session Integration */}
+      <RepositorySelectionToast
+        isOpen={showRepositorySelection}
+        onConfirm={handleRepositoryConfirm}
+        onCancel={handleRepositoryCancel}
+      />
+
+      {/* Toast Container */}
+      <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
+      
+      {/* Session Debug Info (Development Only) */}
+      {process.env.NODE_ENV === 'development' && (
+        <div className="fixed bottom-4 right-4 bg-zinc-900 border border-zinc-700 rounded-lg p-3 text-xs font-mono max-w-sm">
+          <div className="text-zinc-400 mb-2">Session Debug</div>
+          <div>ID: {sessionState.session_id?.slice(-8) || 'None'}</div>
+          <div>Messages: {sessionState.messages.length}</div>
+          <div>Context: {sessionState.context_cards.length}</div>
+          
+          <div>Tokens: {sessionState.statistics.total_tokens.toLocaleString()}</div>
+          <div className={`${
+            connectionStatus === 'connected' ? 'text-green-400' : 
+            connectionStatus === 'reconnecting' ? 'text-yellow-400' : 'text-red-400'
+          }`}>
+            Status: {connectionStatus}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -494,7 +492,11 @@ function App() {
     );
   }
 
-  return <AppContent />;
+  return (
+    <ProtectedRoute>
+      <AppContent />
+    </ProtectedRoute>
+  );
 }
 
 export default App;
