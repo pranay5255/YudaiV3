@@ -11,12 +11,12 @@ from auth.github_oauth import (
     GitHubAppError,
     create_or_update_user,
     exchange_code_for_user_token,
-    generate_oauth_state,
     get_current_user,
     get_github_app_oauth_url,
     get_github_user_info,
     validate_github_app_config,
 )
+from auth.state_manager import state_manager
 from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
@@ -25,9 +25,6 @@ from sqlalchemy.orm import Session
 
 router = APIRouter()
 security = HTTPBearer()
-
-# Store OAuth states (in production, use Redis or database)
-oauth_states = {}
 
 
 @router.get("/login")
@@ -42,9 +39,11 @@ async def login():
         # Validate configuration
         validate_github_app_config()
         
-        # Generate state parameter for security
-        state = generate_oauth_state()
-        oauth_states[state] = True
+        # Clean up expired states periodically
+        state_manager.cleanup_expired_states()
+        
+        # Generate state parameter using centralized manager
+        state = state_manager.generate_state()
         
         # Generate authorization URL
         auth_url = get_github_app_oauth_url(state)
@@ -82,15 +81,12 @@ async def auth_callback(
         Redirect to frontend with success/error
     """
     try:
-        # Validate state parameter
-        if state not in oauth_states:
+        # Validate state parameter using centralized manager
+        if not state_manager.validate_state(state):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid state parameter"
             )
-        
-        # Remove used state
-        oauth_states.pop(state, None)
         
         # Exchange code for access token
         token_data = await exchange_code_for_user_token(code, state)
@@ -281,3 +277,28 @@ async def auth_config():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get configuration: {str(e)}"
         )
+
+
+@router.get("/debug/state")
+async def debug_state():
+    """
+    Debug endpoint to check state manager status (development only)
+    
+    Returns:
+        State manager debug information
+    """
+    if os.getenv("NODE_ENV") == "production":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Debug endpoint not available in production"
+        )
+    
+    # Clean up expired states
+    expired_count = state_manager.cleanup_expired_states()
+    active_count = state_manager.get_active_states_count()
+    
+    return {
+        "active_states": active_count,
+        "expired_states_cleaned": expired_count,
+        "state_manager_working": True
+    }

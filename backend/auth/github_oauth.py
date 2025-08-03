@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 
 import httpx
 import jwt
+from auth.state_manager import state_manager
 from db.database import get_db
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -47,8 +48,8 @@ FALLBACK_REDIRECT_URIS = [
     "https://api.yudai.app/auth/callback",
 ]
 
-# Session storage for state parameter (in production, use Redis or database)
-oauth_states = {}
+# Import centralized state manager
+
 
 
 class GitHubAppError(Exception):
@@ -58,8 +59,7 @@ class GitHubAppError(Exception):
 
 def generate_oauth_state() -> str:
     """Generate a random state parameter for OAuth security"""
-    import secrets
-    return secrets.token_urlsafe(32)
+    return state_manager.generate_state()
 
 
 def generate_jwt() -> str:
@@ -165,12 +165,9 @@ async def exchange_code_for_user_token(code: str, state: str) -> Dict[str, Any]:
     if not GITHUB_APP_CLIENT_SECRET:
         raise GitHubAppError("GitHub App Client Secret not configured")
     
-    # Verify state parameter
-    if state not in oauth_states:
+    # Verify state parameter using centralized manager
+    if not state_manager.validate_state(state):
         raise GitHubAppError("Invalid state parameter")
-    
-    # Remove used state
-    oauth_states.pop(state, None)
     
     # Exchange code for token using OAuth App flow (for user authorization)
     headers = {"Accept": "application/json", "Content-Type": "application/json"}

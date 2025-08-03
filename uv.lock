@@ -3190,7 +3190,6 @@ dependencies = [
     { name = "ruff" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -3279,7 +3278,6 @@ requires-dist = [
     { name = "textual", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "unidiff", marker = "extra == 'dev'", specifier = ">=0.7.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.27.0" },
-    { name = "websockets", specifier = ">=15.0.1" },
 ]
 
 [[package]]
