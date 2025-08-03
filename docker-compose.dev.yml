@@ -1,3 +1,5 @@
+# Development environment configuration
+# Usage: docker compose -f docker-compose.dev.yml up
 
 services:
   # PostgreSQL Database
@@ -8,21 +10,23 @@ services:
     container_name: yudai-db-dev
     restart: unless-stopped
     environment:
-      - POSTGRES_DB=${POSTGRES_DB:-yudai_db}
-      - POSTGRES_USER=${POSTGRES_USER:-yudai_user}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-yudai_password}
+      - POSTGRES_DB=yudai_dev
+      - POSTGRES_USER=yudai_user
+      - POSTGRES_PASSWORD=yudai_password
     volumes:
       - postgres_data_dev:/var/lib/postgresql/data
       - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
     networks:
       - yudai-network-dev
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-yudai_user} -d ${POSTGRES_DB:-yudai_db}"]
+      test: ["CMD-SHELL", "pg_isready -U yudai_user -d yudai_dev"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # Backend API Service
+  # Backend API Service  
   backend:
     build:
       context: ./backend
@@ -30,16 +34,18 @@ services:
     container_name: yudai-be-dev
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-yudai_user}:${POSTGRES_PASSWORD:-yudai_password}@db:5432/${POSTGRES_DB:-yudai_db}
+      - DATABASE_URL=postgresql://yudai_user:yudai_password@db:5432/yudai_dev
       - DB_ECHO=true
       - PYTHONPATH=/app
       - DOCKER_COMPOSE=true
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
-      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
-      - GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI:-http://localhost:5173/auth/callback}
-      - SECRET_KEY=${SECRET_KEY:-dev_secret}
-      - JWT_SECRET=${JWT_SECRET:-dev_jwt_secret}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI:-http://localhost:3000/auth/callback}
+      - API_DOMAIN=localhost
+      - DEV_DOMAIN=localhost
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - JWT_SECRET=${JWT_SECRET:-dev-jwt-secret-change-in-production}
       - NODE_ENV=development
     ports:
       - "8000:8000"
@@ -57,17 +63,19 @@ services:
       timeout: 10s
       retries: 3
 
-  # Frontend Service (Development with nginx)
+  # Frontend Service (development with nginx)
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.dev
+      args:
+        - VITE_API_URL=http://localhost:8000
     container_name: yudai-fe-dev
     restart: unless-stopped
     environment:
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+      - VITE_API_URL=http://localhost:8000
     ports:
-      - "5173:80"
+      - "3000:80"
     depends_on:
       - backend
     networks:

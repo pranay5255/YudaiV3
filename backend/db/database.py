@@ -4,32 +4,27 @@ Database configuration and session management for YudaiV3
 import os
 import uuid
 from datetime import datetime, timedelta
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 # Import Base from unified models
 from models import Base
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 # Database URL from environment variables
 DATABASE_URL = os.getenv(
     "DATABASE_URL", 
-    "postgresql://yudai_user:yudai_password@db:5432/yudai_db"
+    "postgresql://yudai_user:yudai_password@db:5432/yudai_dev"
 )
 
-# Create engine optimized for real-time features and SSE
+# Create engine with standard configuration
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
-    pool_size=20,  # Increased for concurrent SSE connections
-    max_overflow=30,  # Allow burst connections for real-time updates
-    pool_recycle=3600,  # Recycle connections every hour
-    pool_timeout=30,  # Connection timeout
-    echo=bool(os.getenv("DB_ECHO", "false").lower() == "true"),
-    # Additional SSE-friendly settings
-    connect_args={
-        "application_name": "yudai_v3_sse",
-        "options": "-c timezone=UTC"
-    }
+    pool_size=20,
+    max_overflow=30,
+    pool_recycle=3600,
+    pool_timeout=30,
+    echo=bool(os.getenv("DB_ECHO", "false").lower() == "true")
 )
 #TODO: Add pgvector (very important vector db)
 
@@ -66,8 +61,20 @@ def create_sample_data():
     Create sample data for all tables
     """
     from models import (
-        User, AuthToken, Repository, FileItem, ContextCard, IdeaItem,
-        Issue, PullRequest, Commit, FileAnalysis, ChatSession, ChatMessage, UserIssue, FileEmbedding
+        AuthToken,
+        ChatMessage,
+        ChatSession,
+        Commit,
+        ContextCard,
+        FileAnalysis,
+        FileEmbedding,
+        FileItem,
+        IdeaItem,
+        Issue,
+        PullRequest,
+        Repository,
+        User,
+        UserIssue,
     )
     
     db = SessionLocal()
@@ -450,7 +457,7 @@ def create_sample_data():
                 issue_steps='["Set up OAuth2 provider", "Implement callback handler", "Add JWT token validation"]',
                 title="OAuth2 Authentication Implementation",
                 description="Help needed to implement OAuth2 authentication flow",
-                conversation_id="conv_001",
+                session_id="session_001",
                 chat_session_id=1,
                 context_cards='["card_001", "card_002"]',
                 ideas='["idea_001"]',

@@ -4,6 +4,7 @@ Database initialization script for YudaiV3
 This script can work both with and without the application models
 """
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -22,7 +23,7 @@ def wait_for_database(max_retries=30, delay=2):
         try:
             # Use Unix socket connection instead of TCP/IP
             engine = create_engine(
-                "postgresql://yudai_user:yudai_password@/yudai_db?host=/var/run/postgresql",
+                os.getenv("DATABASE_URL"),
                 pool_pre_ping=True
             )
             with engine.connect() as conn:
@@ -264,7 +265,7 @@ def create_tables_standalone(engine):
             issue_steps JSON,
             title VARCHAR(255) NOT NULL,
             description TEXT,
-            conversation_id VARCHAR(255),
+            session_id VARCHAR(255),
             chat_session_id INTEGER REFERENCES chat_sessions(id),
             context_cards JSON,
             ideas JSON,
@@ -542,8 +543,8 @@ requests==2.26.0', 500, NOW(), NOW()),
         
         # Sample UserIssues
         db.execute(text("""
-            INSERT INTO user_issues (user_id, issue_id, context_card_id, issue_text_raw, issue_steps, title, description, conversation_id, chat_session_id, context_cards, ideas, repo_owner, repo_name, priority, status, agent_response, processing_time, tokens_used, github_issue_url, github_issue_number, created_at, updated_at, processed_at) VALUES
-            (1, 'issue_001', 1, 'Need help implementing OAuth2 authentication', '["Set up OAuth2 provider", "Implement callback handler", "Add JWT token validation"]', 'OAuth2 Authentication Implementation', 'Help needed to implement OAuth2 authentication flow', 'conv_001', 1, '["card_001", "card_002"]', '["idea_001"]', 'alice_dev', 'awesome-project', 'high', 'pending', NULL, NULL, 0, NULL, NULL, NOW(), NOW(), NULL)
+            INSERT INTO user_issues (user_id, issue_id, context_card_id, issue_text_raw, issue_steps, title, description, session_id, chat_session_id, context_cards, ideas, repo_owner, repo_name, priority, status, agent_response, processing_time, tokens_used, github_issue_url, github_issue_number, created_at, updated_at, processed_at) VALUES
+            (1, 'issue_001', 1, 'Need help implementing OAuth2 authentication', '["Set up OAuth2 provider", "Implement callback handler", "Add JWT token validation"]', 'OAuth2 Authentication Implementation', 'Help needed to implement OAuth2 authentication flow', 'session_001', 1, '["card_001", "card_002"]', '["idea_001"]', 'alice_dev', 'awesome-project', 'high', 'pending', NULL, NULL, 0, NULL, NULL, NOW(), NOW(), NULL)
             ON CONFLICT (issue_id) DO NOTHING
         """))
         

@@ -12,6 +12,7 @@ from auth.github_oauth import (
     create_or_update_user,
     exchange_code_for_user_token,
     generate_oauth_state,
+    get_current_user,
     get_github_app_oauth_url,
     get_github_user_info,
     validate_github_app_config,
@@ -19,9 +20,11 @@ from auth.github_oauth import (
 from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 router = APIRouter()
+security = HTTPBearer()
 
 # Store OAuth states (in production, use Redis or database)
 oauth_states = {}
@@ -126,6 +129,36 @@ async def auth_callback(
         return RedirectResponse(url=error_url)
 
 
+@router.get("/profile")
+async def get_profile(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """
+    Get current user profile
+    
+    Returns:
+        User profile information
+    """
+    try:
+        user = await get_current_user(credentials, db)
+        
+        return {
+            "id": user.id,
+            "github_username": user.github_username,
+            "display_name": user.display_name,
+            "email": user.email,
+            "avatar_url": user.avatar_url,
+            "github_id": user.github_id
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Failed to get profile: {str(e)}"
+        )
+
+
 @router.get("/status")
 async def auth_status(
     request: Request,
@@ -149,9 +182,6 @@ async def auth_status(
         token = auth_header.split(" ")[1]
         
         # Find user by token
-        from auth.github_oauth import get_current_user
-        from fastapi.security import HTTPAuthorizationCredentials
-        
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
         user = await get_current_user(credentials, db)
         
@@ -162,7 +192,8 @@ async def auth_status(
                 "github_username": user.github_username,
                 "display_name": user.display_name,
                 "email": user.email,
-                "avatar_url": user.avatar_url
+                "avatar_url": user.avatar_url,
+                "github_id": user.github_id
             }
         }
         

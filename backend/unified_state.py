@@ -4,11 +4,10 @@ Mirrors TypeScript interfaces to ensure consistent state across WebSocket commun
 """
 
 from datetime import datetime
-from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field
 from enum import Enum
-import time
-import json
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 
 class AgentType(str, Enum):
@@ -38,14 +37,7 @@ class ContextCardSource(str, Enum):
     MANUAL = "manual"
 
 
-class WebSocketMessageType(str, Enum):
-    SESSION_UPDATE = "session_update"
-    MESSAGE = "message"
-    CONTEXT_CARD = "context_card"
-    AGENT_STATUS = "agent_status"
-    STATISTICS = "statistics"
-    HEARTBEAT = "heartbeat"
-    ERROR = "error"
+# Removed WebSocketMessageType enum - no longer needed without WebSockets
 
 
 # Unified state models that mirror TypeScript interfaces
@@ -134,162 +126,7 @@ class UnifiedSessionState(BaseModel):
         }
 
 
-class UnifiedWebSocketMessage(BaseModel):
-    type: WebSocketMessageType
-    session_id: str
-    data: Dict[str, Any]  # Union of all possible data types
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-
-    class Config:
-        json_encoders = {
-            datetime: lambda v: v.isoformat()
-        }
-
-
-# WebSocket connection manager for unified state
-class UnifiedWebSocketManager:
-    """
-    WebSocket connection manager that maintains unified state
-    and broadcasts updates to connected clients
-    """
-    
-    def __init__(self):
-        # {session_id: [WebSocket, WebSocket, ...]}
-        self.connections: Dict[str, List[Any]] = {}
-        # {session_id: UnifiedSessionState}
-        self.session_states: Dict[str, UnifiedSessionState] = {}
-
-    async def connect(self, websocket: Any, session_id: str, db_session, user_id: int = None):
-        """
-        Connect a WebSocket to a session. If it's the first connection
-        for this session, load the state from the database.
-        """
-        await websocket.accept()
-        if session_id not in self.connections:
-            self.connections[session_id] = []
-        self.connections[session_id].append(websocket)
-
-        # If state is not already in memory, load it from the database
-        if session_id not in self.session_states:
-            from issueChatServices.session_service import SessionService  # Avoid circular import
-            # Assuming user_id is retrievable from a token or similar, for now, this is a simplification
-            # In a real scenario, you would authenticate the websocket connection
-            try:
-                # We need a user_id to fetch the comprehensive context.
-                # This is a simplification. A real implementation would get the user from the websocket scope/token.
-                # For now, let's find the user associated with the session.
-                from models import ChatSession
-                session_db = db_session.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-                if not session_db:
-                    print(f"Session {session_id} not found in DB for new connection.")
-                    return # Or send an error
-                
-                state = SessionService.get_comprehensive_session_context(db_session, session_db.user_id, session_id)
-                if state:
-                    self.session_states[session_id] = state
-                else:
-                    print(f"Could not load state for session {session_id}")
-
-            except Exception as e:
-                print(f"Error loading session state for {session_id}: {e}")
-
-
-        # Send the latest state to the newly connected client
-        if session_id in self.session_states:
-            await self.send_session_state(session_id, self.session_states[session_id], specific_ws=websocket)
-
-    def disconnect(self, websocket: Any, session_id: str):
-        """Disconnect a WebSocket. If it's the last connection, clear the state from memory."""
-        if session_id in self.connections and websocket in self.connections[session_id]:
-            self.connections[session_id].remove(websocket)
-            if not self.connections[session_id]:
-                # Last client disconnected, clean up
-                del self.connections[session_id]
-                if session_id in self.session_states:
-                    del self.session_states[session_id]
-                    print(f"Session state for {session_id} cleared from memory.")
-    
-    async def broadcast_to_session(self, session_id: str, message):
-        """Broadcast a message to all connections for a session"""
-        if session_id in self.connections:
-            # Handle both dict and UnifiedWebSocketMessage
-            if isinstance(message, dict):
-                message_json = json.dumps(message)
-            else:
-                message_json = message.json()
-                
-            disconnected = []
-            
-            for connection in self.connections[session_id]:
-                try:
-                    await connection.send_text(message_json)
-                except Exception as e:
-                    print(f"Error sending WebSocket message: {e}")
-                    disconnected.append(connection)
-            
-            # Remove disconnected connections
-            for connection in disconnected:
-                self.disconnect(connection, session_id)
-    
-    async def send_session_state(self, session_id: str, state: UnifiedSessionState, specific_ws: Optional[Any] = None):
-        """Send the complete session state to all connections for a session, or just one."""
-        message = UnifiedWebSocketMessage(
-            type=WebSocketMessageType.SESSION_UPDATE,
-            session_id=session_id,
-            data=state.dict()
-        )
-        if specific_ws:
-             await specific_ws.send_text(message.json())
-        else:
-            await self.broadcast_to_session(session_id, message)
-    
-    async def update_and_broadcast_message(self, session_id: str, message: UnifiedMessage):
-        """Adds a message to the state and broadcasts the update."""
-        if session_id in self.session_states:
-            self.session_states[session_id].messages.append(message)
-            self.session_states[session_id].statistics.total_messages += 1
-            ws_message = UnifiedWebSocketMessage(
-                type=WebSocketMessageType.MESSAGE,
-                session_id=session_id,
-                data=message.dict()
-            )
-            await self.broadcast_to_session(session_id, ws_message)
-    
-    async def send_context_card_update(self, session_id: str, card: UnifiedContextCard, action: str = "add"):
-        """Send a context card update to all connections"""
-        ws_message = UnifiedWebSocketMessage(
-            type=WebSocketMessageType.CONTEXT_CARD,
-            session_id=session_id,
-            data={"action": action, "card": card.dict()}
-        )
-        await self.broadcast_to_session(session_id, ws_message)
-    
-    async def send_agent_status_update(self, session_id: str, status: UnifiedAgentStatus):
-        """Send an agent status update to all connections"""
-        ws_message = UnifiedWebSocketMessage(
-            type=WebSocketMessageType.AGENT_STATUS,
-            session_id=session_id,
-            data=status.dict()
-        )
-        await self.broadcast_to_session(session_id, ws_message)
-    
-    async def send_statistics_update(self, session_id: str, stats: UnifiedStatistics):
-        """Send statistics update to all connections"""
-        ws_message = UnifiedWebSocketMessage(
-            type=WebSocketMessageType.STATISTICS,
-            session_id=session_id,
-            data=stats.dict()
-        )
-        await self.broadcast_to_session(session_id, ws_message)
-    
-    async def send_heartbeat(self, session_id: str):
-        """Send heartbeat to all connections"""
-        ws_message = UnifiedWebSocketMessage(
-            type=WebSocketMessageType.HEARTBEAT,
-            session_id=session_id,
-            data={"timestamp": datetime.utcnow().timestamp()}
-        )
-        await self.broadcast_to_session(session_id, ws_message)
+# Removed UnifiedWebSocketMessage and UnifiedWebSocketManager - no longer needed without WebSockets
 
 
 # State conversion utilities
@@ -356,5 +193,4 @@ class StateConverter:
 
 
 
-# Global unified WebSocket manager instance
-unified_manager = UnifiedWebSocketManager()
+# Removed unified WebSocket manager - no longer needed without WebSockets

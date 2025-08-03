@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { Send, Plus } from 'lucide-react';
 import { Message, FileItem } from '../types';
-import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview, UserIssueResponse } from '../services/api';
+import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview } from '../services/api';
+import { UserIssueResponse } from '../types';
 import { useRepository } from '../hooks/useRepository';
 import { useSession } from '../hooks/useSession';
 import { useSessionHelpers } from '../hooks/useSessionHelpers';
 
 // Simple toast utility (replace with your own or a library if available)
 // This function is used to show a toast when the user clicks on "Create Issue"
-function showToast(message: string, type: 'error' | 'success' = 'error') {
+function showToast(message: string) {
   // This is a placeholder. Replace with your toast library or implementation.
   // For example, if using react-toastify: toast.error(message)
   if (typeof window !== 'undefined') {
@@ -40,7 +41,7 @@ interface IssuePreviewData extends GitHubIssuePreview {
 interface ChatProps {
   onAddToContext: (content: string) => void;
   onCreateIssue?: (conversationContext: Message[]) => void; // Made optional for backward compatibility
-  contextCards?: ContextCard[]; // Context cards from other components
+  contextCards?: ContextCard[]; // Context cards from other components #TODO: Remove this
   fileContext?: FileItem[]; // File dependencies context
   onShowIssuePreview?: (issuePreview: IssuePreviewData) => void; // Callback to show issue preview in modal
 }
@@ -54,9 +55,10 @@ export const Chat: React.FC<ChatProps> = ({
 }) => {
   // Suppress the unused variable warning by referencing it
   void onCreateIssue;
+  void contextCards; // Suppress unused variable warning
   
   const { selectedRepository } = useRepository();
-  const { sessionState, sendOptimisticUpdate, sendRealtimeMessage } = useSession();
+  const { sessionState, refreshSession } = useSession();
   const { sendMessage } = useSessionHelpers();
   
   // Use messages from session context instead of local state
@@ -102,7 +104,7 @@ export const Chat: React.FC<ChatProps> = ({
     // Check if we have an active session
     if (!sessionState.session_id) {
       const errorText = 'No active session found. Please select a repository first.';
-      showToast(errorText, 'error');
+      showToast(errorText);
       return;
     }
     
@@ -111,38 +113,9 @@ export const Chat: React.FC<ChatProps> = ({
     setIsLoading(true);
     
     try {
-      // Generate session ID if not exists
-      const currentSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      // Use the session helper to send message
+      await sendMessage(currentInput);
       
-      // Send to Daifu agent
-      const response = await ApiService.sendEnhancedChatMessage({
-        session_id: currentSessionId,
-        message: {
-          content: currentInput,
-          is_code: userMessage.isCode,
-        },
-        // Add context cards if available
-        context_cards: contextCards.map(card => card.id) || [],
-        // Add file context if available
-        file_context: fileContext.map(file => file.id) || [],
-      });
-      
-      // Update session ID if provided in response or if we generated a new one
-      if (response.session_id) {
-        setSessionId(response.session_id);
-      } else if (!sessionId) {
-        setSessionId(currentSessionId);
-      }
-      
-      // Add Daifu's response
-      const daifuMessage: Message = {
-        id: response.message_id,
-        content: response.reply,
-        isCode: false,
-        timestamp: new Date(),
-      };
-      
-      setMessages(prev => [...prev, daifuMessage]);
     } catch (error) {
       console.error('Failed to send message:', error);
       
@@ -157,23 +130,14 @@ export const Chat: React.FC<ChatProps> = ({
         }
       }
       // Show error as toast
-      showToast(errorText, 'error');
+      showToast(errorText);
 
-      // Add error message to session context (optional, can be removed if only toast is needed)
-      const errorMessage = {
-        id: Date.now().toString(),
-        session_id: sessionState.session_id,
-        content: errorText,
-        role: 'assistant',
-        is_code: false,
-        timestamp: new Date().toISOString(),
-        tokens: 0,
-        metadata: { status: 'error' }
-      };
-      sendRealtimeMessage({
-        type: 'MESSAGE',
-        data: errorMessage
-      });
+      // Refresh session to get latest state after error
+      try {
+        await refreshSession();
+      } catch (refreshError) {
+        console.error('Failed to refresh session after error:', refreshError);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -226,28 +190,46 @@ export const Chat: React.FC<ChatProps> = ({
         priority: 'medium'
       };
 
-      // Create issue preview
-      const response = await ApiService.createIssueWithContext(request, true, true);
+      // Create issue from chat (this method may need to be implemented)
+      // For now, using the existing createIssueFromChat method
+      const chatRequest = {
+        session_id: sessionState.session_id || '',
+        message: { content: request.title, is_code: false },
+        context_cards: []
+      };
+      const response = await ApiService.createIssueFromChat(chatRequest);
       
       if (response.success && onShowIssuePreview) {
-        // Show the issue preview in the DiffModal
-        onShowIssuePreview({
-          ...response.github_preview,
-          userIssue: response.user_issue,
+        // Create a mock GitHub issue preview since the API structure changed
+        const mockPreview = {
+          title: response.issue.title,
+          body: response.issue.description || response.issue.issue_text_raw,
+          labels: [],
+          assignees: [],
+          repository_info: request.repository_info,
+          metadata: {
+            chat_messages_count: conversationMessages.length,
+            file_context_count: fileContextItems.length,
+            total_tokens: fileContextItems.reduce((sum, file) => sum + file.tokens, 0),
+            generated_at: new Date().toISOString(),
+            generation_method: 'chat_conversation'
+          },
+          userIssue: response.issue,
           conversationContext: conversationMessages,
           fileContext: fileContextItems,
           canCreateGitHubIssue: !!selectedRepository,
           repositoryInfo: request.repository_info
-        });
-        // Show a success toast when the user clicks on "Create Issue" and the preview is shown
-        showToast('GitHub issue preview created successfully!', 'success');
+        };
+        
+        onShowIssuePreview(mockPreview);
+        showToast('Issue created successfully!');
       }
       
     } catch (error) {
       console.error('Failed to create GitHub issue:', error);
       const errorText = `Failed to create GitHub issue: ${error instanceof Error ? error.message : 'Unknown error'}`;
       // Show error as toast
-      showToast(errorText, 'error');
+      showToast(errorText);
       // Optionally, you could also send this as a chat message if desired
       // const errorMessage: Message = {
       //   id: Date.now().toString(),

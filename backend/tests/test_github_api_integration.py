@@ -10,9 +10,9 @@ These tests verify the complete GitHub API integration including:
 - Authentication integration
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
 from auth.github_oauth import get_github_api
 
 
@@ -200,6 +200,7 @@ class TestGitHubAPIAuthentication:
     def test_github_api_expired_token(self, test_db, dummy_user):
         """Test GitHub API instance creation with expired token"""
         from datetime import datetime, timedelta
+
         from models import AuthToken
         
         # Create expired token
@@ -367,7 +368,7 @@ class TestEndToEndIntegration:
         mock_post.return_value.json.return_value = mock_daifu_response
         
         chat_data = {
-            "conversation_id": "test_conv",
+            "session_id": "test_session",
             "message": {
                 "content": "Tell me about my repository test-repo",
                 "is_code": False

@@ -206,7 +206,7 @@ class MessageService:
             CreateChatMessageRequest object
         """
         return MessageService.create_user_message_request(
-            session_id=chat_request.conversation_id,
+            session_id=chat_request.session_id,
             content=chat_request.message.content,
             is_code=chat_request.message.is_code,
             context_cards=chat_request.context_cards,

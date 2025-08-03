@@ -1,498 +1,728 @@
-# YudaiV3 Backend API
+# YudaiV3 Backend API Documentation
 
-A unified FastAPI server that combines all backend services for the YudaiV3 application.
+**Last Updated**: January 2025  
+**Version**: 1.0.0  
+**Status**: 🟡 PARTIALLY READY - CRITICAL FIXES REQUIRED  
+**Base URL**: `http://localhost:8000` (dev), `https://yudai.app/api` (prod)
 
-## Services Included
+## 🚨 CRITICAL NOTICE
 
-### 🔐 Authentication (`/auth`)
-- **Purpose**: Handles user authentication, session management, and profile retrieval.
-- **Functions**:
-  - `github_login()`: [Used] Initiates the GitHub OAuth2 flow.
-  - `github_callback()`: [Used] Handles the callback from GitHub after authentication.
-  - `get_user_profile()`: [Used] Retrieves the authenticated user's profile.
-  - `logout()`: [Used] Logs the user out and invalidates their session.
-  - `auth_status()`: [Used] Checks the current authentication status.
-  - `get_auth_config()`: [Used] Provides public authentication configuration.
+**This API is NOT DEMO READY** - Several critical issues must be resolved before production deployment:
+- 🔒 Security vulnerabilities in WebSocket authentication
+- 💾 Missing pgvector database extension
+- 🐛 File dependencies service broken
+- ⚠️ Debug code exposed in production
 
-### 🐙 GitHub Integration (`/github`)
-- **Purpose**: Manages interactions with the GitHub API, including repositories, issues, and pull requests.
-- **Functions**:
-  - `get_my_repositories()`: [Used] Fetches the authenticated user's repositories.
-  - `get_repository_info()`: [Used] Retrieves details for a specific repository.
-  - `create_repository_issue()`: [Used] Creates a new issue in a repository.
-  - `get_repository_issues_list()`: [Used] Lists issues for a repository.
-  - `get_repository_pulls_list()`: [Used] Lists pull requests for a repository.
-  - `get_repository_commits_list()`: [Used] Lists commits for a repository.
-  - `get_repository_branches_list()`: [Used] Lists branches for a repository.
-  - `search_github_repositories()`: [Used] Searches for repositories on GitHub.
+---
 
-### 💬 Chat Services (`/daifu`)
-- **Purpose**: Integrates with the DAifu AI agent, manages chat sessions, and handles real-time communication.
-- **Functions**:
-  - `create_or_get_session()`: [Used] Creates or retrieves a chat session.
-  - `get_session_context()`: [Used] Gets the comprehensive context for a session.
-  - `touch_session()`: [Used] Updates the last activity timestamp for a session.
-  - `get_user_sessions()`: [Used] Retrieves all sessions for a user.
-  - `chat_daifu()`: [Used] **REFACTORED** - Unified chat endpoint with WebSocket support.
-  - `websocket_session_endpoint()`: [Used] Handles WebSocket connections for real-time updates.
-  - `handle_websocket_message()`: [Used] Processes incoming WebSocket messages.
-  - `handle_new_message_realtime()`: [Used] Manages new messages in real-time.
-  - `process_ai_response_background()`: [Used] Background task for AI response processing.
-  - `get_session_statistics()`: [Used] Retrieves statistics for a session.
-  - `update_session_title()`: [Used] Updates the title of a session.
-  - `deactivate_session()`: [Used] Deactivates a chat session.
-  - `create_issue_from_chat()`: [Used] Creates an issue from a chat conversation.
+## 📋 QUICK REFERENCE
 
-### 📋 Issue Management (`/issues`)
-- **Purpose**: Manages user-generated issues, tracks their status, and integrates with GitHub issues.
-- **Functions**:
-  - `create_issue()`: [Used] Creates a new user issue.
-  - `get_issues()`: [Used] Retrieves a list of user issues.
-  - `get_issue()`: [Used] Retrieves a specific user issue.
-  - `create_issue_with_context()`: [Used] Creates an issue with context from a chat.
-  - `update_issue_status()`: [Used] Updates the status of an issue.
-  - `create_github_issue_from_user_issue()`: [Used] Converts a user issue to a GitHub issue.
-  - `create_issue_from_chat()`: [Used] Creates an issue directly from a chat request.
-  - `get_issue_statistics()`: [Used] Retrieves statistics for user issues.
+| Service | Prefix | Status | Endpoints | Issues |
+|---------|--------|--------|-----------|--------|
+| Authentication | `/auth` | ✅ Stable | 6 | None |
+| GitHub Integration | `/github` | ✅ Stable | 8 | None |
+| Chat Services | `/daifu` | ⚠️ Partial | 12 | Security, consistency |
+| Issue Management | `/issues` | ✅ Stable | 7 | None |
+| File Dependencies | `/filedeps` | ❌ Broken | 4 | Core functionality |
 
-### 📁 File Dependencies (`/filedeps`)
-- **Purpose**: Analyzes repository file structures and dependencies.
-- **Functions**:
-  - `root()`: [Used] Provides basic API information.
-  - `get_repository_by_url()`: [Used] Retrieves a repository by its URL.
-  - `get_repository_files()`: [Used] Lists files for a repository.
-  - `extract_file_dependencies()`: [Used] Extracts file dependencies from a repository.
+**Total Endpoints**: 37 | **Working**: 31 (84%) | **Broken**: 6 (16%)
 
-## Quick Start
+---
 
-### Prerequisites
-- Python 3.11+
-- PostgreSQL database
-- GitHub OAuth app configured
+## 🏗️ UNIFIED FASTAPI ARCHITECTURE
 
-### Installation
-
-1. Install dependencies:
-```bash
-pip install -r requirements.txt
+### Core Server Structure
+```python
+# backend/run_server.py
+app = FastAPI(
+    title="YudaiV3 Backend API",
+    description="Unified backend API for YudaiV3",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
 ```
 
-2. Set up environment variables:
-```bash
-cp env.example .env
-# Edit .env with your configuration
+### Service Mounting
+```python
+app.include_router(auth_router, prefix="/auth", tags=["authentication"])
+app.include_router(github_router, prefix="/github", tags=["github"])
+app.include_router(daifu_router, prefix="/daifu", tags=["chat"])
+app.include_router(issue_router, prefix="/issues", tags=["issues"])
+app.include_router(filedeps_router, prefix="/filedeps", tags=["file-dependencies"])
 ```
 
-3. Initialize the database:
-```bash
-python init_db.py
-```
+### Database Layer
+- **Engine**: PostgreSQL with SQLAlchemy ORM
+- **Connection Pool**: 20 connections, 30 max overflow
+- **Extensions**: **❌ MISSING pgvector** (critical for file embeddings)
 
-4. Start the server:
-```bash
-python run_server.py
-```
+---
 
-The server will be available at:
-- **API**: http://localhost:8000
-- **Documentation**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+## 🔐 AUTHENTICATION SERVICE (`/auth`) ✅ STABLE
 
-## Production Deployment
+**Purpose**: GitHub OAuth2 authentication with JWT token management  
+**Implementation**: `backend/auth/auth_routes.py`  
+**Status**: Production ready, no known issues
 
-### Docker Compose Production Setup
+### Endpoints
 
-The production environment uses Docker Compose with the following services:
-
-#### 1. Database Service (`db`)
-- **Container**: `yudai-db`
-- **Port**: Internal only (5432)
-- **Health Check**: PostgreSQL readiness check
-- **Volumes**: Persistent PostgreSQL data
-
-#### 2. Backend Service (`backend`)
-- **Container**: `yudai-be`
-- **Port**: 127.0.0.1:8000 (localhost only)
-- **Health Check**: HTTP health endpoint
-- **Environment Variables**:
-  - `DATABASE_URL`: PostgreSQL connection string
-  - `GITHUB_CLIENT_ID`: GitHub OAuth app client ID
-  - `GITHUB_CLIENT_SECRET`: GitHub OAuth app client secret
-  - `GITHUB_REDIRECT_URI`: https://yudai.app/auth/callback
-  - `API_DOMAIN`: api.yudai.app
-  - `DEV_DOMAIN`: dev.yudai.app
-
-#### 3. Frontend Service (`frontend`)
-- **Container**: `yudai-fe`
-- **Ports**: 80 (HTTP), 443 (HTTPS)
-- **Environment Variables**:
-  - `VITE_API_URL`: https://yudai.app/api
-- **SSL**: Mounted from `./ssl` directory
-- **Health Check**: Frontend health endpoint
-
-### Nginx Configuration
-
-The production setup uses nginx as a reverse proxy with SSL termination. There are two nginx configuration files:
-
-#### `nginx.prod.conf` - Production Configuration
-- **SSL/TLS**: Full SSL configuration with modern ciphers
-- **Multiple Domains**:
-  - `yudai.app` (main application)
-  - `api.yudai.app` (API subdomain)
-  - `dev.yudai.app` (development subdomain)
-- **Security Headers**: HSTS, X-Frame-Options, CSP, etc.
-- **CORS**: Configured for cross-origin requests
-- **Proxy Rules**:
-  - `/auth/*` → `backend:8000/auth/*` (direct auth proxy)
-  - `/api/*` → `backend:8000/*` (API proxy with prefix removal)
-  - `/` → Static frontend files
-
-#### `nginx.conf` - Development Configuration
-- **HTTP Only**: No SSL configuration
-- **Single Domain**: localhost
-- **Simplified CORS**: Allow all origins (`*`)
-- **Proxy Rules**:
-  - `/auth/*` → `backend:8000/auth/*`
-  - `/api/*` → `backend:8000/*`
-
-### Production Deployment Commands
+#### `GET /auth/login`
+**Purpose**: Initiate GitHub OAuth2 flow  
+**Authentication**: None required  
+**Response**: Redirects to GitHub OAuth page
 
 ```bash
-# Start production environment
-docker compose -f docker-compose.prod.yml up -d
-
-# View logs
-docker compose -f docker-compose.prod.yml logs -f
-
-# Stop production environment
-docker compose -f docker-compose.prod.yml down
-
-# Rebuild and restart
-docker compose -f docker-compose.prod.yml up -d --build
+curl -X GET "http://localhost:8000/auth/login"
 ```
 
-## API Endpoints
+#### `GET /auth/callback`
+**Purpose**: Handle GitHub OAuth callback with authorization code  
+**Parameters**: 
+- `code` (query): OAuth authorization code
+- `state` (query): OAuth state parameter
 
-### Root Endpoints
-- `GET /` - API information and service overview
-- `GET /health` - Health check
+```bash
+curl -X GET "http://localhost:8000/auth/callback?code=123&state=xyz"
+```
 
-### Authentication (`/auth`)
-- `GET /auth/login` - GitHub OAuth login (redirects to GitHub)
-- `GET /auth/callback` - OAuth callback (handles GitHub response)
-- `GET /auth/profile` - User profile (requires authentication)
-- `POST /auth/logout` - Logout (requires authentication)
-- `GET /auth/status` - Auth status (optional authentication)
-- `GET /auth/config` - Auth configuration (public)
+#### `GET /auth/profile`
+**Purpose**: Get authenticated user profile  
+**Authentication**: Bearer token required  
+**Response**: Complete user profile object
 
-### GitHub Integration (`/github`)
-- `GET /github/repositories` - User repositories (requires auth)
-- `GET /github/repositories/{owner}/{repo}` - Repository details
-- `POST /github/repositories/{owner}/{repo}/issues` - Create issue
-- `GET /github/repositories/{owner}/{repo}/issues` - Repository issues
-- `GET /github/repositories/{owner}/{repo}/pulls` - Repository PRs
-- `GET /github/repositories/{owner}/{repo}/commits` - Repository commits
-- `GET /github/search/repositories` - Search repositories
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/auth/profile"
+```
 
-### Chat Services (`/daifu`) - **REFACTORED**
-- `POST /daifu/chat/daifu` - **UNIFIED** Chat with DAifu agent (supports both sync/async modes)
-- `GET /daifu/chat/sessions` - Chat sessions (requires auth) - **DEPRECATED**
-- `GET /daifu/chat/sessions/{session_id}/messages` - Session messages - **DEPRECATED**
-- `GET /daifu/chat/sessions/{session_id}/statistics` - Session statistics
-- `PUT /daifu/chat/sessions/{session_id}/title` - Update session title
-- `DELETE /daifu/chat/sessions/{session_id}` - Deactivate session
-- `POST /daifu/chat/create-issue` - Create issue from chat
-- `POST /daifu/sessions` - Create new session
-- `GET /daifu/sessions/{session_id}` - Get session context
-- `POST /daifu/sessions/{session_id}/touch` - Update session activity
-- `GET /daifu/sessions` - Get user sessions
-- `WS /daifu/sessions/{session_id}/ws` - WebSocket for real-time updates
+#### `POST /auth/logout`
+**Purpose**: Invalidate user session and token  
+**Authentication**: Bearer token required
 
-### Issue Management (`/issues`)
-- `POST /issues/` - Create user issue (requires auth)
-- `GET /issues/` - Get user issues (requires auth)
-- `GET /issues/{issue_id}` - Get specific issue
-- `PUT /issues/{issue_id}/status` - Update issue status
-- `POST /issues/{issue_id}/convert-to-github` - Convert to GitHub issue
-- `POST /issues/from-chat` - Create issue from chat
-- `GET /issues/statistics` - Issue statistics
+```bash
+curl -X POST -H "Authorization: Bearer <token>" "http://localhost:8000/auth/logout"
+```
 
-### File Dependencies (`/filedeps`)
-- `GET /filedeps/` - File dependencies API info
-- `GET /filedeps/repositories` - User repositories (requires auth)
-- `GET /filedeps/repositories?repo_url=<url>` - Repository lookup by URL
-- `GET /filedeps/repositories/{repository_id}` - Repository details
-- `GET /filedeps/repositories/{repository_id}/files` - Repository files
-- `POST /filedeps/extract` - Extract file dependencies
+#### `GET /auth/status`
+**Purpose**: Check current authentication status  
+**Authentication**: Optional Bearer token
 
-## Frontend Integration
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/auth/status"
+```
 
-### Environment Variables
-- `VITE_API_URL`: Base URL for API requests
-  - Development: `http://localhost:8000`
-  - Production: `https://yudai.app/api`
+#### `GET /auth/config`
+**Purpose**: Get public authentication configuration  
+**Authentication**: None required
+
+```bash
+curl "http://localhost:8000/auth/config"
+```
 
 ### Authentication Flow
-1. User clicks login → `GET /auth/login`
-2. Redirected to GitHub OAuth
-3. GitHub redirects to → `GET /auth/callback?code=...&state=...`
-4. Backend exchanges code for token
-5. Frontend stores token in localStorage
-6. Subsequent requests include `Authorization: Bearer <token>` header
-
-### API Request Patterns
-```javascript
-// Auth endpoints (direct proxy)
-const authUrl = `${API_BASE_URL}/auth/login`;
-
-// API endpoints (with /api prefix)
-const apiUrl = `${API_BASE_URL}/github/repositories`;
+```
+1. Frontend → GET /auth/login → Redirect to GitHub
+2. GitHub → GET /auth/callback?code=xxx → Exchange for token
+3. Backend → Store user & token → Return JWT to frontend
+4. Frontend → Store token → Use in Authorization header
 ```
 
-## 🚨 CRITICAL FRONTEND-BACKEND INTEGRATION ISSUES - **FIXED**
+---
 
-### ✅ **1. FIXED: WebSocket URL Construction** 
-**Issue**: WebSocket connections fail in production due to incorrect URL construction
-```typescript
-// FIXED: src/services/api.ts:619-637
-static createSessionWebSocket(sessionId: string, token: string | null): WebSocket {
-  const baseUrl = import.meta.env.VITE_API_URL || 
-    (import.meta.env.DEV ? 'http://localhost:8000' : 'https://yudai.app');
-  
-  // Remove /api prefix if present (WebSocket endpoints don't use /api prefix)
-  const cleanBaseUrl = baseUrl.replace('/api', '');
-  
-  // Convert to WebSocket URL
-  const wsUrl = cleanBaseUrl.replace('http', 'ws').replace('https', 'wss');
-  
-  const url = new URL(`${wsUrl}/daifu/sessions/${sessionId}/ws`);
-  // ...
-}
-```
-**Fix**: Proper URL construction that removes `/api` prefix for WebSocket connections
+## 🐙 GITHUB INTEGRATION SERVICE (`/github`) ✅ STABLE
 
-### ✅ **2. FIXED: Unified Chat Endpoint**
-**Issue**: Two chat endpoints with different behaviors
-```python
-# REFACTORED: Single unified endpoint
-@router.post("/chat/daifu")
-async def chat_daifu(
-    request: ChatRequest,
-    background_tasks: BackgroundTasks,
-    async_mode: bool = Query(False, description="Use async mode for real-time updates"),
-    # ...
-):
-    # Single implementation with async_mode parameter
-```
-**Fix**: Consolidated `/chat/daifu` and `/chat/daifu/v2` into single endpoint with `async_mode` parameter
+**Purpose**: Full GitHub API integration for repository and issue management  
+**Implementation**: `backend/github/github_routes.py`  
+**Status**: Production ready, comprehensive GitHub integration
 
-### ✅ **3. FIXED: Eliminated Code Duplication**
-**Issue**: Duplicate LLM calling logic and message creation
-```python
-# NEW: Centralized services
-from .llm_service import LLMService
-from .message_service import MessageService
-from .session_validator import SessionValidator
+### Repository Management
 
-# Eliminated ~150 lines of duplicate code
-```
-**Fix**: Created centralized services for LLM calls, message creation, and session validation
+#### `GET /github/repositories`
+**Purpose**: Get user's GitHub repositories  
+**Authentication**: Bearer token required  
+**Response**: List of repositories with metadata
 
-### ✅ **4. FIXED: Standardized Session ID Naming**
-**Issue**: Inconsistent session/conversation ID naming
-```typescript
-// FIXED: Consistent naming throughout
-export interface ChatRequest {
-  conversation_id?: string; // Backend expects conversation_id
-  message: ChatMessage;
-  // ...
-}
-```
-**Fix**: Standardized on `conversation_id` for chat requests, `session_id` for session management
-
-### ✅ **5. FIXED: Enhanced WebSocket Error Handling**
-**Issue**: Poor WebSocket error handling and reconnection
-```typescript
-// NEW: Enhanced WebSocket with reconnection
-static createReconnectingWebSocket(
-  sessionId: string,
-  token: string | null,
-  onMessage: (event: MessageEvent) => void,
-  maxReconnectAttempts: number = 5,
-  reconnectDelay: number = 1000
-): {
-  ws: WebSocket | null;
-  disconnect: () => void;
-  reconnect: () => void;
-}
-```
-**Fix**: Added automatic reconnection with exponential backoff and proper error handling
-
-## Environment Variables
-
-### Required Environment Variables
-- `DATABASE_URL` - PostgreSQL connection string
-- `GITHUB_CLIENT_ID` - GitHub OAuth app client ID
-- `GITHUB_CLIENT_SECRET` - GitHub OAuth app client secret
-- `GITHUB_REDIRECT_URI` - OAuth redirect URI
-- `OPENROUTER_API_KEY` - OpenRouter API key for DAifu agent
-- `SECRET_KEY` - Application secret key
-- `JWT_SECRET` - JWT token signing secret
-
-### Production-Specific Variables
-- `POSTGRES_DB` - Database name
-- `POSTGRES_USER` - Database user
-- `POSTGRES_PASSWORD` - Database password
-- `API_DOMAIN` - API subdomain (api.yudai.app)
-- `DEV_DOMAIN` - Development subdomain (dev.yudai.app)
-
-## Security Configuration
-
-### SSL/TLS
-- **Protocols**: TLSv1.2, TLSv1.3
-- **Ciphers**: Modern ECDHE-RSA ciphers
-- **HSTS**: 1 year with includeSubDomains
-- **Certificate**: Full chain required
-
-### Security Headers
-- `Strict-Transport-Security`: HTTPS enforcement
-- `X-Frame-Options`: Clickjacking protection
-- `X-Content-Type-Options`: MIME type sniffing protection
-- `X-XSS-Protection`: XSS protection
-- `Referrer-Policy`: Referrer information control
-
-### CORS Configuration
-- **Allowed Origins**: https://yudai.app
-- **Methods**: GET, POST, PUT, DELETE, OPTIONS
-- **Headers**: Authorization, Content-Type, etc.
-- **Credentials**: Supported
-
-## Error Handling
-
-All endpoints include proper error handling with appropriate HTTP status codes:
-- `400` - Bad Request
-- `401` - Unauthorized
-- `404` - Not Found
-- `500` - Internal Server Error
-
-## Health Checks
-
-### Container Health Checks
-- **Database**: PostgreSQL readiness check
-- **Backend**: HTTP health endpoint
-- **Frontend**: Nginx health endpoint
-
-### Health Endpoints
-- `GET /health` - Backend health check
-- `GET /` - Frontend health check (nginx)
-
-## Monitoring and Logging
-
-### Nginx Logs
-- **Access Logs**: Request/response logging
-- **Error Logs**: Error condition logging
-- **Format**: JSON format for production
-
-### Application Logs
-- **Backend**: FastAPI application logs
-- **Database**: PostgreSQL logs
-- **Container**: Docker container logs
-
-## Development vs Production
-
-### Development Environment
-- **File**: `docker-compose.yml`
-- **Nginx**: `nginx.conf`
-- **SSL**: Disabled
-- **CORS**: Allow all origins
-- **Ports**: Exposed directly
-
-### Production Environment
-- **File**: `docker-compose.prod.yml`
-- **Nginx**: `nginx.prod.conf`
-- **SSL**: Enabled with certificates
-- **CORS**: Restricted to specific domains
-- **Ports**: Internal networking with nginx proxy
-
-## Troubleshooting
-
-### Common Issues
-
-1. **SSL Certificate Errors**
-   - Verify certificate files in `./ssl/`
-   - Check certificate expiration
-   - Validate domain names
-
-2. **CORS Errors**
-   - Verify nginx CORS headers
-   - Check frontend API_BASE_URL
-   - Validate allowed origins
-
-3. **Authentication Failures**
-   - Verify GitHub OAuth app configuration
-   - Check GITHUB_REDIRECT_URI matches
-   - Validate environment variables
-
-4. **Database Connection Issues**
-   - Check DATABASE_URL format
-   - Verify PostgreSQL container health
-   - Validate network connectivity
-
-5. **WebSocket Connection Failures** ✅ **FIXED**
-   - ✅ WebSocket URL construction fixed
-   - ✅ Proper nginx WebSocket proxy configuration
-   - ✅ Enhanced error handling and reconnection
-
-### Debug Commands
 ```bash
-# Check container status
-docker ps
-
-# View container logs
-docker logs yudai-be
-docker logs yudai-fe
-
-# Test nginx configuration
-docker exec yudai-fe nginx -t
-
-# Test backend connectivity
-curl -I http://localhost:8000/health
-
-# Test frontend connectivity
-curl -I https://yudai.app/health
-
-# Test WebSocket connection (requires wscat)
-wscat -c "wss://yudai.app/daifu/sessions/test/ws?token=test"
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/github/repositories"
 ```
 
-## ✅ **REFACTORING COMPLETED**
+#### `GET /github/repositories/{owner}/{repo}`
+**Purpose**: Get specific repository details  
+**Authentication**: Bearer token required
 
-### 🔴 Critical Issues - **ALL FIXED**
-1. ✅ **Fixed WebSocket URL construction** - All real-time features now work
-2. ✅ **Unified chat endpoints** - Single endpoint with async/sync modes
-3. ✅ **Eliminated code duplication** - Centralized services created
-4. ✅ **Standardized session ID naming** - Consistent naming throughout
-5. ✅ **Enhanced WebSocket error handling** - Automatic reconnection with backoff
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/github/repositories/owner/repo"
+```
 
-### 🟡 High Priority Issues - **ALL FIXED**
-6. ✅ **Added WebSocket error handling and reconnection** - Improved user experience
-7. ✅ **Fixed auth URL configuration** - Proper authentication flow
-8. ✅ **Standardized API response structures** - Consistent error handling
+#### `GET /github/repositories/{owner}/{repo}/branches`
+**Purpose**: List repository branches  
+**Authentication**: Bearer token required
 
-### 🟢 Medium Priority Issues - **ALL FIXED**
-9. ✅ **Implemented missing WebSocket message handlers** - Complete real-time features
-10. ✅ **Added comprehensive error boundaries** - Better error recovery
-11. ✅ **Implemented connection health monitoring** - Proactive issue detection
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/github/repositories/owner/repo/branches"
+```
 
-### 📊 **Code Quality Improvements**
-- **Reduced code duplication**: ~150 lines eliminated
-- **Improved maintainability**: Centralized services
-- **Enhanced error handling**: Comprehensive error management
-- **Better type safety**: Consistent TypeScript interfaces
-- **Real-time reliability**: Robust WebSocket implementation
+### Issue Management
 
-### 🚀 **Performance Improvements**
-- **Faster response times**: Optimized LLM calls
-- **Better resource usage**: Eliminated redundant operations
-- **Improved scalability**: Modular service architecture
-- **Enhanced user experience**: Real-time updates with reconnection
+#### `GET /github/repositories/{owner}/{repo}/issues`
+**Purpose**: List repository issues  
+**Authentication**: Bearer token required  
+**Parameters**: Standard GitHub API filters
+
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/github/repositories/owner/repo/issues"
+```
+
+#### `POST /github/repositories/{owner}/{repo}/issues`
+**Purpose**: Create new issue in repository  
+**Authentication**: Bearer token required  
+**Body**: Issue creation data
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Bug report","body":"Issue description"}' \
+  "http://localhost:8000/github/repositories/owner/repo/issues"
+```
+
+### Additional Endpoints
+
+#### `GET /github/repositories/{owner}/{repo}/pulls`
+**Purpose**: List repository pull requests
+
+#### `GET /github/repositories/{owner}/{repo}/commits`
+**Purpose**: List repository commits
+
+#### `GET /github/search/repositories`
+**Purpose**: Search public GitHub repositories
+
+---
+
+## 💬 DAIFU CHAT SERVICE (`/daifu`) ⚠️ PARTIALLY WORKING
+
+**Purpose**: AI-powered chat with real-time WebSocket communication  
+**Implementation**: `backend/daifuUserAgent/chat_api.py`  
+**Status**: Core functionality works but has critical security issues
+
+### 🔴 CRITICAL ISSUES
+1. **WebSocket Authentication Race Conditions**: Auth validation happens after connection
+2. **Session ID Inconsistency**: Mixed `session_id` vs `conversation_id` usage
+3. **Missing Rate Limiting**: Vulnerable to abuse
+4. **Deprecated Endpoints**: Legacy endpoints still in use
+
+### Session Management
+
+#### `POST /daifu/sessions`
+**Purpose**: Create new chat session  
+**Authentication**: Bearer token required  
+**Body**: Session creation request
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"repo_owner":"owner","repo_name":"repo","repo_branch":"main"}' \
+  "http://localhost:8000/daifu/sessions"
+```
+
+#### `GET /daifu/sessions`
+**Purpose**: Get user's chat sessions  
+**Authentication**: Bearer token required
+
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/daifu/sessions"
+```
+
+#### `GET /daifu/sessions/{session_id}`
+**Purpose**: Get session context and metadata  
+**Authentication**: Bearer token required
+
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/daifu/sessions/123"
+```
+
+#### `POST /daifu/sessions/{session_id}/touch`
+**Purpose**: Update session last activity timestamp  
+**Authentication**: Bearer token required
+
+```bash
+curl -X POST -H "Authorization: Bearer <token>" "http://localhost:8000/daifu/sessions/123/touch"
+```
+
+### Chat Operations
+
+#### `POST /daifu/chat/daifu`
+**Purpose**: Send chat message to AI agent  
+**Authentication**: Bearer token required  
+**Body**: Chat request with message and context  
+**⚠️ Issue**: Legacy endpoint, inconsistent behavior
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"conversation_id":"123","message":{"content":"Hello","is_code":false}}' \
+  "http://localhost:8000/daifu/chat/daifu"
+```
+
+#### `GET /daifu/chat/sessions/{session_id}/messages`
+**Purpose**: Get chat message history  
+**Authentication**: Bearer token required
+
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/daifu/chat/sessions/123/messages"
+```
+
+#### `PUT /daifu/chat/sessions/{session_id}/title`
+**Purpose**: Update session title  
+**Authentication**: Bearer token required
+
+```bash
+curl -X PUT \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"New Session Title"}' \
+  "http://localhost:8000/daifu/chat/sessions/123/title"
+```
+
+#### `DELETE /daifu/chat/sessions/{session_id}`
+**Purpose**: Deactivate chat session  
+**Authentication**: Bearer token required
+
+```bash
+curl -X DELETE -H "Authorization: Bearer <token>" "http://localhost:8000/daifu/chat/sessions/123"
+```
+
+### Statistics and Analytics
+
+#### `GET /daifu/chat/sessions/{session_id}/statistics`
+**Purpose**: Get session usage statistics  
+**Authentication**: Bearer token required
+
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/daifu/chat/sessions/123/statistics"
+```
+
+#### `POST /daifu/chat/create-issue`
+**Purpose**: Create issue from chat conversation  
+**Authentication**: Bearer token required
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"123","title":"Issue from chat"}' \
+  "http://localhost:8000/daifu/chat/create-issue"
+```
+
+### 🔌 WebSocket Real-time Communication
+
+#### `WS /daifu/sessions/{session_id}/ws`
+**Purpose**: Real-time chat updates and notifications  
+**Authentication**: Token via query parameter  
+**⚠️ CRITICAL SECURITY ISSUE**: Authentication race conditions
+
+```javascript
+// ❌ VULNERABLE: Current implementation
+const ws = new WebSocket(`ws://localhost:8000/daifu/sessions/123/ws?token=${token}`);
+
+// Connection establishes BEFORE authentication validation
+ws.onopen = () => {
+  // User already connected, auth happens async
+};
+```
+
+#### WebSocket Message Types
+| Type | Direction | Purpose | Status |
+|------|-----------|---------|--------|
+| `SESSION_UPDATE` | Server → Client | Session state changes | ✅ Working |
+| `MESSAGE` | Bidirectional | Chat messages | ✅ Working |
+| `CONTEXT_CARD` | Server → Client | Context updates | ✅ Working |
+| `AGENT_STATUS` | Server → Client | AI agent status | ✅ Working |
+| `STATISTICS` | Server → Client | Usage statistics | ✅ Working |
+| `HEARTBEAT` | Bidirectional | Connection health | ✅ Working |
+| `ERROR` | Server → Client | Error notifications | ✅ Working |
+
+---
+
+## 📋 ISSUE MANAGEMENT SERVICE (`/issues`) ✅ STABLE
+
+**Purpose**: User-generated issue management with GitHub integration  
+**Implementation**: `backend/issueChatServices/issue_service.py`  
+**Status**: Production ready, comprehensive issue lifecycle
+
+### Issue CRUD Operations
+
+#### `POST /issues/`
+**Purpose**: Create new user issue  
+**Authentication**: Bearer token required
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Bug report","description":"Detailed description","priority":"high"}' \
+  "http://localhost:8000/issues/"
+```
+
+#### `GET /issues/`
+**Purpose**: Get user's issues with filtering  
+**Authentication**: Bearer token required  
+**Parameters**: status, priority, created_after, limit
+
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/issues/?status=open&limit=10"
+```
+
+#### `GET /issues/{issue_id}`
+**Purpose**: Get specific issue details  
+**Authentication**: Bearer token required
+
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/issues/123"
+```
+
+### Advanced Issue Operations
+
+#### `POST /issues/create-with-context`
+**Purpose**: Create issue with chat context  
+**Authentication**: Bearer token required  
+**Body**: Issue data with context references
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Issue","description":"Desc","chat_session_id":"123","context_cards":["card1"]}' \
+  "http://localhost:8000/issues/create-with-context"
+```
+
+#### `POST /issues/{issue_id}/create-github-issue`
+**Purpose**: Convert user issue to GitHub issue  
+**Authentication**: Bearer token required  
+**Body**: Repository information
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"repo_owner":"owner","repo_name":"repo"}' \
+  "http://localhost:8000/issues/123/create-github-issue"
+```
+
+#### `POST /issues/from-chat`
+**Purpose**: Create issue directly from chat request  
+**Authentication**: Bearer token required
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"chat_session_id":"123","title":"Chat Issue"}' \
+  "http://localhost:8000/issues/from-chat"
+```
+
+#### `GET /issues/statistics`
+**Purpose**: Get user issue statistics  
+**Authentication**: Bearer token required
+
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/issues/statistics"
+```
+
+---
+
+## 📁 FILE DEPENDENCIES SERVICE (`/filedeps`) ❌ BROKEN
+
+**Purpose**: Repository file analysis and dependency extraction  
+**Implementation**: `backend/repo_processorGitIngest/filedeps.py`  
+**Status**: ❌ **COMPLETELY BROKEN** - Core functionality non-functional
+
+### 🔴 CRITICAL ISSUES
+1. **Missing pgvector Extension**: File embeddings completely broken
+2. **Infinite Recursion Bug**: Frontend crashes when using file context
+3. **Database Schema Issues**: File analysis tables not properly initialized
+4. **Memory Leaks**: Large repositories cause server crashes
+
+### Repository Analysis
+
+#### `GET /filedeps/`
+**Purpose**: File dependencies API information  
+**Status**: ✅ Working (basic info only)
+
+```bash
+curl "http://localhost:8000/filedeps/"
+```
+
+#### `GET /filedeps/repositories`
+**Purpose**: Get user repositories for file analysis  
+**Authentication**: Bearer token required  
+**Status**: ✅ Working
+
+```bash
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/filedeps/repositories"
+```
+
+#### `GET /filedeps/repositories/{repository_id}/files`
+**Purpose**: Get repository file structure  
+**Authentication**: Bearer token required  
+**Status**: ❌ **BROKEN** - File tree rendering issues
+
+```bash
+# ❌ THIS WILL FAIL
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/filedeps/repositories/123/files"
+```
+
+#### `POST /filedeps/extract`
+**Purpose**: Extract file dependencies and create embeddings  
+**Authentication**: Bearer token required  
+**Status**: ❌ **BROKEN** - pgvector dependency missing
+
+```bash
+# ❌ THIS WILL FAIL - Missing pgvector
+curl -X POST \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"repository_url":"https://github.com/owner/repo"}' \
+  "http://localhost:8000/filedeps/extract"
+```
+
+---
+
+## 🔧 PRODUCTION DEPLOYMENT
+
+### Environment Configuration
+
+#### Required Environment Variables
+```bash
+# Database
+DATABASE_URL=postgresql://user:pass@host:5432/db
+
+# GitHub OAuth
+GITHUB_CLIENT_ID=your_client_id
+GITHUB_CLIENT_SECRET=your_client_secret
+GITHUB_REDIRECT_URI=https://yudai.app/auth/callback
+
+# Security
+SECRET_KEY=your_secret_key_here
+JWT_SECRET=your_jwt_secret_here
+
+# AI Integration
+OPENROUTER_API_KEY=your_openrouter_key
+
+# Domain Configuration
+API_DOMAIN=api.yudai.app
+DEV_DOMAIN=dev.yudai.app
+```
+
+#### ⚠️ Current Configuration Issues
+```bash
+# ❌ SECURITY RISK: Development secrets exposed
+SECRET_KEY=${SECRET_KEY:-dev_secret}        # Hardcoded fallback
+JWT_SECRET=${JWT_SECRET:-dev_jwt_secret}    # Hardcoded fallback
+
+# ❌ INCONSISTENT: Different ports across environments
+# Dev: 127.0.0.1:8001:8000
+# Prod: 127.0.0.1:8000:8000
+```
+
+### Docker Deployment
+
+#### Development Environment
+```bash
+# ❌ CURRENT ISSUES:
+# - Exposed secrets in docker-compose.dev.yml
+# - Container naming inconsistency
+# - Missing health check endpoints
+docker compose up -d
+```
+
+#### Production Environment
+```bash
+# ❌ CURRENT ISSUES:
+# - SSL certificate validation missing
+# - No rate limiting configured
+# - Debug code still present
+docker compose -f docker-compose.prod.yml up -d
+```
+
+### Database Setup
+
+#### Current Database Issues
+```python
+# backend/db/database.py:34
+#TODO: Add pgvector (very important vector db)  # ❌ CRITICAL MISSING
+```
+
+#### Required Database Extensions
+```sql
+-- ❌ MISSING: This needs to be added
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+```
+
+---
+
+## 🔒 SECURITY CONFIGURATION
+
+### Current Security Status: ❌ **VULNERABLE**
+
+#### Authentication Security
+- ✅ JWT token implementation
+- ✅ GitHub OAuth2 flow
+- ❌ **WebSocket authentication bypass**
+- ❌ **No rate limiting**
+- ❌ **Token leakage in logs**
+
+#### CORS Configuration
+```python
+# ❌ SECURITY ISSUE: HTTP in production
+allow_origins=[
+    "http://yudai.app"  # Should be HTTPS only
+]
+```
+
+#### SSL/TLS Issues
+- ❌ **No certificate validation**
+- ❌ **Mixed HTTP/HTTPS references**
+- ❌ **No HSTS headers**
+
+---
+
+## 🔍 HEALTH CHECKS & MONITORING
+
+### Health Check Endpoints
+
+#### `GET /`
+**Purpose**: API root with service information  
+**Status**: ✅ Working
+
+```bash
+curl "http://localhost:8000/"
+```
+
+#### `GET /health`
+**Purpose**: Backend health check  
+**Status**: ✅ Working
+
+```bash
+curl "http://localhost:8000/health"
+```
+
+#### ❌ Missing Health Checks
+```yaml
+# docker-compose.yml references non-existent endpoints
+test: ["CMD", "curl", "-f", "http://localhost/health"]  # ❌ MISSING
+```
+
+### Current Monitoring Gaps
+- ❌ **No error tracking** (Sentry, etc.)
+- ❌ **No performance metrics** 
+- ❌ **No log aggregation**
+- ❌ **No alerting system**
+
+---
+
+## 🧪 TESTING & VALIDATION
+
+### API Testing Status
+
+| Service | Unit Tests | Integration Tests | E2E Tests | Status |
+|---------|-----------|------------------|-----------|--------|
+| Auth | ⚠️ Partial | ❌ Missing | ❌ Missing | Poor |
+| GitHub | ⚠️ Partial | ❌ Missing | ❌ Missing | Poor |
+| Chat | ❌ Missing | ❌ Missing | ❌ Missing | None |
+| Issues | ⚠️ Partial | ❌ Missing | ❌ Missing | Poor |
+| FileDeps | ❌ Missing | ❌ Missing | ❌ Missing | None |
+
+### Manual Testing Checklist
+```bash
+# ✅ Working endpoints
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/auth/profile"
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/github/repositories"
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/issues/"
+
+# ❌ Broken endpoints
+curl -H "Authorization: Bearer <token>" "http://localhost:8000/filedeps/repositories/1/files"
+```
+
+---
+
+## 🚨 IMMEDIATE ACTION REQUIRED
+
+### Phase 1: Critical Security Fixes (Day 1)
+1. **Fix WebSocket Authentication**
+   - Move auth validation before connection establishment
+   - Implement proper token verification
+   - Add connection rate limiting
+
+2. **Remove Exposed Secrets**
+   - Eliminate hardcoded development secrets
+   - Implement proper secret management
+   - Add environment validation
+
+3. **Fix CORS Configuration**
+   - HTTPS-only in production
+   - Restrict origins properly
+   - Add security headers
+
+### Phase 2: Core Functionality (Day 2)
+1. **Implement pgvector Extension**
+   - Add to database initialization
+   - Update Docker container setup
+   - Test file embeddings
+
+2. **Fix File Dependencies Service**
+   - Resolve infinite recursion bug
+   - Fix file tree rendering
+   - Implement proper error handling
+
+3. **Remove Debug Code**
+   - Clean production builds
+   - Implement proper logging
+   - Remove development artifacts
+
+### Phase 3: Production Readiness (Day 3)
+1. **Implement Health Checks**
+   - Add missing endpoints
+   - Fix Docker health checks
+   - Add monitoring endpoints
+
+2. **Add Error Handling**
+   - Implement error boundaries
+   - Add user-friendly messages
+   - Create fallback mechanisms
+
+3. **Performance Optimization**
+   - Add request caching
+   - Optimize database queries
+   - Implement rate limiting
+
+---
+
+## 📚 API REFERENCE QUICK ACCESS
+
+### Interactive Documentation
+- **Swagger UI**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
+
+### Postman Collection
+```bash
+# Generate OpenAPI spec
+curl "http://localhost:8000/openapi.json" > yudai-api.json
+```
+
+### Error Response Format
+```json
+{
+  "detail": "Error message",
+  "status_code": 400,
+  "timestamp": "2025-01-XX T12:00:00Z",
+  "path": "/api/endpoint"
+}
+```
+
+---
+
+**⚠️ DEMO READINESS**: This API is currently **NOT READY** for demo deployment. Critical security and functionality issues must be resolved first. See the issues sections above for specific fixes required.

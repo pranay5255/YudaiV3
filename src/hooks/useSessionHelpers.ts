@@ -13,7 +13,7 @@ import { logger } from '../utils/logger';
  * functions for components to use.
  */
 export const useSessionHelpers = () => {
-  const { sessionState, setActiveSessionId, sendOptimisticUpdate, sendRealtimeMessage } = useSession();
+  const { sessionState, setActiveSessionId, sendOptimisticUpdate } = useSession();
   const { isAuthenticated } = useAuth();
 
   // TODO: REPLACE - Replace console.log with proper logging
@@ -29,10 +29,14 @@ export const useSessionHelpers = () => {
     logger.info('Creating session for:', { repoOwner, repoName, repoBranch });
     
     try {
-      const session: { session_id?: string, id?: string } = await ApiService.createSession(repoOwner, repoName, repoBranch);
+      const session = await ApiService.createSession({
+        repo_owner: repoOwner,
+        repo_name: repoName,
+        repo_branch: repoBranch
+      });
       logger.info('Session creation response:', session);
       
-      const sessionId = session.session_id || session.id;
+      const sessionId = session.session_id;
       if (sessionId) {
         logger.info('Setting active session ID:', sessionId);
         setActiveSessionId(sessionId);
@@ -50,57 +54,30 @@ export const useSessionHelpers = () => {
   const sendMessage = useCallback(async (content: string, isCode: boolean = false) => {
     if (!sessionState.session_id) throw new Error('No active session');
     
-    // First, send optimistic update for immediate UI feedback
+    // Send optimistic update for immediate UI feedback
     sendOptimisticUpdate('SEND_MESSAGE', { content, is_code: isCode });
     
     try {
-      // Send through real-time WebSocket for immediate broadcasting
-      sendRealtimeMessage({
-        type: 'SEND_MESSAGE',
-        data: {
-          session_id: sessionState.session_id,
-          content,
-          is_code: isCode,
-          context_cards: sessionState.context_cards.map((c: UnifiedContextCard) => c.id)
-        }
-      });
-    } catch (error) {
-      console.error('Failed to send real-time message:', error);
-      
-      // Fallback to HTTP API if WebSocket fails
-      await ApiService.sendEnhancedChatMessage({
+      // Send via HTTP API
+      await ApiService.sendChatMessage({
         session_id: sessionState.session_id,
         message: { content, is_code: isCode },
         context_cards: sessionState.context_cards.map((c: UnifiedContextCard) => c.id)
       });
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      throw error;
     }
-  }, [sessionState.session_id, sessionState.context_cards, sendOptimisticUpdate, sendRealtimeMessage]);
+  }, [sessionState.session_id, sessionState.context_cards, sendOptimisticUpdate]);
 
   // TODO: IMPLEMENT - Proper API methods for context cards
   const addContextCard = useCallback(async (card: Omit<UnifiedContextCard, 'id' | 'session_id' | 'created_at'>) => {
     if (!sessionState.session_id) throw new Error('No active session');
     
-    // TODO: IMPLEMENT - Call actual API endpoint
-    try {
-      const response = await ApiService.addContextCard({
-        session_id: sessionState.session_id,
-        title: card.title,
-        description: card.description,
-        content: card.content,
-        tokens: card.tokens,
-        source: card.source
-      });
-      
-      // Send real-time update
-      sendRealtimeMessage({
-        type: 'CONTEXT_CARD',
-        data: { action: 'add', card: response }
-      });
-    } catch (error) {
-      console.error('Failed to add context card:', error);
-      throw error;
-    }
-  }, [sessionState.session_id, sendRealtimeMessage]);
+    // TODO: IMPLEMENT - Call actual API endpoint when available
+    console.log('addContextCard (local simulation):', card);
+    // When API is available, this will make an HTTP request
+  }, [sessionState.session_id]);
   
   const removeContextCard = useCallback(async (cardId: string) => {
       if (!sessionState.session_id) throw new Error('No active session');

@@ -83,13 +83,13 @@ class IssueService:
         # Generate unique issue ID
         issue_id = str(uuid.uuid4())
         
-        # Get chat session if conversation_id is provided
+        # Get chat session if session_id is provided
         chat_session_id = None
-        if request.conversation_id:
+        if request.session_id:
             chat_session = db.query(ChatSession).filter(
                 and_(
                     ChatSession.user_id == user_id,
-                    ChatSession.session_id == request.conversation_id
+                    ChatSession.session_id == request.session_id
                 )
             ).first()
             if chat_session:
@@ -104,7 +104,7 @@ class IssueService:
             issue_steps=request.issue_steps,
             title=request.title,
             description=request.description,
-            conversation_id=request.conversation_id,
+            session_id=request.session_id,
             chat_session_id=chat_session_id,
             context_cards=request.context_cards,
             ideas=request.ideas,
@@ -213,15 +213,15 @@ class IssueService:
         Create an issue from a chat request with context
         Links to the session for unified state management
         """
-        # Get session information if conversation_id is provided
-        if chat_request.conversation_id:
+        # Get session information if session_id is provided
+        if chat_request.session_id:
             # Use SessionService to get session context
             session_response = SessionService.get_session_by_id(
-                db, user_id, chat_request.conversation_id
+                db, user_id, chat_request.session_id
             )
             if session_response:
                 session_context = SessionService.get_comprehensive_session_context(
-                    db, user_id, chat_request.conversation_id
+                    db, user_id, chat_request.session_id
                 )
         
         # Extract repository info from session or request
@@ -234,7 +234,7 @@ class IssueService:
         
         # Create comprehensive issue request
         title = f"Issue from chat: {chat_request.message.content[:50]}..."
-        description = f"Generated from chat conversation: {chat_request.conversation_id}"
+        description = f"Generated from chat session: {chat_request.session_id}"
         
         # Add session context if available
         if session_context:
@@ -246,7 +246,7 @@ class IssueService:
             title=title,
             issue_text_raw=chat_request.message.content,
             description=description,
-            conversation_id=chat_request.conversation_id,
+            session_id=chat_request.session_id,
             context_cards=chat_request.context_cards,
             repo_owner=repo_owner,
             repo_name=repo_name
@@ -287,8 +287,8 @@ class IssueService:
             if issue.context_cards:
                 github_body += f"**Context Cards:** {', '.join(issue.context_cards)}\n"
             
-            if issue.conversation_id:
-                github_body += f"**Generated from conversation:** {issue.conversation_id}\n"
+            if issue.session_id:
+                github_body += f"**Generated from session:** {issue.session_id}\n"
             
             # Create GitHub issue
             github_issue = await create_github_issue(
@@ -357,7 +357,7 @@ class IssueService:
         issues_with_sessions = db.query(UserIssue).filter(
             and_(
                 UserIssue.user_id == user_id,
-                UserIssue.conversation_id.isnot(None)
+                UserIssue.session_id.isnot(None)
             )
         ).count()
         
@@ -749,7 +749,7 @@ async def create_issue_with_context(
                     ).first()
                     
                     if existing_issue:
-                        existing_issue.conversation_id = session_response.session_id
+                        existing_issue.session_id = session_response.session_id
                         # Note: chat_session_id will be set by foreign key relationship
                         db.commit()
                         db.refresh(existing_issue)

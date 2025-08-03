@@ -1,14 +1,15 @@
 """
 Unified models for YudaiV3 - SQLAlchemy and Pydantic models in one place
 """
-from pydantic import BaseModel, Field, validator, ConfigDict
-from typing import Optional, List, Literal, Dict, Any
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import Integer, String, Text, DateTime, Boolean, ForeignKey, JSON
-from sqlalchemy.orm import relationship, Mapped, mapped_column
-from sqlalchemy.sql import func
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, validator
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql import func
 
 # ============================================================================
 # ENUMS
@@ -380,7 +381,7 @@ class UserIssue(Base):
     # Additional data from chat API
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    conversation_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    session_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     chat_session_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chat_sessions.id"), nullable=True)
     
     # Context and metadata
@@ -672,7 +673,7 @@ class CreateUserIssueRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     issue_text_raw: str = Field(..., min_length=1)
     description: Optional[str] = Field(None)
-    conversation_id: Optional[str] = Field(None, max_length=255)
+    session_id: Optional[str] = Field(None, max_length=255)
     context_card_id: Optional[int] = Field(None)
     context_cards: Optional[List[str]] = Field(default_factory=list)
     ideas: Optional[List[str]] = Field(default_factory=list)
@@ -689,7 +690,7 @@ class UserIssueResponse(BaseModel):
     description: Optional[str] = None
     issue_text_raw: str
     issue_steps: Optional[List[str]] = None
-    conversation_id: Optional[str] = None
+    session_id: Optional[str] = None
     context_card_id: Optional[int] = None
     context_cards: Optional[List[str]] = None
     ideas: Optional[List[str]] = None
@@ -709,8 +710,8 @@ class UserIssueResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     
 class ChatRequest(BaseModel):
-    conversation_id: Optional[str] = Field(
-        default="default", alias="conversationId"
+    session_id: Optional[str] = Field(
+        default="default", alias="sessionId"
     )
     message: ChatMessageInput
     context_cards: Optional[List[str]] = Field(default_factory=list)

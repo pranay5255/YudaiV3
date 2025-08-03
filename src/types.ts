@@ -148,15 +148,24 @@ export interface ChatSessionStats {
 }
 
 export interface ChatMessageAPI {
-  id: string;
-  content: string;
-  role: 'user' | 'assistant';
-  timestamp: string;
+  id: number;
+  message_id: string;
+  message_text: string;
+  sender_type: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system';
   is_code: boolean;
+  tokens: number;
+  model_used?: string;
+  processing_time?: number;
+  context_cards?: string[];
+  referenced_files?: string[];
+  error_message?: string;
+  created_at: string;
+  updated_at?: string;
 }
 
 export interface CreateIssueFromChatRequest {
-  conversation_id: string;  // Fixed: backend expects conversation_id, not session_id
+  session_id: string;
   title: string;
   description?: string;
   repository_url?: string;
@@ -172,25 +181,27 @@ export interface SessionCreateRequest {
 }
 
 export interface SessionResponse {
-  id: string;
-  repo_owner: string;
-  repo_name: string;
-  repo_branch: string;
-  title: string;
+  id: number;
+  session_id: string;
+  title?: string;
   description?: string;
-  created_at: string;
-  updated_at: string;
-  last_activity: string;
+  repo_owner?: string;
+  repo_name?: string;
+  repo_branch?: string;
+  repo_context?: Record<string, unknown>;
   is_active: boolean;
-  context_card_count: number;
-  message_count: number;
+  total_messages: number;
+  total_tokens: number;
+  created_at: string;
+  updated_at?: string;
+  last_activity?: string;
 }
 
 export interface SessionContextResponse {
   session: SessionResponse;
   messages: ChatMessageAPI[];
-  context_cards: string[];  // Changed to match backend (array of IDs)
-  repository_info: {
+  context_cards: string[];  // Array of context card IDs
+  repository_info?: {
     owner: string;
     name: string;
     branch: string;
@@ -198,7 +209,7 @@ export interface SessionContextResponse {
     html_url: string;
   };
   file_embeddings_count: number;
-  statistics: {
+  statistics?: {
     total_messages: number;
     total_tokens: number;
     total_cost: number;
@@ -233,7 +244,7 @@ export interface UserIssueResponse {
   description?: string;
   issue_text_raw: string;
   issue_steps?: string[];
-  conversation_id?: string;
+  session_id?: string;
   context_card_id?: number;
   context_cards?: string[];
   ideas?: string[];

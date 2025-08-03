@@ -10,15 +10,16 @@ import { DetailModal } from './components/DetailModal';
 import { ToastContainer } from './components/Toast';
 import { RepositorySelectionToast } from './components/RepositorySelectionToast';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { SessionProvider } from './contexts/SessionContext';
+import { AuthCallback } from './components/AuthCallback';
 import { useSession } from './hooks/useSession';
 import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository } from './types';
-import { UnifiedContextCard, ContextCardSource, UnifiedMessage } from './types/unifiedState';
+import { UnifiedContextCard, ContextCardSource } from './types/unifiedState';
 import { FileItem } from './types/fileDependencies';
 import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
 import { useSessionHelpers } from './hooks/useSessionHelpers';
-import { ApiService, ChatContextMessage, FileContextItem, UserIssueResponse } from './services/api';
+import { ApiService, ChatContextMessage, FileContextItem, CreateIssueWithContextRequest } from './services/api';
+import { UserIssueResponse } from './types';
 
 // Interface for issue preview data (matching DiffModal expectations)
 interface IssuePreviewData {
@@ -59,8 +60,6 @@ function AppContent() {
   const { sessionState, tabState, connectionStatus, dispatch } = useSession();
   const {
       createSession,
-      addContextCard,
-      removeContextCard,
       // createIssue // This will be redefined locally for now
     } = useSessionHelpers();
 
@@ -78,7 +77,7 @@ function AppContent() {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [issuePreviewData, setIssuePreviewData] = useState<IssuePreviewData | undefined>(undefined);
   
-  // Repository selection state
+  // Repository selection state - always show after login if no repository selected
   const [showRepositorySelection, setShowRepositorySelection] = useState(false);
 
   // Show repository selection after login if no repository is selected
@@ -90,7 +89,8 @@ function AppContent() {
       sessionId: sessionState.session_id
     });
     
-    if (isAuthenticated && user && !hasSelectedRepository && !sessionState.session_id) {
+    // Always show repository selection after login if no repository is selected
+    if (isAuthenticated && user && !hasSelectedRepository) {
       console.log('Showing repository selection toast');
       // Add a small delay to let the user see they've logged in
       const timer = setTimeout(() => {
@@ -99,16 +99,8 @@ function AppContent() {
       
       return () => clearTimeout(timer);
     }
-  }, [isAuthenticated, user, hasSelectedRepository, sessionState.session_id]);
+  }, );
 
-  // Additional check: if user is authenticated but no session, show repository selection
-  useEffect(() => {
-    if (isAuthenticated && user && !sessionState.session_id && !showRepositorySelection) {
-      console.log('No active session found, showing repository selection');
-      setShowRepositorySelection(true);
-    }
-  }, [isAuthenticated, user, sessionState.session_id, showRepositorySelection]);
-  
   /**
    * Handles repository selection and creates a new session
    * Integrates with SessionContext for unified state management
@@ -190,11 +182,10 @@ function AppContent() {
       created_at: new Date().toISOString()
     };
     
-    addContextCard(newCard);
+    dispatch({ type: 'ADD_CONTEXT_CARD', payload: newCard });
     addToast('Added to context successfully', 'success');
   };
 
-  // TODO: FIX CRITICAL - Remove infinite recursion in addFileToContext
   const addFileToContext = (file: FileItem) => {
     const newCard: UnifiedContextCard = {
       id: Date.now().toString(),
@@ -207,7 +198,7 @@ function AppContent() {
       created_at: new Date().toISOString()
     };
     
-    addContextCard(newCard);
+    dispatch({ type: 'ADD_CONTEXT_CARD', payload: newCard });
     addToast(`Added ${file.file_name} to context`, 'success');
   };
 
@@ -216,12 +207,7 @@ function AppContent() {
    * @param id - The ID of the context card to remove
    */
   const removeContextCardHandler = (id: string) => {
-    removeContextCard(id);
-    // Also remove from file context if it's a file-deps item
-    const card = sessionState.context_cards.find((c: UnifiedContextCard) => c.id === id);
-    if (card && card.source === ContextCardSource.FILE) {
-      // Note: File context is now handled separately from session state
-    }
+    dispatch({ type: 'REMOVE_CONTEXT_CARD', payload: id });
     addToast('Removed from context', 'info');
   };
 
@@ -240,59 +226,79 @@ function AppContent() {
   // This function is defined locally as it interacts heavily with UI state (toasts, modals)
   const handleCreateIssue = async () => {
     if (!sessionState.session_id) {
-        addToast('Cannot create an issue without an active session.', 'error');
-        return;
+      addToast('Cannot create an issue without an active session.', 'error');
+      return;
     }
+
     try {
       addToast('Creating issue with session context...', 'info');
       setCurrentStep('Architect');
-      
-      // This is a placeholder for the actual request model for creating an issue
-      const issueRequest = {
-          title: `Issue from Session ${sessionState.session_id}`,
-          description: 'This issue was generated from the current session context.',
-          session_id: sessionState.session_id
-          // In a real scenario, you'd pass the full context here
-      };
 
-      // Assume ApiService has a method to create a user issue
-      // Since it's not defined in the provided file, we'll mock it for now
-      const issue: UserIssueResponse = await ApiService.createUserIssue(issueRequest);
-      
-      addToast('Issue created successfully!', 'success');
-      
-      // Show issue preview
-      handleShowIssuePreview({
-        title: issue.title,
-        body: issue.issue_text_raw,
-        labels: [],
-        assignees: [],
-        metadata: {
-          chat_messages_count: sessionState.messages.length,
-          file_context_count: 0, // File context now handled separately
-          total_tokens: sessionState.statistics.total_tokens,
-          generated_at: new Date().toISOString(),
-          generation_method: 'session-based',
-        },
-        userIssue: issue,
-        conversationContext: sessionState.messages.map((msg: UnifiedMessage) => ({
+      // Create request using chat messages and context from session
+      const request: CreateIssueWithContextRequest = {
+        title: `Issue from Session ${sessionState.session_id}`,
+        description: 'This issue was generated from the current session context.',
+        chat_messages: sessionState.messages.map(msg => ({
           id: msg.id,
           content: msg.content,
           isCode: msg.is_code,
-          timestamp: msg.timestamp,
+          timestamp: msg.timestamp
         })),
-
-        fileContext: [], // File context now handled separately
-        canCreateGitHubIssue: !!sessionState.repository,
-        repositoryInfo: sessionState.repository ? {
+        file_context: [], // File context handled separately
+        repository_info: sessionState.repository ? {
           owner: sessionState.repository.owner,
           name: sessionState.repository.name,
           branch: sessionState.repository.branch
-        } : undefined,
+        } : undefined
+      };
+
+      // Get issue preview from API
+      const response = await ApiService.createIssueFromChat({
+        session_id: sessionState.session_id,
+        message: {
+          content: JSON.stringify(request),
+          is_code: false
+        }
       });
+
+      if (response.success) {
+        addToast('Issue preview generated successfully!', 'success');
+
+        // Show preview using API response data
+        handleShowIssuePreview({
+          title: response.issue.title,
+          body: response.issue.issue_text_raw,
+          labels: [],
+          assignees: [],
+          metadata: {
+            chat_messages_count: sessionState.messages.length,
+            file_context_count: 0,
+            total_tokens: sessionState.statistics.total_tokens,
+            generated_at: new Date().toISOString(),
+            generation_method: 'session-based'
+          },
+          userIssue: response.issue,
+          conversationContext: sessionState.messages.map(msg => ({
+            id: msg.id,
+            content: msg.content,
+            isCode: msg.is_code,
+            timestamp: msg.timestamp
+          })),
+          fileContext: [],
+          canCreateGitHubIssue: !!sessionState.repository,
+          repositoryInfo: sessionState.repository ? {
+            owner: sessionState.repository.owner,
+            name: sessionState.repository.name,
+            branch: sessionState.repository.branch
+          } : undefined
+        });
+      } else {
+        throw new Error('Failed to generate issue preview');
+      }
+
     } catch (error) {
-      addToast('Failed to create issue', 'error');
-      console.error('Failed to create issue:', error);
+      addToast('Failed to create issue preview', 'error');
+      console.error('Failed to create issue preview:', error);
     }
   };
 
@@ -465,15 +471,30 @@ function AppContent() {
 }
 
 /**
- * Main App Component with SessionProvider
- * Wraps the entire application with session context
+ * Main App Component
+ * No longer needs SessionProvider wrapper since it's at the top level
  */
 function App() {
-  return (
-    <SessionProvider>
-      <AppContent />
-    </SessionProvider>
-  );
+  // Check if this is an auth callback route
+  const isAuthCallback = window.location.pathname === '/auth/success' || 
+                        window.location.pathname === '/auth/error' ||
+                        window.location.search.includes('user_id=') ||
+                        window.location.search.includes('message=');
+
+  if (isAuthCallback) {
+    return (
+      <AuthCallback 
+        onSuccess={() => {
+          console.log('GitHub App authentication successful');
+        }}
+        onError={(error) => {
+          console.error('GitHub App authentication failed:', error);
+        }}
+      />
+    );
+  }
+
+  return <AppContent />;
 }
 
 export default App;

@@ -19,42 +19,43 @@ export class AuthService {
     };
   }
 
-  // GitHub OAuth login - redirects to GitHub
+  // GitHub App OAuth login - redirects to GitHub
   static async login(): Promise<void> {
     window.location.href = `${AUTH_BASE_URL}/auth/login`;
   }
 
-  // Handle OAuth callback
+  // Handle GitHub App OAuth callback
+  // Note: For GitHub App flow, the callback redirects to frontend with user_id
+  // We need to fetch the user profile separately
   static async handleCallback(code: string, state?: string): Promise<LoginResponse> {
-    const params = new URLSearchParams({ code });
-    if (state) params.append('state', state);
-    
-    const response = await fetch(`${AUTH_BASE_URL}/auth/callback?${params}`, {
-      method: 'GET',
-      headers: this.getAuthHeaders(),
+    // Exchange code for token by calling backend endpoint
+    const response = await fetch(`${AUTH_BASE_URL}/auth/callback`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        code,
+        state
+      })
     });
 
     if (!response.ok) {
-      throw new Error(`Authentication failed: ${response.status}`);
+      throw new Error('Failed to exchange code for token');
     }
 
     const data = await response.json();
-    
-    // Handle AuthResponse structure from backend
-    if (!data.success) {
-      throw new Error(data.error || 'Authentication failed');
-    }
-    
-    // Store token in localStorage
-    if (data.access_token) {
-      localStorage.setItem('auth_token', data.access_token);
-    }
 
-    // Return the expected LoginResponse format
+    // Store the access token
+    localStorage.setItem('auth_token', data.access_token);
+
+    // Get user profile using the new token
+    const user = await this.getProfile();
+
     return {
       access_token: data.access_token,
-      token_type: 'bearer',
-      user: data.user
+      token_type: data.token_type,
+      user: user
     };
   }
 
@@ -138,6 +139,50 @@ export class AuthService {
     }
 
     return response.json();
+  }
+
+  // Handle authentication success redirect
+  // This is called when user is redirected back from GitHub with success
+  static async handleAuthSuccess(): Promise<LoginResponse> {
+    const urlParams = new URLSearchParams(window.location.search);
+    const userId = urlParams.get('user_id');
+    
+    if (!userId) {
+      throw new Error('No user ID received from authentication success');
+    }
+
+    // Check auth status to get user info and token
+    const authStatus = await this.checkAuthStatus();
+    
+    if (!authStatus.authenticated || !authStatus.user) {
+      throw new Error('Authentication failed - user not authenticated');
+    }
+
+    const token = this.getStoredToken();
+    if (!token) {
+      throw new Error('No authentication token found');
+    }
+
+    return {
+      access_token: token,
+      token_type: 'bearer',
+      user: authStatus.user
+    };
+  }
+
+  // Handle authentication error redirect
+  static handleAuthError(): void {
+    const urlParams = new URLSearchParams(window.location.search);
+    const errorMessage = urlParams.get('message') || 'Authentication failed';
+    
+    // Clear any existing auth data
+    this.logout();
+    
+    // You can implement custom error handling here
+    console.error('Authentication error:', errorMessage);
+    
+    // Redirect to login page or show error
+    window.location.href = '/login?error=' + encodeURIComponent(errorMessage);
   }
 
   // Utility methods
