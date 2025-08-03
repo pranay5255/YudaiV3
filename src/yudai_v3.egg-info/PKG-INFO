@@ -18,6 +18,8 @@ Requires-Dist: httpx>=0.28.1
 Requires-Dist: black>=25.1.0
 Requires-Dist: ruff>=0.12.7
 Requires-Dist: websockets>=15.0.1
+Requires-Dist: pyjwt>=2.10.1
+Requires-Dist: cryptography>=45.0.5
 Provides-Extra: dev
 Requires-Dist: datasets>=2.16.0; extra == "dev"
 Requires-Dist: numpy>=1.26.0; extra == "dev"

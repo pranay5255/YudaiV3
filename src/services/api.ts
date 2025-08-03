@@ -151,9 +151,14 @@ export class ApiService {
     return response.json();
   }
 
-  // Daifu Chat Services
-  static async sendChatMessage(request: ChatRequest): Promise<ChatResponse> {
-    const response = await fetch(`${API_BASE_URL}/daifu/chat/daifu`, {
+  // Daifu Chat Services - Updated to use unified endpoint
+  static async sendChatMessage(request: ChatRequest, asyncMode: boolean = false): Promise<ChatResponse> {
+    const params = new URLSearchParams();
+    if (asyncMode) {
+      params.append('async_mode', 'true');
+    }
+    
+    const response = await fetch(`${API_BASE_URL}/daifu/chat/daifu?${params}`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
       body: JSON.stringify(request),
@@ -609,19 +614,30 @@ export class ApiService {
     return result;
   }
 
-  // NEW: Additional backend endpoints not previously implemented in frontend
+  // FIXED: WebSocket connection with proper URL construction and error handling
 
   /**
    * Establishes WebSocket connection for real-time session updates
+   * FIXED: Proper URL construction for production environments
    * @param sessionId - Session ID to listen for updates
+   * @param token - Authentication token
+   * @param onMessage - Message handler callback
+   * @param onError - Error handler callback
+   * @param onClose - Close handler callback
    * @returns WebSocket - WebSocket connection for real-time updates
    */
-  static createSessionWebSocket(sessionId: string, token: string | null): WebSocket {
-    // Get the base URL without /api prefix
+  static createSessionWebSocket(
+    sessionId: string, 
+    token: string | null,
+    onMessage?: (event: MessageEvent) => void,
+    onError?: (event: Event) => void,
+    onClose?: (event: CloseEvent) => void
+  ): WebSocket {
+    // Get the base URL without /api prefix for WebSocket connections
     const baseUrl = import.meta.env.VITE_API_URL || 
       (import.meta.env.DEV ? 'http://localhost:8000' : 'https://yudai.app');
     
-    // Remove /api prefix if present
+    // Remove /api prefix if present (WebSocket endpoints don't use /api prefix)
     const cleanBaseUrl = baseUrl.replace('/api', '');
     
     // Convert to WebSocket URL
@@ -633,35 +649,137 @@ export class ApiService {
       url.searchParams.append('token', token);
     }
     
-    return new WebSocket(url.toString());
+    const ws = new WebSocket(url.toString());
+    
+    // Add event handlers if provided
+    if (onMessage) {
+      ws.onmessage = onMessage;
+    }
+    
+    if (onError) {
+      ws.onerror = onError;
+    }
+    
+    if (onClose) {
+      ws.onclose = onClose;
+    }
+    
+    // Add connection health monitoring
+    ws.addEventListener('open', () => {
+      console.log(`WebSocket connected for session: ${sessionId}`);
+    });
+    
+    ws.addEventListener('error', (event) => {
+      console.error(`WebSocket error for session ${sessionId}:`, event);
+    });
+    
+    ws.addEventListener('close', (event) => {
+      console.log(`WebSocket disconnected for session ${sessionId}:`, event.code, event.reason);
+    });
+    
+    return ws;
   }
 
+  /**
+   * Creates a WebSocket connection with automatic reconnection
+   * @param sessionId - Session ID to listen for updates
+   * @param token - Authentication token
+   * @param onMessage - Message handler callback
+   * @param maxReconnectAttempts - Maximum reconnection attempts (default: 5)
+   * @param reconnectDelay - Delay between reconnection attempts in ms (default: 1000)
+   * @returns Object with WebSocket and control methods
+   */
+  static createReconnectingWebSocket(
+    sessionId: string,
+    token: string | null,
+    onMessage: (event: MessageEvent) => void,
+    maxReconnectAttempts: number = 5,
+    reconnectDelay: number = 1000
+  ): {
+    ws: WebSocket | null;
+    disconnect: () => void;
+    reconnect: () => void;
+  } {
+    let ws: WebSocket | null = null;
+    let reconnectAttempts = 0;
+    let reconnectTimer: NodeJS.Timeout | null = null;
+    let isDisconnected = false;
 
+    const connect = () => {
+      if (isDisconnected) return;
+      
+      ws = this.createSessionWebSocket(sessionId, token, onMessage);
+      
+      ws.onclose = (event) => {
+        console.log(`WebSocket closed for session ${sessionId}:`, event.code, event.reason);
+        
+        if (!isDisconnected && reconnectAttempts < maxReconnectAttempts) {
+          reconnectAttempts++;
+          console.log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})...`);
+          
+          reconnectTimer = setTimeout(() => {
+            connect();
+          }, reconnectDelay * reconnectAttempts); // Exponential backoff
+        }
+      };
+      
+      ws.onerror = (event) => {
+        console.error(`WebSocket error for session ${sessionId}:`, event);
+      };
+    };
+
+    const disconnect = () => {
+      isDisconnected = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      if (ws) {
+        ws.close();
+      }
+    };
+
+    const reconnect = () => {
+      if (ws) {
+        ws.close();
+      }
+      reconnectAttempts = 0;
+      connect();
+    };
+
+    // Initial connection
+    connect();
+
+    return {
+      ws,
+      disconnect,
+      reconnect
+    };
+  }
 
   /**
    * Sends enhanced chat message with session context (WebSocket-enabled)
-   * Uses the v2 endpoint that supports real-time WebSocket broadcasting
+   * Updated to use the unified chat endpoint with async_mode parameter
    * @param request - Enhanced chat request with session context
+   * @param asyncMode - Whether to use async mode for real-time updates
    * @returns Promise<ChatResponse> - Enhanced chat response
    */
-  static async sendEnhancedChatMessage(request: {
-    session_id: string;
-    message: ChatMessage;
-    context_cards?: string[];
-    file_context?: string[];
-  }): Promise<ChatResponse> {
-    const response = await fetch(`${API_BASE_URL}/daifu/chat/daifu/v2`, {
-      method: 'POST',
-      headers: this.getAuthHeaders(),
-      body: JSON.stringify({
-        conversation_id: request.session_id,
-        message: request.message,
-        context_cards: request.context_cards || [],
-        file_context: request.file_context || []
-      }),
-    });
+  static async sendEnhancedChatMessage(
+    request: {
+      session_id: string;
+      message: ChatMessage;
+      context_cards?: string[];
+      file_context?: string[];
+    },
+    asyncMode: boolean = true
+  ): Promise<ChatResponse> {
+    const chatRequest: ChatRequest = {
+      conversation_id: request.session_id,
+      message: request.message,
+      context_cards: request.context_cards || [],
+    };
 
-    return this.handleResponse<ChatResponse>(response);
+    return this.sendChatMessage(chatRequest, asyncMode);
   }
 
   // Additional GitHub Endpoints

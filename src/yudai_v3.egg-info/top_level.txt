@@ -1,5 +1,8 @@
 components
 constants
 contexts
+examples
 hooks
 services
+types
+utils
