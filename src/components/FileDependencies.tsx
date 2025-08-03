@@ -113,7 +113,8 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     setFiles(toggleInTree(files));
   }, [files]);
 
-  const renderFileTree = useCallback((items: ExtendedFileItem[], depth = 0) => {
+  // TODO: OPTIMIZE - Memoize file tree rendering
+  const renderFileTree = useCallback((items: (FileItem & { children: FileItem[], expanded: boolean })[], depth = 0) => {
     return items.map((item) => {
       const hasChildren = item.children && item.children.length > 0;
       const isDirectory = hasChildren;

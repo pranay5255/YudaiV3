@@ -346,6 +346,7 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
     }
   }, []);
 
+
   // The context value now provides enhanced real-time capabilities
   const value: SessionContextValue = {
     sessionState,
