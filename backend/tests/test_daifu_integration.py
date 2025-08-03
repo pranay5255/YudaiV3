@@ -19,7 +19,7 @@ class TestDaifuChatIntegration:
         mock_post.return_value.json.return_value = mock_daifu_response
         
         chat_data = {
-            "conversation_id": "test_conv",
+            "session_id": "test_session",
             "message": {
                 "content": "Hello DAifu!",
                 "is_code": False
@@ -46,7 +46,7 @@ class TestDaifuChatIntegration:
         mock_post.return_value.json.return_value = mock_daifu_response
         
         chat_data = {
-            "conversation_id": "auth_test_conv",
+            "session_id": "auth_test_session",
             "message": {
                 "content": "Tell me about my repositories",
                 "is_code": False
@@ -77,11 +77,11 @@ class TestDaifuChatIntegration:
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = mock_daifu_response
         
-        conversation_id = "history_test_conv"
+        session_id = "history_test_session"
         
         # First message
         chat_data_1 = {
-            "conversation_id": conversation_id,
+            "session_id": session_id,
             "message": {
                 "content": "What is Python?",
                 "is_code": False
@@ -97,7 +97,7 @@ class TestDaifuChatIntegration:
         
         # Second message in same conversation
         chat_data_2 = {
-            "conversation_id": conversation_id,
+            "session_id": session_id,
             "message": {
                 "content": "Tell me more about it",
                 "is_code": False
@@ -123,7 +123,7 @@ class TestDaifuChatIntegration:
         mock_post.return_value.json.return_value = mock_daifu_response
         
         chat_data = {
-            "conversation_id": "code_test_conv",
+            "session_id": "code_test_session",
             "message": {
                 "content": "def hello():\n    print('Hello, World!')",
                 "is_code": True
@@ -147,7 +147,7 @@ class TestDaifuChatIntegration:
         mock_post.return_value.json.return_value = mock_daifu_response
         
         chat_data = {
-            "conversation_id": "context_test_conv",
+            "session_id": "context_test_session",
             "message": {
                 "content": "Explain this code",
                 "is_code": False
@@ -165,7 +165,7 @@ class TestDaifuChatIntegration:
     def test_daifu_chat_missing_openrouter_key(self, test_client):
         """Test DAifu chat with missing OpenRouter API key"""
         chat_data = {
-            "conversation_id": "error_test_conv",
+            "session_id": "error_test_session",
             "message": {
                 "content": "Hello",
                 "is_code": False
@@ -188,7 +188,7 @@ class TestDaifuChatIntegration:
         mock_post.side_effect = Exception("API Error")
         
         chat_data = {
-            "conversation_id": "api_error_test_conv",
+            "session_id": "api_error_test_session",
             "message": {
                 "content": "Hello",
                 "is_code": False
@@ -209,7 +209,7 @@ class TestDaifuChatIntegration:
         mock_post.side_effect = Exception("Request timeout")
         
         chat_data = {
-            "conversation_id": "timeout_test_conv",
+            "session_id": "timeout_test_session",
             "message": {
                 "content": "Hello",
                 "is_code": False
@@ -235,7 +235,7 @@ class TestDaifuPromptIntegration:
         mock_post.return_value.json.return_value = mock_daifu_response
         
         chat_data = {
-            "conversation_id": "prompt_test_conv",
+            "session_id": "prompt_test_session",
             "message": {
                 "content": "Help me with my code",
                 "is_code": False
@@ -264,11 +264,11 @@ class TestDaifuPromptIntegration:
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = mock_daifu_response
         
-        conversation_id = "history_prompt_test"
+        session_id = "history_prompt_test"
         
         # First message
         chat_data_1 = {
-            "conversation_id": conversation_id,
+            "session_id": session_id,
             "message": {
                 "content": "What is FastAPI?",
                 "is_code": False
@@ -280,7 +280,7 @@ class TestDaifuPromptIntegration:
         
         # Second message
         chat_data_2 = {
-            "conversation_id": conversation_id,
+            "session_id": session_id,
             "message": {
                 "content": "How do I use it?",
                 "is_code": False
@@ -311,7 +311,7 @@ class TestDaifuAuthenticationIntegration:
         mock_post.return_value.json.return_value = mock_daifu_response
         
         chat_data = {
-            "conversation_id": "auth_user_test",
+            "session_id": "auth_user_test",
             "message": {
                 "content": "Hello, I'm authenticated!",
                 "is_code": False
@@ -334,7 +334,7 @@ class TestDaifuAuthenticationIntegration:
         mock_post.return_value.json.return_value = mock_daifu_response
         
         chat_data = {
-            "conversation_id": "unauth_user_test",
+            "session_id": "unauth_user_test",
             "message": {
                 "content": "Hello, I'm not authenticated!",
                 "is_code": False
@@ -357,7 +357,7 @@ class TestDaifuAuthenticationIntegration:
         mock_post.return_value.json.return_value = mock_daifu_response
         
         chat_data = {
-            "conversation_id": "repo_context_test",
+            "session_id": "repo_context_test",
             "message": {
                 "content": "Tell me about my test-repo repository",
                 "is_code": False
@@ -382,7 +382,7 @@ class TestDaifuValidation:
     def test_daifu_missing_message_content(self, test_client):
         """Test DAifu chat with missing message content"""
         chat_data = {
-            "conversation_id": "validation_test",
+            "session_id": "validation_test",
             "message": {
                 "is_code": False
             },  # Missing content
@@ -395,7 +395,7 @@ class TestDaifuValidation:
     def test_daifu_empty_message_content(self, test_client):
         """Test DAifu chat with empty message content"""
         chat_data = {
-            "conversation_id": "validation_test",
+            "session_id": "validation_test",
             "message": {
                 "content": "",  # Empty content
                 "is_code": False
@@ -409,7 +409,7 @@ class TestDaifuValidation:
     def test_daifu_too_long_message_content(self, test_client):
         """Test DAifu chat with too long message content"""
         chat_data = {
-            "conversation_id": "validation_test",
+            "session_id": "validation_test",
             "message": {
                 "content": "x" * 10001,  # Too long content
                 "is_code": False
@@ -420,11 +420,11 @@ class TestDaifuValidation:
         response = test_client.post("/chat/daifu", json=chat_data)
         assert response.status_code == 422  # Validation error
     
-    def test_daifu_invalid_conversation_id(self, test_client, mock_daifu_response):
-        """Test DAifu chat with invalid conversation ID"""
-        # Test with None conversation_id (should default to "default")
+    def test_daifu_invalid_session_id(self, test_client, mock_daifu_response):
+        """Test DAifu chat with invalid session ID"""
+        # Test with None session_id (should default to "default")
         chat_data = {
-            "conversation_id": None,
+            "session_id": None,
             "message": {
                 "content": "Hello",
                 "is_code": False
@@ -452,11 +452,11 @@ class TestDaifuPerformance:
         mock_post.return_value.status_code = 200
         mock_post.return_value.json.return_value = mock_daifu_response
         
-        def make_chat_request(conv_id):
+        def make_chat_request(session_id):
             chat_data = {
-                "conversation_id": f"concurrent_test_{conv_id}",
+                "session_id": f"concurrent_test_{session_id}",
                 "message": {
-                    "content": f"Hello from conversation {conv_id}",
+                    "content": f"Hello from session {session_id}",
                     "is_code": False
                 },
                 "context_cards": []
@@ -485,7 +485,7 @@ class TestDaifuPerformance:
         # Create many conversations
         for i in range(100):
             chat_data = {
-                "conversation_id": f"memory_test_{i}",
+                "session_id": f"memory_test_{i}",
                 "message": {
                     "content": f"Message {i}",
                     "is_code": False

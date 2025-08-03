@@ -1,5 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { AlertTriangle, RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, RefreshCw, Wifi } from 'lucide-react';
 
 interface Props {
   children: ReactNode;
@@ -10,7 +10,6 @@ interface State {
   hasError: boolean;
   error: Error | null;
   errorInfo: ErrorInfo | null;
-  isWebSocketError: boolean;
   isAuthError: boolean;
   isNetworkError: boolean;
 }
@@ -20,29 +19,25 @@ export class ErrorBoundary extends Component<Props, State> {
     hasError: false,
     error: null,
     errorInfo: null,
-    isWebSocketError: false,
     isAuthError: false,
     isNetworkError: false,
   };
 
   public static getDerivedStateFromError(error: Error): Partial<State> {
     // Analyze error type
-    const isWebSocketError = error.message.includes('WebSocket') || 
-                            error.message.includes('connection') ||
-                            error.message.includes('realtime');
-    
-    const isAuthError = error.message.includes('authentication') || 
+    const isAuthError = error.message.includes('authentication') ||
                        error.message.includes('unauthorized') ||
-                       error.message.includes('token');
+                       error.message.includes('token') ||
+                       error.message.includes('Authentication required');
     
-    const isNetworkError = error.message.includes('network') || 
+    const isNetworkError = error.message.includes('network') ||
                           error.message.includes('fetch') ||
+                          error.message.includes('Failed to fetch') ||
                           error.message.includes('connection');
 
     return {
       hasError: true,
       error,
-      isWebSocketError,
       isAuthError,
       isNetworkError,
     };
@@ -58,7 +53,6 @@ export class ErrorBoundary extends Component<Props, State> {
       hasError: false,
       error: null,
       errorInfo: null,
-      isWebSocketError: false,
       isAuthError: false,
       isNetworkError: false,
     });
@@ -69,8 +63,7 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   private handleReconnect = () => {
-    // Trigger WebSocket reconnection by refreshing the page
-    // This will cause the SessionContext to reinitialize the connection
+    // Refresh the page to reinitialize API connections
     window.location.reload();
   };
 
@@ -83,7 +76,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public render() {
     if (this.state.hasError) {
-      const { error, isWebSocketError, isAuthError, isNetworkError } = this.state;
+      const { error, isAuthError, isNetworkError } = this.state;
 
       // Custom fallback UI based on error type
       if (this.props.fallback) {
@@ -94,9 +87,7 @@ export class ErrorBoundary extends Component<Props, State> {
         <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
           <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6">
             <div className="flex items-center justify-center mb-4">
-              {isWebSocketError ? (
-                <WifiOff className="h-12 w-12 text-orange-500" />
-              ) : isAuthError ? (
+              {isAuthError ? (
                 <AlertTriangle className="h-12 w-12 text-red-500" />
               ) : isNetworkError ? (
                 <Wifi className="h-12 w-12 text-blue-500" />
@@ -106,17 +97,15 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
 
             <h2 className="text-xl font-semibold text-gray-900 text-center mb-2">
-              {isWebSocketError && 'Connection Error'}
               {isAuthError && 'Authentication Error'}
               {isNetworkError && 'Network Error'}
-              {!isWebSocketError && !isAuthError && !isNetworkError && 'Something went wrong'}
+              {!isAuthError && !isNetworkError && 'Something went wrong'}
             </h2>
 
             <p className="text-gray-600 text-center mb-6">
-              {isWebSocketError && 'We lost connection to the server. This might be temporary.'}
               {isAuthError && 'Your session has expired. Please log in again.'}
               {isNetworkError && 'Unable to connect to the server. Please check your internet connection.'}
-              {!isWebSocketError && !isAuthError && !isNetworkError && 'An unexpected error occurred. Please try again.'}
+              {!isAuthError && !isNetworkError && 'An unexpected error occurred. Please try again.'}
             </p>
 
             {error && (
@@ -131,16 +120,6 @@ export class ErrorBoundary extends Component<Props, State> {
             )}
 
             <div className="space-y-3">
-              {isWebSocketError && (
-                <button
-                  onClick={this.handleReconnect}
-                  className="w-full flex items-center justify-center px-4 py-2 bg-orange-500 text-white rounded-md hover:bg-orange-600 transition-colors"
-                >
-                  <Wifi className="h-4 w-4 mr-2" />
-                  Reconnect
-                </button>
-              )}
-
               {isAuthError && (
                 <button
                   onClick={this.handleReauth}

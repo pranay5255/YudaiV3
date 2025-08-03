@@ -4,7 +4,7 @@
  * This file defines the core data structures for the application's state, ensuring
  * consistency between the TypeScript frontend and the Python backend. These types
  * are the "single source of truth" for what our application data looks like.
- * They are synchronized in real-time via WebSockets.
+ * They are synchronized via HTTP API calls and polling.
  */
 
 // ============================================================================
@@ -38,15 +38,7 @@ export enum ContextCardSource {
   MANUAL = "manual",
 }
 
-export enum WebSocketMessageType {
-  SESSION_UPDATE = "session_update",
-  MESSAGE = "message",
-  CONTEXT_CARD = "context_card",
-  AGENT_STATUS = "agent_status",
-  STATISTICS = "statistics",
-  HEARTBEAT = "heartbeat",
-  ERROR = "error",
-}
+// Removed WebSocketMessageType - no longer needed without WebSockets
 
 
 // ============================================================================
@@ -121,38 +113,16 @@ export interface UnifiedSessionState {
 }
 
 // ============================================================================
-// WEBSOCKET-SPECIFIC TYPES
+// REMOVED WEBSOCKET TYPES - Using HTTP API only
 // ============================================================================
 
 /**
  * The data payload for a context card update, making the action explicit.
+ * Kept for potential future HTTP API usage.
  */
 export interface ContextCardUpdateData {
     action: 'add' | 'remove' | 'update';
     card: UnifiedContextCard;
-}
-
-/**
- * A discriminated union for all possible data payloads sent over WebSockets.
- * This makes message handling on the frontend type-safe.
- */
-export type UnifiedWebSocketData =
-  | UnifiedSessionState // For full 'session_update'
-  | UnifiedMessage
-  | ContextCardUpdateData
-  | UnifiedAgentStatus
-  | UnifiedStatistics
-  | { error: string }
-  | { heartbeat: number };
-
-/**
- * The wrapper for all messages sent over the WebSocket connection.
- */
-export interface UnifiedWebSocketMessage {
-  type: WebSocketMessageType;
-  session_id: string;
-  data: UnifiedWebSocketData;
-  timestamp: string; // ISO 8601 timestamp
 }
 
 // ============================================================================

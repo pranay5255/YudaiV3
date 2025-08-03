@@ -3,6 +3,15 @@ set -e
 
 echo "🚀 Starting YudaiV3 Backend..."
 
+# 🆕 ADD THIS SECTION: Initialize database tables
+echo "🏗️  Initializing database tables..."
+if python db/init_db.py --full-init; then
+    echo "✅ Database tables initialized successfully!"
+else
+    echo "❌ Failed to initialize database tables"
+    exit 1
+fi
+
 # Function to test database connectivity
 test_database_connection() {
     echo "🔍 Testing database connectivity..."
@@ -65,6 +74,8 @@ while [ $attempt -lt $max_attempts ]; do
         sleep 5
     fi
 done
+
+
 
 echo "🚀 Starting unified YudaiV3 backend server..."
 echo "📊 Server will be available at: http://localhost:8000"

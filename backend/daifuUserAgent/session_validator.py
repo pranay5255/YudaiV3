@@ -103,48 +103,4 @@ class SessionValidator:
         
         return session
     
-    @staticmethod
-    def validate_conversation_id(conversation_id: str) -> str:
-        """
-        Validate conversation_id (alias for session_id for backward compatibility)
-        
-        Args:
-            conversation_id: Conversation ID to validate
-            
-        Returns:
-            Validated conversation_id
-            
-        Raises:
-            HTTPException: If conversation_id is missing or empty
-        """
-        if not conversation_id or not conversation_id.strip():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="conversation_id (session_id) is required and cannot be empty"
-            )
-        return conversation_id.strip()
-    
-    @staticmethod
-    def validate_conversation_exists(
-        db: Session,
-        user_id: int,
-        conversation_id: str,
-        touch_session: bool = True
-    ):
-        """
-        Validate conversation_id exists (alias for session validation)
-        
-        Args:
-            db: Database session
-            user_id: User ID
-            conversation_id: Conversation ID to validate
-            touch_session: Whether to update session activity timestamp
-            
-        Returns:
-            Session object if valid
-            
-        Raises:
-            HTTPException: If conversation doesn't exist or doesn't belong to user
-        """
-        # conversation_id is just an alias for session_id
-        return SessionValidator.validate_session_exists(db, user_id, conversation_id, touch_session) 
+ 

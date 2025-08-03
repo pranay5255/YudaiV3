@@ -10,7 +10,7 @@ RUN apk add --no-cache \
     py3-pydantic
 
 # Set environment variables for database
-ENV POSTGRES_DB=yudai_db
+ENV POSTGRES_DB=yudai_dev
 ENV POSTGRES_USER=yudai_user
 ENV POSTGRES_PASSWORD=yudai_password
 
