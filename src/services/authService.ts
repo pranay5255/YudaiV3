@@ -114,26 +114,39 @@ export class AuthService {
   // This is called when user is redirected back from GitHub with success
   static async handleAuthSuccess(): Promise<LoginResponse> {
     const urlParams = new URLSearchParams(window.location.search);
-    const userId = urlParams.get('user_id');
+    const code = urlParams.get('code');
+    const state = urlParams.get('state');
     
-    if (!userId) {
-      throw new Error('No user ID received from authentication success');
+    if (!code || !state) {
+      throw new Error('Missing required OAuth parameters');
     }
 
-    // Check auth status to get user info and token
+    // Exchange the code for an access token
+    const response = await fetch(`${AUTH_BASE_URL}/auth/callback?code=${code}&state=${state}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to exchange OAuth code for token');
+    }
+
+    const data = await response.json();
+    
+    // Store the token
+    localStorage.setItem('auth_token', data.access_token);
+
+    // Check auth status to get user info
     const authStatus = await this.checkAuthStatus();
     
     if (!authStatus.authenticated || !authStatus.user) {
       throw new Error('Authentication failed - user not authenticated');
     }
 
-    const token = this.getStoredToken();
-    if (!token) {
-      throw new Error('No authentication token found');
-    }
-
     return {
-      access_token: token,
+      access_token: data.access_token,
       token_type: 'bearer',
       user: authStatus.user
     };
