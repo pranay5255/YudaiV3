@@ -474,10 +474,21 @@ function AppContent() {
  */
 function App() {
   // Check if this is an auth callback route
-  const isAuthCallback = window.location.pathname === '/auth/success' || 
-                        window.location.pathname === '/auth/error' ||
-                        window.location.search.includes('user_id=') ||
-                        window.location.search.includes('message=');
+  const currentPath = window.location.pathname;
+  const currentSearch = window.location.search;
+  
+  // Debug logging
+  console.log('Current path:', currentPath);
+  console.log('Current search:', currentSearch);
+  
+  const isAuthCallback = currentPath === '/auth/success' || 
+                        currentPath === '/auth/error' ||
+                        currentPath === '/auth/callback' ||
+                        currentSearch.includes('user_id=') ||
+                        currentSearch.includes('message=') ||
+                        currentSearch.includes('code=');
+
+  console.log('Is auth callback:', isAuthCallback);
 
   if (isAuthCallback) {
     return (
