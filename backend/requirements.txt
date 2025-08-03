@@ -35,5 +35,9 @@ watchfiles==1.1.0
 websockets==15.0.1
 httpx==0.28.1
 
+# Add PyJWT for GitHub App authentication
+PyJWT==2.8.0
+cryptography==41.0.7  # For JWT signing with RSA keys
+
 
 httpx

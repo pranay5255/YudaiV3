@@ -4,12 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import time
-import uuid
 from typing import List, Optional
 
-import requests
 from auth.github_oauth import get_current_user
 from db.database import get_db
 from fastapi import (
@@ -17,6 +14,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
+    Query,
     WebSocket,
     WebSocketDisconnect,
     status,
@@ -26,7 +24,6 @@ from issueChatServices.issue_service import IssueService
 from issueChatServices.session_service import SessionService
 from models import (
     ChatRequest,
-    CreateChatMessageRequest,
     CreateSessionRequest,
     SessionResponse,
     User,
@@ -38,7 +35,9 @@ from unified_state import (
     unified_manager,
 )
 
-from .prompt import build_daifu_prompt
+from .llm_service import LLMService
+from .message_service import MessageService
+from .session_validator import SessionValidator
 
 router = APIRouter()
 
@@ -148,150 +147,182 @@ async def get_user_sessions(
 @router.post("/chat/daifu")
 async def chat_daifu(
     request: ChatRequest,
+    background_tasks: BackgroundTasks,
+    async_mode: bool = Query(False, description="Use async mode for real-time updates"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Process a chat message via the DAifu agent and store in database."""
+    """
+    Unified Chat Endpoint with WebSocket Support
+    
+    This endpoint consolidates the previous /chat/daifu and /chat/daifu/v2 endpoints.
+    Use async_mode=true for real-time WebSocket updates, false for synchronous responses.
+    """
     start_time = time.time()
-
-    # Validate session_id is provided
-    if not request.conversation_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="session_id (conversation_id) is required",
-        )
-
+    
+    # Validate conversation_id (session_id)
+    conversation_id = SessionValidator.validate_conversation_id(request.conversation_id)
+    
     try:
-        # Touch session to update last_activity
-        session = SessionService.touch_session(
-            db, current_user.id, request.conversation_id
-        )
-        if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
-
-        # Generate unique message ID
-        message_id = str(uuid.uuid4())
-
-        # Store user message in database
-        user_message_request = CreateChatMessageRequest(
-            session_id=request.conversation_id,
-            message_id=message_id,
-            message_text=request.message.content,
-            sender_type="user",
-            role="user",
+        # Validate session exists and belongs to user
+        session = SessionValidator.validate_session_active(db, current_user.id, conversation_id)
+        
+        # Store user message
+        user_message_db = MessageService.store_user_message(
+            db=db,
+            user_id=current_user.id,
+            session_id=conversation_id,
+            content=request.message.content,
             is_code=request.message.is_code,
-            tokens=len(request.message.content.split()),
-            context_cards=request.context_cards,
+            context_cards=request.context_cards
+        )
+        
+        if async_mode:
+            # Async mode: Return immediately and process in background
+            user_message_unified = StateConverter.message_to_unified(user_message_db)
+            
+            # Broadcast user message via WebSocket
+            await unified_manager.update_and_broadcast_message(
+                conversation_id, user_message_unified
+            )
+            
+            # Process AI response in background
+            background_tasks.add_task(
+                process_ai_response_background,
+                db=db,
+                session_id=conversation_id,
+                user_id=current_user.id,
+                start_time=start_time
+            )
+            
+            return {"status": "Message received, assistant is thinking..."}
+        
+        else:
+            # Synchronous mode: Process immediately and return response
+            # Get conversation history
+            history_messages = ChatService.get_chat_messages(
+                db, current_user.id, conversation_id, limit=50
+            )
+            
+            # Convert to format expected by prompt builder
+            history = []
+            for msg in history_messages:
+                sender = "User" if msg.sender_type == "user" else "DAifu"
+                history.append((sender, msg.message_text))
+            
+            # Generate AI response
+            reply = await LLMService.generate_response_with_history(
+                repo_context=GITHUB_CONTEXT,
+                conversation_history=history
+            )
+            
+            # Calculate processing time
+            processing_time = (time.time() - start_time) * 1000
+            
+            # Store assistant response
+            assistant_message_db = MessageService.store_assistant_message(
+                db=db,
+                user_id=current_user.id,
+                session_id=conversation_id,
+                content=reply,
+                processing_time=processing_time
+            )
+            
+            return {
+                "reply": reply,
+                "conversation": history + [("User", request.message.content), ("DAifu", reply)],
+                "message_id": user_message_db.message_id,
+                "processing_time": processing_time,
+                "session_id": conversation_id,
+            }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Store error message
+        MessageService.store_error_message(
+            db=db,
+            user_id=current_user.id,
+            session_id=conversation_id,
+            error_message=str(e),
+            error_type="system"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Chat processing failed: {str(e)}",
         )
 
-        ChatService.create_chat_message(db, current_user.id, user_message_request)
 
-        # Get conversation history from database
+async def process_ai_response_background(
+    db: Session,
+    session_id: str,
+    user_id: int,
+    start_time: float
+):
+    """Background task to process AI response and broadcast via WebSocket"""
+    try:
+        # Get conversation history
         history_messages = ChatService.get_chat_messages(
-            db, current_user.id, request.conversation_id, limit=50
+            db, user_id, session_id, limit=50
         )
-
+        
         # Convert to format expected by prompt builder
         history = []
         for msg in history_messages:
             sender = "User" if msg.sender_type == "user" else "DAifu"
             history.append((sender, msg.message_text))
-
-        # Build prompt with session context
-        prompt = build_daifu_prompt(GITHUB_CONTEXT, history)
-
-        api_key = os.getenv("OPENROUTER_API_KEY")
-        if not api_key:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="OPENROUTER_API_KEY not configured",
-            )
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-
-        body = {
-            "model": "deepseek/deepseek-r1-0528:free",
-            "messages": [{"role": "user", "content": prompt}],
-        }
-
-        resp = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers=headers,
-            json=body,
-            timeout=30,
+        
+        # Generate AI response
+        reply = await LLMService.generate_response_with_history(
+            repo_context=GITHUB_CONTEXT,
+            conversation_history=history
         )
-        resp.raise_for_status()
-        reply = resp.json()["choices"][0]["message"]["content"].strip()
-
+        
         # Calculate processing time
         processing_time = (time.time() - start_time) * 1000
-
-        # Store assistant response in database
-        assistant_message_request = CreateChatMessageRequest(
-            session_id=request.conversation_id,
-            message_id=str(uuid.uuid4()),
-            message_text=reply,
-            sender_type="assistant",
-            role="assistant",
-            is_code=False,
-            tokens=len(reply.split()),
-            model_used="deepseek/deepseek-r1-0528:free",
-            processing_time=processing_time,
+        
+        # Store assistant response
+        assistant_message_db = MessageService.store_assistant_message(
+            db=db,
+            user_id=user_id,
+            session_id=session_id,
+            content=reply,
+            processing_time=processing_time
         )
-
-        ChatService.create_chat_message(db, current_user.id, assistant_message_request)
-
-        return {
-            "reply": reply,
-            "conversation": history
-            + [("User", request.message.content), ("DAifu", reply)],
-            "message_id": message_id,
-            "processing_time": processing_time,
-            "session_id": request.conversation_id,
-        }
-
-    except HTTPException:
-        raise
-    except requests.RequestException as e:
-        # Store error message in database
-        error_message_request = CreateChatMessageRequest(
-            session_id=request.conversation_id,
-            message_id=str(uuid.uuid4()),
-            message_text=f"Error: Network request failed - {str(e)}",
-            sender_type="system",
-            role="system",
-            is_code=False,
-            tokens=0,
-            error_message=str(e),
+        
+        # Convert to unified format and broadcast
+        assistant_message_unified = StateConverter.message_to_unified(assistant_message_db)
+        await unified_manager.update_and_broadcast_message(
+            session_id, assistant_message_unified
         )
-
-        ChatService.create_chat_message(db, current_user.id, error_message_request)
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"LLM service unavailable: {str(e)}",
-        )
+        
+        # Update session statistics
+        updated_stats = SessionService.get_session_statistics(db, user_id, session_id)
+        if updated_stats:
+            await unified_manager.broadcast_to_session(
+                session_id,
+                {"type": "statistics", "data": updated_stats, "timestamp": time.time()},
+            )
+    
     except Exception as e:
-        # Store error message in database
-        error_message_request = CreateChatMessageRequest(
-            session_id=request.conversation_id,
-            message_id=str(uuid.uuid4()),
-            message_text=f"Error: {str(e)}",
-            sender_type="system",
-            role="system",
-            is_code=False,
-            tokens=0,
+        print(f"Error processing AI response: {e}")
+        # Store error message
+        MessageService.store_error_message(
+            db=db,
+            user_id=user_id,
+            session_id=session_id,
             error_message=str(e),
+            error_type="system"
         )
-
-        ChatService.create_chat_message(db, current_user.id, error_message_request)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"LLM call failed: {str(e)}",
+        
+        # Broadcast error via WebSocket
+        await unified_manager.broadcast_to_session(
+            session_id,
+            {
+                "type": "error",
+                "data": {"message": "AI processing failed"},
+                "timestamp": time.time(),
+            },
         )
 
 
@@ -302,8 +333,8 @@ async def websocket_session_endpoint(
     token: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """Enhanced WebSocket endpoint for real-time session updates with proper JWT authentication."""
-    # Enhanced JWT token authentication
+    """Enhanced WebSocket endpoint for real-time session updates with proper GitHub App authentication."""
+    # Enhanced GitHub App token authentication
     if not token:
         await websocket.close(
             code=status.WS_1008_POLICY_VIOLATION, reason="Missing authentication token"
@@ -326,14 +357,20 @@ async def websocket_session_endpoint(
             )
             return
 
+        # Log successful authentication for debugging
+        print(f"WebSocket authenticated for user {user.github_username} on session {session_id}")
+
     except Exception as e:
-        print(f"Authentication error for session {session_id}: {e}")
+        print(f"GitHub App authentication error for session {session_id}: {e}")
         await websocket.close(
-            code=status.WS_1008_POLICY_VIOLATION, reason="Authentication failed"
+            code=status.WS_1008_POLICY_VIOLATION, reason="GitHub App authentication failed"
         )
         return
 
     try:
+        # Validate session exists and belongs to user
+        SessionValidator.validate_session_active(db, user.id, session_id, touch_session=False)
+        
         # Connect to unified manager with user context
         await unified_manager.connect(websocket, session_id, db, user_id=user.id)
 
@@ -403,8 +440,6 @@ async def handle_websocket_message(
 
         elif message_type == "REQUEST_CONTEXT":
             # Send session context update
-            from issueChatServices.session_service import SessionService
-
             context = SessionService.get_comprehensive_session_context(
                 db, user_id, session_id
             )
@@ -455,20 +490,13 @@ async def handle_new_message_realtime(
 ):
     """Handle new message with immediate real-time broadcasting."""
     try:
-        # Create message request object
-        from models import ChatRequest, CreateChatMessageRequest
-
-        chat_request = ChatRequest(
-            conversation_id=session_id,
-            message=CreateChatMessageRequest(
-                content=message_data.get("content", ""),
-                is_code=message_data.get("is_code", False),
-            ),
-        )
-
         # Store user message
-        user_message_db = ChatService.create_chat_message_from_request(
-            db, user_id=user_id, session_id=session_id, request=chat_request
+        user_message_db = MessageService.store_user_message(
+            db=db,
+            user_id=user_id,
+            session_id=session_id,
+            content=message_data.get("content", ""),
+            is_code=message_data.get("is_code", False),
         )
         user_message_unified = StateConverter.message_to_unified(user_message_db)
 
@@ -480,7 +508,7 @@ async def handle_new_message_realtime(
 
         # Process with AI asynchronously
         asyncio.create_task(
-            process_ai_response_async(session_id, user_id, chat_request, db)
+            process_ai_response_background(db, session_id, user_id, time.time())
         )
 
     except Exception as e:
@@ -493,156 +521,6 @@ async def handle_new_message_realtime(
                 "timestamp": time.time(),
             },
         )
-
-
-async def process_ai_response_async(
-    session_id: str, user_id: int, request: ChatRequest, db: Session
-):
-    """Process AI response asynchronously and broadcast when ready."""
-    try:
-        # Generate AI response
-        response_content = await generate_daifu_response_async(request, db)
-
-        # Create AI message
-        ai_message_request = ChatRequest(
-            conversation_id=session_id,
-            message=CreateChatMessageRequest(content=response_content, is_code=False),
-        )
-
-        # Store AI message
-        ai_message_db = ChatService.create_ai_message_from_request(
-            db, session_id=session_id, request=ai_message_request
-        )
-        ai_message_unified = StateConverter.message_to_unified(ai_message_db)
-
-        # Broadcast AI response
-        await unified_manager.broadcast_to_session(
-            session_id,
-            {"type": "message", "data": ai_message_unified, "timestamp": time.time()},
-        )
-
-        # Update session statistics
-        updated_stats = SessionService.get_session_statistics(db, session_id)
-        if updated_stats:
-            await unified_manager.broadcast_to_session(
-                session_id,
-                {"type": "statistics", "data": updated_stats, "timestamp": time.time()},
-            )
-
-    except Exception as e:
-        print(f"Error processing AI response: {e}")
-        await unified_manager.broadcast_to_session(
-            session_id,
-            {
-                "type": "error",
-                "data": {"message": "AI processing failed"},
-                "timestamp": time.time(),
-            },
-        )
-
-
-async def generate_daifu_response_async(request: ChatRequest, db: Session) -> str:
-    """Generate DAifu response asynchronously."""
-    try:
-        # Use existing prompt building logic
-        prompt = build_daifu_prompt(
-            repo_context=GITHUB_CONTEXT,  # TODO: add repo context currently static but needs to get current repo context, commits, pulls, issues, etc.
-            conversation_history=[request.message.content],
-        )
-
-        # Call OpenRouter API
-        openrouter_response = requests.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": "openrouter/deepseek/deepseek-r1-0528",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7,
-                "max_tokens": 1000,
-            },
-            timeout=30,
-        )
-
-        if openrouter_response.status_code == 200:
-            data = openrouter_response.json()
-            return data["choices"][0]["message"]["content"]
-        else:
-            return "I apologize, but I'm having trouble processing your request right now. Please try again."
-
-    except Exception as e:
-        print(f"Error generating DAifu response: {e}")
-        return "I encountered an error while processing your request. Please try again later."
-
-
-@router.post("/chat/daifu/v2")
-async def chat_daifu_v2(
-    request: ChatRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    V2 Chat Endpoint:
-    1. Stores the message in the database.
-    2. Updates the in-memory state via the WebSocket manager.
-    3. Triggers the LLM call asynchronously.
-    """
-    if not request.conversation_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="session_id is required"
-        )
-
-    # 1. Create and store user message
-    user_message_db = ChatService.create_chat_message_from_request(
-        db, user_id=current_user.id, session_id=request.conversation_id, request=request
-    )
-    user_message_unified = StateConverter.message_to_unified(user_message_db)
-
-    # 2. Update state and broadcast to clients immediately
-    await unified_manager.update_and_broadcast_message(
-        request.conversation_id, user_message_unified
-    )
-
-    # 3. Trigger async LLM response generation
-    background_tasks.add_task(
-        generate_and_broadcast_assistant_response,
-        db=db,
-        session_id=request.conversation_id,
-        user_id=current_user.id,
-    )
-
-    return {"status": "Message received, assistant is thinking..."}
-
-
-async def generate_and_broadcast_assistant_response(
-    db: Session, session_id: str, user_id: int
-):
-    """Background task to get a response from the LLM and broadcast it."""
-    # This is a simplified version of your original LLM call logic
-    history_messages = ChatService.get_chat_messages(db, user_id, session_id, limit=50)
-    history = [(msg.sender_type, msg.message_text) for msg in history_messages]
-    prompt = build_daifu_prompt(GITHUB_CONTEXT, history)
-    # This is where you would use the prompt in a real LLM call
-    print(f"Generated prompt for LLM: {prompt[:100]}...")
-
-    # ... (LLM call logic from your original 'chat_daifu' endpoint) ...
-    # For brevity, let's simulate a response
-    await asyncio.sleep(5)  # Simulate network latency and processing time
-    reply_text = f"This is a simulated asynchronous response to your message in session {session_id}."
-
-    # Create and store assistant message
-    assistant_message_db = ChatService.create_assistant_message(
-        db, user_id=user_id, session_id=session_id, content=reply_text
-    )
-    assistant_message_unified = StateConverter.message_to_unified(assistant_message_db)
-
-    # Broadcast the assistant's response
-    await unified_manager.update_and_broadcast_message(
-        session_id, assistant_message_unified
-    )
 
 
 @router.get("/chat/sessions/{session_id}/statistics")
