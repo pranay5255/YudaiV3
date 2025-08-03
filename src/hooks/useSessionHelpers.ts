@@ -6,16 +6,17 @@ import {
   AgentType,
   UnifiedContextCard,
 } from '../types/unifiedState';
-
+import { logger } from '../utils/logger';
 /**
  * Custom hook for managing session actions.
  * This abstracts away the API calls and state updates, providing clean
  * functions for components to use.
  */
 export const useSessionHelpers = () => {
-  const { sessionState, setActiveSessionId } = useSession();
+  const { sessionState, setActiveSessionId, sendOptimisticUpdate, sendRealtimeMessage } = useSession();
   const { isAuthenticated } = useAuth();
 
+  // TODO: REPLACE - Replace console.log with proper logging
   const createSession = useCallback(async (
     repoOwner: string,
     repoName: string,
@@ -24,28 +25,37 @@ export const useSessionHelpers = () => {
     if (!isAuthenticated) {
       throw new Error('User must be authenticated to create a session');
     }
-    const session: { session_id?: string, id?: string } = await ApiService.createSession(repoOwner, repoName, repoBranch);
-    const sessionId = session.session_id || session.id;
-    if (sessionId) {
-      setActiveSessionId(sessionId);
-    } else {
+    
+    logger.info('Creating session for:', { repoOwner, repoName, repoBranch });
+    
+    try {
+      const session: { session_id?: string, id?: string } = await ApiService.createSession(repoOwner, repoName, repoBranch);
+      logger.info('Session creation response:', session);
+      
+      const sessionId = session.session_id || session.id;
+      if (sessionId) {
+        logger.info('Setting active session ID:', sessionId);
+        setActiveSessionId(sessionId);
+        return sessionId;
+      } else {
+        logger.error('No session ID in response:', session);
         throw new Error("Failed to create session or get a session ID");
+      }
+    } catch (error) {
+      logger.error('Session creation failed:', error);
+      throw error;
     }
-    return sessionId;
   }, [isAuthenticated, setActiveSessionId]);
 
   const sendMessage = useCallback(async (content: string, isCode: boolean = false) => {
     if (!sessionState.session_id) throw new Error('No active session');
     
-    // Get real-time capabilities from session context
-    const session = useSession();
-    
     // First, send optimistic update for immediate UI feedback
-    session.sendOptimisticUpdate('SEND_MESSAGE', { content, is_code: isCode });
+    sendOptimisticUpdate('SEND_MESSAGE', { content, is_code: isCode });
     
     try {
       // Send through real-time WebSocket for immediate broadcasting
-      session.sendRealtimeMessage({
+      sendRealtimeMessage({
         type: 'SEND_MESSAGE',
         data: {
           session_id: sessionState.session_id,
@@ -64,14 +74,33 @@ export const useSessionHelpers = () => {
         context_cards: sessionState.context_cards.map((c: UnifiedContextCard) => c.id)
       });
     }
-  }, [sessionState.session_id, sessionState.context_cards]);
+  }, [sessionState.session_id, sessionState.context_cards, sendOptimisticUpdate, sendRealtimeMessage]);
 
+  // TODO: IMPLEMENT - Proper API methods for context cards
   const addContextCard = useCallback(async (card: Omit<UnifiedContextCard, 'id' | 'session_id' | 'created_at'>) => {
     if (!sessionState.session_id) throw new Error('No active session');
-    // In a real implementation, this would call an API endpoint
-    // The backend would then broadcast the update.
-    console.log('addContextCard (local simulation):', card);
-  }, [sessionState.session_id]);
+    
+    // TODO: IMPLEMENT - Call actual API endpoint
+    try {
+      const response = await ApiService.addContextCard({
+        session_id: sessionState.session_id,
+        title: card.title,
+        description: card.description,
+        content: card.content,
+        tokens: card.tokens,
+        source: card.source
+      });
+      
+      // Send real-time update
+      sendRealtimeMessage({
+        type: 'CONTEXT_CARD',
+        data: { action: 'add', card: response }
+      });
+    } catch (error) {
+      console.error('Failed to add context card:', error);
+      throw error;
+    }
+  }, [sessionState.session_id, sendRealtimeMessage]);
   
   const removeContextCard = useCallback(async (cardId: string) => {
       if (!sessionState.session_id) throw new Error('No active session');

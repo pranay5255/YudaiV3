@@ -3,6 +3,19 @@ import { Send, Plus } from 'lucide-react';
 import { Message, FileItem } from '../types';
 import { ApiService, ChatRequest, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview, UserIssueResponse } from '../services/api';
 import { useRepository } from '../hooks/useRepository';
+import { useSession } from '../hooks/useSession';
+import { useSessionHelpers } from '../hooks/useSessionHelpers';
+
+// Simple toast utility (replace with your own or a library if available)
+// This function is used to show a toast when the user clicks on "Create Issue"
+function showToast(message: string, type: 'error' | 'success' = 'error') {
+  // This is a placeholder. Replace with your toast library or implementation.
+  // For example, if using react-toastify: toast.error(message)
+  if (typeof window !== 'undefined') {
+    // You can replace this with a more sophisticated toast system
+    window.alert(message);
+  }
+}
 
 interface ContextCard {
   id: string;
@@ -43,7 +56,16 @@ export const Chat: React.FC<ChatProps> = ({
   void onCreateIssue;
   
   const { selectedRepository } = useRepository();
-  const [messages, setMessages] = useState<Message[]>([
+  const { sessionState, sendOptimisticUpdate, sendRealtimeMessage } = useSession();
+  const { sendMessage } = useSessionHelpers();
+  
+  // Use messages from session context instead of local state
+  const messages = sessionState.messages.length > 0 ? sessionState.messages.map(msg => ({
+    id: msg.id,
+    content: msg.content,
+    isCode: msg.is_code || false,
+    timestamp: new Date(msg.timestamp),
+  })) : [
     {
       id: '1',
       content: 'Hi, I am Daifu, your spirit guide across the chaos of context. I will help you create github issues and pull requests by adding the right context required for a given task.You can add the individual text messages to context such as the one below to prioritize text messages in conversations',
@@ -62,10 +84,10 @@ export const Chat: React.FC<ChatProps> = ({
       isCode: true,
       timestamp: new Date(),
     },
-  ]);
+  ];
+  
   const [input, setInput] = useState('');
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | undefined>();
   const [isLoading, setIsLoading] = useState(false);
   const [isCreatingIssue, setIsCreatingIssue] = useState(false);
 
@@ -77,55 +99,21 @@ export const Chat: React.FC<ChatProps> = ({
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
     
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      content: input,
-      isCode: input.includes('`') && input.includes('`'),
-      timestamp: new Date(),
-    };
+    // Check if we have an active session
+    if (!sessionState.session_id) {
+      const errorText = 'No active session found. Please select a repository first.';
+      showToast(errorText, 'error');
+      return;
+    }
     
-    // Add user message immediately
-    setMessages(prev => [...prev, userMessage]);
     const currentInput = input;
     setInput('');
     setIsLoading(true);
     
     try {
-      // Generate session ID if not exists
-      const currentSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      // Send to Daifu agent
-      const request: ChatRequest = {
-        conversation_id: currentSessionId,  // Fixed: backend expects conversation_id, not session_id
-        message: {
-          content: currentInput,
-          is_code: userMessage.isCode,
-        },
-        // Add context cards if available
-        context_cards: contextCards.map(card => card.id) || [],
-        // Add repository context if available
-        repo_owner: selectedRepository?.repository.full_name.split('/')[0],
-        repo_name: selectedRepository?.repository.full_name.split('/')[1],
-      };
-      
-      const response = await ApiService.sendChatMessage(request);
-      
-      // Update session ID if provided in response or if we generated a new one
-      if (response.session_id) {
-        setSessionId(response.session_id);
-      } else if (!sessionId) {
-        setSessionId(currentSessionId);
-      }
-      
-      // Add Daifu's response
-      const daifuMessage: Message = {
-        id: response.message_id,
-        content: response.reply,
-        isCode: false,
-        timestamp: new Date(),
-      };
-      
-      setMessages(prev => [...prev, daifuMessage]);
+      // Use the session helper to send the message
+      await sendMessage(currentInput, currentInput.includes('`') && currentInput.includes('`'));
+      // The session context will handle the response via real-time updates
     } catch (error) {
       console.error('Failed to send message:', error);
       
@@ -133,20 +121,30 @@ export const Chat: React.FC<ChatProps> = ({
       if (error instanceof Error) {
         if (error.message === 'Authentication required') {
           errorText = 'Please log in to continue chatting.';
+        } else if (error.message === 'No active session') {
+          errorText = 'Please select a repository to start a session.';
         } else {
           errorText = `Error: ${error.message}`;
         }
       }
-      
-      // Add error message
-      const errorMessage: Message = {
+      // Show error as toast
+      showToast(errorText, 'error');
+
+      // Add error message to session context (optional, can be removed if only toast is needed)
+      const errorMessage = {
         id: Date.now().toString(),
+        session_id: sessionState.session_id,
         content: errorText,
-        isCode: false,
-        timestamp: new Date(),
+        role: 'assistant',
+        is_code: false,
+        timestamp: new Date().toISOString(),
+        tokens: 0,
+        metadata: { status: 'error' }
       };
-      
-      setMessages(prev => [...prev, errorMessage]);
+      sendRealtimeMessage({
+        type: 'MESSAGE',
+        data: errorMessage
+      });
     } finally {
       setIsLoading(false);
     }
@@ -187,7 +185,7 @@ export const Chat: React.FC<ChatProps> = ({
 
       // Prepare the request
       const request: CreateIssueWithContextRequest = {
-        title: `Issue from Chat Session ${sessionId || 'default'}`,
+        title: `Issue from Chat Session ${sessionState.session_id || 'default'}`,
         description: 'This issue was generated from a chat conversation with file dependency context.',
         chat_messages: conversationMessages,
         file_context: fileContextItems,
@@ -212,111 +210,120 @@ export const Chat: React.FC<ChatProps> = ({
           canCreateGitHubIssue: !!selectedRepository,
           repositoryInfo: request.repository_info
         });
+        // Show a success toast when the user clicks on "Create Issue" and the preview is shown
+        showToast('GitHub issue preview created successfully!', 'success');
       }
       
     } catch (error) {
       console.error('Failed to create GitHub issue:', error);
-      
-      // Add error message to chat
-      const errorMessage: Message = {
-        id: Date.now().toString(),
-        content: `Failed to create GitHub issue: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        isCode: false,
-        timestamp: new Date(),
-      };
-      
-      setMessages(prev => [...prev, errorMessage]);
+      const errorText = `Failed to create GitHub issue: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      // Show error as toast
+      showToast(errorText, 'error');
+      // Optionally, you could also send this as a chat message if desired
+      // const errorMessage: Message = {
+      //   id: Date.now().toString(),
+      //   content: errorText,
+      //   isCode: false,
+      //   timestamp: new Date(),
+      // };
+      // sendRealtimeMessage({ type: 'MESSAGE', data: errorMessage });
     } finally {
       setIsCreatingIssue(false);
     }
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Messages */}
+    <div className="h-full flex flex-col">
+      {/* Session Status Indicator */}
+      {!sessionState.session_id && (
+        <div className="bg-yellow-600/20 border border-yellow-600/30 rounded-lg p-4 mb-4">
+          <div className="text-yellow-400 font-medium mb-2">No Active Session</div>
+          <div className="text-yellow-300 text-sm mb-3">
+            Please select a repository to start a new session and begin chatting with Daifu.
+          </div>
+          <button
+            onClick={() => {
+              // Trigger repository selection manually
+              window.location.reload();
+            }}
+            className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-sm"
+          >
+            Select Repository
+          </button>
+        </div>
+      )}
+      
+      {/* Messages Container */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((message) => (
           <div
             key={message.id}
-            className="group relative"
+            className={`flex ${message.isCode ? 'justify-start' : 'justify-end'}`}
             onMouseEnter={() => setHoveredMessage(message.id)}
             onMouseLeave={() => setHoveredMessage(null)}
           >
-            <div className={`
-              p-4 rounded-xl
-              ${message.isCode 
-                ? 'bg-zinc-900 border border-zinc-800' 
-                : 'bg-zinc-800/50'
-              }
-            `}>
-              {message.isCode ? (
-                <pre className="text-sm text-fg font-mono overflow-x-auto">
-                  <code>{message.content}</code>
-                </pre>
-              ) : (
-                <p className="text-fg prose dark:prose-invert max-w-none">
-                  {message.content}
-                </p>
+            <div
+              className={`max-w-[70%] rounded-lg p-3 ${
+                message.isCode
+                  ? 'bg-zinc-800 text-zinc-200'
+                  : 'bg-blue-600 text-white'
+              }`}
+            >
+              <div className="whitespace-pre-wrap">{message.content}</div>
+              {hoveredMessage === message.id && message.id !== '1' && message.id !== '2' && (
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => onAddToContext(message.content)}
+                    className="text-xs bg-zinc-700 hover:bg-zinc-600 px-2 py-1 rounded"
+                  >
+                    Add to Context
+                  </button>
+                </div>
               )}
             </div>
-            
-            {/* Add to Context Button */}
-            {hoveredMessage === message.id && (
-              <button
-                onClick={() => onAddToContext(message.content)}
-                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 
-                         transition-opacity duration-200 bg-primary hover:bg-primary/80 
-                         text-white p-1 rounded text-xs flex items-center gap-1"
-              >
-                <Plus className="w-3 h-3" />
-                Add to Context
-              </button>
-            )}
           </div>
         ))}
+        
+        {isLoading && (
+          <div className="flex justify-start">
+            <div className="bg-zinc-800 text-zinc-200 rounded-lg p-3">
+              <div className="flex items-center gap-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-zinc-400"></div>
+                <span>Daifu is thinking...</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Input */}
-      <div className="p-4 border-t border-zinc-800">
+      {/* Input Area */}
+      <div className="border-t border-zinc-700 p-4">
         <div className="flex gap-2">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Type your message... Use /add to add context"
-            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2 
-                     text-fg placeholder-fg/50 focus:outline-none focus:ring-2 
-                     focus:ring-primary focus:border-transparent"
+            placeholder={sessionState.session_id ? "Type your message..." : "Select a repository to start chatting..."}
+            disabled={!sessionState.session_id || isLoading}
+            className="flex-1 bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 text-white placeholder-zinc-400 focus:outline-none focus:border-blue-500 disabled:opacity-50"
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isLoading}
-            className="bg-primary hover:bg-primary/80 disabled:opacity-50 
-                     disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg 
-                     transition-colors flex items-center gap-2"
+            disabled={!input.trim() || isLoading || !sessionState.session_id}
+            className="bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg flex items-center gap-2"
           >
-            {isLoading ? (
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-            ) : (
-              <Send className="w-4 h-4" />
-            )}
+            <Send size={16} />
+            Send
           </button>
-          {userMessageCount >= 2 && (
-            <button
-              onClick={handleCreateGitHubIssue}
-              disabled={isCreatingIssue}
-              className="bg-green-600 hover:bg-green-700 disabled:opacity-50 
-                       disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg 
-                       transition-colors flex items-center gap-2"
-            >
-              {isCreatingIssue ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-              ) : (
-                'Create Github Issue'
-              )}
-            </button>
-          )}
+          <button
+            onClick={handleCreateGitHubIssue}
+            disabled={isCreatingIssue || userMessageCount < 1 || !sessionState.session_id}
+            className="bg-green-600 hover:bg-green-700 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg flex items-center gap-2"
+          >
+            <Plus size={16} />
+            Create Issue
+          </button>
         </div>
       </div>
     </div>

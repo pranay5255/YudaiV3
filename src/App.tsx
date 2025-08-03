@@ -70,7 +70,7 @@ function AppContent() {
   
   // Local UI state (not session-related)
   const [currentStep, setCurrentStep] = useState<ProgressStep>('DAifu');
-  const [errorStep] = useState<ProgressStep | undefined>();
+  // TODO: REMOVE - Unused state variables
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
@@ -83,7 +83,15 @@ function AppContent() {
 
   // Show repository selection after login if no repository is selected
   useEffect(() => {
+    console.log('Repository selection check:', {
+      isAuthenticated,
+      user: !!user,
+      hasSelectedRepository,
+      sessionId: sessionState.session_id
+    });
+    
     if (isAuthenticated && user && !hasSelectedRepository && !sessionState.session_id) {
+      console.log('Showing repository selection toast');
       // Add a small delay to let the user see they've logged in
       const timer = setTimeout(() => {
         setShowRepositorySelection(true);
@@ -92,33 +100,45 @@ function AppContent() {
       return () => clearTimeout(timer);
     }
   }, [isAuthenticated, user, hasSelectedRepository, sessionState.session_id]);
-  
-  // Real-time repository info updates
-  useEffect(() => {
-    if (sessionState.repository) {
-      // Update repository context when session repository changes
-      // This logic will now be handled inside the helper hook or context if needed
-      // updateRepositoryInfo(sessionState.repository);
-    }
-  }, [sessionState.repository]);
 
+  // Additional check: if user is authenticated but no session, show repository selection
+  useEffect(() => {
+    if (isAuthenticated && user && !sessionState.session_id && !showRepositorySelection) {
+      console.log('No active session found, showing repository selection');
+      setShowRepositorySelection(true);
+    }
+  }, [isAuthenticated, user, sessionState.session_id, showRepositorySelection]);
+  
   /**
    * Handles repository selection and creates a new session
    * Integrates with SessionContext for unified state management
    */
   const handleRepositoryConfirm = async (selection: SelectedRepository) => {
+    console.log('Repository selection confirmed:', selection);
     setSelectedRepository(selection);
     setShowRepositorySelection(false);
+    
     try {
-        await createSession(
-            selection.repository.full_name.split('/')[0],
-            selection.repository.name,
-            selection.branch
-        );
-        addToast('Session created successfully!', 'success');
+      console.log('Creating session for:', {
+        owner: selection.repository.full_name.split('/')[0],
+        name: selection.repository.name,
+        branch: selection.branch
+      });
+      
+      const sessionId = await createSession(
+        selection.repository.full_name.split('/')[0],
+        selection.repository.name,
+        selection.branch
+      );
+      
+      console.log('Session created successfully with ID:', sessionId);
+      addToast('Session created successfully!', 'success');
     } catch (error) {
-        addToast('Failed to create session.', 'error');
-        console.error(error);
+      console.error('Failed to create session:', error);
+      addToast(`Failed to create session: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+      
+      // Re-show repository selection if session creation fails
+      setShowRepositorySelection(true);
     }
   };
 
@@ -174,10 +194,7 @@ function AppContent() {
     addToast('Added to context successfully', 'success');
   };
 
-  /**
-   * Adds a file to context cards
-   * @param file - The file item to add to context
-   */
+  // TODO: FIX CRITICAL - Remove infinite recursion in addFileToContext
   const addFileToContext = (file: FileItem) => {
     const newCard: UnifiedContextCard = {
       id: Date.now().toString(),
@@ -191,7 +208,6 @@ function AppContent() {
     };
     
     addContextCard(newCard);
-    addFileToContext(file);
     addToast(`Added ${file.file_name} to context`, 'success');
   };
 
@@ -302,7 +318,7 @@ function AppContent() {
    * @param tab - The tab to refresh
    */
   // Tab refresh handler - available for future use
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
 
   
   // Use handleTabRefresh on double-click for tabs (future enhancement)
@@ -378,7 +394,7 @@ function AppContent() {
         {/* Top Bar with Session Info */}
         <TopBar 
           currentStep={currentStep} 
-          errorStep={errorStep}
+          errorStep={undefined} // ⚠️ UNUSED
         />
         
         {/* Main Layout */}
