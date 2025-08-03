@@ -110,6 +110,3 @@ class ChatService:
 # Legacy SessionService methods moved to dedicated session_service.py
 # This service now focuses only on chat message management
 
-
-# FileEmbeddingService moved to dedicated file_embedding_service.py if needed
-# This service now focuses only on chat message management 
