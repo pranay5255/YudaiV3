@@ -40,7 +40,8 @@ async def login():
         validate_github_app_config()
         
         # Clean up expired states periodically
-        state_manager.cleanup_expired_states()
+        db = next(get_db())
+        state_manager.cleanup_expired_states(db)
         
         # Generate state parameter using centralized manager
         state = state_manager.generate_state()
