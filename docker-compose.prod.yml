@@ -1,4 +1,14 @@
 
+# ===========================================
+# PRODUCTION DOCKER COMPOSE CONFIGURATION
+# Version: v1.5.0 (Production Hardening)
+# Last Updated: 2025-08-04
+#
+# Evolution: v1.4.0 → v1.5.0
+# Added: Resource limits, performance tuning,
+#        security hardening, enhanced logging
+# ===========================================
+
 services:
   # PostgreSQL Database
   db:
@@ -11,24 +21,72 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      # Performance tuning for production
+      - POSTGRES_MAX_CONNECTIONS=200
+      - POSTGRES_SHARED_BUFFERS=256MB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=1GB
+      - POSTGRES_WORK_MEM=4MB
+      - POSTGRES_MAINTENANCE_WORK_MEM=64MB
+      - POSTGRES_WAL_BUFFERS=16MB
+      - POSTGRES_CHECKPOINT_COMPLETION_TARGET=0.9
+      - POSTGRES_DEFAULT_STATISTICS_TARGET=100
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - postgres_backups:/var/lib/postgresql/backups
       - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - yudai-network
+    # Enhanced health check with better timing
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Production resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    # Production logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=database,version=v1.5.0"
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:docker-default
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
 
-  # Backend API Service  
+  # Backend API Service
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: yudai-be
     restart: unless-stopped
+    # Use environment files for better secrets management
+    env_file:
+      - .env.prod
+      - .env.secrets
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - DB_ECHO=false
@@ -54,16 +112,52 @@ services:
     volumes:
       - ./backend:/app
       - /app/__pycache__
+      - app_logs:/app/logs
       - ./backend/yudaiv3.2025-08-02.private-key.pem:/app/yudaiv3.2025-08-02.private-key.pem:ro
     networks:
       - yudai-network
+    # Enhanced health check
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
+      interval: 15s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 30s
+    # Production resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    # Production logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=backend,version=v1.5.0"
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:docker-default
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
 
-  # Frontend Service (now includes nginx with SSL)
+  # Frontend Service (nginx with SSL & enhanced security)
   frontend:
     build:
       context: .
@@ -74,25 +168,120 @@ services:
     restart: unless-stopped
     environment:
       - VITE_API_URL=https://yudai.app/api
+      - NGINX_WORKER_PROCESSES=auto
+      - NGINX_WORKER_CONNECTIONS=1024
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - ./ssl:/etc/nginx/ssl
+      - ./ssl:/etc/nginx/ssl:ro
+      - ssl_certs:/etc/nginx/ssl-backup:ro
+      - app_logs:/var/log/nginx
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - yudai-network
+    # Enhanced health check
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/health"]
-      interval: 30s
+      interval: 15s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 20s
+    # Production resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    # Production logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=frontend,version=v1.5.0"
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:docker-default
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
 
 volumes:
   postgres_data:
     driver: local
+  postgres_backups:
+    driver: local
+    driver_opts:
+      type: local
+      o: bind
+      device: ./backups/postgres
+  app_logs:
+    driver: local
+    driver_opts:
+      type: local
+      o: bind
+      device: ./logs
+  ssl_certs:
+    driver: local
+    driver_opts:
+      type: local
+      o: bind
+      device: ./ssl-backup
 
 networks:
   yudai-network:
     driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: yudai-bridge
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+
+# ===========================================
+# PRODUCTION DEPLOYMENT NOTES
+# ===========================================
+#
+# v1.5.0 Features Added:
+# ✅ Resource limits (prevent resource exhaustion)
+# ✅ Enhanced health checks (better reliability)
+# ✅ Production logging (structured logs with rotation)
+# ✅ Security hardening (capabilities, privileges)
+# ✅ Performance tuning (PostgreSQL optimization)
+# ✅ Backup volumes (data protection)
+# ✅ Network security (custom subnet, isolation)
+# ✅ Environment file management (secrets separation)
+#
+# Next Steps:
+# 1. Create .env.prod and .env.secrets files
+# 2. Set up log rotation and monitoring
+# 3. Configure SSL certificate backup strategy
+# 4. Test resource limits in staging
+# 5. Monitor performance metrics
+#
+# Critical Security Notes:
+# - Ensure .env.secrets is in .gitignore
+# - Set proper file permissions (600) on secrets
+# - Monitor resource usage and adjust limits
+# - Regular backup verification
+# ===========================================
