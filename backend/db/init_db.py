@@ -21,7 +21,6 @@ def wait_for_database(max_retries=30, delay=2):
     
     for attempt in range(max_retries):
         try:
-            # Use Unix socket connection instead of TCP/IP
             engine = create_engine(
                 os.getenv("DATABASE_URL"),
                 pool_pre_ping=True
@@ -43,8 +42,6 @@ def create_tables_with_models(engine):
     """Create tables using SQLAlchemy models (preferred method)"""
     try:
         from db import init_db
-        # Import models but don't use Base directly
-        
         print("Creating tables using SQLAlchemy models...")
         init_db()
         print("✓ Tables created successfully using models")
@@ -303,48 +300,15 @@ def create_tables_standalone(engine):
         """
     ]
     
-    # Index creation for performance optimization
+    # Basic indexes for performance
     create_indexes_sql = [
-        # High-frequency access indexes (SessionContext.tsx usage patterns)
         "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_active ON chat_sessions(user_id, is_active)",
-        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_repo_lookup ON chat_sessions(user_id, repo_owner, repo_name, repo_branch, is_active)",
         "CREATE INDEX IF NOT EXISTS idx_chat_sessions_session_id ON chat_sessions(session_id)",
-        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_last_activity ON chat_sessions(last_activity DESC)",
-        
-        # Message-related indexes (frequent chat operations)
-        "CREATE INDEX IF NOT EXISTS idx_chat_messages_session_time ON chat_messages(session_id, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id)",
-        "CREATE INDEX IF NOT EXISTS idx_chat_messages_message_id ON chat_messages(message_id)",
-        
-        # Context and file embedding indexes (real-time context loading)
         "CREATE INDEX IF NOT EXISTS idx_context_cards_user_active ON context_cards(user_id, is_active)",
-        "CREATE INDEX IF NOT EXISTS idx_file_embeddings_session ON file_embeddings(session_id)",
-        "CREATE INDEX IF NOT EXISTS idx_file_embeddings_file_path ON file_embeddings(file_path)",
-        
-        # Authentication and user indexes (login/auth flows)
-        "CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_active ON auth_tokens(user_id, is_active)",
         "CREATE INDEX IF NOT EXISTS idx_users_github_id ON users(github_user_id)",
-        "CREATE INDEX IF NOT EXISTS idx_users_github_username ON users(github_username)",
-        
-        # Repository and GitHub data indexes (moderate frequency)
         "CREATE INDEX IF NOT EXISTS idx_repositories_user_name ON repositories(user_id, name)",
-        "CREATE INDEX IF NOT EXISTS idx_repositories_full_name ON repositories(full_name)",
-        "CREATE INDEX IF NOT EXISTS idx_repositories_github_id ON repositories(github_repo_id)",
-        
-        # Issue and PR indexes (moderate frequency)
-        "CREATE INDEX IF NOT EXISTS idx_user_issues_user_status ON user_issues(user_id, status)",
-        "CREATE INDEX IF NOT EXISTS idx_user_issues_repo ON user_issues(repo_owner, repo_name)",
-        "CREATE INDEX IF NOT EXISTS idx_user_issues_session ON user_issues(chat_session_id)",
-        
-        # File system indexes (occasional access)
-        "CREATE INDEX IF NOT EXISTS idx_file_items_repo_path ON file_items(repository_id, path)",
-        "CREATE INDEX IF NOT EXISTS idx_file_items_directory ON file_items(repository_id, is_directory)",
-        "CREATE INDEX IF NOT EXISTS idx_file_analyses_repo_status ON file_analyses(repository_id, status)",
-        
-        # GitHub data indexes (low frequency)
-        "CREATE INDEX IF NOT EXISTS idx_issues_repo_state ON issues(repository_id, state)",
-        "CREATE INDEX IF NOT EXISTS idx_pull_requests_repo_state ON pull_requests(repository_id, state)",
-        "CREATE INDEX IF NOT EXISTS idx_commits_repo_date ON commits(repository_id, author_date DESC)"
+        "CREATE INDEX IF NOT EXISTS idx_file_items_repo_path ON file_items(repository_id, path)"
     ]
     
     with engine.connect() as conn:
@@ -355,64 +319,9 @@ def create_tables_standalone(engine):
         for sql in create_indexes_sql:
             conn.execute(text(sql))
         
-        # Create triggers for real-time SSE notifications
-        create_triggers_sql = [
-            # Updated_at triggers for automatic timestamp updates
-            """
-            CREATE TRIGGER update_chat_sessions_updated_at 
-                BEFORE UPDATE ON chat_sessions 
-                FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()
-            """,
-            """
-            CREATE TRIGGER update_chat_messages_updated_at 
-                BEFORE UPDATE ON chat_messages 
-                FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()
-            """,
-            """
-            CREATE TRIGGER update_context_cards_updated_at 
-                BEFORE UPDATE ON context_cards 
-                FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()
-            """,
-            """
-            CREATE TRIGGER update_user_issues_updated_at 
-                BEFORE UPDATE ON user_issues 
-                FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()
-            """,
-            """
-            CREATE TRIGGER update_file_embeddings_updated_at 
-                BEFORE UPDATE ON file_embeddings 
-                FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()
-            """,
-            
-            # Real-time notification triggers for SSE
-            """
-            CREATE TRIGGER notify_chat_sessions_change 
-                AFTER INSERT OR UPDATE OR DELETE ON chat_sessions 
-                FOR EACH ROW EXECUTE FUNCTION notify_session_update()
-            """,
-            """
-            CREATE TRIGGER notify_chat_messages_change 
-                AFTER INSERT OR UPDATE OR DELETE ON chat_messages 
-                FOR EACH ROW EXECUTE FUNCTION notify_session_update()
-            """,
-            """
-            CREATE TRIGGER notify_context_cards_change 
-                AFTER INSERT OR UPDATE OR DELETE ON context_cards 
-                FOR EACH ROW EXECUTE FUNCTION notify_session_update()
-            """,
-            """
-            CREATE TRIGGER notify_file_embeddings_change 
-                AFTER INSERT OR UPDATE OR DELETE ON file_embeddings 
-                FOR EACH ROW EXECUTE FUNCTION notify_session_update()
-            """
-        ]
-        
-        for sql in create_triggers_sql:
-            conn.execute(text(sql))
-        
         conn.commit()
     
-    print("✓ Tables, indexes, and triggers created successfully using standalone SQL")
+    print("✓ Tables and indexes created successfully using standalone SQL")
 
 def create_sample_data_with_models(engine):
     """Create sample data using SQLAlchemy models (preferred method)"""
@@ -441,95 +350,28 @@ def create_sample_data_standalone(engine):
         db.execute(text("""
             INSERT INTO users (github_username, github_user_id, email, display_name, avatar_url, created_at, updated_at) VALUES
             ('alice_dev', '12345', 'alice@example.com', 'Alice Developer', 'https://avatars.githubusercontent.com/u/12345?v=4', NOW(), NOW()),
-            ('bob_coder', '67890', 'bob@example.com', 'Bob Coder', 'https://avatars.githubusercontent.com/u/67890?v=4', NOW(), NOW()),
-            ('charlie_architect', '11111', 'charlie@example.com', 'Charlie Architect', 'https://avatars.githubusercontent.com/u/11111?v=4', NOW(), NOW())
+            ('bob_coder', '67890', 'bob@example.com', 'Bob Coder', 'https://avatars.githubusercontent.com/u/67890?v=4', NOW(), NOW())
             ON CONFLICT (github_username) DO NOTHING
-        """))
-        
-        # Sample AuthTokens
-        db.execute(text("""
-            INSERT INTO auth_tokens (user_id, access_token, refresh_token, token_type, scope, expires_at, is_active, created_at, updated_at) VALUES
-            (1, 'ghp_sample_access_token_1', 'ghr_sample_refresh_token_1', 'bearer', 'repo user', NOW() + INTERVAL '30 days', true, NOW(), NOW()),
-            (2, 'ghp_sample_access_token_2', 'ghr_sample_refresh_token_2', 'bearer', 'repo user', NOW() + INTERVAL '30 days', true, NOW(), NOW())
-            ON CONFLICT DO NOTHING
         """))
         
         # Sample Repositories
         db.execute(text("""
             INSERT INTO repositories (github_repo_id, user_id, name, owner, full_name, repo_url, description, private, html_url, clone_url, language, stargazers_count, forks_count, open_issues_count, github_created_at, github_updated_at, pushed_at, created_at, updated_at) VALUES
-            (123456789, 1, 'awesome-project', 'alice_dev', 'alice_dev/awesome-project', 'https://github.com/alice_dev/awesome-project', 'An awesome project for demonstrating features', false, 'https://github.com/alice_dev/awesome-project', 'https://github.com/alice_dev/awesome-project.git', 'Python', 42, 5, 3, NOW() - INTERVAL '100 days', NOW() - INTERVAL '5 days', NOW() - INTERVAL '1 day', NOW(), NOW()),
-            (987654321, 2, 'cool-app', 'bob_coder', 'bob_coder/cool-app', 'https://github.com/bob_coder/cool-app', 'A cool application with modern features', false, 'https://github.com/bob_coder/cool-app', 'https://github.com/bob_coder/cool-app.git', 'TypeScript', 15, 2, 1, NOW() - INTERVAL '50 days', NOW() - INTERVAL '2 days', NOW() - INTERVAL '6 hours', NOW(), NOW())
+            (123456789, 1, 'awesome-project', 'alice_dev', 'alice_dev/awesome-project', 'https://github.com/alice_dev/awesome-project', 'An awesome project for demonstrating features', false, 'https://github.com/alice_dev/awesome-project', 'https://github.com/alice_dev/awesome-project.git', 'Python', 42, 5, 3, NOW() - INTERVAL '100 days', NOW() - INTERVAL '5 days', NOW() - INTERVAL '1 day', NOW(), NOW())
             ON CONFLICT (github_repo_id) DO NOTHING
-        """))
-        
-        # Sample Issues
-        db.execute(text("""
-            INSERT INTO issues (github_issue_id, repository_id, number, title, body, state, html_url, author_username, github_created_at, github_updated_at, github_closed_at) VALUES
-            (1001, 1, 1, 'Add user authentication feature', 'We need to implement user authentication with OAuth2', 'open', 'https://github.com/alice_dev/awesome-project/issues/1', 'alice_dev', NOW() - INTERVAL '10 days', NOW() - INTERVAL '2 days', NULL),
-            (1002, 1, 2, 'Fix database connection issue', 'Database connection is failing in production', 'closed', 'https://github.com/alice_dev/awesome-project/issues/2', 'bob_coder', NOW() - INTERVAL '15 days', NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day')
-            ON CONFLICT (github_issue_id) DO NOTHING
-        """))
-        
-        # Sample Pull Requests
-        db.execute(text("""
-            INSERT INTO pull_requests (github_pr_id, repository_id, number, title, body, state, html_url, author_username, github_created_at, github_updated_at, github_closed_at, merged_at) VALUES
-            (2001, 1, 1, 'Implement user authentication', 'This PR adds OAuth2 authentication to the application', 'open', 'https://github.com/alice_dev/awesome-project/pull/1', 'alice_dev', NOW() - INTERVAL '5 days', NOW() - INTERVAL '1 day', NULL, NULL)
-            ON CONFLICT (github_pr_id) DO NOTHING
-        """))
-        
-        # Sample Commits
-        db.execute(text("""
-            INSERT INTO commits (sha, repository_id, message, html_url, author_name, author_email, author_date) VALUES
-            ('abc123def456789', 1, 'Initial commit: Add project structure', 'https://github.com/alice_dev/awesome-project/commit/abc123def456789', 'Alice Developer', 'alice@example.com', NOW() - INTERVAL '100 days'),
-            ('def456abc789123', 1, 'Add user authentication feature', 'https://github.com/alice_dev/awesome-project/commit/def456abc789123', 'Alice Developer', 'alice@example.com', NOW() - INTERVAL '5 days')
-            ON CONFLICT (sha) DO NOTHING
-        """))
-        
-        # Sample FileItems
-        db.execute(text("""
-            INSERT INTO file_items (repository_id, name, path, file_type, category, tokens, is_directory, parent_id, content, content_size, created_at, updated_at) VALUES
-            (1, 'main.py', 'src/main.py', 'INTERNAL', 'Source Code', 1500, false, NULL, '# Main application file
-
-def main():
-    print(''Hello, World!'')
-
-if __name__ == ''__main__'':
-    main()', 5000, NOW(), NOW()),
-            (1, 'requirements.txt', 'requirements.txt', 'INTERNAL', 'Dependencies', 200, false, NULL, 'flask==2.0.1
-sqlalchemy==1.4.23
-requests==2.26.0', 500, NOW(), NOW()),
-            (1, 'src', 'src', 'INTERNAL', 'Directory', 0, true, NULL, NULL, 0, NOW(), NOW())
-            ON CONFLICT DO NOTHING
-        """))
-        
-        # Sample FileAnalysis
-        db.execute(text("""
-            INSERT INTO file_analyses (repository_id, raw_data, processed_data, total_files, total_tokens, max_file_size, status, error_message, created_at, updated_at, processed_at) VALUES
-            (1, '{"total_files": 15, "languages": {"Python": 10, "JavaScript": 5}}', '{"analysis": "complete", "complexity": "medium"}', 15, 25000, 10000, 'completed', NULL, NOW(), NOW(), NOW() - INTERVAL '1 day')
-            ON CONFLICT DO NOTHING
         """))
         
         # Sample ContextCards
         db.execute(text("""
             INSERT INTO context_cards (user_id, title, description, content, source, tokens, is_active, created_at, updated_at) VALUES
-            (1, 'Authentication System Design', 'Design patterns for implementing OAuth2 authentication', 'The authentication system should use OAuth2 with JWT tokens...', 'chat', 800, true, NOW(), NOW()),
-            (1, 'Database Schema', 'User and session management database schema', 'CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(255)...', 'file-deps', 600, true, NOW(), NOW())
+            (1, 'Authentication System Design', 'Design patterns for implementing OAuth2 authentication', 'The authentication system should use OAuth2 with JWT tokens...', 'chat', 800, true, NOW(), NOW())
             ON CONFLICT DO NOTHING
         """))
         
-        # Sample IdeaItems
-        db.execute(text("""
-            INSERT INTO idea_items (user_id, title, description, complexity, status, is_active, created_at, updated_at) VALUES
-            (1, 'Add real-time notifications', 'Implement WebSocket-based real-time notifications for user actions', 'M', 'pending', true, NOW(), NOW()),
-            (1, 'Implement caching layer', 'Add Redis caching to improve application performance', 'L', 'pending', true, NOW(), NOW())
-            ON CONFLICT DO NOTHING
-        """))
-        
-        # Sample ChatSessions with repository context
+        # Sample ChatSessions
         db.execute(text("""
             INSERT INTO chat_sessions (user_id, session_id, title, description, repo_owner, repo_name, repo_branch, repo_context, is_active, total_messages, total_tokens, created_at, updated_at, last_activity) VALUES
-            (1, 'session_001', 'Authentication Discussion', 'Discussion about implementing OAuth2 authentication', 'alice_dev', 'awesome-project', 'main', '{"owner": "alice_dev", "name": "awesome-project", "branch": "main", "full_name": "alice_dev/awesome-project", "html_url": "https://github.com/alice_dev/awesome-project"}', true, 5, 1200, NOW(), NOW(), NOW() - INTERVAL '2 hours'),
-            (2, 'session_002', 'Database Design', 'Planning the database schema for the new feature', 'bob_coder', 'cool-app', 'development', '{"owner": "bob_coder", "name": "cool-app", "branch": "development", "full_name": "bob_coder/cool-app", "html_url": "https://github.com/bob_coder/cool-app"}', true, 3, 800, NOW(), NOW(), NOW() - INTERVAL '1 hour')
+            (1, 'session_001', 'Authentication Discussion', 'Discussion about implementing OAuth2 authentication', 'alice_dev', 'awesome-project', 'main', '{"owner": "alice_dev", "name": "awesome-project", "branch": "main", "full_name": "alice_dev/awesome-project", "html_url": "https://github.com/alice_dev/awesome-project"}', true, 5, 1200, NOW(), NOW(), NOW() - INTERVAL '2 hours')
             ON CONFLICT (session_id) DO NOTHING
         """))
         
@@ -539,21 +381,6 @@ requests==2.26.0', 500, NOW(), NOW()),
             (1, 'msg_001', 'How should we implement OAuth2 authentication?', 'user', 'user', false, 15, 'gpt-4', 1.2, NULL, NULL, NULL, NOW(), NOW()),
             (1, 'msg_002', 'I recommend using the OAuth2 authorization code flow with PKCE for security...', 'assistant', 'assistant', false, 45, 'gpt-4', 2.1, NULL, NULL, NULL, NOW(), NOW())
             ON CONFLICT (message_id) DO NOTHING
-        """))
-        
-        # Sample UserIssues
-        db.execute(text("""
-            INSERT INTO user_issues (user_id, issue_id, context_card_id, issue_text_raw, issue_steps, title, description, session_id, chat_session_id, context_cards, ideas, repo_owner, repo_name, priority, status, agent_response, processing_time, tokens_used, github_issue_url, github_issue_number, created_at, updated_at, processed_at) VALUES
-            (1, 'issue_001', 1, 'Need help implementing OAuth2 authentication', '["Set up OAuth2 provider", "Implement callback handler", "Add JWT token validation"]', 'OAuth2 Authentication Implementation', 'Help needed to implement OAuth2 authentication flow', 'session_001', 1, '["card_001", "card_002"]', '["idea_001"]', 'alice_dev', 'awesome-project', 'high', 'pending', NULL, NULL, 0, NULL, NULL, NOW(), NOW(), NULL)
-            ON CONFLICT (issue_id) DO NOTHING
-        """))
-        
-        # Sample FileEmbeddings for session context
-        db.execute(text("""
-            INSERT INTO file_embeddings (session_id, repository_id, file_path, file_name, file_type, file_content, chunk_index, chunk_text, tokens, file_metadata, created_at, updated_at) VALUES
-            (1, 1, 'src/main.py', 'main.py', 'python', '# Main application file\n\ndef main():\n    print(''Hello, World!'')\n\nif __name__ == ''__main__'':\n    main()', 0, '# Main application file\n\ndef main():\n    print(''Hello, World!'')', 25, '{"size": 500, "encoding": "utf-8", "lines": 6}', NOW(), NOW()),
-            (1, 1, 'requirements.txt', 'requirements.txt', 'text', 'flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0', 0, 'flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0', 15, '{"size": 200, "encoding": "utf-8", "lines": 3}', NOW(), NOW())
-            ON CONFLICT DO NOTHING
         """))
         
         db.commit()
@@ -569,7 +396,7 @@ requests==2.26.0', 500, NOW(), NOW()),
 def create_database():
     """Create the database and initialize all tables"""
     try:
-        print("🏗️  Initializing YudaiV3 database with SSE optimization...")
+        print("🏗️  Initializing YudaiV3 database...")
         
         # Wait for database to be ready
         engine = wait_for_database()
@@ -601,16 +428,14 @@ def create_database():
         for table in sorted(tables):
             print(f"  ✓ {table}")
         
-        # Check database health and performance
+        # Check database health
         check_database_health()
         
-        print("\n" + "="*60)
+        print("\n" + "="*50)
         print("🎉 DATABASE INITIALIZATION COMPLETE")
-        print("   ✓ Tables created with performance indexes")
-        print("   ✓ Repository context fields added to chat_sessions")
-        print("   ✓ SSE-optimized connection pool configured")
+        print("   ✓ Tables created with basic indexes")
         print("   ✓ Sample data populated for testing")
-        print("="*60)
+        print("="*50)
         
         return True
         
@@ -657,7 +482,7 @@ def check_database_health():
             inspector = inspect(engine)
             tables = inspector.get_table_names()
             
-            expected_tables = ['users', 'auth_tokens', 'repositories', 'file_items', 'file_analyses', 'context_cards', 'idea_items', 'chat_sessions', 'chat_messages', 'user_issues', 'issues', 'pull_requests', 'commits']
+            expected_tables = ['users', 'auth_tokens', 'repositories', 'file_items', 'file_analyses', 'context_cards', 'idea_items', 'chat_sessions', 'chat_messages', 'user_issues', 'issues', 'pull_requests', 'commits', 'file_embeddings']
             missing_tables = [table for table in expected_tables if table not in tables]
             
             if missing_tables:
