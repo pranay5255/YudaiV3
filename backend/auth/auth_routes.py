@@ -44,7 +44,7 @@ async def login():
         state_manager.cleanup_expired_states(db)
         
         # Generate state parameter using centralized manager
-        state = state_manager.generate_state()
+        state = state_manager.generate_state(db)
         
         # Generate authorization URL
         auth_url = get_github_app_oauth_url(state)
