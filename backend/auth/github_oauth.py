@@ -35,7 +35,7 @@ GITHUB_APP_CLIENT_SECRET = os.getenv("GITHUB_APP_CLIENT_SECRET")  # For user aut
 # GitHub App URLs
 GITHUB_APP_AUTH_URL = "https://github.com/login/oauth/authorize"
 GITHUB_APP_TOKEN_URL = "https://github.com/login/oauth/access_token"
-GITHUB_APP_INSTALLATION_TOKEN_URL = "https://api.github.com/app/installations/{installation_id}/access_tokens"
+GITHUB_APP_INSTALLATION_TOKEN_URL = "https://api.github.com/app/installations/{instalSlation_id}/access_tokens"
 GITHUB_APP_USER_TOKEN_URL = "https://api.github.com/app-manifests/{code}/conversions/token"
 GITHUB_USER_API_URL = "https://api.github.com/user"
 
@@ -131,8 +131,8 @@ def get_github_app_oauth_url(state: str) -> str:
     if not GITHUB_APP_CLIENT_ID:
         raise GitHubAppError("GitHub App Client ID not configured")
     
-    # Use the configured redirect URI, with fallback to first in list
-    redirect_uri = os.getenv("GITHUB_REDIRECT_URI") or FALLBACK_REDIRECT_URIS[0]
+    # Use the production redirect URI
+    redirect_uri = os.getenv("FRONTEND_URL")
     
     params = {
         "client_id": GITHUB_APP_CLIENT_ID,
@@ -166,7 +166,8 @@ async def exchange_code_for_user_token(code: str, state: str) -> Dict[str, Any]:
         raise GitHubAppError("GitHub App Client Secret not configured")
     
     # Verify state parameter using centralized manager
-    if not state_manager.validate_state(state):
+    db = next(get_db())
+    if not state_manager.validate_state(db, state):
         raise GitHubAppError("Invalid state parameter")
     
     # Exchange code for token using OAuth App flow (for user authorization)

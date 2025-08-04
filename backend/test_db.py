@@ -22,10 +22,10 @@ def get_database_url():
     
     # Check if we're in Docker Compose (use 'db' as host)
     if os.getenv("DOCKER_COMPOSE"):
-        return "postgresql://yudai_user:yudai_password@db:5432/yudai_dev"
+        return "postgresql://yudai_user:yudai_password@db:5432/yudai_db"
     
     # Local development (use localhost)
-    return "postgresql://yudai_user:yudai_password@localhost:5432/yudai_dev"
+    return "postgresql://yudai_user:yudai_password@localhost:5432/yudai_db"
 
 def test_database():
     """Test database connection and verify tables exist"""

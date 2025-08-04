@@ -82,7 +82,8 @@ async def auth_callback(
     """
     try:
         # Validate state parameter using centralized manager
-        if not state_manager.validate_state(state):
+        db = next(get_db())
+        if not state_manager.validate_state(db, state):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid state parameter"

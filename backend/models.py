@@ -442,6 +442,18 @@ class FileEmbedding(Base):
     session: Mapped["ChatSession"] = relationship(back_populates="file_embeddings")
     repository: Mapped[Optional["Repository"]] = relationship()
 
+class OAuthState(Base):
+    """OAuth state parameters for GitHub authentication"""
+    __tablename__ = "oauth_states"
+    
+    state: Mapped[str] = mapped_column(String(255), primary_key=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    def __repr__(self):
+        return f"<OAuthState(state={self.state}, expires_at={self.expires_at})>"
+
 # ============================================================================
 # PYDANTIC MODELS (API Request/Response)
 # ============================================================================
