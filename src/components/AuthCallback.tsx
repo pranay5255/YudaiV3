@@ -30,10 +30,23 @@ export const AuthCallback: React.FC<AuthCallbackProps> = ({ onSuccess, onError }
         }
         
         // This is a success redirect
-        const loginResponse = await AuthService.handleAuthSuccess();
+        // Extract OAuth parameters
+        const code = urlParams.get('code');
+        const state = urlParams.get('state');
+        
+        if (!code || !state) {
+          throw new Error('Missing required OAuth parameters');
+        }
+
+        // Exchange code for token with state validation
+        const tokenData = await AuthService.exchangeCodeForToken(code, state);
+        
+        // Get user info and create/update user in local storage
+        const user = await AuthService.getUserInfoAndCreateUser(tokenData.access_token);
         
         // Store user data
-        AuthService.storeUserData(loginResponse.user);
+        // Store user data
+        AuthService.storeUserData(user);
         
         // Refresh auth state in the context
         await refreshAuth();

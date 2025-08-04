@@ -100,6 +100,15 @@ export interface UnifiedStatistics {
  * The core session state that is synchronized between the frontend and backend.
  * It should not contain any client-side-only UI state.
  */
+export interface User {
+  id: number;
+  github_username: string;
+  display_name: string;
+  email: string;
+  avatar_url: string;
+  github_id: string;
+}
+
 export interface UnifiedSessionState {
   session_id: string | null;
   user_id: number | null;
@@ -110,6 +119,7 @@ export interface UnifiedSessionState {
   statistics: UnifiedStatistics;
   last_activity: string; // ISO 8601 timestamp
   is_active: boolean;
+  user?: User;
 }
 
 // ============================================================================

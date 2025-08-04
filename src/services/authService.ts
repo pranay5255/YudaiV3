@@ -1,4 +1,4 @@
-import { User, LoginResponse, AuthConfig } from '../types';
+import { User, AuthConfig } from '../types';
 
 // Get base URL for auth endpoints (different from API endpoints)
 const getAuthBaseURL = () => {
@@ -110,46 +110,52 @@ export class AuthService {
     return response.json();
   }
 
-  // Handle authentication success redirect
-  // This is called when user is redirected back from GitHub with success
-  static async handleAuthSuccess(): Promise<LoginResponse> {
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
-    const state = urlParams.get('state');
-    
-    if (!code || !state) {
-      throw new Error('Missing required OAuth parameters');
-    }
-
-    // Exchange the code for an access token
-    const response = await fetch(`${AUTH_BASE_URL}/auth/callback?code=${code}&state=${state}`, {
-      method: 'GET',
+  // Exchange authorization code for access token with state validation
+  static async exchangeCodeForToken(code: string, state: string): Promise<{access_token: string}> {
+    const response = await fetch(`${AUTH_BASE_URL}/auth/token`, {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json'
-      }
+      },
+      body: JSON.stringify({ code, state })
     });
 
     if (!response.ok) {
       throw new Error('Failed to exchange OAuth code for token');
     }
 
-    const data = await response.json();
-    
-    // Store the token
-    localStorage.setItem('auth_token', data.access_token);
+    return response.json();
+  }
 
-    // Check auth status to get user info
-    const authStatus = await this.checkAuthStatus();
-    
-    if (!authStatus.authenticated || !authStatus.user) {
-      throw new Error('Authentication failed - user not authenticated');
+  // Get GitHub user info and create/update user in local storage
+  static async getUserInfoAndCreateUser(accessToken: string): Promise<User> {
+    const response = await fetch(`${AUTH_BASE_URL}/auth/userinfo`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to get GitHub user info');
     }
 
-    return {
-      access_token: data.access_token,
-      token_type: 'bearer',
-      user: authStatus.user
+    const userInfo = await response.json();
+    
+    const user: User = {
+      id: userInfo.id,
+      github_username: userInfo.login,
+      github_user_id: userInfo.id.toString(),
+      email: userInfo.email,
+      display_name: userInfo.name || userInfo.login,
+      avatar_url: userInfo.avatar_url,
+      created_at: new Date().toISOString()
     };
+
+    this.storeUserData(user);
+    localStorage.setItem('auth_token', accessToken);
+    return user;
   }
 
   // Handle authentication error redirect
@@ -189,5 +195,20 @@ export class AuthService {
   static redirectToMainApp(): void {
     // Redirect to the root path which contains the main app with chat interface
     window.location.href = '/';
+  }
+
+  // Validate state parameter with backend
+  static async validateState(state: string): Promise<boolean> {
+    const response = await fetch(`${AUTH_BASE_URL}/auth/validate-state`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({ state })
+    });
+    
+    if (!response.ok) {
+      return false;
+    }
+    
+    return response.json().then(data => data.valid);
   }
 } 

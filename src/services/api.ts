@@ -279,4 +279,19 @@ export class ApiService {
 
     return this.handleResponse<{authenticated: boolean}>(response);
   }
+
+  // State validation endpoint
+  static async validateState(state: string): Promise<boolean> {
+    const response = await fetch(`${API_BASE_URL}/auth/validate-state`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({ state })
+    });
+    
+    if (!response.ok) {
+      return false;
+    }
+    
+    return response.json().then(data => data.valid);
+  }
 }
