@@ -64,7 +64,7 @@ importers:
         specifier: ^6.0.3
         version: 6.1.2(postcss@8.5.6)
       eslint:
-        specifier: ^9.9.1
+        specifier: ^9.30.0
         version: 9.30.0(jiti@1.21.7)
       eslint-plugin-react-hooks:
         specifier: ^5.1.0-rc.0
@@ -99,6 +99,9 @@ importers:
       vite:
         specifier: ^5.4.19
         version: 5.4.19(@types/node@24.0.10)
+      vite-plugin-eslint:
+        specifier: ^1.8.1
+        version: 1.8.1(eslint@9.30.0(jiti@1.21.7))(vite@5.4.19(@types/node@24.0.10))
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@24.0.10)(jsdom@24.1.3)
@@ -626,6 +629,10 @@ packages:
   '@rolldown/pluginutils@1.0.0-beta.27':
     resolution: {integrity: sha512-+d0F4MKMCbeVUJwG96uQ4SgAznZNSq93I3V+9NHA4OpvqG8mRCpGdKmK8l/dl02h2CCDHwW2FqilnTyDcAnqjA==}
 
+  '@rollup/pluginutils@4.2.1':
+    resolution: {integrity: sha512-iKnFXr7NkdZAIHiIWE+BX5ULi/ucVFYWD6TbAV+rZctiRTY2PL6tsIKhoIOaoskiWAkgu+VsbXgUVDNLHf+InQ==}
+    engines: {node: '>= 8.0.0'}
+
   '@rollup/rollup-android-arm-eabi@4.44.1':
     resolution: {integrity: sha512-JAcBr1+fgqx20m7Fwe1DxPUl/hPkee6jA6Pl7n1v2EFiktAHenTaXl5aIFjUIEsfn9w3HE4gK1lEgNGMzBDs1w==}
     cpu: [arm]
@@ -852,6 +859,9 @@ packages:
 
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
+
+  '@types/eslint@8.56.12':
+    resolution: {integrity: sha512-03ruubjWyOHlmljCVoxSuNDdmfZDzsrrz0P2LeJsOXr+ZwFQ+0yQIwNCwt/GYhV7Z31fgtXJTAEs+FYlEL851g==}
 
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
@@ -1080,13 +1090,10 @@ packages:
     peerDependencies:
       postcss: ^8.1.0
 
-<<<<<<< HEAD
-=======
   available-typed-arrays@1.0.7:
     resolution: {integrity: sha512-wvUjBtSGN7+7SjNpq/9M2Tg350UZD3q62IFZLbRAR1bSMlCo1ZaeW+BJ+D090e4hIIZLBcTDWe4Mh4jvUDajzQ==}
     engines: {node: '>= 0.4'}
 
->>>>>>> 9b190c6de382c81d6f7e79fc7c1d2b6f9b1c86cf
   axios@1.11.0:
     resolution: {integrity: sha512-1Lx3WLFQWm3ooKDYZD1eXmoGO9fxYQjrycfHFC8P0sCfQVXyROp0p9PFWBehewBOdCwHc+f/b8I0fMto5eSfwA==}
 
@@ -1180,12 +1187,9 @@ packages:
   color-name@1.1.4:
     resolution: {integrity: sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==}
 
-<<<<<<< HEAD
-=======
   colord@2.9.3:
     resolution: {integrity: sha512-jeC1axXpnb0/2nn/Y1LPuLdgXBLH7aDcHu4KEKfqw3CUhX7ZpfBSlPKyqXE6btIgEzfWtrX3/tyBCaCvXvMkOw==}
 
->>>>>>> 9b190c6de382c81d6f7e79fc7c1d2b6f9b1c86cf
   combined-stream@1.0.8:
     resolution: {integrity: sha512-FQN4MRfuJeHf7cBbBMJFXhKSDq+2kAArBlmRBvcvFE5BB1HZKXtSFASDhdlz9zOYwxh8lDdnvmMOe/+5cdoEdg==}
     engines: {node: '>= 0.8'}
@@ -1309,8 +1313,6 @@ packages:
   deep-is@0.1.4:
     resolution: {integrity: sha512-oIPzksmTg4/MriiaYGO+okXDT7ztn/w3Eptv/+gSIdMdKsJo0u4CfYNFJPy+4SKMuCqGw2wxnA+URMg3t8a/bQ==}
 
-<<<<<<< HEAD
-=======
   define-data-property@1.1.4:
     resolution: {integrity: sha512-rBMvIzlpA8v6E+SJZoo++HAYqsLrkg7MSfIinMPFhmkorw7X+dOXVJQs+QT69zGkzMyfDnIMN2Wid1+NbL3T+A==}
     engines: {node: '>= 0.4'}
@@ -1323,7 +1325,6 @@ packages:
     resolution: {integrity: sha512-8QmQKqEASLd5nx0U1B1okLElbUuuttJ/AnYmRXbbbGDWh6uS208EjD4Xqq/I9wK7u0v6O08XhTWnt5XtEbR6Dg==}
     engines: {node: '>= 0.4'}
 
->>>>>>> 9b190c6de382c81d6f7e79fc7c1d2b6f9b1c86cf
   delayed-stream@1.0.0:
     resolution: {integrity: sha512-ZySD7Nf91aLB0RxL4KGrKHBXl7Eds1DAmEdcoVawXnLD7SDhpNgtuII2aAkg7a7QS41jxPSZ17p4VdGnMHk3MQ==}
     engines: {node: '>=0.4.0'}
@@ -1480,6 +1481,9 @@ packages:
     resolution: {integrity: sha512-MMdARuVEQziNTeJD8DgMqmhwR11BRQ/cBP+pLtYdSTnf3MIO8fFeiINEbX36ZdNlfU/7A9f3gUw49B3oQsvwBA==}
     engines: {node: '>=4.0'}
 
+  estree-walker@2.0.2:
+    resolution: {integrity: sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w==}
+
   estree-walker@3.0.3:
     resolution: {integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==}
 
@@ -1555,13 +1559,10 @@ packages:
       debug:
         optional: true
 
-<<<<<<< HEAD
-=======
   for-each@0.3.5:
     resolution: {integrity: sha512-dKx12eRCVIzqCxFGplyFKJMPvLEWgmNtUrpTiJIR5u97zEhRG8ySrtboPHZXx7daLxQVrl643cTzbab2tkQjxg==}
     engines: {node: '>= 0.4'}
 
->>>>>>> 9b190c6de382c81d6f7e79fc7c1d2b6f9b1c86cf
   foreground-child@3.3.1:
     resolution: {integrity: sha512-gIXjKqtFuWEgzFRJA9WCQeSJLZDjgJUOMCMzxtvFq/37KojM1BFGufqsCy0r4qSQmYLsZYMeyRqzIWOMup03sw==}
     engines: {node: '>=14'}
@@ -2382,12 +2383,9 @@ packages:
   proxy-from-env@1.1.0:
     resolution: {integrity: sha512-D+zkORCbA9f1tdWRK0RaCR3GPv50cMxcrz4X8k5LTSUD1Dkw47mKJEZQNunItRTkWwgtaUSo1RVFRIG9ZXiFYg==}
 
-<<<<<<< HEAD
-=======
   psl@1.15.0:
     resolution: {integrity: sha512-JZd3gMVBAVQkSs6HdNZo9Sdo0LNcQeMNP3CozBJb3JYC/QUYZTnKxP+f8oWRX4rHP5EurWxqAHTSwUCjlNKa1w==}
 
->>>>>>> 9b190c6de382c81d6f7e79fc7c1d2b6f9b1c86cf
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
@@ -2476,6 +2474,11 @@ packages:
         optional: true
       rollup:
         optional: true
+
+  rollup@2.79.2:
+    resolution: {integrity: sha512-fS6iqSPZDs3dr/y7Od6y5nha8dW1YnbgtsyotCVvoFGKbERG++CVRFv1meyGDE1SNItQA8BrnCw7ScdAhRJ3XQ==}
+    engines: {node: '>=10.0.0'}
+    hasBin: true
 
   rollup@4.44.1:
     resolution: {integrity: sha512-x8H8aPvD+xbl0Do8oez5f5o8eMS3trfCghc4HhLAnCkj7Vl0d1JWGs0UF/D886zLW2rOj2QymV/JcSSsw+XDNg==}
@@ -2776,6 +2779,12 @@ packages:
     resolution: {integrity: sha512-EbKSKh+bh1E1IFxeO0pg1n4dvoOTt0UDiXMd/qn++r98+jPO1xtJilvXldeuQ8giIB5IkpjCgMleHMNEsGH6pg==}
     engines: {node: ^18.0.0 || ^20.0.0 || >=22.0.0}
     hasBin: true
+
+  vite-plugin-eslint@1.8.1:
+    resolution: {integrity: sha512-PqdMf3Y2fLO9FsNPmMX+//2BF5SF8nEWspZdgl4kSt7UvHDRHVVfHvxsD7ULYzZrJDGRxR81Nq7TOFgwMnUang==}
+    peerDependencies:
+      eslint: '>=7'
+      vite: '>=2'
 
   vite@5.4.19:
     resolution: {integrity: sha512-qO3aKv3HoQC8QKiNSTuUM1l9o/XX3+c+VTgLHbJWHZGeTPVAg2XwazI9UWzoxjIJCGCV2zU60uqMzjeLZuULqA==}
@@ -3341,6 +3350,11 @@ snapshots:
 
   '@rolldown/pluginutils@1.0.0-beta.27': {}
 
+  '@rollup/pluginutils@4.2.1':
+    dependencies:
+      estree-walker: 2.0.2
+      picomatch: 2.3.1
+
   '@rollup/rollup-android-arm-eabi@4.44.1':
     optional: true
 
@@ -3527,6 +3541,11 @@ snapshots:
       '@types/node': 24.0.10
 
   '@types/deep-eql@4.0.2': {}
+
+  '@types/eslint@8.56.12':
+    dependencies:
+      '@types/estree': 1.0.8
+      '@types/json-schema': 7.0.15
 
   '@types/estree@1.0.8': {}
 
@@ -3820,13 +3839,10 @@ snapshots:
       postcss: 8.5.6
       postcss-value-parser: 4.2.0
 
-<<<<<<< HEAD
-=======
   available-typed-arrays@1.0.7:
     dependencies:
       possible-typed-array-names: 1.1.0
 
->>>>>>> 9b190c6de382c81d6f7e79fc7c1d2b6f9b1c86cf
   axios@1.11.0:
     dependencies:
       follow-redirects: 1.15.9
@@ -3948,11 +3964,8 @@ snapshots:
 
   color-name@1.1.4: {}
 
-<<<<<<< HEAD
-=======
   colord@2.9.3: {}
 
->>>>>>> 9b190c6de382c81d6f7e79fc7c1d2b6f9b1c86cf
   combined-stream@1.0.8:
     dependencies:
       delayed-stream: 1.0.0
@@ -4100,8 +4113,6 @@ snapshots:
 
   deep-is@0.1.4: {}
 
-<<<<<<< HEAD
-=======
   define-data-property@1.1.4:
     dependencies:
       es-define-property: 1.0.1
@@ -4116,7 +4127,6 @@ snapshots:
       has-property-descriptors: 1.0.2
       object-keys: 1.1.1
 
->>>>>>> 9b190c6de382c81d6f7e79fc7c1d2b6f9b1c86cf
   delayed-stream@1.0.0: {}
 
   depd@2.0.0: {}
@@ -4333,6 +4343,8 @@ snapshots:
 
   estraverse@5.3.0: {}
 
+  estree-walker@2.0.2: {}
+
   estree-walker@3.0.3:
     dependencies:
       '@types/estree': 1.0.8
@@ -4430,13 +4442,10 @@ snapshots:
 
   follow-redirects@1.15.9: {}
 
-<<<<<<< HEAD
-=======
   for-each@0.3.5:
     dependencies:
       is-callable: 1.2.7
 
->>>>>>> 9b190c6de382c81d6f7e79fc7c1d2b6f9b1c86cf
   foreground-child@3.3.1:
     dependencies:
       cross-spawn: 7.0.6
@@ -5196,13 +5205,10 @@ snapshots:
 
   proxy-from-env@1.1.0: {}
 
-<<<<<<< HEAD
-=======
   psl@1.15.0:
     dependencies:
       punycode: 2.3.1
 
->>>>>>> 9b190c6de382c81d6f7e79fc7c1d2b6f9b1c86cf
   punycode@2.3.1: {}
 
   qs@6.14.0:
@@ -5282,6 +5288,10 @@ snapshots:
       yargs: 17.7.2
     optionalDependencies:
       rollup: 4.44.1
+
+  rollup@2.79.2:
+    optionalDependencies:
+      fsevents: 2.3.3
 
   rollup@4.44.1:
     dependencies:
@@ -5665,6 +5675,14 @@ snapshots:
       - sugarss
       - supports-color
       - terser
+
+  vite-plugin-eslint@1.8.1(eslint@9.30.0(jiti@1.21.7))(vite@5.4.19(@types/node@24.0.10)):
+    dependencies:
+      '@rollup/pluginutils': 4.2.1
+      '@types/eslint': 8.56.12
+      eslint: 9.30.0(jiti@1.21.7)
+      rollup: 2.79.2
+      vite: 5.4.19(@types/node@24.0.10)
 
   vite@5.4.19(@types/node@24.0.10):
     dependencies:

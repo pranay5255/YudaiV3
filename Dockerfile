@@ -32,8 +32,8 @@ FROM nginx:alpine
 # Copy built app from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# For production, use nginx.prod.conf instead of nginx.conf
-COPY ./nginx.prod.conf /etc/nginx/conf.d/default.conf
+# Copy the complete nginx configuration as the main nginx.conf
+COPY ./nginx.prod.conf /etc/nginx/nginx.conf
 
 # Create health endpoint
 RUN echo "healthy" > /usr/share/nginx/html/health
