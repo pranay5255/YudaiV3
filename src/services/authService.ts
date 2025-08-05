@@ -3,7 +3,7 @@ import { User, AuthConfig } from '../types';
 // Get base URL for auth endpoints - use relative URLs to work with nginx proxy
 const getAuthBaseURL = () => {
   // Use localhost:8000 for backend API calls
-  return 'http://localhost:8000';
+  return 'https://localhost:8000/';
 };
 
 const AUTH_BASE_URL = getAuthBaseURL();
