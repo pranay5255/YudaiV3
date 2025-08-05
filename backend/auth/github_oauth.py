@@ -29,8 +29,8 @@ security = HTTPBearer()
 GITHUB_APP_ID = os.getenv("GITHUB_APP_ID")
 GITHUB_APP_PRIVATE_KEY_PATH = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH", "private-key.pem")
 GITHUB_APP_INSTALLATION_ID = os.getenv("GITHUB_APP_INSTALLATION_ID")
-GITHUB_APP_CLIENT_ID = os.getenv("GITHUB_APP_CLIENT_ID")  # For user authorization
-GITHUB_APP_CLIENT_SECRET = os.getenv("GITHUB_APP_CLIENT_SECRET")  # For user authorization
+GITHUB_APP_CLIENT_ID = os.getenv("CLIENT_ID")  # For user authorization
+GITHUB_APP_CLIENT_SECRET = os.getenv("CLIENT_SECRET")  # For user authorization
 
 # GitHub App URLs
 GITHUB_APP_AUTH_URL = "https://github.com/login/oauth/authorize"
@@ -171,7 +171,7 @@ async def exchange_code_for_user_token(code: str, state: str) -> Dict[str, Any]:
         raise GitHubAppError("Invalid state parameter")
     
     # Exchange code for token using OAuth App flow (for user authorization)
-    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    headers = {"Accept": "application/json"}  # Remove Content-Type header
     
     redirect_uri = os.getenv("GITHUB_REDIRECT_URI", FALLBACK_REDIRECT_URIS[0])
     
@@ -183,7 +183,8 @@ async def exchange_code_for_user_token(code: str, state: str) -> Dict[str, Any]:
     }
     
     async with httpx.AsyncClient() as client:
-        response = await client.post(GITHUB_APP_TOKEN_URL, headers=headers, json=data)
+        # Use form-encoded data instead of JSON
+        response = await client.post(GITHUB_APP_TOKEN_URL, headers=headers, data=data)
     
     if response.status_code != 200:
         raise GitHubAppError(f"Failed to exchange code for token: {response.text}")
