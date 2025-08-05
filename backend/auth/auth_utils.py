@@ -70,37 +70,36 @@ def create_session_token(db: Session, user_id: int, expires_in_hours: int = 24) 
     try:
         logger.info(f"Creating session token for user_id: {user_id}")
         
-        # Use a transaction for atomic operations
-        with db.begin():
-            # Deactivate existing tokens using bulk update for efficiency
-            existing_count = db.query(SessionToken).filter(
-                SessionToken.user_id == user_id,
-                SessionToken.is_active == True
-            ).update({"is_active": False}, synchronize_session=False)
-            
-            if existing_count > 0:
-                logger.info(f"Deactivated {existing_count} existing session tokens for user {user_id}")
-            
-            # Generate new session token
-            session_token = generate_session_token()
-            expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
-            
-            logger.debug(f"Generated session token: {session_token[:10]}... (expires: {expires_at})")
-            
-            # Create new session token
-            db_session_token = SessionToken(
-                user_id=user_id,
-                session_token=session_token,
-                expires_at=expires_at,
-                is_active=True
-            )
-            
-            db.add(db_session_token)
-            db.flush()  # Get the ID without committing yet
-            
-            logger.info(f"Successfully created session token with ID: {db_session_token.id}")
-            return db_session_token
-            
+        # Deactivate existing tokens using bulk update for efficiency
+        existing_count = db.query(SessionToken).filter(
+            SessionToken.user_id == user_id,
+            SessionToken.is_active == True
+        ).update({"is_active": False}, synchronize_session=False)
+        
+        if existing_count > 0:
+            logger.info(f"Deactivated {existing_count} existing session tokens for user {user_id}")
+        
+        # Generate new session token
+        session_token = generate_session_token()
+        expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
+        
+        logger.debug(f"Generated session token: {session_token[:10]}... (expires: {expires_at})")
+        
+        # Create new session token
+        db_session_token = SessionToken(
+            user_id=user_id,
+            session_token=session_token,
+            expires_at=expires_at,
+            is_active=True
+        )
+        
+        db.add(db_session_token)
+        db.commit()  # Commit the transaction
+        db.refresh(db_session_token)  # Refresh to get the ID
+        
+        logger.info(f"Successfully created session token with ID: {db_session_token.id}")
+        return db_session_token
+        
     except Exception as e:
         logger.error(f"Error creating session token for user {user_id}: {str(e)}", exc_info=True)
         db.rollback()
