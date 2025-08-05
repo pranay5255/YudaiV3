@@ -72,6 +72,7 @@ class User(Base):
     # Relationships
     auth_tokens: Mapped[List["AuthToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     repositories: Mapped[List["Repository"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    session_tokens: Mapped[List["SessionToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 class AuthToken(Base):
     """Authentication tokens for GitHub OAuth"""
@@ -96,6 +97,27 @@ class AuthToken(Base):
     
     # Relationships
     user: Mapped["User"] = relationship(back_populates="auth_tokens")
+
+class SessionToken(Base):
+    """Session tokens for frontend authentication"""
+    __tablename__ = "session_tokens"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    
+    # Session token (for frontend)
+    session_token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    
+    # Session metadata
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    user: Mapped["User"] = relationship(back_populates="session_tokens")
 
 class Repository(Base):
     """Repository data from GitHub"""
@@ -824,6 +846,18 @@ class AuthResponse(BaseModel):
     user: Optional[UserProfile] = None
     access_token: Optional[str] = None
     error: Optional[str] = None
+
+class SessionTokenResponse(BaseModel):
+    session_token: str
+    expires_at: datetime
+    user: UserProfile
+
+class SessionTokenRequest(BaseModel):
+    session_token: str
+
+class CreateSessionTokenRequest(BaseModel):
+    user_id: int
+    expires_in_hours: int = Field(default=24, ge=1, le=168)  # 1 hour to 1 week
 
 # ============================================================================
 # GITHUB API MODELS

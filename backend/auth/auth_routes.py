@@ -4,7 +4,11 @@ Authentication Routes for GitHub OAuth
 Simplified to match Ruby reference implementation
 """
 
-
+from auth.auth_utils import (
+    create_session_token,
+    deactivate_session_token,
+    validate_session_token,
+)
 from auth.github_oauth import (
     GitHubOAuthError,
     create_or_update_user,
@@ -15,6 +19,7 @@ from auth.github_oauth import (
 )
 from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, status
+from models import CreateSessionTokenRequest, SessionTokenResponse
 from sqlalchemy.orm import Session
 
 router = APIRouter()
@@ -74,10 +79,13 @@ async def auth_callback(
         # Create or update user
         user = await create_or_update_user(db, github_user, access_token)
         
-        # Build success redirect URL with auth data
+        # Create session token for frontend
+        session_token = create_session_token(db, user.id, expires_in_hours=24)
+        
+        # Build success redirect URL with auth data (NO GitHub token)
         from urllib.parse import urlencode
         auth_params = {
-            "token": access_token,
+            "session_token": session_token.session_token,
             "user_id": str(user.id),
             "username": user.github_username,
             "name": user.display_name or user.github_username,
@@ -124,40 +132,87 @@ async def api_login():
 
 
 @router.get("/api/user")
-async def api_get_user_by_token(token: str, db: Session = Depends(get_db)):
-    """Get user by access token - for frontend to verify authentication"""
+async def api_get_user_by_session_token(session_token: str, db: Session = Depends(get_db)):
+    """Get user by session token - for frontend to verify authentication"""
     try:
-        from models import AuthToken
+        user = validate_session_token(db, session_token)
         
-        auth_token = db.query(AuthToken).filter(
-            AuthToken.access_token == token,
-            AuthToken.is_active
-        ).first()
-        
-        if not auth_token:
+        if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token"
+                detail="Invalid or expired session token"
             )
         
-        from models import User
-        user = db.query(User).filter(User.id == auth_token.user_id).first()
+        return {
+            "id": user.id,
+            "github_username": user.github_username,
+            "github_id": user.github_user_id,
+            "display_name": user.display_name,
+            "email": user.email,
+            "avatar_url": user.avatar_url
+        }
         
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/api/logout")
+async def api_logout(session_token: str, db: Session = Depends(get_db)):
+    """Logout user by deactivating session token"""
+    try:
+        success = deactivate_session_token(db, session_token)
+        
+        if success:
+            return {"success": True, "message": "Logged out successfully"}
+        else:
+            return {"success": False, "message": "Session token not found or already inactive"}
+            
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/api/refresh-session")
+async def api_refresh_session(
+    request: CreateSessionTokenRequest,
+    db: Session = Depends(get_db)
+):
+    """Create a new session token for a user (for testing/admin purposes)"""
+    try:
+        from models import User
+        
+        # Verify user exists
+        user = db.query(User).filter(User.id == request.user_id).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="User not found"
             )
         
-        return {
-            "id": user.id,
-            "github_username": user.github_username,
-            "github_id": user.github_user_id,  # Fix: use github_id as expected by frontend
-            "display_name": user.display_name,
-            "email": user.email,
-            "avatar_url": user.avatar_url,
-            "access_token": token
-        }
+        # Create new session token
+        session_token = create_session_token(db, user.id, request.expires_in_hours)
+        
+        return SessionTokenResponse(
+            session_token=session_token.session_token,
+            expires_at=session_token.expires_at,
+            user={
+                "id": user.id,
+                "github_username": user.github_username,
+                "github_user_id": user.github_user_id,
+                "email": user.email,
+                "display_name": user.display_name,
+                "avatar_url": user.avatar_url,
+                "created_at": user.created_at.isoformat(),
+                "last_login": user.last_login.isoformat() if user.last_login else None
+            }
+        )
         
     except HTTPException:
         raise

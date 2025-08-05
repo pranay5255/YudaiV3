@@ -86,6 +86,17 @@ def create_tables_standalone(engine):
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS session_tokens (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            session_token VARCHAR(255) UNIQUE NOT NULL,
+            expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            is_active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS repositories (
             id SERIAL PRIMARY KEY,
             github_repo_id INTEGER UNIQUE,

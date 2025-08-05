@@ -3,14 +3,14 @@ import { User } from '../types/unifiedState';
 
 interface AuthState {
   user: User | null;
-  token: string | null;
+  sessionToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
 }
 
 interface AuthContextValue extends AuthState {
   login: () => Promise<void>;
-  logout: () => void;  // Simplified: no need for async logout
+  logout: () => Promise<void>;  // Updated to async
   refreshAuth: () => Promise<void>;
 }
 

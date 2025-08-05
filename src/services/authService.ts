@@ -20,16 +20,16 @@ export class AuthService {
     }
   }
 
-  // Handle successful authentication by extracting token from URL
-  static handleAuthSuccess(): { token: string; user: User } | null {
+  // Handle successful authentication by extracting session token from URL
+  static handleAuthSuccess(): { sessionToken: string; user: User } | null {
     try {
       const urlParams = new URLSearchParams(window.location.search);
-      const token = urlParams.get('token');
+      const sessionToken = urlParams.get('session_token');
       const userId = urlParams.get('user_id');
       
-      if (token && userId) {
-        // Store token
-        localStorage.setItem('auth_token', token);
+      if (sessionToken && userId) {
+        // Store session token
+        localStorage.setItem('session_token', sessionToken);
         
         // Create user object from URL params
         const user: User = {
@@ -43,7 +43,7 @@ export class AuthService {
         
         localStorage.setItem('user_data', JSON.stringify(user));
         
-        return { token, user };
+        return { sessionToken, user };
       }
       
       return null;
@@ -53,9 +53,9 @@ export class AuthService {
     }
   }
 
-  // Get user by token (for verification)
-  static async getUserByToken(token: string): Promise<User> {
-    const response = await fetch(`${AUTH_BASE_URL}/auth/api/user?token=${token}`);
+  // Get user by session token (for verification)
+  static async getUserBySessionToken(sessionToken: string): Promise<User> {
+    const response = await fetch(`${AUTH_BASE_URL}/auth/api/user?session_token=${sessionToken}`);
     
     if (!response.ok) {
       throw new Error(`Failed to get user: ${response.status}`);
@@ -67,21 +67,39 @@ export class AuthService {
     return userData;
   }
 
-  // Simple logout
-  static logout(): void {
-    localStorage.removeItem('auth_token');
+  // Logout user by deactivating session token
+  static async logout(): Promise<void> {
+    const sessionToken = this.getStoredSessionToken();
+    
+    if (sessionToken) {
+      try {
+        await fetch(`${AUTH_BASE_URL}/auth/api/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ session_token: sessionToken }),
+        });
+      } catch (error) {
+        console.error('Logout API call failed:', error);
+        // Continue with local cleanup even if API call fails
+      }
+    }
+    
+    // Clear local storage
+    localStorage.removeItem('session_token');
     localStorage.removeItem('user_data');
     window.location.href = '/';
   }
 
   // Check if user is authenticated
   static isAuthenticated(): boolean {
-    return !!localStorage.getItem('auth_token');
+    return !!localStorage.getItem('session_token');
   }
 
-  // Get stored token
-  static getStoredToken(): string | null {
-    return localStorage.getItem('auth_token');
+  // Get stored session token
+  static getStoredSessionToken(): string | null {
+    return localStorage.getItem('session_token');
   }
 
   // Get stored user data
@@ -92,15 +110,15 @@ export class AuthService {
 
   // Verify current authentication
   static async verifyAuth(): Promise<{ authenticated: boolean; user?: User }> {
-    const token = this.getStoredToken();
+    const sessionToken = this.getStoredSessionToken();
     const storedUser = this.getStoredUserData();
     
-    if (!token || !storedUser) {
+    if (!sessionToken || !storedUser) {
       return { authenticated: false };
     }
     
     try {
-      const user = await this.getUserByToken(token);
+      const user = await this.getUserBySessionToken(sessionToken);
       return { authenticated: true, user };
     } catch (error) {
       console.error('Auth verification failed:', error);

@@ -5,14 +5,14 @@ import { User } from '../types/unifiedState';
 
 interface AuthState {
   user: User | null;
-  token: string | null;
+  sessionToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
 }
 
 interface AuthContextValue extends AuthState {
   login: () => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refreshAuth: () => Promise<void>;
 }
 
@@ -23,7 +23,7 @@ interface AuthProviderProps {
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [authState, setAuthState] = useState<AuthState>({
     user: null,
-    token: null,
+    sessionToken: null,
     isAuthenticated: false,
     isLoading: true,
   });
@@ -33,10 +33,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       setAuthState(prev => ({ ...prev, isLoading: true }));
 
-      const storedToken = AuthService.getStoredToken();
+      const storedSessionToken = AuthService.getStoredSessionToken();
       const storedUser = AuthService.getStoredUserData();
 
-      if (storedToken && storedUser) {
+      if (storedSessionToken && storedUser) {
         // We have stored data, verify it's still valid
         try {
           const authCheck = await AuthService.verifyAuth();
@@ -44,7 +44,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           if (authCheck.authenticated && authCheck.user) {
             setAuthState({
               user: authCheck.user,
-              token: storedToken,
+              sessionToken: storedSessionToken,
               isAuthenticated: true,
               isLoading: false,
             });
@@ -81,8 +81,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const logout = (): void => {
-    AuthService.logout();
+  const logout = async (): Promise<void> => {
+    await AuthService.logout();
     clearAuthState();
     // AuthService.logout() already redirects to home
   };
@@ -96,7 +96,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (authCheck.authenticated && authCheck.user) {
         setAuthState({
           user: authCheck.user,
-          token: AuthService.getStoredToken(),
+          sessionToken: AuthService.getStoredSessionToken(),
           isAuthenticated: true,
           isLoading: false,
         });
@@ -113,7 +113,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const clearAuthState = () => {
     setAuthState({
       user: null,
-      token: null,
+      sessionToken: null,
       isAuthenticated: false,
       isLoading: false,
     });

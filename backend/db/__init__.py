@@ -2,8 +2,21 @@
 Database package for YudaiV3
 """
 
-from .database import Base, engine, SessionLocal, get_db, init_db
-from models import User, AuthToken, Repository, FileItem, FileAnalysis, ContextCard, IdeaItem, ChatSession, ChatMessage, UserIssue
+from models import (
+    AuthToken,
+    ChatMessage,
+    ChatSession,
+    ContextCard,
+    FileAnalysis,
+    FileItem,
+    IdeaItem,
+    Repository,
+    SessionToken,
+    User,
+    UserIssue,
+)
+
+from .database import Base, SessionLocal, engine, get_db, init_db
 
 __all__ = [
     "Base", 
@@ -12,7 +25,8 @@ __all__ = [
     "get_db", 
     "init_db",
     "User",
-    "AuthToken", 
+    "AuthToken",
+    "SessionToken",
     "Repository",
     "FileItem",
     "FileAnalysis",
