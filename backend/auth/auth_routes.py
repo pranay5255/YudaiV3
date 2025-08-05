@@ -6,6 +6,7 @@ This module provides the authentication endpoints for GitHub App OAuth flow.
 """
 
 import os
+from datetime import datetime
 
 from auth.github_oauth import (
     GitHubAppError,
@@ -128,11 +129,15 @@ async def auth_callback(
     except HTTPException:
         raise
     except GitHubAppError as e:
+        # Log the specific error for debugging
+        print(f"GitHub App Error: {str(e)}")
         # Redirect to frontend with error
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         error_url = f"{frontend_url}/auth/error?message={str(e)}"
         return RedirectResponse(url=error_url)
-    except Exception:
+    except Exception as e:
+        # Log the generic error for debugging
+        print(f"Generic Error: {str(e)}")
         # Redirect to frontend with generic error
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
         error_url = f"{frontend_url}/auth/error?message=Authentication failed"
@@ -315,4 +320,22 @@ async def debug_state():
         "active_states": active_count,
         "expired_states_cleaned": expired_count,
         "state_manager_working": True
+    }
+
+
+@router.get("/error")
+async def auth_error(message: str = "Authentication failed"):
+    """
+    Handle authentication errors
+    
+    Args:
+        message: Error message from URL parameter
+        
+    Returns:
+        Error response
+    """
+    return {
+        "error": True,
+        "message": message,
+        "timestamp": datetime.utcnow().isoformat()
     }
