@@ -19,38 +19,24 @@ export const AuthCallback: React.FC<AuthCallbackProps> = ({ onSuccess, onError }
       try {
         setIsLoading(true);
         
-        console.log('AuthCallback: Starting auth callback handling');
-        console.log('AuthCallback: Current URL:', window.location.href);
-        
-        // Check if this is an error redirect from backend
         const urlParams = new URLSearchParams(window.location.search);
-        const errorMessage = urlParams.get('error') || urlParams.get('message');
-        
-        console.log('AuthCallback: URL params:', Object.fromEntries(urlParams.entries()));
+        const errorMessage = urlParams.get('error');
         
         if (errorMessage) {
           // Handle error case
-          console.log('AuthCallback: Error detected:', errorMessage);
           setError(errorMessage);
           AuthService.handleAuthError(errorMessage);
           onError?.(errorMessage);
           return;
         }
         
-        // Try to handle successful authentication
+        // Try to handle successful authentication from URL params
         const authResult = AuthService.handleAuthSuccess();
         
-        console.log('AuthCallback: Auth result:', authResult);
-        
         if (authResult) {
-          // Success - we have token and user data
+          // Success - we have token and user data from URL params
           try {
-            console.log('AuthCallback: Processing successful auth with token and user data');
-            
-            // Verify the token works by getting fresh user data
-            await AuthService.getUserByToken(authResult.token);
-            
-            // Refresh auth state in the context if available
+            // Refresh auth state in the context
             if (refreshAuth) {
               await refreshAuth();
             }
@@ -59,81 +45,22 @@ export const AuthCallback: React.FC<AuthCallbackProps> = ({ onSuccess, onError }
             onSuccess?.();
             
             // Show success state
-            setSuccessMessage('Successfully authorized! Welcome, ' + authResult.user.display_name + ' (' + authResult.user.github_username + ').');
+            const displayName = authResult.user.display_name || authResult.user.github_username;
+            setSuccessMessage(`Successfully authorized! Welcome, ${displayName} (${authResult.user.github_username}).`);
             setIsSuccess(true);
             
-            console.log('AuthCallback: Showing success message, will redirect in 2 seconds');
-            
-            // Redirect to main app with a small delay to show success
+            // Redirect to main app after showing success
             setTimeout(() => {
-              console.log('AuthCallback: Redirecting to main app now');
               AuthService.redirectToMainApp();
             }, 2000);
           } catch (err) {
-            const errorMsg = err instanceof Error ? err.message : 'Token verification failed';
+            const errorMsg = err instanceof Error ? err.message : 'Authentication processing failed';
             setError(errorMsg);
             AuthService.handleAuthError(errorMsg);
             onError?.(errorMsg);
           }
         } else {
-          // Check for success message in URL (from backend redirect)
-          const successMessage = urlParams.get('message');
-          console.log('AuthCallback: Checking for success message:', successMessage);
-          
-          if (successMessage && successMessage.includes('Successfully authorized')) {
-            // This is a successful auth redirect from backend
-            console.log('AuthCallback: Found success message, processing backend redirect');
-            try {
-              // Try to get user data from stored token
-              const token = AuthService.getStoredToken();
-              console.log('AuthCallback: Stored token exists:', !!token);
-              
-              if (token) {
-                await AuthService.getUserByToken(token);
-                
-                // Refresh auth state in the context if available
-                if (refreshAuth) {
-                  await refreshAuth();
-                }
-                
-                // Call success callback
-                onSuccess?.();
-                
-                // Show success state
-                setSuccessMessage('Successfully authorized! Welcome back.');
-                setIsSuccess(true);
-                
-                console.log('AuthCallback: Backend redirect success, will redirect in 2 seconds');
-                
-                // Redirect to main app with a small delay to show success
-                setTimeout(() => {
-                  console.log('AuthCallback: Redirecting to main app from backend redirect');
-                  AuthService.redirectToMainApp();
-                }, 2000);
-                return;
-              }
-            } catch (err) {
-              console.error('Failed to verify stored token:', err);
-            }
-          }
-          
-          // No auth data in URL - check if we already have valid auth
-          if (AuthService.isAuthenticated()) {
-            try {
-              const token = AuthService.getStoredToken();
-              if (token) {
-                await AuthService.getUserByToken(token);
-                onSuccess?.();
-                AuthService.redirectToMainApp();
-                return;
-              }
-            } catch {
-              // Token is invalid, clear it
-              AuthService.logout();
-            }
-          }
-          
-          // No valid authentication found
+          // No auth data found
           throw new Error('No authentication data found');
         }
         

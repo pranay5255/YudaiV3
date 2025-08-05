@@ -1,22 +1,15 @@
 import { User } from '../types/unifiedState';
 
-// Get base URL for auth endpoints
-const getAuthBaseURL = () => {
-  return 'https://api.yudai.app';
-};
-
-const AUTH_BASE_URL = getAuthBaseURL();
+const AUTH_BASE_URL = 'https://api.yudai.app';
 
 export class AuthService {
-  // Simple GitHub OAuth login - matches Ruby approach
+  // Simple GitHub OAuth login
   static async login(): Promise<void> {
     try {
-      // Get login URL from backend
       const response = await fetch(`${AUTH_BASE_URL}/auth/api/login`);
       const data = await response.json();
       
       if (data.login_url) {
-        // Redirect to GitHub OAuth - simple like Ruby
         window.location.href = data.login_url;
       } else {
         throw new Error('Failed to get login URL');
@@ -38,7 +31,7 @@ export class AuthService {
         // Store token
         localStorage.setItem('auth_token', token);
         
-        // Create user object from URL params (simplified)
+        // Create user object from URL params
         const user: User = {
           id: parseInt(userId),
           github_username: urlParams.get('username') || '',
@@ -69,19 +62,15 @@ export class AuthService {
     }
     
     const userData = await response.json();
-    
-    // Store user data
     localStorage.setItem('user_data', JSON.stringify(userData));
     
     return userData;
   }
 
-  // Simple logout - just clear local storage
+  // Simple logout
   static logout(): void {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('user_data');
-    
-    // Redirect to home
     window.location.href = '/';
   }
 
@@ -104,8 +93,9 @@ export class AuthService {
   // Verify current authentication
   static async verifyAuth(): Promise<{ authenticated: boolean; user?: User }> {
     const token = this.getStoredToken();
+    const storedUser = this.getStoredUserData();
     
-    if (!token) {
+    if (!token || !storedUser) {
       return { authenticated: false };
     }
     
@@ -114,7 +104,6 @@ export class AuthService {
       return { authenticated: true, user };
     } catch (error) {
       console.error('Auth verification failed:', error);
-      // Clear invalid token
       this.logout();
       return { authenticated: false };
     }
@@ -128,8 +117,6 @@ export class AuthService {
 
   // Redirect to main app
   static redirectToMainApp(): void {
-    // Clear any auth-related URL parameters and redirect to root
-    const cleanUrl = window.location.origin + '/';
-    window.location.replace(cleanUrl);
+    window.location.replace(window.location.origin + '/');
   }
 }

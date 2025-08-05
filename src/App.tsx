@@ -477,28 +477,18 @@ function App() {
   const currentPath = window.location.pathname;
   const currentSearch = window.location.search;
   
-  // Debug logging
-  console.log('Current path:', currentPath);
-  console.log('Current search:', currentSearch);
-  
-  const isAuthCallback = currentPath === '/auth/success' || 
-                        currentPath === '/auth/error' ||
-                        currentPath === '/auth/callback' ||
-                        currentPath === '/auth/login' ||
-                        currentSearch.includes('user_id=') ||
-                        currentSearch.includes('message=') ||
-                        currentSearch.includes('code=');
-
-  console.log('Is auth callback:', isAuthCallback);
+  const isAuthCallback = currentPath === '/auth/callback' ||
+                        currentSearch.includes('token=') ||
+                        currentSearch.includes('error=');
 
   if (isAuthCallback) {
     return (
-      <AuthCallback 
+      <AuthCallback
         onSuccess={() => {
-          console.log('GitHub App authentication successful');
+          console.log('GitHub authentication successful');
         }}
         onError={(error) => {
-          console.error('GitHub App authentication failed:', error);
+          console.error('GitHub authentication failed:', error);
         }}
       />
     );

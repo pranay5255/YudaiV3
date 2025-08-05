@@ -15,7 +15,6 @@ from auth.github_oauth import (
 )
 from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 router = APIRouter()
@@ -30,59 +29,83 @@ async def auth_callback(
     db: Session = Depends(get_db)
 ):
     """
-    Handle GitHub OAuth callback - matches Ruby implementation exactly
+    Handle GitHub OAuth callback - redirect to frontend with auth data
     
     Args:
         code: Authorization code from GitHub
         db: Database session
         
     Returns:
-        HTML response with success or error message
+        Redirect response to frontend with auth data
     """
     try:
         if not code:
-            return HTMLResponse(
-                content="Authorized, but no code provided.",
-                status_code=400
+            error_msg = "Authorized, but no code provided."
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(
+                url=f"https://yudai.app/auth/callback?error={error_msg}",
+                status_code=302
             )
         
-        # Exchange code for token - matches Ruby exchange_code function
+        # Exchange code for token
         token_data = await exchange_code(code)
         
         if "access_token" not in token_data:
-            error_msg = f"Authorized, but unable to exchange code {code} for token."
-            return HTMLResponse(content=error_msg, status_code=400)
+            error_msg = "Unable to exchange code for token."
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(
+                url=f"https://yudai.app/auth/callback?error={error_msg}",
+                status_code=302
+            )
         
         access_token = token_data["access_token"]
         
-        # Get user info - matches Ruby user_info function  
+        # Get user info
         github_user = await user_info(access_token)
         
         if not github_user:
-            return HTMLResponse(
-                content="Authorized, but unable to get user information.",
-                status_code=400
+            error_msg = "Unable to get user information."
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(
+                url=f"https://yudai.app/auth/callback?error={error_msg}",
+                status_code=302
             )
         
         # Create or update user
         user = await create_or_update_user(db, github_user, access_token)
         
-        # Extract user info like Ruby implementation
-        handle = github_user.get("login", "unknown")
-        name = github_user.get("name", handle)
+        # Build success redirect URL with auth data
+        from urllib.parse import urlencode
+        auth_params = {
+            "token": access_token,
+            "user_id": str(user.id),
+            "username": user.github_username,
+            "name": user.display_name or user.github_username,
+            "email": user.email or "",
+            "avatar": user.avatar_url or "",
+            "github_id": user.github_user_id
+        }
         
-        # Success message matching Ruby format exactly
-        success_message = f"Successfully authorized! Welcome, {name} ({handle})."
+        from fastapi.responses import RedirectResponse
+        redirect_url = f"https://yudai.app/auth/callback?{urlencode(auth_params)}"
         
-        return HTMLResponse(content=success_message)
+        return RedirectResponse(url=redirect_url, status_code=302)
         
     except GitHubOAuthError as e:
         error_msg = f"Authentication failed: {str(e)}"
-        return HTMLResponse(content=error_msg, status_code=400)
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(
+            url=f"https://yudai.app/auth/callback?error={error_msg}",
+            status_code=302
+        )
         
     except Exception as e:
         error_msg = f"Authentication failed: {str(e)}"
-        return HTMLResponse(content=error_msg, status_code=500)
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(
+            url=f"https://yudai.app/auth/callback?error={error_msg}",
+            status_code=302
+        )
 
 
 # Simple API endpoints for frontend integration (minimal)
