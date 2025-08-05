@@ -2,8 +2,9 @@ import { User, AuthConfig } from '../types';
 
 // Get base URL for auth endpoints - use relative URLs to work with nginx proxy
 const getAuthBaseURL = () => {
-  // Use relative URLs for auth endpoints to work with nginx proxy
-  return '';
+  // Use relative URLs for auth endpoints to work with nginx proxy in production
+  // This will resolve to the current domain (yudai.app in production)
+  return window.location.origin;
 };
 
 const AUTH_BASE_URL = getAuthBaseURL();

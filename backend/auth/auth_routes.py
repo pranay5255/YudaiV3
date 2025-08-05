@@ -28,7 +28,7 @@ security = HTTPBearer()
 
 
 @router.get("/login")
-async def login():
+async def login(db: Session = Depends(get_db)):
     """
     Initiate GitHub App OAuth login flow
     
@@ -40,7 +40,6 @@ async def login():
         validate_github_app_config()
         
         # Clean up expired states periodically
-        db = next(get_db())
         state_manager.cleanup_expired_states(db)
         
         # Generate state parameter using centralized manager
@@ -83,7 +82,6 @@ async def auth_callback(
     """
     try:
         # Validate state parameter using centralized manager
-        db = next(get_db())
         if not state_manager.validate_state(db, state):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

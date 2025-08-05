@@ -35,7 +35,7 @@ GITHUB_APP_CLIENT_SECRET = os.getenv("GITHUB_APP_CLIENT_SECRET")  # For user aut
 # GitHub App URLs
 GITHUB_APP_AUTH_URL = "https://github.com/login/oauth/authorize"
 GITHUB_APP_TOKEN_URL = "https://github.com/login/oauth/access_token"
-GITHUB_APP_INSTALLATION_TOKEN_URL = "https://api.github.com/app/installations/{instalSlation_id}/access_tokens"
+GITHUB_APP_INSTALLATION_TOKEN_URL = "https://api.github.com/app/installations/{installation_id}/access_tokens"
 GITHUB_APP_USER_TOKEN_URL = "https://api.github.com/app-manifests/{code}/conversions/token"
 GITHUB_USER_API_URL = "https://api.github.com/user"
 
@@ -131,8 +131,8 @@ def get_github_app_oauth_url(state: str) -> str:
     if not GITHUB_APP_CLIENT_ID:
         raise GitHubAppError("GitHub App Client ID not configured")
     
-    # Use the production redirect URI
-    redirect_uri = os.getenv("FRONTEND_URL")
+    # Use the production redirect URI - standardize on GITHUB_REDIRECT_URI
+    redirect_uri = os.getenv("GITHUB_REDIRECT_URI", "https://yudai.app/auth/callback")
     
     params = {
         "client_id": GITHUB_APP_CLIENT_ID,
@@ -173,7 +173,7 @@ async def exchange_code_for_user_token(code: str, state: str) -> Dict[str, Any]:
     # Exchange code for token using OAuth App flow (for user authorization)
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     
-    redirect_uri = os.getenv("GITHUB_REDIRECT_URI") or FALLBACK_REDIRECT_URIS[0]
+    redirect_uri = os.getenv("GITHUB_REDIRECT_URI", FALLBACK_REDIRECT_URIS[0])
     
     data = {
         "client_id": GITHUB_APP_CLIENT_ID,
