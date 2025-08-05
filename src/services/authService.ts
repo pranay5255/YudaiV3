@@ -1,11 +1,9 @@
 import { User, AuthConfig } from '../types';
 
-// Get base URL for auth endpoints (different from API endpoints)
+// Get base URL for auth endpoints - use relative URLs to work with nginx proxy
 const getAuthBaseURL = () => {
-  const apiUrl = import.meta.env.VITE_API_URL || 
-    (import.meta.env.DEV ? 'http://localhost:8000' : 'https://yudai.app');
-  // For auth endpoints, we need to use the API URL directly (not remove /api)
-  return apiUrl;
+  // Use relative URLs for auth endpoints to work with nginx proxy
+  return '';
 };
 
 const AUTH_BASE_URL = getAuthBaseURL();
@@ -98,9 +96,7 @@ export class AuthService {
   static async getAuthConfig(): Promise<AuthConfig> {
     const response = await fetch(`${AUTH_BASE_URL}/auth/config`, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: this.getAuthHeaders(),
     });
 
     if (!response.ok) {
@@ -110,105 +106,88 @@ export class AuthService {
     return response.json();
   }
 
-  // Exchange authorization code for access token with state validation
+  // Exchange OAuth code for access token
   static async exchangeCodeForToken(code: string, state: string): Promise<{access_token: string}> {
-    const response = await fetch(`${AUTH_BASE_URL}/auth/token`, {
+    const response = await fetch(`${AUTH_BASE_URL}/auth/exchange`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ code, state })
+      body: JSON.stringify({ code, state }),
     });
 
     if (!response.ok) {
-      throw new Error('Failed to exchange OAuth code for token');
+      throw new Error(`Token exchange failed: ${response.status}`);
     }
 
     return response.json();
   }
 
-  // Get GitHub user info and create/update user in local storage
+  // Get user info and create/update user
   static async getUserInfoAndCreateUser(accessToken: string): Promise<User> {
-    const response = await fetch(`${AUTH_BASE_URL}/auth/userinfo`, {
+    const response = await fetch(`${AUTH_BASE_URL}/auth/user-info`, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      }
+        'Content-Type': 'application/json',
+      },
     });
 
     if (!response.ok) {
-      throw new Error('Failed to get GitHub user info');
+      throw new Error(`Failed to get user info: ${response.status}`);
     }
 
-    const userInfo = await response.json();
-    
-    const user: User = {
-      id: userInfo.id,
-      github_username: userInfo.login,
-      github_user_id: userInfo.id.toString(),
-      email: userInfo.email,
-      display_name: userInfo.name || userInfo.login,
-      avatar_url: userInfo.avatar_url,
-      created_at: new Date().toISOString()
-    };
-
-    this.storeUserData(user);
-    localStorage.setItem('auth_token', accessToken);
-    return user;
+    return response.json();
   }
 
-  // Handle authentication error redirect
+  // Handle auth error
   static handleAuthError(): void {
-    const urlParams = new URLSearchParams(window.location.search);
-    const errorMessage = urlParams.get('message') || 'Authentication failed';
-    
-    // Clear any existing auth data
-    this.logout();
-    
-    // You can implement custom error handling here
-    console.error('Authentication error:', errorMessage);
-    
-    // Redirect to login page or show error
-    window.location.href = '/login?error=' + encodeURIComponent(errorMessage);
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user_data');
+    window.location.href = '/';
   }
 
-  // Utility methods
+  // Get stored token
   static getStoredToken(): string | null {
     return localStorage.getItem('auth_token');
   }
 
+  // Check if user is authenticated
   static isAuthenticated(): boolean {
-    return !!this.getStoredToken();
+    return !!localStorage.getItem('auth_token');
   }
 
+  // Store user data
   static storeUserData(user: User): void {
     localStorage.setItem('user_data', JSON.stringify(user));
   }
 
+  // Get stored user data
   static getStoredUserData(): User | null {
-    const userData = localStorage.getItem('user_data');
-    return userData ? JSON.parse(userData) : null;
+    const data = localStorage.getItem('user_data');
+    return data ? JSON.parse(data) : null;
   }
 
-  // Redirect to main application after successful authentication
+  // Redirect to main app
   static redirectToMainApp(): void {
-    // Redirect to the root path which contains the main app with chat interface
     window.location.href = '/';
   }
 
-  // Validate state parameter with backend
+  // Validate state parameter
   static async validateState(state: string): Promise<boolean> {
-    const response = await fetch(`${AUTH_BASE_URL}/auth/validate-state`, {
-      method: 'POST',
-      headers: this.getAuthHeaders(),
-      body: JSON.stringify({ state })
-    });
-    
-    if (!response.ok) {
+    try {
+      const response = await fetch(`${AUTH_BASE_URL}/auth/validate-state`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ state }),
+      });
+
+      return response.ok;
+    } catch (error) {
+      console.error('State validation failed:', error);
       return false;
     }
-    
-    return response.json().then(data => data.valid);
   }
 } 
