@@ -47,7 +47,10 @@ def init_db():
     """
     try:
         print("Initializing database with SQLAlchemy models...")
-        # Import all models here to ensure they are registered
+        
+        # Import all models here to ensure they are registered with SQLAlchemy
+        
+        # Create all tables
         Base.metadata.create_all(bind=engine)
         print("✓ Database initialized successfully with SQLAlchemy models")
         return True

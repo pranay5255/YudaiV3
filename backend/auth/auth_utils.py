@@ -59,29 +59,57 @@ def generate_session_token(length: int = 32) -> str:
 
 def create_session_token(db: Session, user_id: int, expires_in_hours: int = 24) -> SessionToken:
     """Create a new session token for a user"""
-    # Deactivate any existing active session tokens for this user
-    db.query(SessionToken).filter(
-        SessionToken.user_id == user_id,
-        SessionToken.is_active == True
-    ).update({"is_active": False})
-    
-    # Generate new session token
-    session_token = generate_session_token()
-    expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
-    
-    # Create new session token
-    db_session_token = SessionToken(
-        user_id=user_id,
-        session_token=session_token,
-        expires_at=expires_at,
-        is_active=True
-    )
-    
-    db.add(db_session_token)
-    db.commit()
-    db.refresh(db_session_token)
-    
-    return db_session_token
+    try:
+        print(f"create_session_token: Creating session token for user_id: {user_id}")
+        
+        # Deactivate any existing active session tokens for this user
+        existing_tokens = db.query(SessionToken).filter(
+            SessionToken.user_id == user_id,
+            SessionToken.is_active == True
+        ).all()
+        
+        if existing_tokens:
+            print(f"create_session_token: Deactivating {len(existing_tokens)} existing tokens")
+            for token in existing_tokens:
+                token.is_active = False
+        
+        # Generate new session token
+        session_token = generate_session_token()
+        expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
+        
+        print(f"create_session_token: Generated token: {session_token[:10]}...")
+        print(f"create_session_token: Expires at: {expires_at}")
+        
+        # Create new session token
+        db_session_token = SessionToken(
+            user_id=user_id,
+            session_token=session_token,
+            expires_at=expires_at,
+            is_active=True
+        )
+        
+        db.add(db_session_token)
+        db.commit()
+        db.refresh(db_session_token)
+        
+        print(f"create_session_token: Successfully created session token with ID: {db_session_token.id}")
+        
+        # Verify the token was saved
+        saved_token = db.query(SessionToken).filter(
+            SessionToken.session_token == session_token
+        ).first()
+        
+        if saved_token:
+            print("create_session_token: Verified token saved to database")
+        else:
+            print("create_session_token: ERROR - Token not found in database after save!")
+        
+        return db_session_token
+        
+    except Exception as e:
+        print(f"create_session_token: Error creating session token: {str(e)}")
+        db.rollback()
+        raise
 
 
 def validate_session_token(db: Session, session_token: str) -> Optional[User]:
@@ -89,6 +117,16 @@ def validate_session_token(db: Session, session_token: str) -> Optional[User]:
     try:
         if not session_token:
             print("validate_session_token: No session token provided")
+            return None
+        
+        print(f"validate_session_token: Looking for token: {session_token[:10]}...")
+        
+        # First, let's check if the session_tokens table exists and has any data
+        try:
+            total_tokens = db.query(SessionToken).count()
+            print(f"validate_session_token: Total session tokens in database: {total_tokens}")
+        except Exception as e:
+            print(f"validate_session_token: Error checking session_tokens table: {str(e)}")
             return None
         
         # Find active session token
@@ -99,6 +137,17 @@ def validate_session_token(db: Session, session_token: str) -> Optional[User]:
         
         if not db_session_token:
             print(f"validate_session_token: No active session token found for token: {session_token[:10]}...")
+            
+            # Let's check if the token exists but is inactive
+            inactive_token = db.query(SessionToken).filter(
+                SessionToken.session_token == session_token
+            ).first()
+            
+            if inactive_token:
+                print(f"validate_session_token: Token exists but is inactive (is_active: {inactive_token.is_active})")
+            else:
+                print("validate_session_token: Token does not exist in database at all")
+            
             return None
         
         # Check if token is expired
