@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Authentication Routes for GitHub App
+Authentication Routes for GitHub OAuth
 
-This module provides the authentication endpoints for GitHub App OAuth flow.
+This module provides the authentication endpoints for GitHub OAuth flow.
 """
 
 import os
 from datetime import datetime
+from urllib.parse import quote
 
 from auth.github_oauth import (
     GitHubAppError,
@@ -22,6 +23,7 @@ from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from models import User
 from sqlalchemy.orm import Session
 
 router = APIRouter()
@@ -31,7 +33,7 @@ security = HTTPBearer()
 @router.get("/login")
 async def login(db: Session = Depends(get_db)):
     """
-    Initiate GitHub App OAuth login flow
+    Initiate GitHub OAuth login flow
     
     Returns:
         Redirect to GitHub authorization page
@@ -53,11 +55,13 @@ async def login(db: Session = Depends(get_db)):
         return RedirectResponse(url=auth_url)
         
     except GitHubAppError as e:
+        print(f"GitHub OAuth configuration error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Authentication configuration error: {str(e)}"
         )
     except Exception as e:
+        print(f"Login initiation failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Login initiation failed: {str(e)}"
@@ -71,7 +75,7 @@ async def auth_callback(
     db: Session = Depends(get_db)
 ):
     """
-    Handle GitHub App OAuth callback
+    Handle GitHub OAuth callback
     
     Args:
         code: Authorization code from GitHub
@@ -82,6 +86,19 @@ async def auth_callback(
         Redirect to frontend with success/error
     """
     try:
+        # Validate required parameters
+        if not code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing authorization code"
+            )
+        
+        if not state:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing state parameter"
+            )
+        
         # Validate state parameter using centralized manager
         if not state_manager.validate_state(db, state):
             raise HTTPException(
@@ -93,15 +110,22 @@ async def auth_callback(
         token_data = await exchange_code_for_user_token(code, state)
         
         if "access_token" not in token_data:
+            error_msg = token_data.get("error_description", "Failed to obtain access token")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to obtain access token"
+                detail=error_msg
             )
         
         access_token = token_data["access_token"]
         
         # Get user information from GitHub
         github_user = await get_github_user_info(access_token)
+        
+        if not github_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to retrieve user information from GitHub"
+            )
         
         # Create or update user in database
         user = await create_or_update_user(db, github_user, access_token)
@@ -130,17 +154,17 @@ async def auth_callback(
         raise
     except GitHubAppError as e:
         # Log the specific error for debugging
-        print(f"GitHub App Error: {str(e)}")
+        print(f"GitHub OAuth Error: {str(e)}")
         # Redirect to frontend with error
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-        error_url = f"{frontend_url}/auth/error?message={str(e)}"
+        error_url = f"{frontend_url}/auth/error?message={quote(str(e))}"
         return RedirectResponse(url=error_url)
     except Exception as e:
         # Log the generic error for debugging
         print(f"Generic Error: {str(e)}")
         # Redirect to frontend with generic error
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-        error_url = f"{frontend_url}/auth/error?message=Authentication failed"
+        error_url = f"{frontend_url}/auth/error?message={quote('Authentication failed')}"
         return RedirectResponse(url=error_url)
 
 
@@ -159,15 +183,23 @@ async def get_profile(
         user = await get_current_user(credentials, db)
         
         return {
-            "id": user.id,
-            "github_username": user.github_username,
-            "display_name": user.display_name,
-            "email": user.email,
-            "avatar_url": user.avatar_url,
-            "github_id": user.github_id
+            "success": True,
+            "user": {
+                "id": user.id,
+                "github_username": user.github_username,
+                "display_name": user.display_name,
+                "email": user.email,
+                "avatar_url": user.avatar_url,
+                "github_user_id": user.github_user_id,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+                "last_login": user.last_login.isoformat() if user.last_login else None
+            }
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Failed to get profile: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Failed to get profile: {str(e)}"
@@ -208,7 +240,7 @@ async def auth_status(
                 "display_name": user.display_name,
                 "email": user.email,
                 "avatar_url": user.avatar_url,
-                "github_id": user.github_id
+                "github_user_id": user.github_user_id
             }
         }
         
@@ -251,7 +283,11 @@ async def logout(
         
         if auth_token:
             auth_token.is_active = False
+            auth_token.updated_at = datetime.utcnow()
             db.commit()
+            print(f"User {auth_token.user_id} logged out successfully")
+        else:
+            print("Attempted logout with invalid token")
         
         return {
             "success": True,
@@ -261,6 +297,7 @@ async def logout(
     except HTTPException:
         raise
     except Exception as e:
+        print(f"Logout failed: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Logout failed: {str(e)}"
@@ -280,8 +317,8 @@ async def auth_config():
         validate_github_app_config()
         
         return {
-            "auth_type": "github_app",
-            "client_id": os.getenv("GITHUB_APP_CLIENT_ID"),
+            "auth_type": "github_oauth",
+            "client_id": os.getenv("CLIENT_ID"),
             "redirect_uri": os.getenv("GITHUB_REDIRECT_URI"),
             "frontend_url": os.getenv("FRONTEND_URL", "http://localhost:3000")
         }
@@ -299,7 +336,7 @@ async def auth_config():
 
 
 @router.get("/debug/state")
-async def debug_state():
+async def debug_state(db: Session = Depends(get_db)):
     """
     Debug endpoint to check state manager status (development only)
     
@@ -313,14 +350,75 @@ async def debug_state():
         )
     
     # Clean up expired states
-    expired_count = state_manager.cleanup_expired_states()
-    active_count = state_manager.get_active_states_count()
+    expired_count = state_manager.cleanup_expired_states(db)
     
     return {
-        "active_states": active_count,
         "expired_states_cleaned": expired_count,
         "state_manager_working": True
     }
+
+
+@router.get("/success")
+async def auth_success(
+    user_id: int,
+    token: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Handle successful authentication
+    
+    Args:
+        user_id: User ID from URL parameter
+        token: Access token from URL parameter
+        db: Database session
+        
+    Returns:
+        Success response with user info
+    """
+    try:
+        # Verify the token is valid
+        from models import AuthToken
+        auth_token = db.query(AuthToken).filter(
+            AuthToken.user_id == user_id,
+            AuthToken.access_token == token,
+            AuthToken.is_active
+        ).first()
+        
+        if not auth_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token"
+            )
+        
+        # Get user info
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        return {
+            "success": True,
+            "message": "Authentication successful",
+            "user": {
+                "id": user.id,
+                "github_username": user.github_username,
+                "display_name": user.display_name,
+                "email": user.email,
+                "avatar_url": user.avatar_url,
+                "github_user_id": user.github_user_id
+            },
+            "access_token": token
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process success: {str(e)}"
+        )
 
 
 @router.get("/error")
@@ -335,6 +433,7 @@ async def auth_error(message: str = "Authentication failed"):
         Error response
     """
     return {
+        "success": False,
         "error": True,
         "message": message,
         "timestamp": datetime.utcnow().isoformat()

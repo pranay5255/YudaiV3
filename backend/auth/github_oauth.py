@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """
-GitHub App Authentication Module
+GitHub OAuth Authentication Module
 
-This module handles GitHub App authentication flow, JWT generation,
-installation token management, and user access token generation.
+This module handles GitHub OAuth authentication flow and user access token generation.
 """
 
 import os
-import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
 import httpx
-import jwt
 from auth.state_manager import state_manager
 from db.database import get_db
 from fastapi import Depends, HTTPException, status
@@ -25,18 +22,13 @@ from sqlalchemy.orm import Session
 # Security scheme for JWT-like token authentication
 security = HTTPBearer()
 
-# GitHub App Configuration
-GITHUB_APP_ID = os.getenv("GITHUB_APP_ID")
-GITHUB_APP_PRIVATE_KEY_PATH = os.getenv("GITHUB_APP_PRIVATE_KEY_PATH", "private-key.pem")
-GITHUB_APP_INSTALLATION_ID = os.getenv("GITHUB_APP_INSTALLATION_ID")
+# GitHub OAuth Configuration
 GITHUB_APP_CLIENT_ID = os.getenv("CLIENT_ID")  # For user authorization
 GITHUB_APP_CLIENT_SECRET = os.getenv("CLIENT_SECRET")  # For user authorization
 
 # GitHub App URLs
 GITHUB_APP_AUTH_URL = "https://github.com/login/oauth/authorize"
 GITHUB_APP_TOKEN_URL = "https://github.com/login/oauth/access_token"
-GITHUB_APP_INSTALLATION_TOKEN_URL = "https://api.github.com/app/installations/{installation_id}/access_tokens"
-GITHUB_APP_USER_TOKEN_URL = "https://api.github.com/app-manifests/{code}/conversions/token"
 GITHUB_USER_API_URL = "https://api.github.com/user"
 
 # Fallback redirect URIs for different environments
@@ -51,6 +43,23 @@ FALLBACK_REDIRECT_URIS = [
 # Import centralized state manager
 
 
+def parse_response(response) -> Dict[str, Any]:
+    """
+    Parse HTTP response similar to Ruby implementation
+    
+    Args:
+        response: httpx.Response object
+        
+    Returns:
+        Parsed JSON response or empty dict on error
+    """
+    if response.status_code == 200:
+        return response.json()
+    else:
+        print(f"Response status: {response.status_code}")
+        print(f"Response body: {response.text}")
+        return {}
+
 
 class GitHubAppError(Exception):
     """Custom exception for GitHub App errors"""
@@ -62,60 +71,7 @@ def generate_oauth_state() -> str:
     return state_manager.generate_state()
 
 
-def generate_jwt() -> str:
-    """
-    Generate JWT for GitHub App authentication
-    
-    Returns:
-        JWT token string
-    """
-    if not GITHUB_APP_ID:
-        raise GitHubAppError("GitHub App ID not configured")
-    
-    if not os.path.exists(GITHUB_APP_PRIVATE_KEY_PATH):
-        raise GitHubAppError(f"GitHub App private key not found at {GITHUB_APP_PRIVATE_KEY_PATH}")
-    
-    now = int(time.time())
-    payload = {
-        'iat': now,
-        'exp': now + 600,  # 10 minutes
-        'iss': int(GITHUB_APP_ID)  # App ID must be integer
-    }
-    
-    # Load private key
-    with open(GITHUB_APP_PRIVATE_KEY_PATH, 'r') as f:
-        private_key = f.read()
-    
-    return jwt.encode(payload, private_key, algorithm='RS256')
 
-
-async def get_installation_token(installation_id: str) -> str:
-    """
-    Get installation access token using JWT
-    
-    Args:
-        installation_id: GitHub App installation ID
-        
-    Returns:
-        Installation access token
-    """
-    jwt_token = generate_jwt()
-    
-    headers = {
-        "Authorization": f"Bearer {jwt_token}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    
-    url = GITHUB_APP_INSTALLATION_TOKEN_URL.format(installation_id=installation_id)
-    
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, headers=headers)
-    
-    if response.status_code != 201:
-        raise GitHubAppError(f"Failed to get installation token: {response.text}")
-    
-    token_data = response.json()
-    return token_data["token"]
 
 
 def get_github_app_oauth_url(state: str) -> str:
@@ -143,11 +99,6 @@ def get_github_app_oauth_url(state: str) -> str:
     
     auth_url = f"{GITHUB_APP_AUTH_URL}?{urlencode(params)}"
     
-    # Log the generated URL for debugging (remove in production)
-    print(f"Generated GitHub App OAuth URL: {auth_url}")
-    print(f"Client ID: {GITHUB_APP_CLIENT_ID}")
-    print(f"Redirect URI: {redirect_uri}")
-    
     return auth_url
 
 
@@ -171,30 +122,25 @@ async def exchange_code_for_user_token(code: str, state: str) -> Dict[str, Any]:
         raise GitHubAppError("Invalid state parameter")
     
     # Exchange code for token using OAuth App flow (for user authorization)
-    headers = {"Accept": "application/json"}  # Remove Content-Type header
+    headers = {"Accept": "application/json"}
     
-    redirect_uri = os.getenv("GITHUB_REDIRECT_URI", FALLBACK_REDIRECT_URIS[0])
-    
+    # Remove redirect_uri from the request as per the Ruby implementation
     data = {
         "client_id": GITHUB_APP_CLIENT_ID,
         "client_secret": GITHUB_APP_CLIENT_SECRET,
         "code": code,
-        "redirect_uri": redirect_uri,
     }
     
     async with httpx.AsyncClient() as client:
         # Use form-encoded data instead of JSON
         response = await client.post(GITHUB_APP_TOKEN_URL, headers=headers, data=data)
     
-    if response.status_code != 200:
-        raise GitHubAppError(f"Failed to exchange code for token: {response.text}")
+    token_data = parse_response(response)
     
-    token_data = response.json()
-    
+    # Handle errors more gracefully like the Ruby implementation
     if "error" in token_data:
-        raise GitHubAppError(
-            f"GitHub OAuth error: {token_data.get('error_description', token_data['error'])}"
-        )
+        error_msg = token_data.get('error_description', token_data['error'])
+        print(f"GitHub OAuth error: {error_msg}")
     
     return token_data
 
@@ -210,17 +156,15 @@ async def get_github_user_info(access_token: str) -> Dict[str, Any]:
         GitHub user information
     """
     headers = {
-        "Authorization": f"token {access_token}",
-        "Accept": "application/vnd.github.v3+json",
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
     }
     
     async with httpx.AsyncClient() as client:
         response = await client.get(GITHUB_USER_API_URL, headers=headers)
     
-    if response.status_code != 200:
-        raise GitHubAppError(f"Failed to get user info: {response.text}")
-    
-    return response.json()
+    return parse_response(response)
 
 
 async def create_or_update_user(
@@ -237,6 +181,10 @@ async def create_or_update_user(
     Returns:
         User object
     """
+    # Handle case where github_user might be empty (like in Ruby implementation)
+    if not github_user or "id" not in github_user or "login" not in github_user:
+        raise GitHubAppError("Invalid GitHub user information received")
+    
     github_id = str(github_user["id"])
     username = github_user["login"]
     
@@ -394,11 +342,8 @@ async def get_current_user_optional(
 
 
 def validate_github_app_config():
-    """Validate that GitHub App configuration is complete"""
+    """Validate that GitHub OAuth configuration is complete"""
     missing_vars = []
-    
-    if not GITHUB_APP_ID:
-        missing_vars.append("GITHUB_APP_ID")
     
     if not GITHUB_APP_CLIENT_ID:
         missing_vars.append("GITHUB_APP_CLIENT_ID")
@@ -406,15 +351,9 @@ def validate_github_app_config():
     if not GITHUB_APP_CLIENT_SECRET:
         missing_vars.append("GITHUB_APP_CLIENT_SECRET")
     
-    if not GITHUB_APP_INSTALLATION_ID:
-        missing_vars.append("GITHUB_APP_INSTALLATION_ID")
-    
-    if not os.path.exists(GITHUB_APP_PRIVATE_KEY_PATH):
-        missing_vars.append(f"Private key file: {GITHUB_APP_PRIVATE_KEY_PATH}")
-    
     if missing_vars:
         raise GitHubAppError(
-            f"Missing required GitHub App configuration: {', '.join(missing_vars)}"
+            f"Missing required GitHub OAuth configuration: {', '.join(missing_vars)}"
         )
 
 
