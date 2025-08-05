@@ -105,9 +105,23 @@ async def auth_callback(
         # Create or update user in database
         user = await create_or_update_user(db, github_user, access_token)
         
-        # Redirect to frontend with success
+        # Get the auth token that was created
+        from models import AuthToken
+        auth_token = db.query(AuthToken).filter(
+            AuthToken.user_id == user.id,
+            AuthToken.is_active,
+            AuthToken.access_token == access_token
+        ).first()
+        
+        if not auth_token:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create auth token"
+            )
+        
+        # Redirect to frontend with success and token
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-        success_url = f"{frontend_url}/auth/success?user_id={user.id}"
+        success_url = f"{frontend_url}/auth/success?user_id={user.id}&token={auth_token.access_token}"
         
         return RedirectResponse(url=success_url)
         

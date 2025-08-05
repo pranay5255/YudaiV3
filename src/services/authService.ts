@@ -18,14 +18,34 @@ export class AuthService {
     };
   }
 
-  // GitHub App OAuth login - redirects to GitHub
+  // GitHub App OAuth login - redirects to GitHub via backend
   static async login(): Promise<void> {
     window.location.href = `${AUTH_BASE_URL}/auth/login`;
   }
 
-  // Note: handleCallback method removed - OAuth flow uses redirects, not direct API calls
-  // The backend /auth/callback endpoint handles the OAuth redirect and then redirects to frontend
-  // Frontend should use handleAuthSuccess() or handleAuthError() to process the redirect
+  // Handle OAuth success redirect from backend
+  static async handleAuthSuccess(): Promise<User> {
+    try {
+      // Get user profile from backend
+      const user = await this.getProfile();
+      
+      // Store user data
+      this.storeUserData(user);
+      
+      return user;
+    } catch (error) {
+      console.error('Failed to handle auth success:', error);
+      throw error;
+    }
+  }
+
+  // Handle OAuth error redirect from backend
+  static handleAuthError(message?: string): void {
+    console.error('Authentication failed:', message);
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user_data');
+    window.location.href = '/';
+  }
 
   // Get current user profile
   static async getProfile(): Promise<User> {
@@ -107,47 +127,6 @@ export class AuthService {
     return response.json();
   }
 
-  // Exchange OAuth code for access token
-  static async exchangeCodeForToken(code: string, state: string): Promise<{access_token: string}> {
-    const response = await fetch(`${AUTH_BASE_URL}/auth/exchange`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ code, state }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Token exchange failed: ${response.status}`);
-    }
-
-    return response.json();
-  }
-
-  // Get user info and create/update user
-  static async getUserInfoAndCreateUser(accessToken: string): Promise<User> {
-    const response = await fetch(`${AUTH_BASE_URL}/auth/user-info`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to get user info: ${response.status}`);
-    }
-
-    return response.json();
-  }
-
-  // Handle auth error
-  static handleAuthError(): void {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('user_data');
-    window.location.href = '/';
-  }
-
   // Get stored token
   static getStoredToken(): string | null {
     return localStorage.getItem('auth_token');
@@ -172,23 +151,5 @@ export class AuthService {
   // Redirect to main app
   static redirectToMainApp(): void {
     window.location.href = '/';
-  }
-
-  // Validate state parameter
-  static async validateState(state: string): Promise<boolean> {
-    try {
-      const response = await fetch(`${AUTH_BASE_URL}/auth/validate-state`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ state }),
-      });
-
-      return response.ok;
-    } catch (error) {
-      console.error('State validation failed:', error);
-      return false;
-    }
   }
 } 

@@ -17,49 +17,55 @@ export const AuthCallback: React.FC<AuthCallbackProps> = ({ onSuccess, onError }
       try {
         setIsLoading(true);
         
-        // Check if this is a success or error redirect
+        // Check if this is a success or error redirect from backend
         const urlParams = new URLSearchParams(window.location.search);
         const errorMessage = urlParams.get('message');
+        const userId = urlParams.get('user_id');
+        const token = urlParams.get('token');
         
         if (errorMessage) {
-          // This is an error redirect
+          // This is an error redirect from backend
           setError(errorMessage);
-          AuthService.handleAuthError();
+          AuthService.handleAuthError(errorMessage);
           onError?.(errorMessage);
           return;
         }
         
-        // This is a success redirect
-        // Extract OAuth parameters
-        const code = urlParams.get('code');
-        const state = urlParams.get('state');
-        
-        if (!code || !state) {
-          throw new Error('Missing required OAuth parameters');
+        if (userId && token) {
+          // This is a success redirect from backend
+          // Store the auth token
+          localStorage.setItem('auth_token', token);
+          
+          // Get user profile and store it
+          await AuthService.handleAuthSuccess();
+          
+          // Refresh auth state in the context
+          await refreshAuth();
+          
+          // Call the success callback
+          onSuccess?.();
+          
+          // Redirect to main app
+          AuthService.redirectToMainApp();
+        } else {
+          // No user_id parameter, this might be a direct callback
+          // Check if we have a valid token
+          const statusCheck = await AuthService.checkAuthStatus();
+          if (statusCheck.authenticated && statusCheck.user) {
+            // User is already authenticated
+            AuthService.storeUserData(statusCheck.user);
+            await refreshAuth();
+            onSuccess?.();
+            AuthService.redirectToMainApp();
+          } else {
+            throw new Error('Authentication failed - no valid session found');
+          }
         }
-
-        // Exchange code for token with state validation
-        const tokenData = await AuthService.exchangeCodeForToken(code, state);
-        
-        // Get user info and create/update user in local storage
-        const user = await AuthService.getUserInfoAndCreateUser(tokenData.access_token);
-        
-        // Store user data
-        // Store user data
-        AuthService.storeUserData(user);
-        
-        // Refresh auth state in the context
-        await refreshAuth();
-        
-        // Call the success callback
-        onSuccess?.();
-        
-        // Redirect to main app
-        AuthService.redirectToMainApp();
         
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Authentication failed';
         setError(errorMessage);
+        AuthService.handleAuthError(errorMessage);
         onError?.(errorMessage);
       } finally {
         setIsLoading(false);
