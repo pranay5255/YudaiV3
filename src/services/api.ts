@@ -8,9 +8,8 @@ import {
   UserIssueResponse
 } from '../types';
 
-// API endpoints use the full VITE_API_URL (includes /api prefix)
-const API_BASE_URL = import.meta.env.VITE_API_URL || 
-  (import.meta.env.DEV ? 'http://localhost:8000' : 'https://yudai.app/api');
+// API endpoints use relative URLs to work with nginx proxy
+const API_BASE_URL = '/api';
 
 export interface ChatMessage {
   content: string;
@@ -123,30 +122,27 @@ export class ApiService {
 
   // Session Management API Methods
   static async createSession(request: SessionCreateRequest): Promise<SessionResponse> {
-    const response = await fetch(`${API_BASE_URL}/sessions`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
       body: JSON.stringify(request),
     });
-
     return this.handleResponse<SessionResponse>(response);
   }
 
   static async getSession(sessionId: string): Promise<SessionContextResponse> {
-    const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });
-
     return this.handleResponse<SessionContextResponse>(response);
   }
 
   static async touchSession(sessionId: string): Promise<{success: boolean, session: SessionResponse}> {
-    const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/touch`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/touch`, {
       method: 'POST',
       headers: this.getAuthHeaders(),
     });
-
     return this.handleResponse<{success: boolean, session: SessionResponse}>(response);
   }
 
@@ -160,30 +156,27 @@ export class ApiService {
     if (repoName) params.append('repo_name', repoName);
     params.append('limit', limit.toString());
 
-    const response = await fetch(`${API_BASE_URL}/sessions?${params}`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions?${params}`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });
-
     return this.handleResponse<SessionResponse[]>(response);
   }
 
   static async updateSessionTitle(sessionId: string, title: string): Promise<SessionResponse> {
-    const response = await fetch(`${API_BASE_URL}/chat/sessions/${sessionId}/title`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/title`, {
       method: 'PUT',
       headers: this.getAuthHeaders(),
       body: JSON.stringify({ title }),
     });
-
     return this.handleResponse<SessionResponse>(response);
   }
 
   static async deleteSession(sessionId: string): Promise<{message: string}> {
-    const response = await fetch(`${API_BASE_URL}/chat/sessions/${sessionId}`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
       method: 'DELETE',
       headers: this.getAuthHeaders(),
     });
-
     return this.handleResponse<{message: string}>(response);
   }
 
@@ -195,11 +188,10 @@ export class ApiService {
     user_issues_count?: number;
     file_embeddings_count?: number;
   }> {
-    const response = await fetch(`${API_BASE_URL}/chat/sessions/${sessionId}/statistics`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/statistics`, {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });
-
     return this.handleResponse<{
       total_messages: number;
       total_tokens: number;
@@ -212,17 +204,15 @@ export class ApiService {
 
   // Chat API Methods
   static async sendChatMessage(request: ChatRequest, asyncMode: boolean = false): Promise<ChatResponse> {
-    const params = new URLSearchParams();
-    if (asyncMode) {
-      params.append('async_mode', 'true');
-    }
+    const url = asyncMode 
+      ? `${API_BASE_URL}/chat/daifu/async`
+      : `${API_BASE_URL}/chat/daifu`;
     
-    const response = await fetch(`${API_BASE_URL}/chat/daifu?${params}`, {
-      method: 'POST', 
+    const response = await fetch(url, {
+      method: 'POST',
       headers: this.getAuthHeaders(),
       body: JSON.stringify(request),
     });
-
     return this.handleResponse<ChatResponse>(response);
   }
 
@@ -236,7 +226,6 @@ export class ApiService {
       headers: this.getAuthHeaders(),
       body: JSON.stringify(request),
     });
-
     return this.handleResponse<{
       success: boolean;
       issue: UserIssueResponse;
@@ -244,31 +233,166 @@ export class ApiService {
     }>(response);
   }
 
-  // Removed WebSocket connection - using HTTP API only
+  // Issue Management API Methods
+  static async createIssueWithContext(request: CreateIssueWithContextRequest): Promise<IssueCreationResponse> {
+    const response = await fetch(`${API_BASE_URL}/issues/from-session-enhanced`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(request),
+    });
+    return this.handleResponse<IssueCreationResponse>(response);
+  }
 
-  // Auth Methods
+  static async getIssues(
+    repoOwner?: string,
+    repoName?: string,
+    limit: number = 50
+  ): Promise<UserIssueResponse[]> {
+    const params = new URLSearchParams();
+    if (repoOwner) params.append('repo_owner', repoOwner);
+    if (repoName) params.append('repo_name', repoName);
+    params.append('limit', limit.toString());
+
+    const response = await fetch(`${API_BASE_URL}/issues?${params}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+    return this.handleResponse<UserIssueResponse[]>(response);
+  }
+
+  static async getIssue(issueId: string): Promise<UserIssueResponse> {
+    const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+    return this.handleResponse<UserIssueResponse>(response);
+  }
+
+  static async updateIssue(issueId: string, updates: Partial<UserIssueResponse>): Promise<UserIssueResponse> {
+    const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
+      method: 'PUT',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(updates),
+    });
+    return this.handleResponse<UserIssueResponse>(response);
+  }
+
+  static async deleteIssue(issueId: string): Promise<{message: string}> {
+    const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
+      method: 'DELETE',
+      headers: this.getAuthHeaders(),
+    });
+    return this.handleResponse<{message: string}>(response);
+  }
+
+  // File Dependencies API Methods
+  static async analyzeFileDependencies(files: File[]): Promise<{
+    dependencies: FileContextItem[];
+    total_tokens: number;
+  }> {
+    const formData = new FormData();
+    files.forEach(file => formData.append('files', file));
+
+    const token = localStorage.getItem('auth_token');
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/file-dependencies/analyze`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+    return this.handleResponse<{
+      dependencies: FileContextItem[];
+      total_tokens: number;
+    }>(response);
+  }
+
+  static async getFileDependencies(fileId: string): Promise<FileContextItem[]> {
+    const response = await fetch(`${API_BASE_URL}/file-dependencies/${fileId}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+    return this.handleResponse<FileContextItem[]>(response);
+  }
+
+  // Repository Management API Methods
+  static async getRepositories(): Promise<{
+    repositories: Array<{
+      id: string;
+      name: string;
+      owner: string;
+      description?: string;
+      private: boolean;
+      default_branch: string;
+    }>;
+  }> {
+    const response = await fetch(`${API_BASE_URL}/repositories`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+    return this.handleResponse<{
+      repositories: Array<{
+        id: string;
+        name: string;
+        owner: string;
+        description?: string;
+        private: boolean;
+        default_branch: string;
+      }>;
+    }>(response);
+  }
+
+  static async getRepository(owner: string, name: string): Promise<{
+    id: string;
+    name: string;
+    owner: string;
+    description?: string;
+    private: boolean;
+    default_branch: string;
+    branches: string[];
+  }> {
+    const response = await fetch(`${API_BASE_URL}/repositories/${owner}/${name}`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+    return this.handleResponse<{
+      id: string;
+      name: string;
+      owner: string;
+      description?: string;
+      private: boolean;
+      default_branch: string;
+      branches: string[];
+    }>(response);
+  }
+
+  // Legacy Auth Methods (for backward compatibility)
   static async login(credentials: {username: string, password: string}): Promise<{token: string}> {
     const response = await fetch(`${API_BASE_URL}/auth/login`, {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify(credentials),
     });
-
     return this.handleResponse<{token: string}>(response);
   }
 
   static async logout(): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/auth/logout`, {
-      method: 'POST',
-      headers: this.getAuthHeaders(),
-    });
-
-    if (response.ok) {
+    try {
+      await fetch(`${API_BASE_URL}/auth/logout`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+      });
+    } catch (error) {
+      console.error('Logout request failed:', error);
+    } finally {
       localStorage.removeItem('auth_token');
       localStorage.removeItem('user_data');
     }
-
-    return this.handleResponse<void>(response);
   }
 
   static async getAuthStatus(): Promise<{authenticated: boolean}> {
@@ -276,22 +400,22 @@ export class ApiService {
       method: 'GET',
       headers: this.getAuthHeaders(),
     });
-
     return this.handleResponse<{authenticated: boolean}>(response);
   }
 
-  // State validation endpoint
   static async validateState(state: string): Promise<boolean> {
-    const response = await fetch(`${API_BASE_URL}/auth/validate-state`, {
-      method: 'POST',
-      headers: this.getAuthHeaders(),
-      body: JSON.stringify({ state })
-    });
-    
-    if (!response.ok) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/validate-state`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ state }),
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('State validation failed:', error);
       return false;
     }
-    
-    return response.json().then(data => data.valid);
   }
 }
