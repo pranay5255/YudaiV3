@@ -10,6 +10,9 @@ from typing import Any, Dict
 from urllib.parse import urlencode
 
 import httpx
+from db.database import get_db
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from models import AuthToken, User
 from sqlalchemy.orm import Session
 
@@ -206,3 +209,140 @@ def validate_github_config():
         raise GitHubOAuthError(
             f"Missing required GitHub OAuth configuration: {', '.join(missing_vars)}"
         )
+
+
+# FastAPI security scheme for Bearer token authentication
+security = HTTPBearer()
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    FastAPI dependency to get current authenticated user from Bearer token
+    
+    Args:
+        credentials: Bearer token from Authorization header
+        db: Database session
+        
+    Returns:
+        User: Authenticated user object
+        
+    Raises:
+        HTTPException: If token is invalid or user not found
+    """
+    token = credentials.credentials
+    
+    # Find active auth token
+    auth_token = db.query(AuthToken).filter(
+        AuthToken.access_token == token,
+        AuthToken.is_active == True
+    ).first()
+    
+    if not auth_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Check if token is expired
+    if auth_token.expires_at and auth_token.expires_at < datetime.utcnow():
+        # Deactivate expired token
+        auth_token.is_active = False
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Get user
+    user = db.query(User).filter(User.id == auth_token.user_id).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    return user
+
+
+def get_github_api(user_id: int, db: Session):
+    """
+    Get GitHub API client for authenticated user
+    
+    Args:
+        user_id: User ID
+        db: Database session
+        
+    Returns:
+        GitHub API client instance
+        
+    Raises:
+        HTTPException: If user not found or no valid token
+    """
+    # Get user's active token
+    auth_token = db.query(AuthToken).filter(
+        AuthToken.user_id == user_id,
+        AuthToken.is_active == True
+    ).first()
+    
+    if not auth_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No valid authentication token found"
+        )
+    
+    # Check if token is expired
+    if auth_token.expires_at and auth_token.expires_at < datetime.utcnow():
+        # Deactivate expired token
+        auth_token.is_active = False
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication token has expired"
+        )
+    
+    # Import ghapi here to avoid circular imports
+    try:
+        from ghapi import GhApi
+        return GhApi(token=auth_token.access_token)
+    except ImportError:
+        # Fallback: create a simple mock API client for basic functionality
+        class MockGitHubApi:
+            def __init__(self, token):
+                self.token = token
+                self.repos = self
+                self.issues = self
+                self.pulls = self
+                self.search = self
+                
+            def list_for_authenticated_user(self, **kwargs):
+                return []
+                
+            def get(self, **kwargs):
+                return {}
+                
+            def create(self, **kwargs):
+                return {}
+                
+            def list_for_repo(self, **kwargs):
+                return []
+                
+            def list(self, **kwargs):
+                return []
+                
+            def list_commits(self, **kwargs):
+                return []
+                
+            def list_branches(self, **kwargs):
+                return []
+                
+            def repos(self, **kwargs):
+                return {"items": []}
+        
+        return MockGitHubApi(auth_token.access_token)

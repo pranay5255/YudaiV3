@@ -12,11 +12,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+# Import authentication
+from auth.github_oauth import get_current_user
+
 # Import database session
 from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException
 
-# Import authentication
 # Import unified models
 from models import (
     FileAnalysis,
@@ -26,6 +28,7 @@ from models import (
     Repository,
     RepositoryRequest,
     RepositoryResponse,
+    User,
 )
 from sqlalchemy.orm import Session
 
@@ -81,35 +84,18 @@ def get_or_create_repository(
     repo_url: str,
     repo_name: str,
     repo_owner: str,
-    user_id: Optional[int] = None  # Make user_id optional
+    user_id: int
 ) -> Repository:
     """Retrieve existing repository metadata or create a new record."""
 
-    # First try to find existing repository by URL
+    # First try to find existing repository by URL and user
     repository = db.query(Repository).filter(
-        Repository.repo_url == repo_url
+        Repository.repo_url == repo_url,
+        Repository.user_id == user_id
     ).first()
 
     if repository:
         return repository
-
-    # If no user_id provided, try to find a default user or create one
-    if user_id is None:
-        # Try to find any existing user
-        from models import User
-        default_user = db.query(User).first()
-        if default_user:
-            user_id = default_user.id
-        else:
-            # Create a default user if none exists
-            default_user = User(
-                github_username="default_user",
-                github_user_id="default_user_id",
-                email="default@example.com"
-            )
-            db.add(default_user)
-            db.flush()  # Get the ID
-            user_id = default_user.id
 
     # Generate a unique github_repo_id based on URL hash
     import hashlib
@@ -372,7 +358,9 @@ async def root():
 
 @router.get("/repositories", response_model=RepositoryResponse)
 async def get_repository_by_url(
-    repo_url: str, db: Session = Depends(get_db)
+    repo_url: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Retrieve a repository by its exact URL."""
     repository = db.query(Repository).filter(Repository.repo_url == repo_url).first()
@@ -383,7 +371,8 @@ async def get_repository_by_url(
 @router.get("/repositories/{repository_id}/files", response_model=List[FileItemDBResponse])
 async def get_repository_files(
     repository_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Get all file items for a specific repository."""
     # Check if repository exists
@@ -398,7 +387,8 @@ async def get_repository_files(
 @router.post("/extract", response_model=FileItemResponse)
 async def extract_file_dependencies(
     request: RepositoryRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Extract file dependencies from a GitHub repository.
@@ -465,6 +455,7 @@ async def extract_file_dependencies(
                 repo_url=request.repo_url,
                 repo_name=repo_name,
                 repo_owner=repo_owner,
+                user_id=current_user.id
             )
             print(f"Repository ID: {repository.id}")
 

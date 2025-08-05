@@ -4,7 +4,6 @@ Authentication Routes for GitHub OAuth
 Simplified to match Ruby reference implementation
 """
 
-import os
 
 from auth.github_oauth import (
     GitHubOAuthError,
@@ -22,27 +21,7 @@ from sqlalchemy.orm import Session
 router = APIRouter()
 
 
-@router.get("/")
-async def login():
-    """
-    Show login link - matches Ruby implementation
-    
-    Returns:
-        HTML page with GitHub login link
-    """
-    try:
-        validate_github_config()
-        
-        client_id = os.getenv("CLIENT_ID")
-        login_link = f'<a href="https://github.com/login/oauth/authorize?client_id={client_id}">Login with GitHub</a>'
-        
-        return HTMLResponse(content=login_link)
-        
-    except GitHubOAuthError as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Authentication configuration error: {str(e)}"
-        )
+# Removed simple HTML login endpoint - frontend handles login UI
 
 
 @router.get("/callback")
