@@ -10,20 +10,22 @@ This server combines all the backend services:
 - Issue management services
 """
 
-import uvicorn
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
-# Import database initialization
-from db.database import init_db
+import uvicorn
 
 # Import all service routers
 from auth import auth_router
-from github import github_router
 from daifuUserAgent.chat_api import router as daifu_router
+
+# Import database initialization
+from db.database import init_db
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from github import github_router
 from issueChatServices import issue_router
 from repo_processorGitIngest.filedeps import router as filedeps_router
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -53,7 +55,6 @@ app.add_middleware(
         "http://localhost:3000", 
         "http://localhost:5173",  # React dev servers
         "https://yudai.app",      # Production domain
-        "http://yudai.app"        # Production domain (fallback)
     ],
     allow_credentials=True,
     allow_methods=["*"],

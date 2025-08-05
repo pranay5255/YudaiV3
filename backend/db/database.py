@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 # Database URL from environment variables
 DATABASE_URL = os.getenv(
     "DATABASE_URL", 
-    "postgresql://yudai_user:yudai_password@db:5432/yudai_dev"
+    "postgresql://yudai_user:yudai_password@db:5432/yudai_db"
 )
 
 # Create engine with standard configuration
