@@ -175,7 +175,6 @@ services:
       - "443:443"
     volumes:
       - ./ssl:/etc/nginx/ssl:ro
-      - ssl_certs:/etc/nginx/ssl-backup:ro
       - app_logs:/var/log/nginx
     depends_on:
       backend:
@@ -238,12 +237,6 @@ volumes:
       type: local
       o: bind
       device: ./logs
-  ssl_certs:
-    driver: local
-    driver_opts:
-      type: local
-      o: bind
-      device: ./ssl-backup
 
 networks:
   yudai-network:
