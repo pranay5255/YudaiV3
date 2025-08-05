@@ -17,49 +17,62 @@ export const AuthCallback: React.FC<AuthCallbackProps> = ({ onSuccess, onError }
       try {
         setIsLoading(true);
         
-        // Check if this is a success or error redirect from backend
+        // Check if this is an error redirect from backend
         const urlParams = new URLSearchParams(window.location.search);
-        const errorMessage = urlParams.get('message');
-        const userId = urlParams.get('user_id');
-        const token = urlParams.get('token');
+        const errorMessage = urlParams.get('error') || urlParams.get('message');
         
         if (errorMessage) {
-          // This is an error redirect from backend
+          // Handle error case
           setError(errorMessage);
           AuthService.handleAuthError(errorMessage);
           onError?.(errorMessage);
           return;
         }
         
-        if (userId && token) {
-          // This is a success redirect from backend
-          // Store the auth token
-          localStorage.setItem('auth_token', token);
-          
-          // Get user profile and store it
-          await AuthService.handleAuthSuccess();
-          
-          // Refresh auth state in the context
-          await refreshAuth();
-          
-          // Call the success callback
-          onSuccess?.();
-          
-          // Redirect to main app
-          AuthService.redirectToMainApp();
-        } else {
-          // No user_id parameter, this might be a direct callback
-          // Check if we have a valid token
-          const statusCheck = await AuthService.checkAuthStatus();
-          if (statusCheck.authenticated && statusCheck.user) {
-            // User is already authenticated
-            AuthService.storeUserData(statusCheck.user);
-            await refreshAuth();
+        // Try to handle successful authentication
+        const authResult = AuthService.handleAuthSuccess();
+        
+        if (authResult) {
+          // Success - we have token and user data
+          try {
+            // Verify the token works by getting fresh user data
+            await AuthService.getUserByToken(authResult.token);
+            
+            // Refresh auth state in the context if available
+            if (refreshAuth) {
+              await refreshAuth();
+            }
+            
+            // Call success callback
             onSuccess?.();
+            
+            // Redirect to main app
             AuthService.redirectToMainApp();
-          } else {
-            throw new Error('Authentication failed - no valid session found');
+          } catch (err) {
+            const errorMsg = err instanceof Error ? err.message : 'Token verification failed';
+            setError(errorMsg);
+            AuthService.handleAuthError(errorMsg);
+            onError?.(errorMsg);
           }
+        } else {
+          // No auth data in URL - check if we already have valid auth
+          if (AuthService.isAuthenticated()) {
+            try {
+              const token = AuthService.getStoredToken();
+              if (token) {
+                await AuthService.getUserByToken(token);
+                onSuccess?.();
+                AuthService.redirectToMainApp();
+                return;
+              }
+            } catch {
+              // Token is invalid, clear it
+              AuthService.logout();
+            }
+          }
+          
+          // No valid authentication found
+          throw new Error('No authentication data found');
         }
         
       } catch (err) {
@@ -81,7 +94,7 @@ export const AuthCallback: React.FC<AuthCallbackProps> = ({ onSuccess, onError }
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
           <h2 className="text-xl font-semibold text-fg mb-2">Completing Authentication</h2>
-          <p className="text-fg/70">Please wait while we complete your GitHub App authentication...</p>
+          <p className="text-fg/70">Please wait while we complete your GitHub authentication...</p>
         </div>
       </div>
     );
@@ -106,4 +119,4 @@ export const AuthCallback: React.FC<AuthCallbackProps> = ({ onSuccess, onError }
   }
 
   return null;
-}; 
+};

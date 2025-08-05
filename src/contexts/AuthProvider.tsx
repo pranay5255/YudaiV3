@@ -1,11 +1,18 @@
 import React, { useEffect, useState, ReactNode, useCallback } from 'react';
 import { AuthContext } from './AuthContext';
-import { AuthState } from '../types';
 import { AuthService } from '../services/authService';
+import { User } from '../types/unifiedState';
+
+interface AuthState {
+  user: User | null;
+  token: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+}
 
 interface AuthContextValue extends AuthState {
   login: () => Promise<void>;
-  logout: () => Promise<void>;
+  logout: () => void;
   refreshAuth: () => Promise<void>;
 }
 
@@ -21,6 +28,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     isLoading: true,
   });
 
+  // Initialize auth state - simplified version
   const initializeAuth = useCallback(async () => {
     try {
       setAuthState(prev => ({ ...prev, isLoading: true }));
@@ -29,31 +37,27 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const storedUser = AuthService.getStoredUserData();
 
       if (storedToken && storedUser) {
+        // We have stored data, verify it's still valid
         try {
-          const statusCheck = await AuthService.checkAuthStatus();
+          const authCheck = await AuthService.verifyAuth();
           
-          if (statusCheck.authenticated && statusCheck.user) {
+          if (authCheck.authenticated && authCheck.user) {
             setAuthState({
-              user: statusCheck.user,
+              user: authCheck.user,
               token: storedToken,
               isAuthenticated: true,
               isLoading: false,
             });
-            AuthService.storeUserData(statusCheck.user);
           } else {
+            // Invalid auth, clear it
             clearAuthState();
           }
         } catch (error) {
-          console.warn('Auth status check failed, but keeping stored token:', error);
-          // Keep the stored token and user data as fallback
-          setAuthState({
-            user: storedUser,
-            token: storedToken,
-            isAuthenticated: true,
-            isLoading: false,
-          });
+          console.warn('Auth verification failed, clearing auth:', error);
+          clearAuthState();
         }
       } else {
+        // No stored auth
         setAuthState(prev => ({ ...prev, isLoading: false }));
       }
     } catch (error) {
@@ -62,7 +66,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, []);
 
-  // Initialize auth state on mount
+  // Initialize on mount
   useEffect(() => {
     initializeAuth();
   }, [initializeAuth]);
@@ -77,34 +81,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const logout = async (): Promise<void> => {
-    try {
-      setAuthState(prev => ({ ...prev, isLoading: true }));
-      await AuthService.logout();
-      clearAuthState();
-    } catch (error) {
-      console.error('Logout failed:', error);
-      // Still clear local state even if API call fails
-      clearAuthState();
-      throw error;
-    }
+  const logout = (): void => {
+    AuthService.logout();
+    clearAuthState();
+    // AuthService.logout() already redirects to home
   };
 
   const refreshAuth = async (): Promise<void> => {
     try {
       setAuthState(prev => ({ ...prev, isLoading: true }));
       
-      const statusCheck = await AuthService.checkAuthStatus();
+      const authCheck = await AuthService.verifyAuth();
       
-      if (statusCheck.authenticated && statusCheck.user) {
+      if (authCheck.authenticated && authCheck.user) {
         setAuthState({
-          user: statusCheck.user,
+          user: authCheck.user,
           token: AuthService.getStoredToken(),
           isAuthenticated: true,
           isLoading: false,
         });
-        
-        AuthService.storeUserData(statusCheck.user);
       } else {
         clearAuthState();
       }
@@ -136,4 +131,4 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       {children}
     </AuthContext.Provider>
   );
-}; 
+};

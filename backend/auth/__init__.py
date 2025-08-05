@@ -1,23 +1,25 @@
 """
 Authentication module for YudaiV3
 
-This module provides GitHub OAuth authentication functionality using ghapi.
+Simplified GitHub OAuth authentication functionality.
 """
 
-from .github_oauth import (
-    get_current_user,
-    get_current_user_optional,
-    get_github_api,
-    validate_github_config,
-    GitHubOAuthError
-)
 from .auth_routes import router as auth_router
+from .github_oauth import (
+    GitHubOAuthError,
+    create_or_update_user,
+    exchange_code,
+    get_github_oauth_url,
+    user_info,
+    validate_github_config,
+)
 
 __all__ = [
-    "get_current_user",
-    "get_current_user_optional", 
-    "get_github_api",
     "validate_github_config",
-    "GitHubOAuthError",
+    "GitHubOAuthError", 
+    "get_github_oauth_url",
+    "exchange_code",
+    "user_info",
+    "create_or_update_user",
     "auth_router"
-] 
+]
