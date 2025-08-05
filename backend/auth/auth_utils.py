@@ -86,32 +86,42 @@ def create_session_token(db: Session, user_id: int, expires_in_hours: int = 24) 
 
 def validate_session_token(db: Session, session_token: str) -> Optional[User]:
     """Validate a session token and return the associated user"""
-    if not session_token:
+    try:
+        if not session_token:
+            print("validate_session_token: No session token provided")
+            return None
+        
+        # Find active session token
+        db_session_token = db.query(SessionToken).filter(
+            SessionToken.session_token == session_token,
+            SessionToken.is_active == True
+        ).first()
+        
+        if not db_session_token:
+            print(f"validate_session_token: No active session token found for token: {session_token[:10]}...")
+            return None
+        
+        # Check if token is expired
+        if db_session_token.expires_at < datetime.utcnow():
+            print(f"validate_session_token: Session token expired for token: {session_token[:10]}...")
+            # Deactivate expired token
+            db_session_token.is_active = False
+            db.commit()
+            return None
+        
+        # Get user
+        user = db.query(User).filter(User.id == db_session_token.user_id).first()
+        
+        if not user:
+            print(f"validate_session_token: User not found for session token: {session_token[:10]}...")
+            return None
+        
+        print(f"validate_session_token: Successfully validated session token for user: {user.github_username}")
+        return user
+        
+    except Exception as e:
+        print(f"validate_session_token: Error validating session token: {str(e)}")
         return None
-    
-    # Find active session token
-    db_session_token = db.query(SessionToken).filter(
-        SessionToken.session_token == session_token,
-        SessionToken.is_active == True
-    ).first()
-    
-    if not db_session_token:
-        return None
-    
-    # Check if token is expired
-    if db_session_token.expires_at < datetime.utcnow():
-        # Deactivate expired token
-        db_session_token.is_active = False
-        db.commit()
-        return None
-    
-    # Get user
-    user = db.query(User).filter(User.id == db_session_token.user_id).first()
-    
-    if not user:
-        return None
-    
-    return user
 
 
 def deactivate_session_token(db: Session, session_token: str) -> bool:

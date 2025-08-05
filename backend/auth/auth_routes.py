@@ -19,7 +19,7 @@ from auth.github_oauth import (
 )
 from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, status
-from models import CreateSessionTokenRequest, SessionTokenResponse
+from models import CreateSessionTokenRequest, SessionTokenRequest, SessionTokenResponse
 from sqlalchemy.orm import Session
 
 router = APIRouter()
@@ -135,6 +135,12 @@ async def api_login():
 async def api_get_user_by_session_token(session_token: str, db: Session = Depends(get_db)):
     """Get user by session token - for frontend to verify authentication"""
     try:
+        if not session_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Session token is required"
+            )
+        
         user = validate_session_token(db, session_token)
         
         if not user:
@@ -155,17 +161,18 @@ async def api_get_user_by_session_token(session_token: str, db: Session = Depend
     except HTTPException:
         raise
     except Exception as e:
+        print(f"Error in api_get_user_by_session_token: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail=f"Internal server error: {str(e)}"
         )
 
 
 @router.post("/api/logout")
-async def api_logout(session_token: str, db: Session = Depends(get_db)):
+async def api_logout(request: SessionTokenRequest, db: Session = Depends(get_db)):
     """Logout user by deactivating session token"""
     try:
-        success = deactivate_session_token(db, session_token)
+        success = deactivate_session_token(db, request.session_token)
         
         if success:
             return {"success": True, "message": "Logged out successfully"}
