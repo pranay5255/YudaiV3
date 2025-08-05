@@ -108,7 +108,7 @@ export class AuthService {
     return data ? JSON.parse(data) : null;
   }
 
-  // Verify current authentication
+  // Verify current authentication with enhanced error handling
   static async verifyAuth(): Promise<{ authenticated: boolean; user?: User }> {
     const sessionToken = this.getStoredSessionToken();
     const storedUser = this.getStoredUserData();
@@ -122,9 +122,33 @@ export class AuthService {
       return { authenticated: true, user };
     } catch (error) {
       console.error('Auth verification failed:', error);
-      this.logout();
+      // Clear invalid auth state
+      this.clearAuthData();
       return { authenticated: false };
     }
+  }
+
+  // Refresh token if needed (check validity)
+  static async refreshTokenIfNeeded(): Promise<boolean> {
+    const sessionToken = this.getStoredSessionToken();
+    if (!sessionToken) return false;
+    
+    try {
+      // Check if token is still valid
+      await this.getUserBySessionToken(sessionToken);
+      return true;
+    } catch (error) {
+      // Token expired or invalid, clear auth
+      console.warn('Session token invalid, clearing auth:', error);
+      this.clearAuthData();
+      return false;
+    }
+  }
+
+  // Clear authentication data without redirect
+  private static clearAuthData(): void {
+    localStorage.removeItem('session_token');
+    localStorage.removeItem('user_data');
   }
 
   // Handle authentication error

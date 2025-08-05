@@ -71,6 +71,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     initializeAuth();
   }, [initializeAuth]);
 
+  // Add periodic token validation (every 5 minutes)
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (authState.isAuthenticated && authState.sessionToken) {
+        const isValid = await AuthService.refreshTokenIfNeeded();
+        if (!isValid) {
+          console.warn('Session token validation failed, clearing auth state');
+          clearAuthState();
+        }
+      }
+    }, 5 * 60 * 1000); // Check every 5 minutes
+    
+    return () => clearInterval(interval);
+  }, [authState.isAuthenticated, authState.sessionToken]);
+
   const login = async (): Promise<void> => {
     try {
       await AuthService.login();

@@ -319,7 +319,12 @@ def create_tables_standalone(engine):
         "CREATE INDEX IF NOT EXISTS idx_context_cards_user_active ON context_cards(user_id, is_active)",
         "CREATE INDEX IF NOT EXISTS idx_users_github_id ON users(github_user_id)",
         "CREATE INDEX IF NOT EXISTS idx_repositories_user_name ON repositories(user_id, name)",
-        "CREATE INDEX IF NOT EXISTS idx_file_items_repo_path ON file_items(repository_id, path)"
+        "CREATE INDEX IF NOT EXISTS idx_file_items_repo_path ON file_items(repository_id, path)",
+        # Session token indexes for performance
+        "CREATE INDEX IF NOT EXISTS idx_session_tokens_session_token ON session_tokens(session_token)",
+        "CREATE INDEX IF NOT EXISTS idx_session_tokens_user_id ON session_tokens(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_session_tokens_is_active ON session_tokens(is_active)",
+        "CREATE INDEX IF NOT EXISTS idx_session_tokens_expires_at ON session_tokens(expires_at)"
     ]
     
     with engine.connect() as conn:

@@ -1,6 +1,8 @@
 """
 Shared authentication utilities for YudaiV3 backend
+Enhanced with proper logging and atomic operations
 """
+import logging
 import secrets
 import string
 from datetime import datetime, timedelta
@@ -9,6 +11,9 @@ from typing import Optional
 from fastapi import HTTPException, status
 from models import SessionToken, User
 from sqlalchemy.orm import Session
+
+# Configure logger for this module
+logger = logging.getLogger(__name__)
 
 
 def handle_auth_error(e: Exception) -> HTTPException:
@@ -58,102 +63,78 @@ def generate_session_token(length: int = 32) -> str:
 
 
 def create_session_token(db: Session, user_id: int, expires_in_hours: int = 24) -> SessionToken:
-    """Create a new session token for a user"""
+    """
+    Create a new session token for a user with atomic operations
+    Always deactivates ALL existing tokens before creating a new one
+    """
     try:
-        print(f"create_session_token: Creating session token for user_id: {user_id}")
+        logger.info(f"Creating session token for user_id: {user_id}")
         
-        # Deactivate any existing active session tokens for this user
-        existing_tokens = db.query(SessionToken).filter(
-            SessionToken.user_id == user_id,
-            SessionToken.is_active == True
-        ).all()
-        
-        if existing_tokens:
-            print(f"create_session_token: Deactivating {len(existing_tokens)} existing tokens")
-            for token in existing_tokens:
-                token.is_active = False
-        
-        # Generate new session token
-        session_token = generate_session_token()
-        expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
-        
-        print(f"create_session_token: Generated token: {session_token[:10]}...")
-        print(f"create_session_token: Expires at: {expires_at}")
-        
-        # Create new session token
-        db_session_token = SessionToken(
-            user_id=user_id,
-            session_token=session_token,
-            expires_at=expires_at,
-            is_active=True
-        )
-        
-        db.add(db_session_token)
-        db.commit()
-        db.refresh(db_session_token)
-        
-        print(f"create_session_token: Successfully created session token with ID: {db_session_token.id}")
-        
-        # Verify the token was saved
-        saved_token = db.query(SessionToken).filter(
-            SessionToken.session_token == session_token
-        ).first()
-        
-        if saved_token:
-            print("create_session_token: Verified token saved to database")
-        else:
-            print("create_session_token: ERROR - Token not found in database after save!")
-        
-        return db_session_token
-        
+        # Use a transaction for atomic operations
+        with db.begin():
+            # Deactivate existing tokens using bulk update for efficiency
+            existing_count = db.query(SessionToken).filter(
+                SessionToken.user_id == user_id,
+                SessionToken.is_active == True
+            ).update({"is_active": False}, synchronize_session=False)
+            
+            if existing_count > 0:
+                logger.info(f"Deactivated {existing_count} existing session tokens for user {user_id}")
+            
+            # Generate new session token
+            session_token = generate_session_token()
+            expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
+            
+            logger.debug(f"Generated session token: {session_token[:10]}... (expires: {expires_at})")
+            
+            # Create new session token
+            db_session_token = SessionToken(
+                user_id=user_id,
+                session_token=session_token,
+                expires_at=expires_at,
+                is_active=True
+            )
+            
+            db.add(db_session_token)
+            db.flush()  # Get the ID without committing yet
+            
+            logger.info(f"Successfully created session token with ID: {db_session_token.id}")
+            return db_session_token
+            
     except Exception as e:
-        print(f"create_session_token: Error creating session token: {str(e)}")
+        logger.error(f"Error creating session token for user {user_id}: {str(e)}", exc_info=True)
         db.rollback()
-        raise
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create session token"
+        )
 
 
 def validate_session_token(db: Session, session_token: str) -> Optional[User]:
-    """Validate a session token and return the associated user"""
+    """
+    Validate a session token and return the associated user
+    Automatically deactivates expired tokens
+    """
     try:
         if not session_token:
-            print("validate_session_token: No session token provided")
+            logger.debug("No session token provided for validation")
             return None
         
-        print(f"validate_session_token: Looking for token: {session_token[:10]}...")
+        logger.debug(f"Validating session token: {session_token[:10]}...")
         
-        # First, let's check if the session_tokens table exists and has any data
-        try:
-            total_tokens = db.query(SessionToken).count()
-            print(f"validate_session_token: Total session tokens in database: {total_tokens}")
-        except Exception as e:
-            print(f"validate_session_token: Error checking session_tokens table: {str(e)}")
-            return None
-        
-        # Find active session token
+        # Find active session token with user in a single query
         db_session_token = db.query(SessionToken).filter(
             SessionToken.session_token == session_token,
             SessionToken.is_active == True
         ).first()
         
         if not db_session_token:
-            print(f"validate_session_token: No active session token found for token: {session_token[:10]}...")
-            
-            # Let's check if the token exists but is inactive
-            inactive_token = db.query(SessionToken).filter(
-                SessionToken.session_token == session_token
-            ).first()
-            
-            if inactive_token:
-                print(f"validate_session_token: Token exists but is inactive (is_active: {inactive_token.is_active})")
-            else:
-                print("validate_session_token: Token does not exist in database at all")
-            
+            logger.debug(f"No active session token found: {session_token[:10]}...")
             return None
         
         # Check if token is expired
         if db_session_token.expires_at < datetime.utcnow():
-            print(f"validate_session_token: Session token expired for token: {session_token[:10]}...")
-            # Deactivate expired token
+            logger.info(f"Session token expired, deactivating: {session_token[:10]}...")
             db_session_token.is_active = False
             db.commit()
             return None
@@ -162,27 +143,84 @@ def validate_session_token(db: Session, session_token: str) -> Optional[User]:
         user = db.query(User).filter(User.id == db_session_token.user_id).first()
         
         if not user:
-            print(f"validate_session_token: User not found for session token: {session_token[:10]}...")
+            logger.warning(f"User not found for valid session token: {session_token[:10]}...")
             return None
         
-        print(f"validate_session_token: Successfully validated session token for user: {user.github_username}")
+        logger.debug(f"Successfully validated session token for user: {user.github_username}")
         return user
         
     except Exception as e:
-        print(f"validate_session_token: Error validating session token: {str(e)}")
+        logger.error(f"Error validating session token: {str(e)}", exc_info=True)
         return None
 
 
 def deactivate_session_token(db: Session, session_token: str) -> bool:
-    """Deactivate a session token"""
-    db_session_token = db.query(SessionToken).filter(
-        SessionToken.session_token == session_token,
-        SessionToken.is_active == True
-    ).first()
-    
-    if db_session_token:
-        db_session_token.is_active = False
+    """Deactivate a specific session token"""
+    try:
+        db_session_token = db.query(SessionToken).filter(
+            SessionToken.session_token == session_token,
+            SessionToken.is_active == True
+        ).first()
+        
+        if db_session_token:
+            db_session_token.is_active = False
+            db.commit()
+            logger.info(f"Deactivated session token: {session_token[:10]}...")
+            return True
+        
+        logger.debug(f"Session token not found or already inactive: {session_token[:10]}...")
+        return False
+        
+    except Exception as e:
+        logger.error(f"Error deactivating session token: {str(e)}", exc_info=True)
+        db.rollback()
+        return False
+
+
+def cleanup_expired_tokens(db: Session) -> int:
+    """
+    Clean up expired session tokens
+    Returns the number of tokens cleaned up
+    """
+    try:
+        expired_count = db.query(SessionToken).filter(
+            SessionToken.expires_at < datetime.utcnow(),
+            SessionToken.is_active == True
+        ).update({"is_active": False}, synchronize_session=False)
+        
         db.commit()
-        return True
-    
-    return False 
+        
+        if expired_count > 0:
+            logger.info(f"Cleaned up {expired_count} expired session tokens")
+        
+        return expired_count
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up expired tokens: {str(e)}", exc_info=True)
+        db.rollback()
+        return 0
+
+
+def deactivate_all_user_tokens(db: Session, user_id: int) -> int:
+    """
+    Deactivate all session tokens for a specific user
+    Useful for security purposes (e.g., password change, account suspension)
+    Returns the number of tokens deactivated
+    """
+    try:
+        deactivated_count = db.query(SessionToken).filter(
+            SessionToken.user_id == user_id,
+            SessionToken.is_active == True
+        ).update({"is_active": False}, synchronize_session=False)
+        
+        db.commit()
+        
+        if deactivated_count > 0:
+            logger.info(f"Deactivated {deactivated_count} session tokens for user {user_id}")
+        
+        return deactivated_count
+        
+    except Exception as e:
+        logger.error(f"Error deactivating all tokens for user {user_id}: {str(e)}", exc_info=True)
+        db.rollback()
+        return 0
