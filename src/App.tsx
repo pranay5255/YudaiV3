@@ -484,6 +484,7 @@ function App() {
   const isAuthCallback = currentPath === '/auth/success' || 
                         currentPath === '/auth/error' ||
                         currentPath === '/auth/callback' ||
+                        currentPath === '/auth/login' ||
                         currentSearch.includes('user_id=') ||
                         currentSearch.includes('message=') ||
                         currentSearch.includes('code=');

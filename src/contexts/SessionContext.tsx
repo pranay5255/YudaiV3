@@ -47,7 +47,9 @@ export interface SessionContextValue {
 // A simple reducer action type for UI state changes
 export type SessionAction =
   | { type: 'SET_ACTIVE_TAB'; payload: import('../types/unifiedState').TabType }
-  | { type: 'REFRESH_TAB'; payload: import('../types/unifiedState').TabType };
+  | { type: 'REFRESH_TAB'; payload: import('../types/unifiedState').TabType }
+  | { type: 'ADD_CONTEXT_CARD'; payload: import('../types/unifiedState').UnifiedContextCard }
+  | { type: 'REMOVE_CONTEXT_CARD'; payload: string };
 
 // Export the context but suppress the fast refresh warning with eslint-disable
 // eslint-disable-next-line react-refresh/only-export-components
@@ -87,6 +89,26 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
 
   const [sessionState, setSessionState] = useState<UnifiedSessionState>(initialSessionState);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'reconnecting'>('disconnected');
+  
+  // Session state reducer for context card operations
+  const sessionReducer = (state: UnifiedSessionState, action: SessionAction): UnifiedSessionState => {
+    switch (action.type) {
+      case 'ADD_CONTEXT_CARD': {
+        return {
+          ...state,
+          context_cards: [...state.context_cards, action.payload]
+        };
+      }
+      case 'REMOVE_CONTEXT_CARD': {
+        return {
+          ...state,
+          context_cards: state.context_cards.filter(card => card.id !== action.payload)
+        };
+      }
+      default:
+        return state;
+    }
+  };
   
   // Refs for managing polling and state updates
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -131,12 +153,33 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
           }
         };
       }
+      case 'ADD_CONTEXT_CARD':
+      case 'REMOVE_CONTEXT_CARD': {
+        // These actions are handled by the session state, not tab state
+        // Just refresh the context tab to reflect changes
+        return {
+          ...state,
+          refreshKeys: {
+            ...state.refreshKeys,
+            'context': state.refreshKeys['context'] + 1
+          }
+        };
+      }
       default:
         return state;
     }
   };
 
-  const [tabState, dispatch] = useReducer(tabReducer, initialTabState);
+  const [tabState, tabDispatch] = useReducer(tabReducer, initialTabState);
+  
+  // Combined dispatch function that handles both tab and session state
+  const dispatch = useCallback((action: SessionAction) => {
+    // Handle tab state changes
+    tabDispatch(action);
+    
+    // Handle session state changes
+    setSessionState(prevState => sessionReducer(prevState, action));
+  }, []);
   
   // Debounced state update to prevent excessive re-renders
   const debouncedSetSessionState = useCallback((updater: (prev: UnifiedSessionState) => UnifiedSessionState) => {
