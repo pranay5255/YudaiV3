@@ -128,6 +128,8 @@ export class AuthService {
 
   // Redirect to main app
   static redirectToMainApp(): void {
-    window.location.href = '/';
+    // Clear any auth-related URL parameters and redirect to root
+    const cleanUrl = window.location.origin + '/';
+    window.location.replace(cleanUrl);
   }
 }
