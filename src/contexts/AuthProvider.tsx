@@ -34,19 +34,33 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       setAuthState(prev => ({ ...prev, isLoading: true }));
 
-      // Check for GitHub token in URL parameters (OAuth callback)
+      // Check for session token in URL parameters (OAuth callback)
       const urlParams = new URLSearchParams(window.location.search);
-      const githubToken = urlParams.get('github_token');
+      const sessionToken = urlParams.get('session_token');
+      const userId = urlParams.get('user_id');
+      const username = urlParams.get('username');
       const code = urlParams.get('code');
 
-      if (githubToken) {
-        // We have GitHub token from OAuth callback, create session
+      if (sessionToken && userId && username) {
+        // We have session token from OAuth callback, validate it
         try {
-          const sessionData = await ApiService.createSession(githubToken);
+          const userData = await ApiService.validateSessionToken(sessionToken);
+          
+          // Transform userData to match User type
+          const user: User = {
+            id: userData.id,
+            github_username: userData.github_username,
+            github_user_id: userData.github_id, // Map github_id to github_user_id
+            email: userData.email,
+            display_name: userData.display_name,
+            avatar_url: userData.avatar_url,
+            created_at: new Date().toISOString(), // Use current date or get from backend
+            last_login: new Date().toISOString(), // Use current date or get from backend
+          };
           
           setAuthState({
-            user: sessionData.user,
-            sessionToken: sessionData.session_token,
+            user: user,
+            sessionToken: sessionToken,
             isAuthenticated: true,
             isLoading: false,
           });
@@ -57,7 +71,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           window.history.replaceState({}, '', newUrl.toString());
           
         } catch (error) {
-          console.warn('Session creation failed:', error);
+          console.warn('Session validation failed:', error);
           setAuthState({
             user: null,
             sessionToken: null,
@@ -66,8 +80,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           });
         }
       } else if (code) {
-        // We have authorization code but no token yet, redirect to login
-        console.warn('Authorization code received but no token, redirecting to login');
+        // We have authorization code but no session token yet, redirect to login
+        console.warn('Authorization code received but no session token, redirecting to login');
         window.location.href = '/auth/login';
       } else {
         // No auth data in URL, check if we're on a protected route
