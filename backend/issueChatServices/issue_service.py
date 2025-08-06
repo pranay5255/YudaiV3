@@ -19,7 +19,6 @@ from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from github.github_api import GitHubAPIError
 from github.github_api import create_issue as create_github_issue
-from issueChatServices.session_service import SessionService
 from models import (
     ChatRequest,
     ChatSession,
@@ -213,34 +212,13 @@ class IssueService:
         Create an issue from a chat request with context
         Links to the session for unified state management
         """
-        # Get session information if session_id is provided
-        if chat_request.session_id:
-            # Use SessionService to get session context
-            session_response = SessionService.get_session_by_id(
-                db, user_id, chat_request.session_id
-            )
-            if session_response:
-                session_context = SessionService.get_comprehensive_session_context(
-                    db, user_id, chat_request.session_id
-                )
-        
-        # Extract repository info from session or request
+        # Extract repository info from request
         repo_owner = chat_request.repo_owner
         repo_name = chat_request.repo_name
-        
-        if session_context and session_context.session.repo_owner:
-            repo_owner = session_context.session.repo_owner
-            repo_name = session_context.session.repo_name
         
         # Create comprehensive issue request
         title = f"Issue from chat: {chat_request.message.content[:50]}..."
         description = f"Generated from chat session: {chat_request.session_id}"
-        
-        # Add session context if available
-        if session_context:
-            description += f"\n\nSession: {session_context.session.title}"
-            description += f"\nRepository: {repo_owner}/{repo_name}"
-            description += f"\nTotal messages in session: {len(session_context.messages)}"
         
         issue_request = CreateUserIssueRequest(
             title=title,
@@ -459,47 +437,7 @@ class IssueService:
             )
         
         # Enhanced context gathering from session if available
-        if db and user_id and request.repository_info:
-            try:
-                # Get session context for additional information using unified SessionService
-                sessions = SessionService.get_user_sessions(
-                    db, user_id, 
-                    request.repository_info.get("owner"),
-                    request.repository_info.get("name")
-                )
-                
-                if sessions:
-                    latest_session = sessions[0]  # Most recent session
-                    session_context = SessionService.get_comprehensive_session_context(
-                        db, user_id, latest_session.session_id
-                    )
-                    
-                    if session_context:
-                        # Add file embeddings context from session
-                        if session_context.file_embeddings:
-                            code_aware_context = f"""
-## File Context from Session
-Repository: {latest_session.repo_owner}/{latest_session.repo_name} (branch: {latest_session.repo_branch})
-Total file embeddings: {len(session_context.file_embeddings)}
-
-Key files analyzed:
-""" + "\n".join([f"- {emb.file_path}: {emb.chunk_text[:100]}..." for emb in session_context.file_embeddings[:10]])
-                            
-                        # Enhance conversation context with session messages
-                        if session_context.messages:
-                            session_messages = "\n".join([
-                                f"{msg.sender_type}: {msg.message_text[:200]}..." 
-                                for msg in session_context.messages[-10:]  # Last 10 messages
-                            ])
-                            conversation_context = f"""
-## Session Messages
-{session_messages}
-
-## Direct Chat Context
-{conversation_context}
-"""
-            except Exception as e:
-                print(f"Warning: Could not enhance context with session data: {e}")
+        # Session management is not implemented, so we skip session context enhancement
         
         # Build architect prompt
         prompt = build_architect_prompt(
@@ -729,34 +667,7 @@ async def create_issue_with_context(
         
         user_issue = IssueService.create_user_issue(db, current_user.id, issue_request)
         
-        # If we have repository info and session context, link to existing session
-        if request.repository_info and request.file_context:
-            try:
-                # Find or create a session for this repository using unified SessionService
-                session_response = SessionService.get_or_create_session(
-                    db=db,
-                    user_id=current_user.id,
-                    repo_owner=request.repository_info.get("owner", ""),
-                    repo_name=request.repository_info.get("name", ""),
-                    repo_branch=request.repository_info.get("branch", "main")
-                )
-                
-                # Link the user issue to the session for unified state management
-                if session_response:
-                    # Update the user issue with session information
-                    existing_issue = db.query(UserIssue).filter(
-                        UserIssue.issue_id == user_issue.issue_id
-                    ).first()
-                    
-                    if existing_issue:
-                        existing_issue.session_id = session_response.session_id
-                        # Note: chat_session_id will be set by foreign key relationship
-                        db.commit()
-                        db.refresh(existing_issue)
-                        user_issue = UserIssueResponse.model_validate(existing_issue)
-                        
-            except Exception as session_error:
-                print(f"Warning: Could not link issue to session: {session_error}")
+        # Session management is not implemented, so we skip session linking
         
         return {
             "success": True,

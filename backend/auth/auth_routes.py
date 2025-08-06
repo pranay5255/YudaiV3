@@ -4,11 +4,13 @@ Authentication Routes for GitHub OAuth
 Enhanced with proper logging and error handling
 """
 import logging
+from datetime import datetime
 from urllib.parse import urlencode
 
 from auth.auth_utils import (
     create_session_token,
     deactivate_session_token,
+    #TODO: Add deactivate/delete session token function
     validate_session_token,
 )
 from auth.github_oauth import (
@@ -22,7 +24,14 @@ from auth.github_oauth import (
 from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
-from models import CreateSessionTokenRequest, SessionTokenRequest, SessionTokenResponse
+from models import (
+    AuthToken,
+    CreateSessionFromGitHubRequest,
+    CreateSessionTokenRequest,
+    SessionTokenRequest,
+    SessionTokenResponse,
+    User,
+)
 from sqlalchemy.orm import Session
 
 # Configure logger for this module
@@ -128,6 +137,96 @@ async def auth_callback(
         return RedirectResponse(
             url=f"https://yudai.app/auth/callback?error={error_msg}",
             status_code=302
+        )
+
+
+@router.post("/api/create-session")
+async def api_create_session(
+    request: CreateSessionFromGitHubRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Create a session token using GitHub auth token
+    This endpoint creates a session token and links it to the existing AuthToken
+    
+    Args:
+        request: Request containing GitHub access token from OAuth
+        db: Database session
+        
+    Returns:
+        Session token response with user data
+    """
+    try:
+        logger.info("Creating session token from GitHub token")
+        
+        github_token = request.github_token
+        
+        if not github_token:
+            logger.warning("Session creation requested without GitHub token")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="GitHub token is required"
+            )
+        
+        # Find the active AuthToken for this GitHub token
+        auth_token = db.query(AuthToken).filter(
+            AuthToken.access_token == github_token,
+            AuthToken.is_active == True
+        ).first()
+        
+        if not auth_token:
+            logger.warning(f"No active AuthToken found for GitHub token: {github_token[:10]}...")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired GitHub token"
+            )
+        
+        # Check if AuthToken is expired
+        if auth_token.expires_at and auth_token.expires_at < datetime.utcnow():
+            logger.info(f"AuthToken expired, deactivating: {github_token[:10]}...")
+            auth_token.is_active = False
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="GitHub token has expired"
+            )
+        
+        # Get the user
+        user = db.query(User).filter(User.id == auth_token.user_id).first()
+        
+        if not user:
+            logger.warning(f"User not found for valid AuthToken: {github_token[:10]}...")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found"
+            )
+        
+        # Create session token using auth_utils
+        session_token = create_session_token(db, user.id, expires_in_hours=24)
+        logger.info(f"Successfully created session token for user: {user.github_username}")
+        
+        return SessionTokenResponse(
+            session_token=session_token.session_token,
+            expires_at=session_token.expires_at,
+            user={
+                "id": user.id,
+                "github_username": user.github_username,
+                "github_user_id": user.github_user_id,
+                "email": user.email,
+                "display_name": user.display_name,
+                "avatar_url": user.avatar_url,
+                "created_at": user.created_at.isoformat(),
+                "last_login": user.last_login.isoformat() if user.last_login else None
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating session from GitHub token: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
         )
 
 

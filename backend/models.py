@@ -859,6 +859,9 @@ class CreateSessionTokenRequest(BaseModel):
     user_id: int
     expires_in_hours: int = Field(default=24, ge=1, le=168)  # 1 hour to 1 week
 
+class CreateSessionFromGitHubRequest(BaseModel):
+    github_token: str = Field(..., min_length=1, description="GitHub access token from OAuth")
+
 # ============================================================================
 # GITHUB API MODELS
 # ============================================================================

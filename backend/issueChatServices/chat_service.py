@@ -1,6 +1,6 @@
 """
 Streamlined Chat Service for managing chat messages within sessions
-Session management is handled by SessionService - this focuses on messages only
+Session management is not implemented - this focuses on messages only
 """
 from datetime import datetime
 from typing import List
@@ -27,7 +27,7 @@ class ChatService:
     ) -> ChatMessageResponse:
         """
         Create a new chat message within an existing session
-        Note: Session must exist - use SessionService to create sessions
+        Note: Session must exist - session management is not implemented
         """
         # Get the session (must exist)
         session = db.query(ChatSession).filter(
@@ -99,7 +99,7 @@ class ChatService:
         user_id: int, 
         limit: int = 50
     ) -> List[ChatSessionResponse]:
-        """Get all chat sessions for a user (legacy support)"""
+        """Get all chat sessions for a user (basic implementation)"""
         sessions = db.query(ChatSession).filter(
             ChatSession.user_id == user_id
         ).order_by(desc(ChatSession.last_activity)).limit(limit).all()
@@ -107,6 +107,6 @@ class ChatService:
         return [ChatSessionResponse.model_validate(session) for session in sessions]
 
 
-# Legacy SessionService methods moved to dedicated session_service.py
+# Session management is not implemented
 # This service now focuses only on chat message management
 
