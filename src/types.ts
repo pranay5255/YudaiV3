@@ -1,3 +1,7 @@
+// ============================================================================
+// FRONTEND-ONLY TYPES (not API-related)
+// ============================================================================
+
 export interface ContextCard {
   id: string;
   title: string;
@@ -14,33 +18,29 @@ export interface IdeaItem {
   confidence: number;
 }
 
-// Updated to match the database schema from models.py
+// Unified File Item type (consolidating with types/fileDependencies.ts)
 export interface FileItem {
   id: string;
-  name: string; // file/directory name
-  path?: string; // full path (optional for frontend)
-  type: 'INTERNAL' | 'EXTERNAL'; // matches FileType enum from models.py
-  tokens: number; // int
-  Category: string; // category classification
-  isDirectory: boolean; // matches is_directory from database
+  name: string;
+  path?: string;
+  type: 'INTERNAL' | 'EXTERNAL';
+  tokens: number;
+  category: string;
+  isDirectory?: boolean;
   children?: FileItem[];
   expanded?: boolean; // frontend-only state
   content?: string; // optional file content
   content_size?: number; // optional content size
+  file_name?: string; // alias for name (backward compatibility)
+  file_path?: string; // alias for path (backward compatibility)
+  file_type?: string; // alias for type (backward compatibility)
+  content_summary?: string; // alias for category (backward compatibility)
+  created_at?: string; // optional timestamp
 }
 
-// API response type for the filedeps endpoint
-export interface FileItemAPIResponse {
-  id?: string;
-  name?: string;
-  path?: string;
-  type?: string; // can be any string from API
-  tokens?: number;
-  category?: string;
-  Category?: string;
-  isDirectory?: boolean;
-  children?: FileItemAPIResponse[];
-}
+// ============================================================================
+// UI & STATE TYPES
+// ============================================================================
 
 export interface Message {
   id: string;
@@ -58,13 +58,13 @@ export interface Toast {
 export type ProgressStep = 'DAifu' | 'Architect' | 'Test-Writer' | 'Coder';
 export type TabType = 'chat' | 'file-deps' | 'context' | 'ideas';
 
-// Auth types
+// Auth types (frontend state management)
 export interface User {
-  id: number; // Changed from string to number to match backend
-  github_username: string; // Changed from username to match backend
-  github_user_id: string; // Changed from github_id to match backend
+  id: number;
+  github_username: string;
+  github_user_id: string;
   email?: string;
-  display_name?: string; // Added display_name field from backend
+  display_name?: string;
   avatar_url?: string;
   created_at: string;
   last_login?: string;
@@ -72,15 +72,9 @@ export interface User {
 
 export interface AuthState {
   user: User | null;
-  token: string | null;
+  sessionToken: string | null; // Changed from token to sessionToken
   isAuthenticated: boolean;
   isLoading: boolean;
-}
-
-export interface LoginResponse {
-  access_token: string;
-  token_type: string;
-  user: User;
 }
 
 export interface AuthConfig {
@@ -88,7 +82,10 @@ export interface AuthConfig {
   redirect_uri: string;
 }
 
-// Tab management with session persistence
+// ============================================================================
+// TAB & SESSION MANAGEMENT
+// ============================================================================
+
 export interface TabState {
   activeTab: TabType;
   refreshKeys: {
@@ -100,7 +97,10 @@ export interface TabState {
   tabHistory: TabType[];
 }
 
-// GitHub types
+// ============================================================================
+// GITHUB FRONTEND TYPES (extended from API types)
+// ============================================================================
+
 export interface GitHubRepository {
   id: number;
   name: string;
@@ -116,6 +116,7 @@ export interface GitHubRepository {
   updated_at?: string;
   created_at?: string;
   pushed_at?: string;
+  default_branch?: string; // Added for consistency
 }
 
 export interface GitHubBranch {
@@ -124,7 +125,7 @@ export interface GitHubBranch {
     sha: string;
     url: string;
   };
-  protected: boolean;
+  protected?: boolean;
 }
 
 export interface SelectedRepository {
@@ -132,7 +133,10 @@ export interface SelectedRepository {
   branch: string;
 }
 
-// Chat API types
+// ============================================================================
+// CHAT & SESSION TYPES (frontend state management)
+// ============================================================================
+
 export interface ChatSession {
   id: string;
   title?: string;
@@ -162,13 +166,6 @@ export interface ChatMessageAPI {
   error_message?: string;
   created_at: string;
   updated_at?: string;
-}
-
-export interface CreateIssueFromChatRequest {
-  session_id: string;
-  title: string;
-  description?: string;
-  repository_url?: string;
 }
 
 // Enhanced Session Types for comprehensive state management
