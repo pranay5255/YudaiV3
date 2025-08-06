@@ -1,7 +1,6 @@
-import React, { useEffect, useState, ReactNode, useCallback } from 'react';
-import { AuthContext } from './AuthContext';
-import { AuthService } from '../services/authService';
-import { User } from '../types/unifiedState';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { User } from '../types';
+import { ApiService } from '../services/api';
 
 interface AuthState {
   user: User | null;
@@ -16,8 +15,10 @@ interface AuthContextValue extends AuthState {
   refreshAuth: () => Promise<void>;
 }
 
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
 interface AuthProviderProps {
-  children: ReactNode;
+  children: React.ReactNode;
 }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
@@ -28,41 +29,65 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     isLoading: true,
   });
 
-  // Initialize auth state - simplified version
+  // Initialize auth state from URL parameters (OAuth callback)
   const initializeAuth = useCallback(async () => {
     try {
       setAuthState(prev => ({ ...prev, isLoading: true }));
 
-      const storedSessionToken = AuthService.getStoredSessionToken();
-      const storedUser = AuthService.getStoredUserData();
+      // Check for GitHub token in URL parameters (OAuth callback)
+      const urlParams = new URLSearchParams(window.location.search);
+      const githubToken = urlParams.get('github_token');
+      const code = urlParams.get('code');
 
-      if (storedSessionToken && storedUser) {
-        // We have stored data, verify it's still valid
+      if (githubToken) {
+        // We have GitHub token from OAuth callback, create session
         try {
-          const authCheck = await AuthService.verifyAuth();
+          const sessionData = await ApiService.createSession(githubToken);
           
-          if (authCheck.authenticated && authCheck.user) {
-            setAuthState({
-              user: authCheck.user,
-              sessionToken: storedSessionToken,
-              isAuthenticated: true,
-              isLoading: false,
-            });
-          } else {
-            // Invalid auth, clear it
-            clearAuthState();
-          }
+          setAuthState({
+            user: sessionData.user,
+            sessionToken: sessionData.session_token,
+            isAuthenticated: true,
+            isLoading: false,
+          });
+
+          // Clear URL parameters after successful auth
+          const newUrl = new URL(window.location.href);
+          newUrl.search = '';
+          window.history.replaceState({}, '', newUrl.toString());
+          
         } catch (error) {
-          console.warn('Auth verification failed, clearing auth:', error);
-          clearAuthState();
+          console.warn('Session creation failed:', error);
+          setAuthState({
+            user: null,
+            sessionToken: null,
+            isAuthenticated: false,
+            isLoading: false,
+          });
         }
+      } else if (code) {
+        // We have authorization code but no token yet, redirect to login
+        console.warn('Authorization code received but no token, redirecting to login');
+        window.location.href = '/auth/login';
       } else {
-        // No stored auth
-        setAuthState(prev => ({ ...prev, isLoading: false }));
+        // No auth data in URL, check if we're on a protected route
+        const currentPath = window.location.pathname;
+        if (currentPath.startsWith('/auth/callback')) {
+          // We're on callback page but no auth data, redirect to login
+          window.location.href = '/auth/login';
+        } else {
+          // Not on callback page, just set as not authenticated
+          setAuthState(prev => ({ ...prev, isLoading: false }));
+        }
       }
     } catch (error) {
       console.error('Auth initialization failed:', error);
-      clearAuthState();
+      setAuthState({
+        user: null,
+        sessionToken: null,
+        isAuthenticated: false,
+        isLoading: false,
+      });
     }
   }, []);
 
@@ -71,25 +96,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     initializeAuth();
   }, [initializeAuth]);
 
-  // Add periodic token validation (every 5 minutes)
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      if (authState.isAuthenticated && authState.sessionToken) {
-        const isValid = await AuthService.refreshTokenIfNeeded();
-        if (!isValid) {
-          console.warn('Session token validation failed, clearing auth state');
-          clearAuthState();
-        }
-      }
-    }, 5 * 60 * 1000); // Check every 5 minutes
-    
-    return () => clearInterval(interval);
-  }, [authState.isAuthenticated, authState.sessionToken]);
-
   const login = async (): Promise<void> => {
     try {
-      await AuthService.login();
-      // Note: This will redirect to GitHub, so execution won't continue here
+      // Get login URL from backend and redirect
+      const { login_url } = await ApiService.getLoginUrl();
+      window.location.href = login_url;
     } catch (error) {
       console.error('Login failed:', error);
       throw error;
@@ -97,48 +108,35 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const logout = async (): Promise<void> => {
-    await AuthService.logout();
-    clearAuthState();
-    // AuthService.logout() already redirects to home
-  };
-
-  const refreshAuth = async (): Promise<void> => {
     try {
-      setAuthState(prev => ({ ...prev, isLoading: true }));
-      
-      const authCheck = await AuthService.verifyAuth();
-      
-      if (authCheck.authenticated && authCheck.user) {
-        setAuthState({
-          user: authCheck.user,
-          sessionToken: AuthService.getStoredSessionToken(),
-          isAuthenticated: true,
-          isLoading: false,
-        });
-      } else {
-        clearAuthState();
+      if (authState.sessionToken) {
+        await ApiService.logout(authState.sessionToken);
       }
     } catch (error) {
-      console.error('Auth refresh failed:', error);
-      clearAuthState();
-      throw error;
+      console.warn('Logout API call failed:', error);
+    } finally {
+      // Always clear local state
+      setAuthState({
+        user: null,
+        sessionToken: null,
+        isAuthenticated: false,
+        isLoading: false,
+      });
+      
+      // Redirect to login page
+      window.location.href = '/auth/login';
     }
   };
 
-  const clearAuthState = () => {
-    setAuthState({
-      user: null,
-      sessionToken: null,
-      isAuthenticated: false,
-      isLoading: false,
-    });
+  const refreshAuth = async () => {
+    await initializeAuth();
   };
 
   const contextValue: AuthContextValue = {
     ...authState,
     login,
     logout,
-    refreshAuth,
+    refreshAuth
   };
 
   return (
@@ -146,4 +144,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       {children}
     </AuthContext.Provider>
   );
+};
+
+export const useAuth = (): AuthContextValue => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 };

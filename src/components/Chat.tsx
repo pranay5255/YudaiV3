@@ -4,8 +4,7 @@ import { Message, FileItem } from '../types';
 import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview } from '../services/api';
 import { UserIssueResponse } from '../types';
 import { useRepository } from '../hooks/useRepository';
-import { useSession } from '../hooks/useSession';
-import { useSessionHelpers } from '../hooks/useSessionHelpers';
+import { useAuth } from '../hooks/useAuth';
 
 // Simple toast utility (replace with your own or a library if available)
 // This function is used to show a toast when the user clicks on "Create Issue"
@@ -58,16 +57,10 @@ export const Chat: React.FC<ChatProps> = ({
   void contextCards; // Suppress unused variable warning
   
   const { selectedRepository } = useRepository();
-  const { sessionState, refreshSession } = useSession();
-  const { sendMessage } = useSessionHelpers();
+  const { sessionToken } = useAuth();
   
-  // Use messages from session context instead of local state
-  const messages = sessionState.messages.length > 0 ? sessionState.messages.map(msg => ({
-    id: msg.id,
-    content: msg.content,
-    isCode: msg.is_code || false,
-    timestamp: new Date(msg.timestamp),
-  })) : [
+  // Simplified messages state without session management
+  const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
       content: 'Hi, I am Daifu, your spirit guide across the chaos of context. I will help you create github issues and pull requests by adding the right context required for a given task.You can add the individual text messages to context such as the one below to prioritize text messages in conversations',
@@ -86,7 +79,7 @@ export const Chat: React.FC<ChatProps> = ({
       isCode: true,
       timestamp: new Date(),
     },
-  ];
+  ]);
   
   const [input, setInput] = useState('');
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
@@ -102,8 +95,8 @@ export const Chat: React.FC<ChatProps> = ({
     if (!input.trim() || isLoading) return;
     
     // Check if we have an active session
-    if (!sessionState.session_id) {
-      const errorText = 'No active session found. Please select a repository first.';
+    if (!selectedRepository) {
+      const errorText = 'No active repository selected. Please select a repository first.';
       showToast(errorText);
       return;
     }
@@ -113,8 +106,14 @@ export const Chat: React.FC<ChatProps> = ({
     setIsLoading(true);
     
     try {
-      // Use the session helper to send message
-      await sendMessage(currentInput);
+      // Simulate sending message to a backend
+      const newMessage: Message = {
+        id: Date.now().toString(),
+        content: currentInput,
+        isCode: false,
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, newMessage]);
       
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -133,14 +132,6 @@ export const Chat: React.FC<ChatProps> = ({
       showToast(errorText);
 
       // Refresh session to get latest state after error
-      try {
-        await refreshSession();
-      } catch (refreshError) {
-        console.error('Failed to refresh session after error:', refreshError);
-      }
-    } finally {
-      setIsLoading(false);
-    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -178,7 +169,7 @@ export const Chat: React.FC<ChatProps> = ({
 
       // Prepare the request
       const request: CreateIssueWithContextRequest = {
-        title: `Issue from Chat Session ${sessionState.session_id || 'default'}`,
+        title: `Issue from Chat Session ${selectedRepository?.repository.full_name || 'default'}`,
         description: 'This issue was generated from a chat conversation with file dependency context.',
         chat_messages: conversationMessages,
         file_context: fileContextItems,
@@ -193,11 +184,11 @@ export const Chat: React.FC<ChatProps> = ({
       // Create issue from chat (this method may need to be implemented)
       // For now, using the existing createIssueFromChat method
       const chatRequest = {
-        session_id: sessionState.session_id || '',
+        session_id: '', // No session ID for this simplified version
         message: { content: request.title, is_code: false },
         context_cards: []
       };
-      const response = await ApiService.createIssueFromChat(chatRequest);
+      const response = await ApiService.createIssueFromChat(chatRequest, sessionToken || undefined);
       
       if (response.success && onShowIssuePreview) {
         // Create a mock GitHub issue preview since the API structure changed
@@ -246,9 +237,9 @@ export const Chat: React.FC<ChatProps> = ({
   return (
     <div className="h-full flex flex-col">
       {/* Session Status Indicator */}
-      {!sessionState.session_id && (
+      {!selectedRepository && (
         <div className="bg-yellow-600/20 border border-yellow-600/30 rounded-lg p-4 mb-4">
-          <div className="text-yellow-400 font-medium mb-2">No Active Session</div>
+          <div className="text-yellow-400 font-medium mb-2">No Active Repository</div>
           <div className="text-yellow-300 text-sm mb-3">
             Please select a repository to start a new session and begin chatting with Daifu.
           </div>
@@ -315,13 +306,13 @@ export const Chat: React.FC<ChatProps> = ({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder={sessionState.session_id ? "Type your message..." : "Select a repository to start chatting..."}
-            disabled={!sessionState.session_id || isLoading}
+            placeholder={selectedRepository ? "Type your message..." : "Select a repository to start chatting..."}
+            disabled={!selectedRepository || isLoading}
             className="flex-1 bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 text-white placeholder-zinc-400 focus:outline-none focus:border-blue-500 disabled:opacity-50"
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isLoading || !sessionState.session_id}
+            disabled={!input.trim() || isLoading || !selectedRepository}
             className="bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg flex items-center gap-2"
           >
             <Send size={16} />
@@ -329,7 +320,7 @@ export const Chat: React.FC<ChatProps> = ({
           </button>
           <button
             onClick={handleCreateGitHubIssue}
-            disabled={isCreatingIssue || userMessageCount < 1 || !sessionState.session_id}
+            disabled={isCreatingIssue || userMessageCount < 1 || !selectedRepository}
             className="bg-green-600 hover:bg-green-700 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg flex items-center gap-2"
           >
             <Plus size={16} />
@@ -340,3 +331,4 @@ export const Chat: React.FC<ChatProps> = ({
     </div>
   );
 };
+}

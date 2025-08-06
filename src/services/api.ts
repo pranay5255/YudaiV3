@@ -2,9 +2,6 @@
 // This service provides complete coverage of all backend endpoints documented in context/APIDOCS.md
 // State flow from frontend calls to database operations is documented in context/dbSchema.md
 import { 
-  SessionCreateRequest,
-  SessionResponse,
-  SessionContextResponse,
   UserIssueResponse
 } from '../types';
 
@@ -89,20 +86,31 @@ export interface IssueCreationResponse {
 }
 
 export class ApiService {
-  private static getAuthHeaders(): HeadersInit {
-    const token = localStorage.getItem('auth_token');
-    return {
+  private static getAuthHeaders(githubToken?: string): HeadersInit {
+    const headers: HeadersInit = {
       'Content-Type': 'application/json',
-      ...(token && { 'Authorization': `Bearer ${token}` }),
     };
+    
+    // Use github token from parameter or try to get from URL
+    if (githubToken) {
+      headers['Authorization'] = `Bearer ${githubToken}`;
+    } else {
+      // Try to get github token from URL parameters (for OAuth callback)
+      const urlParams = new URLSearchParams(window.location.search);
+      const tokenFromUrl = urlParams.get('github_token');
+      if (tokenFromUrl) {
+        headers['Authorization'] = `Bearer ${tokenFromUrl}`;
+      }
+    }
+    
+    return headers;
   }
 
   private static async handleResponse<T>(response: Response): Promise<T> {
     if (!response.ok) {
       if (response.status === 401) {
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('user_data');
-        window.location.reload();
+        // Redirect to login instead of clearing localStorage
+        window.location.href = '/auth/login';
         throw new Error('Authentication required');
       }
       
@@ -120,110 +128,111 @@ export class ApiService {
     return response.json();
   }
 
-  // Session Management API Methods
-  static async createSession(request: SessionCreateRequest): Promise<SessionResponse> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions`, {
-      method: 'POST',
-      headers: this.getAuthHeaders(),
-      body: JSON.stringify(request),
-    });
-    return this.handleResponse<SessionResponse>(response);
-  }
-
-  static async getSession(sessionId: string): Promise<SessionContextResponse> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
-      method: 'GET',
-      headers: this.getAuthHeaders(),
-    });
-    return this.handleResponse<SessionContextResponse>(response);
-  }
-
-  static async touchSession(sessionId: string): Promise<{success: boolean, session: SessionResponse}> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/touch`, {
-      method: 'POST',
-      headers: this.getAuthHeaders(),
-    });
-    return this.handleResponse<{success: boolean, session: SessionResponse}>(response);
-  }
-
-  static async getSessions(
-    repoOwner?: string, 
-    repoName?: string, 
-    limit: number = 50
-  ): Promise<SessionResponse[]> {
-    const params = new URLSearchParams();
-    if (repoOwner) params.append('repo_owner', repoOwner);
-    if (repoName) params.append('repo_name', repoName);
-    params.append('limit', limit.toString());
-
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions?${params}`, {
-      method: 'GET',
-      headers: this.getAuthHeaders(),
-    });
-    return this.handleResponse<SessionResponse[]>(response);
-  }
-
-  static async updateSessionTitle(sessionId: string, title: string): Promise<SessionResponse> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/title`, {
-      method: 'PUT',
-      headers: this.getAuthHeaders(),
-      body: JSON.stringify({ title }),
-    });
-    return this.handleResponse<SessionResponse>(response);
-  }
-
-  static async deleteSession(sessionId: string): Promise<{message: string}> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
-      method: 'DELETE',
-      headers: this.getAuthHeaders(),
-    });
-    return this.handleResponse<{message: string}>(response);
-  }
-
-  static async getSessionStatistics(sessionId: string): Promise<{
-    total_messages: number;
-    total_tokens: number;
-    total_cost: number;
-    session_duration: number;
-    user_issues_count?: number;
-    file_embeddings_count?: number;
+  // Authentication API Methods
+  static async createSession(githubToken: string): Promise<{
+    session_token: string;
+    expires_at: string;
+    user: {
+      id: number;
+      github_username: string;
+      github_user_id: string;
+      email: string;
+      display_name: string;
+      avatar_url: string;
+      created_at: string;
+      last_login: string;
+    };
   }> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/statistics`, {
-      method: 'GET',
-      headers: this.getAuthHeaders(),
+    const response = await fetch(`${API_BASE_URL}/auth/api/create-session`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ github_token: githubToken }),
     });
     return this.handleResponse<{
-      total_messages: number;
-      total_tokens: number;
-      total_cost: number;
-      session_duration: number;
-      user_issues_count?: number;
-      file_embeddings_count?: number;
+      session_token: string;
+      expires_at: string;
+      user: {
+        id: number;
+        github_username: string;
+        github_user_id: string;
+        email: string;
+        display_name: string;
+        avatar_url: string;
+        created_at: string;
+        last_login: string;
+      };
     }>(response);
   }
 
+  static async validateSessionToken(sessionToken: string): Promise<{
+    id: number;
+    github_username: string;
+    github_id: string;
+    display_name: string;
+    email: string;
+    avatar_url: string;
+  }> {
+    const response = await fetch(`${API_BASE_URL}/auth/api/user?session_token=${sessionToken}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    return this.handleResponse<{
+      id: number;
+      github_username: string;
+      github_id: string;
+      display_name: string;
+      email: string;
+      avatar_url: string;
+    }>(response);
+  }
+
+  static async logout(sessionToken: string): Promise<{success: boolean; message: string}> {
+    const response = await fetch(`${API_BASE_URL}/auth/api/logout`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ session_token: sessionToken }),
+    });
+    return this.handleResponse<{success: boolean; message: string}>(response);
+  }
+
+  static async getLoginUrl(): Promise<{login_url: string}> {
+    const response = await fetch(`${API_BASE_URL}/auth/api/login`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    return this.handleResponse<{login_url: string}>(response);
+  }
+
   // Chat API Methods
-  static async sendChatMessage(request: ChatRequest, asyncMode: boolean = false): Promise<ChatResponse> {
+  static async sendChatMessage(request: ChatRequest, asyncMode: boolean = false, githubToken?: string): Promise<ChatResponse> {
     const url = asyncMode 
       ? `${API_BASE_URL}/chat/daifu/async`
       : `${API_BASE_URL}/chat/daifu`;
     
     const response = await fetch(url, {
       method: 'POST',
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(githubToken),
       body: JSON.stringify(request),
     });
     return this.handleResponse<ChatResponse>(response);
   }
 
-  static async createIssueFromChat(request: ChatRequest): Promise<{
+  static async createIssueFromChat(request: ChatRequest, githubToken?: string): Promise<{
     success: boolean;
     issue: UserIssueResponse;
     message: string;
   }> {
     const response = await fetch(`${API_BASE_URL}/chat/create-issue`, {
       method: 'POST',
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(githubToken),
       body: JSON.stringify(request),
     });
     return this.handleResponse<{
@@ -234,10 +243,10 @@ export class ApiService {
   }
 
   // Issue Management API Methods
-  static async createIssueWithContext(request: CreateIssueWithContextRequest): Promise<IssueCreationResponse> {
+  static async createIssueWithContext(request: CreateIssueWithContextRequest, githubToken?: string): Promise<IssueCreationResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/from-session-enhanced`, {
       method: 'POST',
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(githubToken),
       body: JSON.stringify(request),
     });
     return this.handleResponse<IssueCreationResponse>(response);
@@ -246,7 +255,8 @@ export class ApiService {
   static async getIssues(
     repoOwner?: string,
     repoName?: string,
-    limit: number = 50
+    limit: number = 50,
+    githubToken?: string
   ): Promise<UserIssueResponse[]> {
     const params = new URLSearchParams();
     if (repoOwner) params.append('repo_owner', repoOwner);
@@ -255,48 +265,54 @@ export class ApiService {
 
     const response = await fetch(`${API_BASE_URL}/issues?${params}`, {
       method: 'GET',
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(githubToken),
     });
     return this.handleResponse<UserIssueResponse[]>(response);
   }
 
-  static async getIssue(issueId: string): Promise<UserIssueResponse> {
+  static async getIssue(issueId: string, githubToken?: string): Promise<UserIssueResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
       method: 'GET',
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(githubToken),
     });
     return this.handleResponse<UserIssueResponse>(response);
   }
 
-  static async updateIssue(issueId: string, updates: Partial<UserIssueResponse>): Promise<UserIssueResponse> {
+  static async updateIssue(issueId: string, updates: Partial<UserIssueResponse>, githubToken?: string): Promise<UserIssueResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
       method: 'PUT',
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(githubToken),
       body: JSON.stringify(updates),
     });
     return this.handleResponse<UserIssueResponse>(response);
   }
 
-  static async deleteIssue(issueId: string): Promise<{message: string}> {
+  static async deleteIssue(issueId: string, githubToken?: string): Promise<{message: string}> {
     const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
       method: 'DELETE',
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(githubToken),
     });
     return this.handleResponse<{message: string}>(response);
   }
 
   // File Dependencies API Methods
-  static async analyzeFileDependencies(files: File[]): Promise<{
+  static async analyzeFileDependencies(files: File[], githubToken?: string): Promise<{
     dependencies: FileContextItem[];
     total_tokens: number;
   }> {
     const formData = new FormData();
     files.forEach(file => formData.append('files', file));
 
-    const token = localStorage.getItem('auth_token');
     const headers: HeadersInit = {};
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+    if (githubToken) {
+      headers['Authorization'] = `Bearer ${githubToken}`;
+    } else {
+      // Try to get github token from URL parameters
+      const urlParams = new URLSearchParams(window.location.search);
+      const tokenFromUrl = urlParams.get('github_token');
+      if (tokenFromUrl) {
+        headers['Authorization'] = `Bearer ${tokenFromUrl}`;
+      }
     }
 
     const response = await fetch(`${API_BASE_URL}/file-dependencies/analyze`, {
@@ -310,16 +326,16 @@ export class ApiService {
     }>(response);
   }
 
-  static async getFileDependencies(fileId: string): Promise<FileContextItem[]> {
+  static async getFileDependencies(fileId: string, githubToken?: string): Promise<FileContextItem[]> {
     const response = await fetch(`${API_BASE_URL}/file-dependencies/${fileId}`, {
       method: 'GET',
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(githubToken),
     });
     return this.handleResponse<FileContextItem[]>(response);
   }
 
   // Repository Management API Methods
-  static async getRepositories(): Promise<{
+  static async getRepositories(githubToken?: string): Promise<{
     repositories: Array<{
       id: string;
       name: string;
@@ -331,7 +347,7 @@ export class ApiService {
   }> {
     const response = await fetch(`${API_BASE_URL}/repositories`, {
       method: 'GET',
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(githubToken),
     });
     return this.handleResponse<{
       repositories: Array<{
@@ -345,7 +361,7 @@ export class ApiService {
     }>(response);
   }
 
-  static async getRepository(owner: string, name: string): Promise<{
+  static async getRepository(owner: string, name: string, githubToken?: string): Promise<{
     id: string;
     name: string;
     owner: string;
@@ -356,7 +372,7 @@ export class ApiService {
   }> {
     const response = await fetch(`${API_BASE_URL}/repositories/${owner}/${name}`, {
       method: 'GET',
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(githubToken),
     });
     return this.handleResponse<{
       id: string;
@@ -369,39 +385,122 @@ export class ApiService {
     }>(response);
   }
 
-  // Legacy Auth Methods (for backward compatibility)
-  static async login(credentials: {username: string, password: string}): Promise<{token: string}> {
-    const response = await fetch(`${API_BASE_URL}/auth/login`, {
+  static async createGitHubIssueFromUserIssue(issueId: string, githubToken?: string): Promise<{
+    success: boolean;
+    github_url: string;
+    message: string;
+  }> {
+    const response = await fetch(`${API_BASE_URL}/issues/${issueId}/create-github-issue`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(credentials),
+      headers: this.getAuthHeaders(githubToken),
     });
-    return this.handleResponse<{token: string}>(response);
+    return this.handleResponse<{
+      success: boolean;
+      github_url: string;
+      message: string;
+    }>(response);
   }
 
-  static async logout(): Promise<void> {
-    try {
-      await fetch(`${API_BASE_URL}/auth/logout`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-    } catch (error) {
-      console.error('Logout request failed:', error);
-    } finally {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user_data');
-    }
+  static async extractFileDependencies(repoUrl: string, githubToken?: string): Promise<{
+    children: Array<{
+      id: string;
+      name: string;
+      type: string;
+      tokens: number;
+      Category: string;
+      isDirectory?: boolean;
+      children?: Array<{
+        id: string;
+        name: string;
+        type: string;
+        tokens: number;
+        Category: string;
+        isDirectory?: boolean;
+        children?: Array<{
+          id: string;
+          name: string;
+          type: string;
+          tokens: number;
+          Category: string;
+          isDirectory?: boolean;
+        }>;
+      }>;
+    }>;
+  }> {
+    const response = await fetch(`${API_BASE_URL}/filedeps/extract`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(githubToken),
+      body: JSON.stringify({ repo_url: repoUrl }),
+    });
+    return this.handleResponse<{
+      children: Array<{
+        id: string;
+        name: string;
+        type: string;
+        tokens: number;
+        Category: string;
+        isDirectory?: boolean;
+        children?: Array<{
+          id: string;
+          name: string;
+          type: string;
+          tokens: number;
+          Category: string;
+          isDirectory?: boolean;
+          children?: Array<{
+            id: string;
+            name: string;
+            type: string;
+            tokens: number;
+            Category: string;
+            isDirectory?: boolean;
+          }>;
+        }>;
+      }>;
+    }>(response);
   }
 
-  static async getAuthStatus(): Promise<{authenticated: boolean}> {
-    const response = await fetch(`${API_BASE_URL}/auth/status`, {
+  static async getRepositoryBranches(owner: string, repo: string, githubToken?: string): Promise<Array<{
+    name: string;
+    commit: {
+      sha: string;
+      url: string;
+    };
+  }>> {
+    const response = await fetch(`${API_BASE_URL}/github/repositories/${owner}/${repo}/branches`, {
       method: 'GET',
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(githubToken),
     });
-    return this.handleResponse<{authenticated: boolean}>(response);
+    return this.handleResponse<Array<{
+      name: string;
+      commit: {
+        sha: string;
+        url: string;
+      };
+    }>>(response);
   }
 
-
+  static async getUserRepositories(githubToken?: string): Promise<Array<{
+    id: number;
+    name: string;
+    full_name: string;
+    description: string;
+    private: boolean;
+    html_url: string;
+    default_branch: string;
+  }>> {
+    const response = await fetch(`${API_BASE_URL}/github/repositories`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(githubToken),
+    });
+    return this.handleResponse<Array<{
+      id: number;
+      name: string;
+      full_name: string;
+      description: string;
+      private: boolean;
+      html_url: string;
+      default_branch: string;
+    }>>(response);
+  }
 }

@@ -3,12 +3,13 @@ import { UnifiedSessionState } from '../types/unifiedState';
 import { TabState } from '../types';
 
 /**
- * Session state hooks
- * Extracted to separate file for better organization and Fast Refresh compatibility
+ * Simplified session state hooks.
+ * Provides basic session state access.
+ * Session management is not implemented as per requirements.
  */
 
 /**
- * Helper hook to get current session state without management functions
+ * Helper hook to get current session state
  * Useful for components that only need to read session data
  */
 export const useSessionState = (): UnifiedSessionState => {
@@ -17,7 +18,7 @@ export const useSessionState = (): UnifiedSessionState => {
 };
 
 /**
- * Helper hook to get current tab state without management functions
+ * Helper hook to get current tab state
  * Useful for components that only need to read tab data
  */
 export const useTabState = (): TabState => {
@@ -26,8 +27,8 @@ export const useTabState = (): TabState => {
 };
 
 /**
- * Helper hook to get real-time connection status
- * Useful for displaying connection indicators
+ * Helper hook to get connection status
+ * Simplified since session management is not implemented
  */
 export const useConnectionStatus = (): 'connected' | 'disconnected' | 'reconnecting' => {
   const { connectionStatus } = useSession();
