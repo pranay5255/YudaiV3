@@ -9,7 +9,6 @@ processed by agents to create GitHub issues.
 import os
 import re
 import uuid
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -32,6 +31,7 @@ from models import (
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, func
 from sqlalchemy.orm import Session
+from utils import utc_now
 
 
 # Use local unified data models for frontend-backend consistency
@@ -193,9 +193,9 @@ class IssueService:
             issue.tokens_used = tokens_used
         
         if status in ["completed", "failed"]:
-            issue.processed_at = datetime.utcnow()
+            issue.processed_at = utc_now()
         
-        issue.updated_at = datetime.utcnow()
+        issue.updated_at = utc_now()
         
         db.commit()
         db.refresh(issue)
@@ -282,8 +282,8 @@ class IssueService:
             issue.github_issue_url = github_issue.html_url
             issue.github_issue_number = github_issue.number
             issue.status = "completed"
-            issue.processed_at = datetime.utcnow()
-            issue.updated_at = datetime.utcnow()
+            issue.processed_at = utc_now()
+            issue.updated_at = utc_now()
             
             db.commit()
             db.refresh(issue)
@@ -294,8 +294,8 @@ class IssueService:
             # Update issue status to failed
             issue.status = "failed"
             issue.agent_response = f"Failed to create GitHub issue: {str(e)}"
-            issue.processed_at = datetime.utcnow()
-            issue.updated_at = datetime.utcnow()
+            issue.processed_at = utc_now()
+            issue.updated_at = utc_now()
             
             db.commit()
             db.refresh(issue)
@@ -414,7 +414,7 @@ class IssueService:
                     "chat_messages_count": len(request.chat_messages),
                     "file_context_count": len(request.file_context),
                     "total_tokens": sum(f.tokens for f in request.file_context),
-                    "generated_at": datetime.utcnow().isoformat(),
+                    "generated_at": utc_now().isoformat(),
                     "generation_method": "sample_data"
                 }
             )
@@ -514,7 +514,7 @@ class IssueService:
                     "chat_messages_count": len(request.chat_messages),
                     "file_context_count": len(request.file_context),
                     "total_tokens": sum(f.tokens for f in request.file_context),
-                    "generated_at": datetime.utcnow().isoformat(),
+                    "generated_at": utc_now().isoformat(),
                     "generation_method": "architect_agent_llm",
                     "enhanced_with_session": bool(db and user_id)
                 }
@@ -559,7 +559,7 @@ Based on the analyzed context, this issue requires attention to the following fi
                     "chat_messages_count": len(request.chat_messages),
                     "file_context_count": len(request.file_context),
                     "total_tokens": sum(f.tokens for f in request.file_context),
-                    "generated_at": datetime.utcnow().isoformat(),
+                    "generated_at": utc_now().isoformat(),
                     "generation_method": "context_analysis_fallback",
                     "error": str(e)
                 }

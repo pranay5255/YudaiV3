@@ -4,8 +4,10 @@ Simplified authentication utilities - only create and validate tokens
 import logging
 import secrets
 import string
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
+
+from utils import utc_now
 
 from fastapi import HTTPException, status
 from models import SessionToken, User
@@ -25,7 +27,7 @@ def create_session_token(db: Session, user_id: int, expires_in_hours: int = 24) 
         
         # Generate new session token
         session_token = generate_session_token()
-        expires_at = datetime.utcnow() + timedelta(hours=expires_in_hours)
+        expires_at = utc_now() + timedelta(hours=expires_in_hours)
         
         # Create new session token
         db_session_token = SessionToken(
@@ -70,7 +72,7 @@ def validate_session_token(db: Session, session_token: str) -> Optional[User]:
             return None
         
         # Check if token is expired
-        if db_session_token.expires_at < datetime.utcnow():
+        if db_session_token.expires_at < utc_now():
             logger.info(f"Session token expired: {session_token[:10]}...")
             return None
         
