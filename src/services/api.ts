@@ -143,7 +143,7 @@ export class ApiService {
       last_login: string;
     };
   }> {
-    const response = await fetch(`${API_BASE_URL}/auth/api/create-session`, {
+    const response = await fetch(`/auth/api/create-session`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -174,7 +174,7 @@ export class ApiService {
     email: string;
     avatar_url: string;
   }> {
-    const response = await fetch(`${API_BASE_URL}/auth/api/user?session_token=${sessionToken}`, {
+    const response = await fetch(`/auth/api/user?session_token=${sessionToken}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -191,7 +191,7 @@ export class ApiService {
   }
 
   static async logout(sessionToken: string): Promise<{success: boolean; message: string}> {
-    const response = await fetch(`${API_BASE_URL}/auth/api/logout`, {
+    const response = await fetch(`/auth/api/logout`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -202,7 +202,7 @@ export class ApiService {
   }
 
   static async getLoginUrl(): Promise<{login_url: string}> {
-    const response = await fetch(`${API_BASE_URL}/auth/api/login`, {
+    const response = await fetch(`/auth/api/login`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
