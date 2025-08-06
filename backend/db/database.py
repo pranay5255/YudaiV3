@@ -3,12 +3,13 @@ Database configuration and session management for YudaiV3
 """
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 # Import Base from unified models
 from models import Base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from utils import utc_now
 
 # Database URL from environment variables
 DATABASE_URL = os.getenv(
@@ -119,7 +120,7 @@ def create_sample_data():
                 refresh_token=f"ghr_{uuid.uuid4().hex[:40]}",
                 token_type="bearer",
                 scope="repo user",
-                expires_at=datetime.utcnow() + timedelta(days=30),
+                expires_at=utc_now() + timedelta(days=30),
                 is_active=True
             ),
             AuthToken(
@@ -128,7 +129,7 @@ def create_sample_data():
                 refresh_token=f"ghr_{uuid.uuid4().hex[:40]}",
                 token_type="bearer",
                 scope="repo user",
-                expires_at=datetime.utcnow() + timedelta(days=30),
+                expires_at=utc_now() + timedelta(days=30),
                 is_active=True
             )
         ]
@@ -154,9 +155,9 @@ def create_sample_data():
                 stargazers_count=42,
                 forks_count=5,
                 open_issues_count=3,
-                github_created_at=datetime.utcnow() - timedelta(days=100),
-                github_updated_at=datetime.utcnow() - timedelta(days=5),
-                pushed_at=datetime.utcnow() - timedelta(days=1)
+                github_created_at=utc_now() - timedelta(days=100),
+                github_updated_at=utc_now() - timedelta(days=5),
+                pushed_at=utc_now() - timedelta(days=1)
             ),
             Repository(
                 github_repo_id=987654321,
@@ -173,9 +174,9 @@ def create_sample_data():
                 stargazers_count=15,
                 forks_count=2,
                 open_issues_count=1,
-                github_created_at=datetime.utcnow() - timedelta(days=50),
-                github_updated_at=datetime.utcnow() - timedelta(days=2),
-                pushed_at=datetime.utcnow() - timedelta(hours=6)
+                github_created_at=utc_now() - timedelta(days=50),
+                github_updated_at=utc_now() - timedelta(days=2),
+                pushed_at=utc_now() - timedelta(hours=6)
             )
         ]
         
@@ -194,8 +195,8 @@ def create_sample_data():
                 state="open",
                 html_url="https://github.com/alice_dev/awesome-project/issues/1",
                 author_username="alice_dev",
-                github_created_at=datetime.utcnow() - timedelta(days=10),
-                github_updated_at=datetime.utcnow() - timedelta(days=2)
+                github_created_at=utc_now() - timedelta(days=10),
+                github_updated_at=utc_now() - timedelta(days=2)
             ),
             Issue(
                 github_issue_id=1002,
@@ -206,9 +207,9 @@ def create_sample_data():
                 state="closed",
                 html_url="https://github.com/alice_dev/awesome-project/issues/2",
                 author_username="bob_coder",
-                github_created_at=datetime.utcnow() - timedelta(days=15),
-                github_updated_at=datetime.utcnow() - timedelta(days=1),
-                github_closed_at=datetime.utcnow() - timedelta(days=1)
+                github_created_at=utc_now() - timedelta(days=15),
+                github_updated_at=utc_now() - timedelta(days=1),
+                github_closed_at=utc_now() - timedelta(days=1)
             )
         ]
         
@@ -227,8 +228,8 @@ def create_sample_data():
                 state="open",
                 html_url="https://github.com/alice_dev/awesome-project/pull/1",
                 author_username="alice_dev",
-                github_created_at=datetime.utcnow() - timedelta(days=5),
-                github_updated_at=datetime.utcnow() - timedelta(days=1)
+                github_created_at=utc_now() - timedelta(days=5),
+                github_updated_at=utc_now() - timedelta(days=1)
             )
         ]
         
@@ -245,7 +246,7 @@ def create_sample_data():
                 html_url="https://github.com/alice_dev/awesome-project/commit/abc123def456789",
                 author_name="Alice Developer",
                 author_email="alice@example.com",
-                author_date=datetime.utcnow() - timedelta(days=100)
+                author_date=utc_now() - timedelta(days=100)
             ),
             Commit(
                 sha="def456abc789123",
@@ -254,7 +255,7 @@ def create_sample_data():
                 html_url="https://github.com/alice_dev/awesome-project/commit/def456abc789123",
                 author_name="Alice Developer",
                 author_email="alice@example.com",
-                author_date=datetime.utcnow() - timedelta(days=5)
+                author_date=utc_now() - timedelta(days=5)
             )
         ]
         
@@ -312,7 +313,7 @@ def create_sample_data():
                 total_tokens=25000,
                 max_file_size=10000,
                 status="completed",
-                processed_at=datetime.utcnow() - timedelta(days=1)
+                processed_at=utc_now() - timedelta(days=1)
             )
         ]
         
@@ -386,12 +387,12 @@ def create_sample_data():
                     "branch": "main",
                     "full_name": "alice_dev/awesome-project",
                     "html_url": "https://github.com/alice_dev/awesome-project",
-                    "created_at": datetime.utcnow().isoformat()
+                    "created_at": utc_now().isoformat()
                 },
                 is_active=True,
                 total_messages=5,
                 total_tokens=1200,
-                last_activity=datetime.utcnow() - timedelta(hours=2)
+                last_activity=utc_now() - timedelta(hours=2)
             ),
             ChatSession(
                 user_id=2,
@@ -407,12 +408,12 @@ def create_sample_data():
                     "branch": "development",
                     "full_name": "bob_coder/cool-app",
                     "html_url": "https://github.com/bob_coder/cool-app",
-                    "created_at": datetime.utcnow().isoformat()
+                    "created_at": utc_now().isoformat()
                 },
                 is_active=True,
                 total_messages=3,
                 total_tokens=800,
-                last_activity=datetime.utcnow() - timedelta(hours=1)
+                last_activity=utc_now() - timedelta(hours=1)
             )
         ]
         

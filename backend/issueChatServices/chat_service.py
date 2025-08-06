@@ -2,8 +2,9 @@
 Streamlined Chat Service for managing chat messages within sessions
 Session management is not implemented - this focuses on messages only
 """
-from datetime import datetime
 from typing import List
+
+from utils import utc_now
 
 from models import (
     ChatMessage,
@@ -61,7 +62,7 @@ class ChatService:
         # Update session statistics
         session.total_messages += 1
         session.total_tokens += request.tokens
-        session.last_activity = datetime.utcnow()
+        session.last_activity = utc_now()
         
         db.commit()
         db.refresh(message)

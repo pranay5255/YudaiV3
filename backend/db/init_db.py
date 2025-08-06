@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Database initialization script for YudaiV3
-This script can work both with and without the application models
+Database initialization script for YudaiV3.
+This script can work both with and without the application models.
+All timestamps are stored as timezone-aware UTC values.
 """
 
 import os
