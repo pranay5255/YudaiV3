@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronRight, ChevronDown, Plus, Folder, File, RefreshCw } from 'lucide-react';
 import { FileItem } from '../types/fileDependencies';
 import { ApiService } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
 
 interface FileDependenciesProps {
   onAddToContext: (file: FileItem) => void;
@@ -34,6 +35,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
   onShowDetails, 
   repoUrl 
 }) => {
+  const { sessionToken } = useAuth();
   // Repository context removed - using repoUrl prop directly
   const [files, setFiles] = useState<ExtendedFileItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -64,7 +66,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     setError(null);
     
     try {
-      const data = await ApiService.extractFileDependencies(targetRepoUrl);
+      const data = await ApiService.extractFileDependencies(targetRepoUrl, sessionToken || undefined);
       if (data && data.children) {
         setFiles(transformData(data.children));
       } else {

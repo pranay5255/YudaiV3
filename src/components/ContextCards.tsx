@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { Trash2, FileText, MessageCircle, Upload } from 'lucide-react';
 import { UnifiedContextCard, ContextCardSource } from '../types/unifiedState';
-import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview, UserIssueResponse } from '../services/api';
+import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview } from '../services/api';
+import { UserIssueResponse } from '../types';
+import { useAuth } from '../hooks/useAuth';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -35,6 +37,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   repositoryInfo
 }) => {
   const [isCreatingIssue, setIsCreatingIssue] = useState(false);
+  const { sessionToken } = useAuth();
 
   const getSourceIcon = (source: ContextCardSource) => {
     switch (source) {
@@ -87,7 +90,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
         priority: 'medium',
       };
 
-      const response = await ApiService.createIssueWithContext(request, true, true);
+      const response = await ApiService.createIssueWithContext(request, sessionToken || undefined);
       if (response.success && onShowIssuePreview) {
         onShowIssuePreview({
           ...response.github_preview,

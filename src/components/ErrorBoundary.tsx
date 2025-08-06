@@ -68,10 +68,8 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   private handleReauth = () => {
-    // Clear auth tokens and redirect to login
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('user_data');
-    window.location.href = '/login';
+    // Redirect to login page
+    window.location.href = '/auth/login';
   };
 
   public render() {

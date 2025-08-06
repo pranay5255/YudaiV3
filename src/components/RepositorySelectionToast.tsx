@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, Github, GitBranch, Check, X, Loader2 } from 'lucide-react';
 import { GitHubRepository, GitHubBranch, SelectedRepository } from '../types';
 import { ApiService } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
 
 interface RepositorySelectionToastProps {
   isOpen: boolean;
@@ -23,6 +24,7 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
   const [isRepoDropdownOpen, setIsRepoDropdownOpen] = useState(false);
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { sessionToken } = useAuth();
 
   const loadBranches = useCallback(async () => {
     if (!selectedRepository) return;
@@ -33,7 +35,7 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
     
     try {
       const [owner, repo] = selectedRepository.full_name.split('/');
-      const branchList = await ApiService.getRepositoryBranches(owner, repo);
+      const branchList = await ApiService.getRepositoryBranches(owner, repo, sessionToken || undefined);
       setBranches(branchList);
       
       // Auto-select main or master branch if available
@@ -71,7 +73,7 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
     setLoadingRepos(true);
     setError(null);
     try {
-      const repos = await ApiService.getUserRepositories();
+      const repos = await ApiService.getUserRepositories(sessionToken || undefined);
       setRepositories(repos);
     } catch (error) {
       console.error('Failed to load repositories:', error);

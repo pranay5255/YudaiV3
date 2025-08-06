@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { X, ExternalLink, GitBranch, FileText, MessageSquare, Tag, Clock, Check } from 'lucide-react';
-import { ApiService, GitHubIssuePreview, ChatContextMessage, FileContextItem, UserIssueResponse } from '../services/api';
+import { ApiService, GitHubIssuePreview, ChatContextMessage, FileContextItem } from '../services/api';
+import { UserIssueResponse } from '../types';
+import { useAuth } from '../hooks/useAuth';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -28,6 +30,7 @@ export const DiffModal: React.FC<DiffModalProps> = ({
   const [isCreatingGitHubIssue, setIsCreatingGitHubIssue] = useState(false);
   const [githubIssueCreated, setGithubIssueCreated] = useState(false);
   const [githubIssueUrl, setGithubIssueUrl] = useState<string | null>(null);
+  const { sessionToken } = useAuth();
 
   if (!isOpen || !issuePreview) return null;
 
@@ -37,7 +40,7 @@ export const DiffModal: React.FC<DiffModalProps> = ({
     setIsCreatingGitHubIssue(true);
     
     try {
-      const response = await ApiService.createGitHubIssueFromUserIssue(issuePreview.userIssue.issue_id);
+      const response = await ApiService.createGitHubIssueFromUserIssue(issuePreview.userIssue.issue_id, sessionToken || undefined);
       
       if (response.success) {
         setGithubIssueCreated(true);
