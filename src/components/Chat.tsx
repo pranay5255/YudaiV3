@@ -90,7 +90,7 @@ export const Chat: React.FC<ChatProps> = ({
   const userMessageCount = messages.filter(msg => 
     msg.id !== '1' && msg.id !== '2'
   ).length;
-
+//eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
     
