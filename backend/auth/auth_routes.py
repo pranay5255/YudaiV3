@@ -4,7 +4,7 @@ Authentication Routes for GitHub OAuth
 Enhanced with proper logging and error handling
 """
 import logging
-from datetime import datetime
+from utils import utc_now
 from urllib.parse import urlencode
 
 from auth.auth_utils import (
@@ -182,7 +182,7 @@ async def api_create_session(
             )
         
         # Check if AuthToken is expired
-        if auth_token.expires_at and auth_token.expires_at < datetime.utcnow():
+        if auth_token.expires_at and auth_token.expires_at < utc_now():
             logger.info(f"AuthToken expired, deactivating: {github_token[:10]}...")
             auth_token.is_active = False
             db.commit()

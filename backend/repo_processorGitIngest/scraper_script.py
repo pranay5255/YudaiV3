@@ -18,7 +18,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Dict, Optional, Any, Tuple
-from datetime import datetime
+from utils import utc_now
 import fnmatch
 from gitingest import ingest_async as ingest
 
@@ -129,7 +129,7 @@ async def extract_repository_data(
         
         return {
             'extraction_info': {
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': utc_now().isoformat(),
                 'source_url': repo_url,
                 'parameters': {
                     'max_file_size': max_file_size,
@@ -147,7 +147,7 @@ async def extract_repository_data(
     except Exception as e:
         return {
             'error': str(e),
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': utc_now().isoformat(),
             'source_url': repo_url
         }
 

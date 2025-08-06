@@ -10,6 +10,7 @@ from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Tex
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+from utils import utc_now
 
 # ============================================================================
 # ENUMS
@@ -109,6 +110,7 @@ class SessionToken(Base):
     session_token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     
     # Session metadata
+    # Store expiration as timezone-aware UTC timestamp
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     
@@ -780,7 +782,7 @@ class ContextCardResponse(BaseModel):
     description: str = Field(...)
     tokens: int = Field(...)
     source: ContextSource = Field(...)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 class IssueResponse(BaseModel):
     issue_id: str = Field(...)

@@ -5,7 +5,9 @@ Simplified to match Ruby reference implementation
 """
 
 import os
-from datetime import datetime, timedelta
+from datetime import timedelta
+
+from utils import utc_now
 from typing import Any, Dict
 from urllib.parse import urlencode
 
@@ -153,8 +155,8 @@ async def create_or_update_user(
             user.email = github_user.get("email")
             user.display_name = github_user.get("name")
             user.avatar_url = github_user.get("avatar_url")
-            user.last_login = datetime.utcnow()
-            user.updated_at = datetime.utcnow()
+            user.last_login = utc_now()
+            user.updated_at = utc_now()
         else:
             # Create new user
             user = User(
@@ -163,7 +165,7 @@ async def create_or_update_user(
                 email=github_user.get("email"),
                 display_name=github_user.get("name"),
                 avatar_url=github_user.get("avatar_url"),
-                last_login=datetime.utcnow(),
+                last_login=utc_now(),
             )
             db.add(user)
         
@@ -180,7 +182,7 @@ async def create_or_update_user(
             access_token=access_token,
             token_type="bearer",
             scope="repo user email",
-            expires_at=datetime.utcnow() + timedelta(hours=8),
+            expires_at=utc_now() + timedelta(hours=8),
             is_active=True,
         )
         db.add(auth_token)
@@ -248,7 +250,7 @@ async def get_current_user(
         )
     
     # Check if token is expired
-    if auth_token.expires_at and auth_token.expires_at < datetime.utcnow():
+    if auth_token.expires_at and auth_token.expires_at < utc_now():
         # Deactivate expired token
         auth_token.is_active = False
         db.commit()
@@ -298,7 +300,7 @@ def get_github_api(user_id: int, db: Session):
         )
     
     # Check if token is expired
-    if auth_token.expires_at and auth_token.expires_at < datetime.utcnow():
+    if auth_token.expires_at and auth_token.expires_at < utc_now():
         # Deactivate expired token
         auth_token.is_active = False
         db.commit()

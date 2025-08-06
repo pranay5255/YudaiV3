@@ -9,16 +9,16 @@ import json
 import os
 import uuid
 from typing import List, Dict, Any, Optional
-from datetime import datetime
 
 import requests
 from sqlalchemy.orm import Session
 
 from models import (
-    UserIssue, 
+    UserIssue,
     CreateUserIssueRequest,
     Repository
 )
+from utils import utc_now
 from .promptTemplate import (
     build_code_inspector_prompt,
     build_issue_refinement_prompt,
@@ -220,7 +220,7 @@ Key Information:
                 repo_name=issue_request.repo_name,
                 priority=issue_request.priority,
                 status="pending",
-                created_at=datetime.utcnow()
+                created_at=utc_now()
             )
             
             db.add(user_issue)
