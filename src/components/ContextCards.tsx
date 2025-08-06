@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { Trash2, FileText, MessageCircle, Upload } from 'lucide-react';
-import { UnifiedContextCard, ContextCardSource } from '../types/unifiedState';
 import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview } from '../services/api';
-import { UserIssueResponse } from '../types';
+import { UserIssueResponse, ContextCard } from '../types';
 import { useAuth } from '../hooks/useAuth';
 
 interface IssuePreviewData extends GitHubIssuePreview {
@@ -18,9 +17,9 @@ interface IssuePreviewData extends GitHubIssuePreview {
 }
 
 interface ContextCardsProps {
-  cards: UnifiedContextCard[];
+  cards: ContextCard[];
   onRemoveCard: (id: string) => void;
-  onCreateIssue?: () => void; // <-- add this
+  onCreateIssue?: () => void;
   onShowIssuePreview?: (issuePreview: IssuePreviewData) => void;
   repositoryInfo?: {
     owner: string;
@@ -32,19 +31,19 @@ interface ContextCardsProps {
 export const ContextCards: React.FC<ContextCardsProps> = ({ 
   cards, 
   onRemoveCard, 
-  onCreateIssue, // <-- add this
+  onCreateIssue,
   onShowIssuePreview,
   repositoryInfo
 }) => {
   const [isCreatingIssue, setIsCreatingIssue] = useState(false);
   const { sessionToken } = useAuth();
 
-  const getSourceIcon = (source: ContextCardSource) => {
+  const getSourceIcon = (source: ContextCard['source']) => {
     switch (source) {
-      case ContextCardSource.CHAT: return MessageCircle;
-      case ContextCardSource.FILE: return FileText;
-      case ContextCardSource.GITHUB: return FileText; // Or a new icon
-      case ContextCardSource.MANUAL: return Upload;
+      case 'chat': return MessageCircle;
+      case 'file-deps': return FileText;
+      case 'upload': return Upload;
+      default: return FileText;
     }
   };
 
@@ -62,8 +61,8 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
     setIsCreatingIssue(true);
     try {
       // Separate chat and file context
-      const chatCards = cards.filter(card => card.source === ContextCardSource.CHAT);
-      const fileCards = cards.filter(card => card.source === ContextCardSource.FILE);
+      const chatCards = cards.filter(card => card.source === 'chat');
+      const fileCards = cards.filter(card => card.source === 'file-deps');
 
       // Convert to API formats
       const conversationMessages: ChatContextMessage[] = chatCards.map(card => ({
