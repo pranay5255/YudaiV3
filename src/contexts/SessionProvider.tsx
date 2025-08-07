@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useState, useCallback, useEffect, useContext } from 'react';
 import { 
   SessionState, 
   GitHubRepository, 
@@ -21,6 +21,8 @@ import { useAuth } from '../hooks/useAuth';
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined);
 
+export { SessionContext };
+
 export const useSession = () => {
   const context = useContext(SessionContext);
   if (!context) {
@@ -28,6 +30,7 @@ export const useSession = () => {
   }
   return context;
 };
+
 
 interface SessionProviderProps {
   children: React.ReactNode;

@@ -10,7 +10,7 @@ import type {
 import { UserIssueResponse } from '../types';
 import { useRepository } from '../hooks/useRepository';
 import { useApi } from '../hooks/useApi';
-import { useSession } from '../hooks/useSessionState';
+import { useSession } from '../contexts/SessionProvider';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;

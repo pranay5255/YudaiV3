@@ -62,3 +62,4 @@ export const useConnectionStatus = (): 'connected' | 'disconnected' | 'reconnect
   const { connectionStatus } = useSession();
   return connectionStatus;
 };
+
