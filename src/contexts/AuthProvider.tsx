@@ -1,13 +1,6 @@
 import React, { createContext, useState, useEffect, useCallback } from 'react';
-import { User } from '../types';
+import { User, AuthState } from '../types';
 import { ApiService } from '../services/api';
-
-interface AuthState {
-  user: User | null;
-  sessionToken: string | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
-}
 
 export interface AuthContextValue extends AuthState {
   login: () => Promise<void>;
@@ -46,7 +39,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         try {
           const userData = await ApiService.validateSessionToken(sessionToken);
           
-          // Transform userData to match User type
+          // Transform userData to match User type with proper field mapping
           const user: User = {
             id: userData.id,
             github_username: userData.github_username,
@@ -54,8 +47,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             email: userData.email,
             display_name: userData.display_name,
             avatar_url: userData.avatar_url,
-            created_at: new Date().toISOString(), // Use current date or get from backend
-            last_login: new Date().toISOString(), // Use current date or get from backend
+            created_at: new Date().toISOString(),
+            last_login: new Date().toISOString(),
           };
           
           setAuthState({
@@ -65,6 +58,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             isLoading: false,
           });
 
+          // Store session token in localStorage for persistence
+          localStorage.setItem('session_token', sessionToken);
+
           // Clear URL parameters after successful auth
           const newUrl = new URL(window.location.href);
           newUrl.search = '';
@@ -72,6 +68,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           
         } catch (error) {
           console.warn('Session validation failed:', error);
+          // Clear any stored token on validation failure
+          localStorage.removeItem('session_token');
           setAuthState({
             user: null,
             sessionToken: null,
@@ -84,14 +82,43 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.warn('Authorization code received but no session token, redirecting to login');
         window.location.href = '/auth/login';
       } else {
-        // No auth data in URL, check if we're on a protected route
-        const currentPath = window.location.pathname;
-        if (currentPath.startsWith('/auth/callback')) {
-          // We're on callback page but no auth data, redirect to login
-          window.location.href = '/auth/login';
+        // No auth data in URL, check for stored session token
+        const storedToken = localStorage.getItem('session_token');
+        if (storedToken) {
+          try {
+            const userData = await ApiService.validateSessionToken(storedToken);
+            const user: User = {
+              id: userData.id,
+              github_username: userData.github_username,
+              github_user_id: userData.github_id,
+              email: userData.email,
+              display_name: userData.display_name,
+              avatar_url: userData.avatar_url,
+              created_at: new Date().toISOString(),
+              last_login: new Date().toISOString(),
+            };
+            
+            setAuthState({
+              user: user,
+              sessionToken: storedToken,
+              isAuthenticated: true,
+              isLoading: false,
+            });
+          } catch (error) {
+            console.warn('Stored session validation failed:', error);
+            localStorage.removeItem('session_token');
+            setAuthState(prev => ({ ...prev, isLoading: false }));
+          }
         } else {
-          // Not on callback page, just set as not authenticated
-          setAuthState(prev => ({ ...prev, isLoading: false }));
+          // No stored token, check if we're on a protected route
+          const currentPath = window.location.pathname;
+          if (currentPath.startsWith('/auth/callback')) {
+            // We're on callback page but no auth data, redirect to login
+            window.location.href = '/auth/login';
+          } else {
+            // Not on callback page, just set as not authenticated
+            setAuthState(prev => ({ ...prev, isLoading: false }));
+          }
         }
       }
     } catch (error) {
@@ -129,7 +156,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } catch (error) {
       console.warn('Logout API call failed:', error);
     } finally {
-      // Always clear local state
+      // Always clear local state and storage
+      localStorage.removeItem('session_token');
       setAuthState({
         user: null,
         sessionToken: null,
