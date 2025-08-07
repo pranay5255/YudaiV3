@@ -1,104 +1,39 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { ChevronRight, ChevronDown, Plus, Folder, File, RefreshCw } from 'lucide-react';
-import { FileItem } from '../types/fileDependencies';
+import { FileItem } from '../types';
+import { useSessionState } from '../hooks/useSessionState';
 import { ApiService } from '../services/api';
-import { useAuth } from '../hooks/useAuth';
+import type { FileDependencyNode } from '../types/api';
 
 interface FileDependenciesProps {
   onAddToContext: (file: FileItem) => void;
   onShowDetails: (file: FileItem) => void;
+  onShowError?: (error: string) => void;
   repoUrl?: string; // Optional repository URL to analyze
 }
 
-// Note: buildFileTreeFromDb function available for future database integration
-// Currently using API-based file structure from GitIngest
-
-interface ApiFileItem {
-  id: string;
-  name: string;
-  type: 'INTERNAL' | 'EXTERNAL';
-  tokens: number;
-  Category: string;
-  isDirectory?: boolean;
-  children?: ApiFileItem[];
-  expanded?: boolean;
-}
-
-// Extended FileItem type with expanded property
+// Extended FileItem type with frontend-specific properties
 interface ExtendedFileItem extends FileItem {
   children: ExtendedFileItem[];
   expanded: boolean;
 }
 
-export const FileDependencies: React.FC<FileDependenciesProps> = ({ 
-  onAddToContext, 
-  onShowDetails, 
-  repoUrl 
+export const FileDependencies: React.FC<FileDependenciesProps> = ({
+  onAddToContext,
+  onShowDetails,
+  onShowError,
+  repoUrl
 }) => {
-  const { sessionToken } = useAuth();
-  // Repository context removed - using repoUrl prop directly
+  const sessionState = useSessionState();
   const [files, setFiles] = useState<ExtendedFileItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [loadingStates, setLoadingStates] = useState<{[key: string]: boolean}>({});
 
-  // Use the repoUrl prop directly
-  const targetRepoUrl = repoUrl;
-
-  const transformData = useCallback((items: ApiFileItem[]): ExtendedFileItem[] => {
-    return items.map(item => ({
-      id: item.id,
-      file_name: item.name,
-      file_path: item.name,
-      file_type: item.type,
-      content_summary: item.Category,
-      tokens: item.tokens,
-      created_at: new Date().toISOString(),
-      children: item.children ? transformData(item.children) : [],
-      expanded: item.expanded || false
-    }));
-  }, []);
-
-  const loadFileDependencies = useCallback(async () => {
-    if (!targetRepoUrl) return;
-    
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const data = await ApiService.extractFileDependencies(targetRepoUrl, sessionToken || undefined);
-      if (data && data.children) {
-        setFiles(transformData(data.children));
-      } else {
-        setFiles([]);
-      }
-    } catch (err) {
-      console.error('Failed to load file dependencies:', err);
-      setError('Failed to load file dependencies');
-      setFiles([]);
-    } finally {
-      setLoading(false);
+  const showError = useCallback((message: string) => {
+    if (onShowError) {
+      onShowError(message);
     }
-  }, [targetRepoUrl, transformData]);
-
-  useEffect(() => {
-    if (targetRepoUrl) {
-      loadFileDependencies();
-    }
-  }, [targetRepoUrl, loadFileDependencies]);
-
-  const updateFiles = (items: ExtendedFileItem[]): ExtendedFileItem[] => {
-    return items.map(item => {
-      if (item.children && item.children.length > 0) {
-        return { ...item, children: updateFiles(item.children) };
-      }
-      return item;
-    });
-  };
-
-  const handleRefresh = () => {
-    setFiles(updateFiles(files));
-  };
+  }, [onShowError]);
 
   const toggleExpanded = useCallback((targetId: string) => {
     const toggleInTree = (items: ExtendedFileItem[]): ExtendedFileItem[] => {
@@ -115,15 +50,89 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     setFiles(toggleInTree(files));
   }, [files]);
 
-  // TODO: OPTIMIZE - Memoize file tree rendering
-  const renderFileTree = useCallback((items: (FileItem & { children: FileItem[], expanded: boolean })[], depth = 0) => {
+  const loadFileDependencies = useCallback(async () => {
+    if (!sessionState.sessionId) {
+      showError('No active session found');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      // Try to get file dependencies from session first
+      const sessionDependencies = await ApiService.getFileDependenciesSession(
+        sessionState.sessionId
+      );
+      
+      if (sessionDependencies && sessionDependencies.length > 0) {
+        // Convert session file embeddings to ExtendedFileItem format
+        const convertedFiles: ExtendedFileItem[] = sessionDependencies.map(dep => ({
+          id: dep.id.toString(),
+          name: dep.file_name,
+          path: dep.file_path,
+          type: 'INTERNAL',
+          tokens: dep.tokens,
+          category: dep.file_type,
+          isDirectory: false,
+          children: [],
+          expanded: false
+        }));
+        setFiles(convertedFiles);
+      } else if (repoUrl && sessionState.repositoryInfo) {
+        // If no session dependencies, try to extract from repository
+        const repoDependencies = await ApiService.extractFileDependencies(
+          repoUrl
+        );
+        
+                 if (repoDependencies && repoDependencies.children) {
+           const convertToExtendedItems = (items: FileDependencyNode[]): ExtendedFileItem[] => {
+             return items.map(item => ({
+               id: item.id,
+               name: item.name,
+               path: undefined, // FileDependencyNode doesn't have path property
+               type: (item.type as 'INTERNAL' | 'EXTERNAL') || 'INTERNAL',
+               tokens: item.tokens || 0,
+               category: item.Category || 'unknown',
+               isDirectory: item.isDirectory || false,
+               children: item.children ? convertToExtendedItems(item.children) : [],
+               expanded: false
+             }));
+           };
+          
+          setFiles(convertToExtendedItems(repoDependencies.children));
+        }
+      } else {
+        setFiles([]);
+      }
+    } catch (error) {
+      console.error('Error loading file dependencies:', error);
+      showError('Failed to load file dependencies');
+      setFiles([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sessionState.sessionId, sessionState.repositoryInfo, repoUrl, showError]);
+
+  // Load file dependencies when component mounts or session changes
+  useEffect(() => {
+    if (sessionState.sessionId) {
+      loadFileDependencies();
+    }
+  }, [sessionState.sessionId, loadFileDependencies]);
+
+  const handleRefresh = () => {
+    console.log('Refreshing file dependencies...');
+    loadFileDependencies();
+  };
+
+  // Optimized file tree rendering with proper TypeScript types
+  const renderFileTree = useCallback((items: ExtendedFileItem[], depth = 0) => {
     return items.map((item) => {
       const hasChildren = item.children && item.children.length > 0;
-      const isDirectory = hasChildren;
+      const isDirectory = item.isDirectory || hasChildren;
       
       return (
         <div key={item.id} className="select-none">
-          <div 
+          <div
             className="flex items-center py-1 px-2 hover:bg-gray-100 cursor-pointer text-sm group"
             style={{ paddingLeft: `${depth * 20 + 8}px` }}
           >
@@ -146,11 +155,11 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
               )}
             </div>
             
-            <span 
+            <span
               className="flex-1 truncate"
               onClick={() => !isDirectory && onShowDetails(item)}
             >
-              {item.file_name}
+              {item.name || item.file_name}
             </span>
             
             <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -192,52 +201,30 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     });
   }, [onAddToContext, onShowDetails, toggleExpanded, loadingStates]);
 
-
-
-  if (!targetRepoUrl) {
-    return (
-      <div className="text-center py-8 text-gray-500">
-        <Folder className="w-12 h-12 mx-auto mb-2 text-gray-300" />
-        <p>No repository selected</p>
-        <p className="text-sm">Select a repository to view file dependencies</p>
-      </div>
-    );
-  }
-
   return (
     <div className="h-full flex flex-col bg-white">
       <div className="flex items-center justify-between p-4 border-b bg-gray-50">
         <div>
           <h3 className="font-semibold text-gray-800">File Dependencies</h3>
           <p className="text-sm text-gray-600 truncate">
-            {targetRepoUrl}
+            {sessionState.repositoryInfo?.full_name || 'No repository selected'}
           </p>
         </div>
         <button
           onClick={handleRefresh}
-          disabled={loading}
+          disabled={isLoading}
           className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-md disabled:opacity-50"
           title="Refresh dependencies"
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
       <div className="flex-1 overflow-auto">
-        {loading ? (
+        {isLoading ? (
           <div className="flex items-center justify-center h-40">
             <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
             <span className="ml-2 text-gray-600">Analyzing repository...</span>
-          </div>
-        ) : error ? (
-          <div className="p-4 text-center">
-            <div className="text-red-500 mb-2">⚠️ {error}</div>
-            <button
-              onClick={loadFileDependencies}
-              className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-            >
-              Retry
-            </button>
           </div>
         ) : files.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
@@ -253,7 +240,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
       </div>
 
       <div className="p-2 border-t bg-gray-50 text-xs text-gray-500">
-        Total files: {files.length} | Total tokens: {files.reduce((sum, file) => sum + file.tokens, 0)}
+        Total files: {files.length} | Total tokens: {files.reduce((sum, file) => sum + (file.tokens || 0), 0)}
       </div>
     </div>
   );
