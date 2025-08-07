@@ -4,7 +4,6 @@ Authentication Routes for GitHub OAuth
 Enhanced with proper logging and error handling
 """
 import logging
-from utils import utc_now
 from urllib.parse import urlencode
 
 from auth.auth_utils import (
@@ -33,6 +32,8 @@ from models import (
     User,
 )
 from sqlalchemy.orm import Session
+
+from utils import utc_now
 
 # Configure logger for this module
 logger = logging.getLogger(__name__)
@@ -169,6 +170,8 @@ async def api_create_session(
             )
         
         # Find the active AuthToken for this GitHub token
+
+
         auth_token = db.query(AuthToken).filter(
             AuthToken.access_token == github_token,
             AuthToken.is_active == True

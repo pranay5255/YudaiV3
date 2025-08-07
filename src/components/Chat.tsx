@@ -1,29 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Send, Plus } from 'lucide-react';
-import { Message, FileItem } from '../types';
-import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview } from '../services/api';
+import { Message, FileItem, ContextCard } from '../types';
+import type {
+  CreateIssueWithContextRequest,
+  ChatContextMessage,
+  FileContextItem,
+  GitHubIssuePreview
+} from '../types/api';
 import { UserIssueResponse } from '../types';
 import { useRepository } from '../hooks/useRepository';
-import { useAuth } from '../hooks/useAuth';
-
-// Simple toast utility (replace with your own or a library if available)
-// This function is used to show a toast when the user clicks on "Create Issue"
-function showToast(message: string) {
-  // This is a placeholder. Replace with your toast library or implementation.
-  // For example, if using react-toastify: toast.error(message)
-  if (typeof window !== 'undefined') {
-    // You can replace this with a more sophisticated toast system
-    window.alert(message);
-  }
-}
-
-interface ContextCard {
-  id: string;
-  title: string;
-  description: string;
-  tokens: number;
-  source: string;
-}
+import { useApi } from '../hooks/useApi';
+import { useSession } from '../contexts/SessionProvider';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -39,25 +26,22 @@ interface IssuePreviewData extends GitHubIssuePreview {
 
 interface ChatProps {
   onAddToContext: (content: string) => void;
-  onCreateIssue?: (conversationContext: Message[]) => void; // Made optional for backward compatibility
-  contextCards?: ContextCard[]; // Context cards from other components #TODO: Remove this
-  fileContext?: FileItem[]; // File dependencies context
-  onShowIssuePreview?: (issuePreview: IssuePreviewData) => void; // Callback to show issue preview in modal
+  contextCards?: ContextCard[];
+  fileContext?: FileItem[];
+  onShowIssuePreview?: (issuePreview: IssuePreviewData) => void;
+  onShowError?: (error: string) => void;
 }
 
-export const Chat: React.FC<ChatProps> = ({ 
-  onAddToContext, 
-  onCreateIssue, // Keep for backward compatibility but mark as unused
+export const Chat: React.FC<ChatProps> = ({
+  onAddToContext,
   contextCards = [],
   fileContext = [],
-  onShowIssuePreview 
+  onShowIssuePreview,
+  onShowError
 }) => {
-  // Suppress the unused variable warning by referencing it
-  void onCreateIssue;
-  void contextCards; // Suppress unused variable warning
-  
+  const { sessionId, createSession } = useSession();
   const { selectedRepository } = useRepository();
-  const { sessionToken } = useAuth();
+  const api = useApi();
   
   // Simplified messages state without session management
   const [messages, setMessages] = useState<Message[]>([
@@ -87,52 +71,75 @@ export const Chat: React.FC<ChatProps> = ({
   const [isCreatingIssue, setIsCreatingIssue] = useState(false);
 
   // Count user messages (messages that are not the initial system messages)
-  const userMessageCount = messages.filter(msg => 
+  const userMessageCount = messages.filter(msg =>
     msg.id !== '1' && msg.id !== '2'
   ).length;
-//eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
-    
-    // Check if we have an active session
-    if (!selectedRepository) {
-      const errorText = 'No active repository selected. Please select a repository first.';
-      showToast(errorText);
-      return;
+
+  const showError = useCallback((message: string) => {
+    if (onShowError) {
+      onShowError(message);
+    } else {
+      console.error('Chat Error:', message);
     }
+  }, [onShowError]);
+
+  // Create session when repository is selected
+  useEffect(() => {
+    if (selectedRepository && !sessionId) {
+      createSession(
+        selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0],
+        selectedRepository.repository.name,
+        selectedRepository.branch
+      );
+    }
+  }, [selectedRepository, sessionId, createSession]);
+
+  const handleSend = useCallback(async () => {
+    if (!input.trim() || isLoading || !sessionId) return;
     
     const currentInput = input;
     setInput('');
     setIsLoading(true);
     
-    try {
-      // Simulate sending message to a backend
-      const newMessage: Message = {
-        id: Date.now().toString(),
-        content: currentInput,
+    // Add user message to chat immediately
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      content: currentInput,
+      isCode: false,
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMessage]);
+    
+          try {
+        // Send to chat API for AI response
+        const response = await api.sendChatMessage({
+          session_id: sessionId,
+          message: {
+            content: currentInput,
+            is_code: false
+          },
+          context_cards: contextCards.map(card => card.id),
+          repo_owner: selectedRepository?.repository.owner?.login || selectedRepository?.repository.full_name.split('/')[0],
+          repo_name: selectedRepository?.repository.name
+        });
+      
+      // Add assistant response to chat
+      const assistantMessage: Message = {
+        id: response.message_id,
+        content: response.reply,
         isCode: false,
         timestamp: new Date(),
       };
-      setMessages(prev => [...prev, newMessage]);
+      setMessages(prev => [...prev, assistantMessage]);
       
     } catch (error) {
       console.error('Failed to send message:', error);
-      
-      let errorText = 'Sorry, I encountered an error. Please try again.';
-      if (error instanceof Error) {
-        if (error.message === 'Authentication required') {
-          errorText = 'Please log in to continue chatting.';
-        } else if (error.message === 'No active session') {
-          errorText = 'Please select a repository to start a session.';
-        } else {
-          errorText = `Error: ${error.message}`;
-        }
-      }
-      // Show error as toast
-      showToast(errorText);
-
-      // Refresh session to get latest state after error
-  };
+      showError('Failed to send message. Please try again.');
+      setMessages(prev => prev.filter(msg => msg.id !== userMessage.id));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [input, isLoading, sessionId, contextCards, selectedRepository, api, showError]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -141,8 +148,8 @@ export const Chat: React.FC<ChatProps> = ({
     }
   };
 
-  const handleCreateGitHubIssue = async () => {
-    if (isCreatingIssue) return;
+  const handleCreateGitHubIssue = useCallback(async () => {
+    if (isCreatingIssue || !selectedRepository) return;
     
     setIsCreatingIssue(true);
     
@@ -160,79 +167,53 @@ export const Chat: React.FC<ChatProps> = ({
       // Convert file context to FileContextItem format
       const fileContextItems: FileContextItem[] = fileContext.map(file => ({
         id: file.id,
-        name: file.name,
-        type: file.type,
+        name: file.name || file.file_name || '',
+        type: file.type || file.file_type || 'INTERNAL',
         tokens: file.tokens,
-        category: file.Category,
-        path: file.path
+        category: file.category || file.content_summary || '',
+        path: file.path || file.file_path
       }));
 
-      // Prepare the request
+      // Prepare the request using the proper API method
       const request: CreateIssueWithContextRequest = {
-        title: `Issue from Chat Session ${selectedRepository?.repository.full_name || 'default'}`,
+        title: `Issue from Chat Session - ${selectedRepository.repository.name}`,
         description: 'This issue was generated from a chat conversation with file dependency context.',
         chat_messages: conversationMessages,
         file_context: fileContextItems,
-        repository_info: selectedRepository ? {
+        repository_info: {
           owner: selectedRepository.repository.full_name.split('/')[0],
           name: selectedRepository.repository.full_name.split('/')[1],
           branch: selectedRepository.branch
-        } : undefined,
+        },
         priority: 'medium'
       };
 
-      // Create issue from chat (this method may need to be implemented)
-      // For now, using the existing createIssueFromChat method
-      const chatRequest = {
-        session_id: '', // No session ID for this simplified version
-        message: { content: request.title, is_code: false },
-        context_cards: []
-      };
-      const response = await ApiService.createIssueFromChat(chatRequest, sessionToken || undefined);
+      // Use the proper API method for creating issues with context
+      const response = await api.createIssueWithContext(request);
       
       if (response.success && onShowIssuePreview) {
-        // Create a mock GitHub issue preview since the API structure changed
-        const mockPreview = {
-          title: response.issue.title,
-          body: response.issue.description || response.issue.issue_text_raw,
-          labels: [],
-          assignees: [],
-          repository_info: request.repository_info,
-          metadata: {
-            chat_messages_count: conversationMessages.length,
-            file_context_count: fileContextItems.length,
-            total_tokens: fileContextItems.reduce((sum, file) => sum + file.tokens, 0),
-            generated_at: new Date().toISOString(),
-            generation_method: 'chat_conversation'
-          },
-          userIssue: response.issue,
+        const issuePreview: IssuePreviewData = {
+          ...response.github_preview,
+          userIssue: response.user_issue as UserIssueResponse,
           conversationContext: conversationMessages,
           fileContext: fileContextItems,
-          canCreateGitHubIssue: !!selectedRepository,
+          canCreateGitHubIssue: true,
           repositoryInfo: request.repository_info
         };
         
-        onShowIssuePreview(mockPreview);
-        showToast('Issue created successfully!');
+        onShowIssuePreview(issuePreview);
       }
       
     } catch (error) {
       console.error('Failed to create GitHub issue:', error);
       const errorText = `Failed to create GitHub issue: ${error instanceof Error ? error.message : 'Unknown error'}`;
-      // Show error as toast
-      showToast(errorText);
-      // Optionally, you could also send this as a chat message if desired
-      // const errorMessage: Message = {
-      //   id: Date.now().toString(),
-      //   content: errorText,
-      //   isCode: false,
-      //   timestamp: new Date(),
-      // };
-      // sendRealtimeMessage({ type: 'MESSAGE', data: errorMessage });
+      showError(errorText);
     } finally {
       setIsCreatingIssue(false);
     }
-  };
+  }, [isCreatingIssue, selectedRepository, messages, fileContext, api, onShowIssuePreview, showError]);
+
+
 
   return (
     <div className="h-full flex flex-col">
@@ -315,20 +296,28 @@ export const Chat: React.FC<ChatProps> = ({
             disabled={!input.trim() || isLoading || !selectedRepository}
             className="bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg flex items-center gap-2"
           >
-            <Send size={16} />
-            Send
+            {isLoading ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+            ) : (
+              <Send size={16} />
+            )}
+            {isLoading ? 'Sending...' : 'Send'}
           </button>
           <button
             onClick={handleCreateGitHubIssue}
             disabled={isCreatingIssue || userMessageCount < 1 || !selectedRepository}
             className="bg-green-600 hover:bg-green-700 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg flex items-center gap-2"
+            title={!selectedRepository ? 'Select a repository first' : userMessageCount < 1 ? 'Send at least one message' : 'Create GitHub issue from conversation'}
           >
-            <Plus size={16} />
-            Create Issue
+            {isCreatingIssue ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+            ) : (
+              <Plus size={16} />
+            )}
+            {isCreatingIssue ? 'Creating...' : 'Create Issue'}
           </button>
         </div>
       </div>
     </div>
   );
 };
-}
