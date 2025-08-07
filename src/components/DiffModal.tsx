@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { X, ExternalLink, GitBranch, FileText, MessageSquare, Tag, Clock, Check } from 'lucide-react';
-import { ApiService, GitHubIssuePreview, ChatContextMessage, FileContextItem } from '../services/api';
+import type { GitHubIssuePreview, ChatContextMessage, FileContextItem } from '../types/api';
 import { UserIssueResponse } from '../types';
-import { useAuth } from '../hooks/useAuth';
+import { useApi } from '../hooks/useApi';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -20,46 +20,64 @@ interface DiffModalProps {
   isOpen: boolean;
   onClose: () => void;
   issuePreview?: IssuePreviewData;
+  onShowError?: (error: string) => void;
 }
 
 export const DiffModal: React.FC<DiffModalProps> = ({
   isOpen,
   onClose,
-  issuePreview
+  issuePreview,
+  onShowError
 }) => {
   const [isCreatingGitHubIssue, setIsCreatingGitHubIssue] = useState(false);
   const [githubIssueCreated, setGithubIssueCreated] = useState(false);
   const [githubIssueUrl, setGithubIssueUrl] = useState<string | null>(null);
-  const { sessionToken } = useAuth();
+  const [error, setError] = useState<string | null>(null);
+  
+  const api = useApi();
 
-  if (!isOpen || !issuePreview) return null;
+  const showError = useCallback((message: string) => {
+    setError(message);
+    if (onShowError) {
+      onShowError(message);
+    }
+  }, [onShowError]);
 
-  const handleCreateGitHubIssue = async () => {
-    if (!issuePreview.canCreateGitHubIssue || !issuePreview.userIssue) return;
+  const handleCreateGitHubIssue = useCallback(async () => {
+    if (!issuePreview?.canCreateGitHubIssue || !issuePreview?.userIssue) {
+      showError('Cannot create GitHub issue: missing issue data or repository access');
+      return;
+    }
     
     setIsCreatingGitHubIssue(true);
+    setError(null);
     
     try {
-      const response = await ApiService.createGitHubIssueFromUserIssue(issuePreview.userIssue.issue_id, sessionToken || undefined);
+      const response = await api.createGitHubIssueFromUserIssue(issuePreview.userIssue.issue_id);
       
       if (response.success) {
         setGithubIssueCreated(true);
         setGithubIssueUrl(response.github_url);
+      } else {
+        showError(response.message || 'Failed to create GitHub issue');
       }
       
     } catch (error) {
       console.error('Failed to create GitHub issue:', error);
-      // TODO: Show error message in UI
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      showError(`Failed to create GitHub issue: ${errorMessage}`);
     } finally {
       setIsCreatingGitHubIssue(false);
     }
-  };
+  }, [issuePreview, api, showError]);
 
-  const handleOpenGitHubIssue = () => {
+  const handleOpenGitHubIssue = useCallback(() => {
     if (githubIssueUrl) {
-      window.open(githubIssueUrl, '_blank');
+      window.open(githubIssueUrl, '_blank', 'noopener,noreferrer');
     }
-  };
+  }, [githubIssueUrl]);
+
+  if (!isOpen || !issuePreview) return null;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -92,6 +110,19 @@ export const DiffModal: React.FC<DiffModalProps> = ({
             <X className="w-5 h-5 text-fg" />
           </button>
         </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="mx-6 mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+            <p className="text-sm text-red-400">{error}</p>
+            <button
+              onClick={() => setError(null)}
+              className="mt-2 text-xs text-red-300 hover:text-red-200 underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {/* Content */}
         <div className="flex-1 overflow-auto">
@@ -244,9 +275,13 @@ export const DiffModal: React.FC<DiffModalProps> = ({
         {/* Footer */}
         <div className="p-6 border-t border-zinc-800 flex justify-between items-center">
           <div className="text-sm text-fg/60">
-            {issuePreview.canCreateGitHubIssue 
-              ? 'Ready to create GitHub issue' 
-              : 'Select a repository to create GitHub issue'}
+            {githubIssueCreated ? (
+              <span className="text-green-400">✓ GitHub issue created successfully</span>
+            ) : issuePreview?.canCreateGitHubIssue ? (
+              'Ready to create GitHub issue'
+            ) : (
+              'Repository access required to create GitHub issue'
+            )}
           </div>
           <div className="flex gap-3">
             <button
@@ -258,7 +293,7 @@ export const DiffModal: React.FC<DiffModalProps> = ({
             {githubIssueCreated ? (
               <button
                 onClick={handleOpenGitHubIssue}
-                className="flex items-center gap-2 bg-success hover:bg-success/80 text-white px-4 py-2 rounded-lg transition-colors"
+                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors"
               >
                 Open GitHub Issue
                 <ExternalLink className="w-4 h-4" />
@@ -266,9 +301,16 @@ export const DiffModal: React.FC<DiffModalProps> = ({
             ) : (
               <button
                 onClick={handleCreateGitHubIssue}
-                disabled={!issuePreview.canCreateGitHubIssue || isCreatingGitHubIssue}
-                className="flex items-center gap-2 bg-primary hover:bg-primary/80 disabled:opacity-50 
+                disabled={!issuePreview?.canCreateGitHubIssue || isCreatingGitHubIssue || !issuePreview?.userIssue}
+                className="flex items-center gap-2 bg-primary hover:bg-primary/80 disabled:opacity-50
                          disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg transition-colors"
+                title={
+                  !issuePreview?.canCreateGitHubIssue
+                    ? 'Repository access required'
+                    : !issuePreview?.userIssue
+                      ? 'Issue data not available'
+                      : 'Create GitHub issue'
+                }
               >
                 {isCreatingGitHubIssue ? (
                   <>

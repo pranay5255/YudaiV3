@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, Github, GitBranch, Check, X, Loader2 } from 'lucide-react';
 import { GitHubRepository, GitHubBranch, SelectedRepository } from '../types';
-import { ApiService } from '../services/api';
-import { useAuth } from '../hooks/useAuth';
+import { useApi } from '../hooks/useApi';
+import { useRepository } from '../hooks/useRepository';
 
 interface RepositorySelectionToastProps {
   isOpen: boolean;
@@ -10,21 +10,21 @@ interface RepositorySelectionToastProps {
   onCancel: () => void;
 }
 
-export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> = ({ 
-  isOpen, 
-  onConfirm, 
-  onCancel 
+export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> = ({
+  isOpen,
+  onConfirm,
+  onCancel
 }) => {
-  const [repositories, setRepositories] = useState<GitHubRepository[]>([]);
   const [branches, setBranches] = useState<GitHubBranch[]>([]);
   const [selectedRepository, setSelectedRepository] = useState<GitHubRepository | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string>('');
-  const [loadingRepos, setLoadingRepos] = useState(false);
   const [loadingBranches, setLoadingBranches] = useState(false);
   const [isRepoDropdownOpen, setIsRepoDropdownOpen] = useState(false);
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { sessionToken } = useAuth();
+  
+  const api = useApi();
+  const { availableRepositories, isLoadingRepositories, loadRepositories, repositoryError } = useRepository();
 
   const loadBranches = useCallback(async () => {
     if (!selectedRepository) return;
@@ -35,17 +35,25 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
     
     try {
       const [owner, repo] = selectedRepository.full_name.split('/');
-      const branchList = await ApiService.getRepositoryBranches(owner, repo, sessionToken || undefined);
-      setBranches(branchList);
+      const branchList = await api.getRepositoryBranches(owner, repo);
       
-      // Auto-select main or master branch if available
-      const defaultBranch = branchList.find(b => 
-        b.name === 'main' || b.name === 'master'
+      // Transform API response to match frontend GitHubBranch type
+      const transformedBranches: GitHubBranch[] = branchList.map(branch => ({
+        name: branch.name,
+        commit: branch.commit,
+        protected: false // API doesn't provide this, set default
+      }));
+      
+      setBranches(transformedBranches);
+      
+      // Auto-select main or master branch if available, or default branch
+      const defaultBranch = transformedBranches.find(b =>
+        b.name === 'main' || b.name === 'master' || b.name === selectedRepository.default_branch
       );
       if (defaultBranch) {
         setSelectedBranch(defaultBranch.name);
-      } else if (branchList.length > 0) {
-        setSelectedBranch(branchList[0].name);
+      } else if (transformedBranches.length > 0) {
+        setSelectedBranch(transformedBranches[0].name);
       }
     } catch (error) {
       console.error('Failed to load branches:', error);
@@ -53,14 +61,14 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
     } finally {
       setLoadingBranches(false);
     }
-  }, [selectedRepository]);
+  }, [selectedRepository, api]);
 
   // Load repositories when toast opens
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && availableRepositories.length === 0) {
       loadRepositories();
     }
-  }, [isOpen]);
+  }, [isOpen, availableRepositories.length, loadRepositories]);
 
   // Load branches when repository is selected
   useEffect(() => {
@@ -69,19 +77,12 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
     }
   }, [selectedRepository, loadBranches]);
 
-  const loadRepositories = async () => {
-    setLoadingRepos(true);
-    setError(null);
-    try {
-      const repos = await ApiService.getUserRepositories(sessionToken || undefined);
-      setRepositories(repos);
-    } catch (error) {
-      console.error('Failed to load repositories:', error);
-      setError('Failed to load repositories. Please try again.');
-    } finally {
-      setLoadingRepos(false);
+  // Set error from repository context
+  useEffect(() => {
+    if (repositoryError) {
+      setError(repositoryError);
     }
-  };
+  }, [repositoryError]);
 
   const handleConfirm = () => {
     if (selectedRepository && selectedBranch) {
@@ -146,11 +147,11 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
               <div className="relative">
                 <button
                   onClick={() => setIsRepoDropdownOpen(!isRepoDropdownOpen)}
-                  disabled={loadingRepos}
+                  disabled={isLoadingRepositories}
                   className="w-full flex items-center justify-between px-4 py-3 bg-zinc-900 border border-zinc-600 rounded-lg text-fg hover:border-zinc-500 transition-colors disabled:opacity-50"
                 >
                   <span className="flex items-center gap-2">
-                    {loadingRepos ? (
+                    {isLoadingRepositories ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
                         Loading repositories...
@@ -167,9 +168,9 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
                   <ChevronDown className={`w-4 h-4 transition-transform ${isRepoDropdownOpen ? 'rotate-180' : ''}`} />
                 </button>
                 
-                {isRepoDropdownOpen && repositories.length > 0 && (
+                {isRepoDropdownOpen && availableRepositories.length > 0 && (
                   <div className="absolute top-full left-0 right-0 mt-1 bg-zinc-900 border border-zinc-600 rounded-lg shadow-lg max-h-64 overflow-y-auto z-10">
-                    {repositories.map((repo) => (
+                    {availableRepositories.map((repo) => (
                       <button
                         key={repo.id}
                         onClick={() => handleRepositorySelect(repo)}
