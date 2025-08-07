@@ -10,6 +10,7 @@ from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Tex
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+
 from utils import utc_now
 
 # ============================================================================
@@ -126,8 +127,10 @@ class Repository(Base):
     __tablename__ = "repositories"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    github_repo_id: Mapped[Optional[int]] = mapped_column(Integer, unique=True, nullable=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    # Optional GitHub numeric repository ID. Keep non-unique to allow multiple users/tests
+    # to reference the same upstream repository without constraint conflicts.
+    github_repo_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
 
     # Core GitHub metadata
     name: Mapped[str] = mapped_column(String(255), nullable=False)
