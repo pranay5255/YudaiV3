@@ -8,7 +8,7 @@ import type {
 } from '../types/api';
 import { UserIssueResponse, ContextCard } from '../types';
 import { useApi } from '../hooks/useApi';
-import { useSession } from '../contexts/SessionProvider';
+import { useSession } from '../hooks/useSessionState';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
