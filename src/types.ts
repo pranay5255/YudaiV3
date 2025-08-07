@@ -116,7 +116,13 @@ export interface GitHubRepository {
   updated_at?: string;
   created_at?: string;
   pushed_at?: string;
-  default_branch?: string; // Added for consistency
+  default_branch?: string;
+  owner?: {
+    login: string;
+    id: number;
+    avatar_url?: string;
+    html_url?: string;
+  };
 }
 
 export interface GitHubBranch {
