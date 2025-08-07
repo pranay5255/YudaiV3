@@ -332,6 +332,34 @@ export interface SessionState {
   connectionStatus: 'connected' | 'disconnected' | 'reconnecting';
 }
 
+// ============================================================================
+// UNIFIED SESSION STATE TYPES
+// ============================================================================
+
+// Unified session state that combines all session-related data
+export interface UnifiedSessionState extends SessionState {
+  // Additional unified state properties
+  tabState: TabState;
+  selectedRepository: SelectedRepository | null;
+  availableRepositories: GitHubRepository[];
+  isLoadingRepositories: boolean;
+  repositoryError: string | null;
+}
+
+// Session context value interface for the provider
+export interface SessionContextValue extends UnifiedSessionState {
+  // Session management methods
+  createSession: (repoOwner: string, repoName: string, repoBranch?: string) => Promise<void>;
+  loadSession: (sessionId: string) => Promise<void>;
+  clearSession: () => void;
+  
+  // Repository management methods
+  setSelectedRepository: (repository: SelectedRepository | null) => void;
+  hasSelectedRepository: boolean;
+  clearSelectedRepository: () => void;
+  loadRepositories: () => Promise<void>;
+}
+
 // GitHub Issue Context Structure
 export interface GitHubIssueContext {
   conversation: {

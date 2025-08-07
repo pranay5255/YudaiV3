@@ -65,6 +65,15 @@ export interface ChatRequest {
   repo_name?: string;
 }
 
+export interface CreateChatMessageRequest {
+  content: string;
+  is_code: boolean;
+  sender_type: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system';
+  context_cards?: string[];
+  referenced_files?: string[];
+}
+
 export interface ChatResponse {
   reply: string;
   conversation: [string, string][];
@@ -176,6 +185,76 @@ export interface CreateGitHubIssueResponse {
 }
 
 // ============================================================================
+// SESSION API TYPES
+// ============================================================================
+
+export interface CreateSessionDaifuRequest {
+  repo_owner: string;
+  repo_name: string;
+  repo_branch?: string;
+  title?: string;
+  description?: string;
+}
+
+export interface SessionResponse {
+  id: number;
+  session_id: string;
+  title?: string;
+  description?: string;
+  repo_owner?: string;
+  repo_name?: string;
+  repo_branch?: string;
+  repo_context?: Record<string, unknown>;
+  is_active: boolean;
+  total_messages: number;
+  total_tokens: number;
+  created_at: string;
+  updated_at?: string;
+  last_activity?: string;
+}
+
+export interface SessionContextResponse {
+  session: SessionResponse;
+  messages: ChatMessageResponse[];
+  context_cards: string[];
+  repository_info?: {
+    owner: string;
+    name: string;
+    branch: string;
+    full_name: string;
+    html_url: string;
+  };
+  file_embeddings_count: number;
+  statistics?: {
+    total_messages: number;
+    total_tokens: number;
+    total_cost: number;
+    session_duration: number;
+    user_issues_count?: number;
+    file_embeddings_count?: number;
+  };
+  user_issues?: UserIssueResponse[];
+  file_embeddings?: FileEmbeddingResponse[];
+}
+
+export interface ChatMessageResponse {
+  id: number;
+  message_id: string;
+  message_text: string;
+  sender_type: string;
+  role: string;
+  is_code: boolean;
+  tokens: number;
+  model_used?: string;
+  processing_time?: number;
+  context_cards?: string[];
+  referenced_files?: string[];
+  error_message?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+// ============================================================================
 // REPOSITORY API TYPES
 // ============================================================================
 
@@ -236,6 +315,95 @@ export interface ExtractFileDependenciesRequest {
 
 export interface ExtractFileDependenciesResponse {
   children: FileDependencyNode[];
+}
+
+// ============================================================================
+// USER ISSUES & FILE EMBEDDINGS API TYPES
+// ============================================================================
+
+export interface UserIssueResponse {
+  id: number;
+  issue_id: string;
+  user_id: number;
+  title: string;
+  description?: string;
+  issue_text_raw: string;
+  issue_steps?: string[];
+  session_id?: string;
+  context_card_id?: number;
+  context_cards?: string[];
+  ideas?: string[];
+  repo_owner?: string;
+  repo_name?: string;
+  priority: string;
+  status: string;
+  agent_response?: string;
+  processing_time?: number;
+  tokens_used: number;
+  github_issue_url?: string;
+  github_issue_number?: number;
+  created_at: string;
+  updated_at?: string;
+  processed_at?: string;
+}
+
+export interface FileEmbeddingResponse {
+  id: number;
+  session_id: number;
+  repository_id?: number;
+  file_path: string;
+  file_name: string;
+  file_type: string;
+  chunk_index: number;
+  tokens: number;
+  file_metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+// ============================================================================
+// CONTEXT CARDS & FILE EMBEDDINGS API TYPES
+// ============================================================================
+
+export interface CreateContextCardRequest {
+  title: string;
+  description: string;
+  source: 'chat' | 'file-deps' | 'upload';
+  tokens: number;
+  content?: string;
+}
+
+export interface ContextCardResponse {
+  id: number;
+  session_id: number;
+  title: string;
+  description: string;
+  source: string;
+  tokens: number;
+  content?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface CreateFileEmbeddingRequest {
+  file_path: string;
+  file_name: string;
+  file_type: string;
+  chunk_index: number;
+  tokens: number;
+  file_metadata?: Record<string, unknown>;
+}
+
+export interface FileEmbeddingResponse {
+  id: number;
+  session_id: number;
+  repository_id?: number;
+  file_path: string;
+  file_name: string;
+  file_type: string;
+  chunk_index: number;
+  tokens: number;
+  file_metadata?: Record<string, unknown>;
+  created_at: string;
 }
 
 // ============================================================================
