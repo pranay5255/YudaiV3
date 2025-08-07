@@ -7,11 +7,11 @@ import string
 from datetime import timedelta
 from typing import Optional
 
-from utils import utc_now
-
 from fastapi import HTTPException, status
 from models import SessionToken, User
 from sqlalchemy.orm import Session
+
+from utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,7 @@ def validate_session_token(db: Session, session_token: str) -> Optional[User]:
         logger.debug(f"Validating session token: {session_token[:10]}...")
         
         # Find active session token
+        
         db_session_token = db.query(SessionToken).filter(
             SessionToken.session_token == session_token,
             SessionToken.is_active == True

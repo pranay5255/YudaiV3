@@ -1,8 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Trash2, FileText, MessageCircle, Upload } from 'lucide-react';
-import { ApiService, CreateIssueWithContextRequest, ChatContextMessage, FileContextItem, GitHubIssuePreview } from '../services/api';
+import type {
+  CreateIssueWithContextRequest,
+  ChatContextMessage,
+  FileContextItem,
+  GitHubIssuePreview
+} from '../types/api';
 import { UserIssueResponse, ContextCard } from '../types';
-import { useAuth } from '../hooks/useAuth';
+import { useApi } from '../hooks/useApi';
+import { useSession } from '../contexts/SessionProvider';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -21,6 +27,7 @@ interface ContextCardsProps {
   onRemoveCard: (id: string) => void;
   onCreateIssue?: () => void;
   onShowIssuePreview?: (issuePreview: IssuePreviewData) => void;
+  onShowError?: (error: string) => void;
   repositoryInfo?: {
     owner: string;
     name: string;
@@ -29,14 +36,32 @@ interface ContextCardsProps {
 }
 
 export const ContextCards: React.FC<ContextCardsProps> = ({ 
-  cards, 
-  onRemoveCard, 
-  onCreateIssue,
-  onShowIssuePreview,
-  repositoryInfo
+  cards = [], 
+  onRemoveCard = () => {}, 
+  onShowIssuePreview, 
+  onShowError, 
+  repositoryInfo 
 }) => {
-  const [isCreatingIssue, setIsCreatingIssue] = useState(false);
-  const { sessionToken } = useAuth();
+  const { sessionId, repositoryInfo: sessionRepositoryInfo } = useSession();
+  const api = useApi();
+  const [isLoading, setIsLoading] = useState(false);
+
+  const loadContextCards = useCallback(async () => {
+    // TODO: Implement context cards loading when API is ready
+    console.log('Loading context cards for session:', sessionId);
+  }, [sessionId]);
+
+  // Load context cards when session changes
+  useEffect(() => {
+    if (sessionId) {
+      loadContextCards();
+    }
+  }, [sessionId, loadContextCards]);
+
+  const removeContextCard = useCallback(async (cardId: string) => {
+    // TODO: Implement context card removal when API is ready
+    onRemoveCard(cardId);
+  }, [onRemoveCard]);
 
   const getSourceIcon = (source: ContextCard['source']) => {
     switch (source) {
@@ -55,58 +80,79 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
 
   const totalTokens = cards.reduce((sum, card) => sum + card.tokens, 0);
 
-  // Replicate Chat.tsx: handle create GitHub issue with context cards
-  const handleCreateGitHubIssue = async () => {
-    if (isCreatingIssue) return;
-    setIsCreatingIssue(true);
+  const showError = useCallback((message: string) => {
+    if (onShowError) {
+      onShowError(message);
+    } else {
+      console.error('ContextCards Error:', message);
+    }
+  }, [onShowError]);
+
+  // Handle create GitHub issue with context cards using unified API
+  const handleCreateGitHubIssue = useCallback(async () => {
+    const repoInfo = repositoryInfo || sessionRepositoryInfo;
+    if (isLoading || !repoInfo) {
+      if (!repoInfo) {
+        showError('No repository selected. Please select a repository first.');
+      }
+      return;
+    }
+    
+    setIsLoading(true);
+    
     try {
       // Separate chat and file context
       const chatCards = cards.filter(card => card.source === 'chat');
       const fileCards = cards.filter(card => card.source === 'file-deps');
 
-      // Convert to API formats
+      // Convert to API formats with proper typing
       const conversationMessages: ChatContextMessage[] = chatCards.map(card => ({
         id: card.id,
-        content: card.title + '\n' + card.description,
+        content: `${card.title}\n${card.description}`,
         isCode: false,
         timestamp: new Date().toISOString(),
       }));
+      
       const fileContextItems: FileContextItem[] = fileCards.map(card => ({
         id: card.id,
         name: card.title,
         type: 'INTERNAL',
         tokens: card.tokens,
-        category: 'Context File',
+        category: card.source,
         path: card.title,
       }));
 
       const request: CreateIssueWithContextRequest = {
-        title: `Issue from Context Cards`,
-        description: 'This issue was generated from context cards.',
+        title: `Issue from Context Cards - ${repoInfo.name}`,
+        description: 'This issue was generated from context cards including chat messages and file dependencies.',
         chat_messages: conversationMessages,
         file_context: fileContextItems,
-        repository_info: repositoryInfo,
+        repository_info: repoInfo,
         priority: 'medium',
       };
 
-      const response = await ApiService.createIssueWithContext(request, sessionToken || undefined);
+      const response = await api.createIssueWithContext(request);
+      
       if (response.success && onShowIssuePreview) {
-        onShowIssuePreview({
+        const previewData: IssuePreviewData = {
           ...response.github_preview,
-          userIssue: response.user_issue,
+          userIssue: response.user_issue as UserIssueResponse,
           conversationContext: conversationMessages,
           fileContext: fileContextItems,
-          canCreateGitHubIssue: !!repositoryInfo,
+          canCreateGitHubIssue: true,
           repositoryInfo: request.repository_info,
-        });
+        };
+        
+        onShowIssuePreview(previewData);
       }
     } catch (error) {
-      // Optionally show error toast or message
       console.error('Failed to create GitHub issue from context cards:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to create issue';
+      showError(`Failed to create GitHub issue: ${errorMessage}`);
     } finally {
-      setIsCreatingIssue(false);
+      setIsLoading(false);
     }
-  };
+  }, [isLoading, repositoryInfo, sessionRepositoryInfo, cards, api, onShowIssuePreview, showError]);
 
   return (
     <div className="h-full flex flex-col">
@@ -159,7 +205,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
                   </div>
 
                   <button
-                    onClick={() => onRemoveCard(card.id)}
+                    onClick={() => removeContextCard(card.id)}
                     className="opacity-0 group-hover:opacity-100 transition-opacity
                              p-1 hover:bg-error/20 rounded text-error"
                     aria-label="Remove card"
@@ -181,13 +227,27 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
           </span>
         </div>
         <button
-          onClick={onCreateIssue ? onCreateIssue : handleCreateGitHubIssue}
-          disabled={cards.length === 0 || isCreatingIssue}
-          className="w-full h-11 bg-primary hover:bg-primary/80 disabled:opacity-50 
-                   disabled:cursor-not-allowed text-white rounded-xl font-medium 
+          onClick={handleCreateGitHubIssue}
+          disabled={cards.length === 0 || isLoading || !repositoryInfo}
+          className="w-full h-11 bg-primary hover:bg-primary/80 disabled:opacity-50
+                   disabled:cursor-not-allowed text-white rounded-xl font-medium
                    transition-colors"
+          title={
+            !repositoryInfo
+              ? 'Select a repository first'
+              : cards.length === 0
+                ? 'Add context cards first'
+                : 'Create GitHub issue from context cards'
+          }
         >
-          {isCreatingIssue ? 'Creating...' : 'Create GitHub Issue'}
+          {isLoading ? (
+            <div className="flex items-center justify-center gap-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+              Creating...
+            </div>
+          ) : (
+            'Create GitHub Issue'
+          )}
         </button>
       </div>
     </div>
