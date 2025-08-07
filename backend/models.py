@@ -280,11 +280,11 @@ class FileAnalysis(Base):
 
 class ContextCard(Base):
     """Context cards created by users"""
-    # TODO: MAke this compatible to display for @ContextCard.tsx
     __tablename__ = "context_cards"
     
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    session_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chat_sessions.id"), nullable=True)
     
     # Context data
     title: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -302,6 +302,7 @@ class ContextCard(Base):
     
     # Relationships
     user: Mapped["User"] = relationship()
+    session: Mapped[Optional["ChatSession"]] = relationship()
 
 class IdeaItem(Base):
     """Ideas to implement"""
@@ -359,6 +360,7 @@ class ChatSession(Base):
     user: Mapped["User"] = relationship()
     messages: Mapped[List["ChatMessage"]] = relationship(back_populates="session", cascade="all, delete-orphan")
     file_embeddings: Mapped[List["FileEmbedding"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+    context_cards: Mapped[List["ContextCard"]] = relationship(back_populates="session", cascade="all, delete-orphan")
 
 class ChatMessage(Base):
     """Individual chat messages within sessions"""

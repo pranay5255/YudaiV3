@@ -17,6 +17,7 @@ import uvicorn
 # Import all service routers
 from auth import auth_router
 from daifuUserAgent.chat_api import router as daifu_router
+from stateManagement.session_routes import router as session_router
 
 # Import database initialization
 from db.database import init_db
@@ -64,6 +65,7 @@ app.add_middleware(
 # Mount all service routers
 app.include_router(auth_router, prefix="/auth", tags=["authentication"])
 app.include_router(github_router, prefix="/github", tags=["github"])
+app.include_router(session_router, prefix="/daifu", tags=["sessions"])
 app.include_router(daifu_router, prefix="/daifu", tags=["chat"])
 app.include_router(issue_router, prefix="/issues", tags=["issues"])
 app.include_router(filedeps_router, prefix="/filedeps", tags=["file-dependencies"])
