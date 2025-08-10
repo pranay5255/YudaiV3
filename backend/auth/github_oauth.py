@@ -6,8 +6,6 @@ Simplified to match Ruby reference implementation
 
 import os
 from datetime import timedelta
-
-from utils import utc_now
 from typing import Any, Dict
 from urllib.parse import urlencode
 
@@ -15,8 +13,10 @@ import httpx
 from db.database import get_db
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from models import AuthToken, User
+from models import AuthToken, SessionToken, User
 from sqlalchemy.orm import Session
+
+from utils import utc_now
 
 # GitHub OAuth Configuration - matching Ruby implementation
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -235,42 +235,64 @@ async def get_current_user(
         HTTPException: If token is invalid or user not found
     """
     token = credentials.credentials
-    
-    # Find active auth token
+
+    # 1) Try to authenticate using a SessionToken (frontend session)
+    session_token = db.query(SessionToken).filter(
+        SessionToken.session_token == token,
+        SessionToken.is_active,
+    ).first()
+
+    if session_token:
+        # Check expiry for session token
+        if session_token.expires_at and session_token.expires_at < utc_now():
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session token has expired",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        user = db.query(User).filter(User.id == session_token.user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return user
+
+    # 2) Fallback: authenticate using an AuthToken (GitHub OAuth access token)
     auth_token = db.query(AuthToken).filter(
         AuthToken.access_token == token,
-        AuthToken.is_active == True
+        AuthToken.is_active,
     ).first()
-    
-    if not auth_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    # Check if token is expired
-    if auth_token.expires_at and auth_token.expires_at < utc_now():
-        # Deactivate expired token
-        auth_token.is_active = False
-        db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication token has expired",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    # Get user
-    user = db.query(User).filter(User.id == auth_token.user_id).first()
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    return user
+
+    if auth_token:
+        # Check expiry for auth token
+        if auth_token.expires_at and auth_token.expires_at < utc_now():
+            # Deactivate expired token
+            auth_token.is_active = False
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication token has expired",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        user = db.query(User).filter(User.id == auth_token.user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return user
+
+    # Neither a valid session token nor a valid auth token
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid authentication token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def get_github_api(user_id: int, db: Session):
@@ -290,7 +312,7 @@ def get_github_api(user_id: int, db: Session):
     # Get user's active token
     auth_token = db.query(AuthToken).filter(
         AuthToken.user_id == user_id,
-        AuthToken.is_active == True
+        AuthToken.is_active
     ).first()
     
     if not auth_token:
