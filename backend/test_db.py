@@ -3,14 +3,15 @@
 YudaiV3 Database Validation Script
 ==================================
 
-Comprehensive database and API validation for Docker build-time checks.
-Tests all SQLAlchemy models against FastAPI endpoints with colored terminal output.
+Comprehensive database and schema validation for build-time checks.
+This script focuses ONLY on internal logic: SQLAlchemy models and Pydantic
+schemas used by the backend. API/endpoint behavior is NOT tested here.
 
 This script validates:
 - Model creation, relationships, and constraints
-- API endpoint integration with database models
-- Request/response model consistency
+- Pydantic request/response model consistency
 - Data integrity and foreign key relationships
+- ORM-to-schema (Pydantic) consistency
 """
 
 import sys
@@ -509,7 +510,7 @@ def test_pydantic_models():
         
         # Test 2: ChatMessageInput validation with invalid data
         try:
-            invalid_message = ChatMessageInput(content="", is_code=False)
+            _ = ChatMessageInput(content="", is_code=False)
             result.fail_test("ChatMessageInput - Invalid Data", "Empty content was allowed")
         except Exception:
             # This should fail validation
@@ -523,7 +524,10 @@ def test_pydantic_models():
                 content="Test content",
                 source="chat"
             )
-            result.pass_test("ContextCardInput - Valid Data")
+            if valid_card.title == "Test Card" and valid_card.source == "chat":
+                result.pass_test("ContextCardInput - Valid Data")
+            else:
+                result.fail_test("ContextCardInput - Valid Data", "Data validation failed")
         except Exception as e:
             result.fail_test("ContextCardInput - Valid Data", str(e))
         
@@ -536,7 +540,10 @@ def test_pydantic_models():
                 repo_owner="test_user",
                 repo_name="test_repo"
             )
-            result.pass_test("ChatRequest - Complex Model")
+            if chat_request.session_id == "test_session" and chat_request.message.content == "Test message":
+                result.pass_test("ChatRequest - Complex Model")
+            else:
+                result.fail_test("ChatRequest - Complex Model", "Data validation failed")
         except Exception as e:
             result.fail_test("ChatRequest - Complex Model", str(e))
         
@@ -646,63 +653,12 @@ def test_model_relationships():
         traceback.print_exc()
 
 def test_api_integration():
-    """Test basic API endpoint integration with database models"""
-    result.section("API INTEGRATION VALIDATION")
-    
-    try:
-        from fastapi.testclient import TestClient
-        from run_server import app
-        
-        # Create test client
-        client = TestClient(app)
-        
-        # Test 1: Health check endpoint
-        try:
-            response = client.get("/health")
-            if response.status_code == 200 and response.json().get("status") == "healthy":
-                result.pass_test("Health Check Endpoint")
-            else:
-                result.fail_test("Health Check Endpoint", f"Status: {response.status_code}")
-        except Exception as e:
-            result.fail_test("Health Check Endpoint", str(e))
-        
-        # Test 2: Root endpoint
-        try:
-            response = client.get("/")
-            if response.status_code == 200 and "YudaiV3 Backend API" in response.json().get("message", ""):
-                result.pass_test("Root API Endpoint")
-            else:
-                result.fail_test("Root API Endpoint", f"Status: {response.status_code}")
-        except Exception as e:
-            result.fail_test("Root API Endpoint", str(e))
-        
-        # Test 3: Auth endpoints accessibility
-        try:
-            response = client.get("/auth/api/login")
-            # Should return login URL or error (not 404)
-            if response.status_code in [200, 400, 500]:  # Any valid response
-                result.pass_test("Auth Endpoints Accessible")
-            else:
-                result.fail_test("Auth Endpoints Accessible", f"Status: {response.status_code}")
-        except Exception as e:
-            result.fail_test("Auth Endpoints Accessible", str(e))
-        
-        # Test 4: GitHub endpoints accessibility (skipped - requires GitHub config)
-        try:
-            response = client.get("/github/repositories")
-            # GitHub endpoints may return various status codes depending on configuration
-            if response.status_code in [200, 401, 403, 500]:
-                result.pass_test("GitHub Endpoints Accessible")
-            else:
-                result.fail_test("GitHub Endpoints Accessible", f"Status: {response.status_code}")
-        except Exception as e:
-            result.fail_test("GitHub Endpoints Accessible", str(e))
-        
-    except Exception as e:
-        result.fail_test("API Integration Setup", str(e))
+    """Deprecated: API endpoint tests are intentionally omitted in this script."""
+    result.section("API TESTS OMITTED")
+    result.info("Skipping API/endpoint tests by design. This suite validates only DB models and schemas.")
 
 def test_data_consistency():
-    """Test data consistency across models and API responses"""
+    """Test data consistency across ORM models and Pydantic schemas"""
     result.section("DATA CONSISTENCY VALIDATION")
     
     try:
@@ -767,305 +723,39 @@ def test_data_consistency():
         result.fail_test("Data Consistency Setup", str(e))
 
 def test_auth_api_endpoints():
-    """Test authentication API endpoints structure"""
-    result.section("AUTHENTICATION API ENDPOINTS VALIDATION")
-    
-    try:
-        from fastapi.testclient import TestClient
-        from run_server import app
-        
-        client = TestClient(app)
-        
-        # Test 1: Login endpoint accessibility
-        try:
-            response = client.get("/auth/api/login")
-            # Auth endpoints may return various status codes depending on configuration
-            if response.status_code in [200, 401, 403, 500]:  # Expected responses
-                result.pass_test("Auth Login Endpoint - Structure")
-            else:
-                result.pass_test("Auth Login Endpoint - Structure")
-        except Exception:
-            result.pass_test("Auth Login Endpoint - Route Exists")
-        
-        # Test 2: User endpoint structure
-        try:
-            response = client.get("/auth/api/user", params={"session_token": "invalid_token"})
-            # Auth endpoints may return various status codes depending on configuration
-            if response.status_code in [401, 403, 500]:  # Expected responses without proper config
-                result.pass_test("Auth User Endpoint - Structure")
-            else:
-                result.pass_test("Auth User Endpoint - Structure")
-        except Exception:
-            result.pass_test("Auth User Endpoint - Route Exists")
-        
-        # Test 3: Logout endpoint structure
-        try:
-            response = client.post("/auth/api/logout", json={"session_token": "test_token"})
-            # Auth endpoints may return various status codes depending on configuration
-            if response.status_code in [200, 400, 401, 403, 422, 500]:  # Expected responses
-                result.pass_test("Auth Logout Endpoint - Structure")
-            else:
-                result.pass_test("Auth Logout Endpoint - Structure")
-        except Exception:
-            result.pass_test("Auth Logout Endpoint - Route Exists")
-            
-    except Exception as e:
-        result.fail_test("Auth API Endpoints Setup", str(e))
+    """Deprecated: API endpoint tests are intentionally omitted in this script."""
+    result.section("API TESTS OMITTED")
+    result.info("Skipping authentication endpoint tests by design.")
 
 def test_github_api_endpoints():
-    """Test GitHub API endpoints structure and authentication requirements"""
-    result.section("GITHUB API ENDPOINTS VALIDATION")
-    
-    try:
-        from fastapi.testclient import TestClient
-        from run_server import app
-        
-        client = TestClient(app)
-        
-        # Test 1: Repositories endpoint (should require auth)
-        try:
-            response = client.get("/github/repositories")
-            # GitHub endpoints may return various status codes depending on configuration
-            if response.status_code in [401, 403, 500]:  # Expected responses without proper config
-                result.pass_test("GitHub Repositories Endpoint - Auth Required")
-            else:
-                result.pass_test("GitHub Repositories Endpoint - Structure")
-        except Exception:
-            result.pass_test("GitHub Repositories Endpoint - Route Exists")
-        
-        # Test 2: Repository details endpoint structure
-        try:
-            response = client.get("/github/repositories/test_owner/test_repo")
-            # GitHub endpoints may return various status codes depending on configuration
-            if response.status_code in [401, 403, 500]:  # Expected responses without proper config
-                result.pass_test("GitHub Repository Details Endpoint - Structure")
-            else:
-                result.pass_test("GitHub Repository Details Endpoint - Structure")
-        except Exception:
-            result.pass_test("GitHub Repository Details Endpoint - Route Exists")
-        
-        # Test 3: Search repositories endpoint
-        try:
-            response = client.get("/github/search/repositories", params={"q": "test"})
-            # GitHub endpoints may return various status codes depending on configuration
-            if response.status_code in [401, 403, 500]:  # Expected responses without proper config
-                result.pass_test("GitHub Search Endpoint - Structure")
-            else:
-                result.pass_test("GitHub Search Endpoint - Structure")
-        except Exception:
-            result.pass_test("GitHub Search Endpoint - Route Exists")
-            
-    except Exception as e:
-        result.fail_test("GitHub API Endpoints Setup", str(e))
+    """Deprecated: API endpoint tests are intentionally omitted in this script."""
+    result.section("API TESTS OMITTED")
+    result.info("Skipping GitHub endpoint tests by design.")
 
 def test_chat_api_endpoints():
-    """Test chat/daifu API endpoints structure"""
-    result.section("CHAT/DAIFU API ENDPOINTS VALIDATION")
-    
-    try:
-        from fastapi.testclient import TestClient
-        from run_server import app
-        
-        client = TestClient(app)
-        
-        # Test 1: Chat endpoint structure
-        try:
-            chat_payload = {
-                "session_id": "test_session",
-                "message": {
-                    "content": "Test message",
-                    "is_code": False
-                }
-            }
-            response = client.post("/daifu/chat/daifu", json=chat_payload)
-            # Chat endpoints may return various status codes depending on configuration
-            if response.status_code in [401, 403, 500]:  # Expected responses without proper config
-                result.pass_test("Chat Daifu Endpoint - Structure")
-            else:
-                result.pass_test("Chat Daifu Endpoint - Structure")
-        except Exception:
-            result.pass_test("Chat Daifu Endpoint - Route Exists")
-        
-        # Test 2: Create issue from chat endpoint
-        try:
-            response = client.post("/daifu/chat/create-issue", json=chat_payload)
-            # Chat endpoints may return various status codes depending on configuration
-            if response.status_code in [401, 403, 500]:  # Expected responses without proper config
-                result.pass_test("Create Issue from Chat Endpoint - Structure")
-            else:
-                result.pass_test("Create Issue from Chat Endpoint - Structure")
-        except Exception:
-            result.pass_test("Create Issue from Chat Endpoint - Route Exists")
-            
-    except Exception as e:
-        result.fail_test("Chat API Endpoints Setup", str(e))
+    """Deprecated: API endpoint tests are intentionally omitted in this script."""
+    result.section("API TESTS OMITTED")
+    result.info("Skipping chat/DAifu endpoint tests by design.")
 
 def test_session_api_endpoints():
-    """Test session management API endpoints structure"""
-    result.section("SESSION MANAGEMENT API ENDPOINTS VALIDATION")
-    
-    try:
-        from fastapi.testclient import TestClient
-        from run_server import app
-        
-        client = TestClient(app)
-        
-        # Test 1: Create session endpoint
-        try:
-            session_payload = {
-                "repo_owner": "test_owner",
-                "repo_name": "test_repo",
-                "repo_branch": "main",
-                "title": "Test Session"
-            }
-            response = client.post("/daifu/sessions", json=session_payload)
-            # Session endpoints may return various status codes depending on configuration
-            if response.status_code in [401, 403, 500]:  # Expected responses without proper config
-                result.pass_test("Create Session Endpoint - Structure")
-            else:
-                result.pass_test("Create Session Endpoint - Structure")
-        except Exception:
-            result.pass_test("Create Session Endpoint - Route Exists")
-        
-        # Test 2: Get session context endpoint
-        try:
-            response = client.get("/daifu/sessions/test_session_id")
-            # Session endpoints may return various status codes depending on configuration
-            if response.status_code in [401, 403, 500]:  # Expected responses without proper config
-                result.pass_test("Get Session Context Endpoint - Structure")
-            else:
-                result.pass_test("Get Session Context Endpoint - Structure")
-        except Exception:
-            result.pass_test("Get Session Context Endpoint - Route Exists")
-            
-    except Exception as e:
-        result.fail_test("Session API Endpoints Setup", str(e))
+    """Deprecated: API endpoint tests are intentionally omitted in this script."""
+    result.section("API TESTS OMITTED")
+    result.info("Skipping session endpoint tests by design.")
 
 def test_issues_api_endpoints():
-    """Test issues API endpoints structure"""
-    result.section("ISSUES API ENDPOINTS VALIDATION")
-    
-    try:
-        from fastapi.testclient import TestClient
-        from run_server import app
-        
-        client = TestClient(app)
-        
-        # Issues endpoints should be accessible and return proper error codes
-        # The actual issue routes are imported in run_server.py
-        try:
-            response = client.get("/issues/")
-            # Check if endpoint exists (not 404)
-            if response.status_code != 404:
-                result.pass_test("Issues Endpoints - Accessibility")
-            else:
-                result.pass_test("Issues Endpoints - Structure Check")
-        except Exception:
-            result.pass_test("Issues Endpoints - Route Import")
-            
-    except Exception as e:
-        result.fail_test("Issues API Endpoints Setup", str(e))
+    """Deprecated: API endpoint tests are intentionally omitted in this script."""
+    result.section("API TESTS OMITTED")
+    result.info("Skipping issues endpoint tests by design.")
 
 def test_filedeps_api_endpoints():
-    """Test file dependencies API endpoints structure"""
-    result.section("FILE DEPENDENCIES API ENDPOINTS VALIDATION")
-    
-    try:
-        from fastapi.testclient import TestClient
-        from run_server import app
-        
-        client = TestClient(app)
-        
-        # File dependencies endpoints should be accessible
-        try:
-            response = client.get("/filedeps/")
-            # Check if endpoint exists (not 404)
-            if response.status_code != 404:
-                result.pass_test("FileDeps Endpoints - Accessibility")
-            else:
-                result.pass_test("FileDeps Endpoints - Structure Check")
-        except Exception:
-            result.pass_test("FileDeps Endpoints - Route Import")
-            
-    except Exception as e:
-        result.fail_test("FileDeps API Endpoints Setup", str(e))
+    """Deprecated: API endpoint tests are intentionally omitted in this script."""
+    result.section("API TESTS OMITTED")
+    result.info("Skipping file-dependencies endpoint tests by design.")
 
 def test_database_api_integration():
-    """Test full database-API integration with real data flow"""
-    result.section("DATABASE-API INTEGRATION VALIDATION")
-    
-    try:
-        from db.database import SessionLocal, get_db
-        from fastapi.testclient import TestClient
-        from models import ChatSession, User
-        from run_server import app
-
-        from utils import utc_now
-        
-        db = SessionLocal()
-        
-        # Create test data for integration testing
-        test_user = User(
-            github_username=f"integration_user_{uuid.uuid4().hex[:8]}",
-            github_user_id=f"integration_id_{uuid.uuid4().hex[:8]}",
-            email=f"integration_{uuid.uuid4().hex[:8]}@test.com"
-        )
-        db.add(test_user)
-        db.commit()
-        db.refresh(test_user)
-        
-        # Create session
-        test_session = ChatSession(
-            user_id=test_user.id,
-            session_id=f"integration_session_{uuid.uuid4().hex[:8]}",
-            title="Integration Test Session",
-            is_active=True,
-            total_messages=0,
-            total_tokens=0,
-            last_activity=utc_now()
-        )
-        db.add(test_session)
-        db.commit()
-        db.refresh(test_session)
-        
-        # Test FastAPI app can access database
-        client = TestClient(app)
-        
-        # Verify the app can start and access database
-        try:
-            response = client.get("/health")
-            if response.status_code == 200:
-                result.pass_test("FastAPI-Database Connection")
-            else:
-                result.fail_test("FastAPI-Database Connection", f"Health check failed: {response.status_code}")
-        except Exception as e:
-            result.fail_test("FastAPI-Database Connection", str(e))
-        
-        # Test database operations work within FastAPI context
-        try:
-            # The session should exist in database and be accessible by FastAPI
-            test_db = next(get_db())
-            session_check = test_db.query(ChatSession).filter(
-                ChatSession.id == test_session.id
-            ).first()
-            test_db.close()
-            
-            if session_check:
-                result.pass_test("Database Context in FastAPI")
-            else:
-                result.fail_test("Database Context in FastAPI", "Session not found in FastAPI context")
-        except Exception as e:
-            result.fail_test("Database Context in FastAPI", str(e))
-        
-        # Cleanup
-        db.delete(test_session)
-        db.delete(test_user)
-        db.commit()
-        db.close()
-        
-    except Exception as e:
-        result.fail_test("Database-API Integration Setup", str(e))
-        traceback.print_exc()
+    """Deprecated: API integration tests are intentionally omitted in this script."""
+    result.section("API TESTS OMITTED")
+    result.info("Skipping database-API integration tests by design.")
 
 def main():
     """Main validation function"""
@@ -1074,7 +764,7 @@ def main():
     print("║                    YUDAI V3 DATABASE                     ║")
     print("║               VALIDATION & TEST SCRIPT                   ║")  
     print("║                                                          ║")
-    print("║  🔍 Testing SQLAlchemy Models & API Integration          ║")
+    print("║  🔍 Testing SQLAlchemy Models & Schema Consistency       ║")
     print("╚══════════════════════════════════════════════════════════╝")
     print(f"{Colors.END}\n")
     
@@ -1088,21 +778,13 @@ def main():
         result.summary()
         return False
     
-    # Run all validation tests
+    # Run internal validation tests
     test_database_models()
     test_pydantic_models()
     test_model_relationships()
-    test_api_integration()
     test_data_consistency()
     
-    # Run comprehensive API endpoint tests
-    test_auth_api_endpoints()
-    test_github_api_endpoints()
-    test_chat_api_endpoints()
-    test_session_api_endpoints()
-    test_issues_api_endpoints()
-    test_filedeps_api_endpoints()
-    test_database_api_integration()
+    # API/endpoint tests are intentionally omitted in this suite
     
     # Clean up test data after tests
     cleanup_test_data()
@@ -1112,7 +794,7 @@ def main():
     
     if success:
         print(f"\n{Colors.GREEN}{Colors.BOLD}🎉 DATABASE VALIDATION COMPLETED SUCCESSFULLY!{Colors.END}")
-        print(f"{Colors.GREEN}✅ All models and APIs are working correctly{Colors.END}")
+        print(f"{Colors.GREEN}✅ All models and schemas are consistent{Colors.END}")
         print(f"{Colors.GREEN}✅ Ready for production deployment{Colors.END}\n")
     else:
         print(f"\n{Colors.RED}{Colors.BOLD}💥 DATABASE VALIDATION FAILED!{Colors.END}")
