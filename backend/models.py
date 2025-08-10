@@ -75,6 +75,10 @@ class User(Base):
     auth_tokens: Mapped[List["AuthToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     repositories: Mapped[List["Repository"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     session_tokens: Mapped[List["SessionToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    chat_sessions: Mapped[List["ChatSession"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
 
 class AuthToken(Base):
     """Authentication tokens for GitHub OAuth"""
@@ -360,7 +364,7 @@ class ChatSession(Base):
     last_activity: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     # Relationships
-    user: Mapped["User"] = relationship()
+    user: Mapped["User"] = relationship(back_populates="chat_sessions")
     messages: Mapped[List["ChatMessage"]] = relationship(back_populates="session", cascade="all, delete-orphan")
     file_embeddings: Mapped[List["FileEmbedding"]] = relationship(back_populates="session", cascade="all, delete-orphan")
     context_cards: Mapped[List["ContextCard"]] = relationship(back_populates="session", cascade="all, delete-orphan")
