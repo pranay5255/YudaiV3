@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { ApiService } from '../services/api';
 import { useAuth } from './useAuth';
 
@@ -64,5 +64,7 @@ export const useApi = () => {
     };
   }, [sessionToken]);
 
-  return api();
+  // Use useMemo to stabilize the returned object and prevent infinite loops
+  // This ensures the API object only changes when sessionToken changes
+  return useMemo(() => api(), [api]);
 };
