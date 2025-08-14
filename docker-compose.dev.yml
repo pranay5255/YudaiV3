@@ -33,14 +33,15 @@ services:
       dockerfile: Dockerfile
     container_name: yudai-be-dev
     restart: unless-stopped
+    # Use environment files for better secrets management
+    env_file:
+      - .env.secrets
     environment:
       - DATABASE_URL=postgresql://yudai_user:yudai_password@db:5432/yudai_dev
       - DB_ECHO=true
       - PYTHONPATH=/app
       - DOCKER_COMPOSE=true
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
-      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
       - GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI:-http://localhost:3000/auth/callback}
       - API_DOMAIN=localhost
       - DEV_DOMAIN=localhost
