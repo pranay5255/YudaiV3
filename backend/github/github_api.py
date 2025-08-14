@@ -7,10 +7,7 @@ for authenticated users, including repository management, issues, and more.
 """
 
 from typing import List, Optional
-from fastapi import Depends
 from sqlalchemy.orm import Session
-
-from db.database import get_db
 from models import (
     User, 
     Repository,
@@ -24,15 +21,15 @@ from models import (
     GitHubBranch,
     GitHubSearchResponse
 )
-from auth.github_oauth import get_github_api, get_current_user
+from auth.github_oauth import get_github_api
 
 class GitHubAPIError(Exception):
     """Custom exception for GitHub API errors"""
     pass
 
 async def get_user_repositories(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User,
+    db: Session
 ) -> List[GitHubRepo]:
     """
     Get all repositories for the authenticated user from GitHub,
@@ -77,8 +74,8 @@ async def get_user_repositories(
 async def get_repository_details(
     owner: str,
     repo_name: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User,
+    db: Session
 ) -> GitHubRepo:
     """
     Get detailed information for a repository, update the database only if repository doesn't exist, and return it.
@@ -127,8 +124,8 @@ async def create_issue(
     body: str,
     labels: Optional[List[str]] = None,
     assignees: Optional[List[str]] = None,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User,
+    db: Session
 ) -> GitHubIssue:
     """
     Create a new issue, save it to the database only if it doesn't exist, and return it.
@@ -171,8 +168,8 @@ async def get_repository_issues(
     owner: str,
     repo_name: str,
     state: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User,
+    db: Session
 ) -> List[GitHubIssue]:
     try:
         api = get_github_api(current_user.id, db)
@@ -313,8 +310,8 @@ async def search_repositories(
     query: str,
     sort: str = "stars",
     order: str = "desc",
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user: User,
+    db: Session
 ) -> GitHubSearchResponse:
     """
     Search repositories on GitHub. This function will not save to DB
