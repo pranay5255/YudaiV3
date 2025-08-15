@@ -7,21 +7,23 @@ for authenticated users, including repository management, issues, and more.
 """
 
 from typing import List, Optional
-from sqlalchemy.orm import Session
+
+from auth.github_oauth import get_github_api
 from models import (
-    User, 
-    Repository,
+    Commit,
+    GitHubBranch,
+    GitHubCommit,
+    GitHubIssue,
+    GitHubPullRequest,
+    GitHubRepo,
+    GitHubSearchResponse,
     Issue,
     PullRequest,
-    Commit,
-    GitHubRepo, 
-    GitHubIssue, 
-    GitHubPullRequest, 
-    GitHubCommit, 
-    GitHubBranch,
-    GitHubSearchResponse
+    Repository,
+    User,
 )
-from auth.github_oauth import get_github_api
+from sqlalchemy.orm import Session
+
 
 class GitHubAPIError(Exception):
     """Custom exception for GitHub API errors"""
@@ -122,10 +124,10 @@ async def create_issue(
     repo_name: str,
     title: str,
     body: str,
-    labels: Optional[List[str]] = None,
-    assignees: Optional[List[str]] = None,
     current_user: User,
-    db: Session
+    db: Session,
+    labels: Optional[List[str]] = None,
+    assignees: Optional[List[str]] = None
 ) -> GitHubIssue:
     """
     Create a new issue, save it to the database only if it doesn't exist, and return it.
@@ -308,10 +310,10 @@ async def get_repository_branches(
 
 async def search_repositories(
     query: str,
-    sort: str = "stars",
-    order: str = "desc",
     current_user: User,
-    db: Session
+    db: Session,
+    sort: str = "stars",
+    order: str = "desc"
 ) -> GitHubSearchResponse:
     """
     Search repositories on GitHub. This function will not save to DB

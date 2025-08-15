@@ -6,32 +6,34 @@ This module provides FastAPI routes for GitHub API functionality,
 including repository management, issues, and search.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status, Query
-from sqlalchemy.orm import Session
 from typing import List
+
+from auth.github_oauth import get_current_user
 from db.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from models import (
-    User,
     CreateIssueRequest,
-    GitHubRepo,
+    GitHubBranch,
+    GitHubCommit,
     GitHubIssue,
     GitHubPullRequest,
-    GitHubCommit,
-    GitHubBranch,
+    GitHubRepo,
     GitHubSearchResponse,
+    User,
 )
+from sqlalchemy.orm import Session
+
 from .github_api import (
-    get_user_repositories,
-    get_repository_details,
+    GitHubAPIError,
     create_issue,
+    get_repository_branches,
+    get_repository_commits,
+    get_repository_details,
     get_repository_issues,
     get_repository_pulls,
-    get_repository_commits,
-    get_repository_branches,
+    get_user_repositories,
     search_repositories,
-    GitHubAPIError
 )
-from auth.github_oauth import get_current_user
 
 router = APIRouter(tags=["github"])
 
@@ -86,10 +88,10 @@ async def create_repository_issue(
             repo=repo,
             title=request.title,
             body=request.description,
-            labels=getattr(request, "labels", None),
-            assignees=getattr(request, "assignees", None),
             current_user=current_user,
-            db=db
+            db=db,
+            labels=getattr(request, "labels", None),
+            assignees=getattr(request, "assignees", None)
         )
     except GitHubAPIError as e:
         raise HTTPException(
@@ -184,7 +186,7 @@ async def search_github_repositories(
     Search repositories on GitHub
     """
     try:
-        return await search_repositories(q, sort, order, current_user, db)
+        return await search_repositories(q, current_user, db, sort, order)
     except GitHubAPIError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
