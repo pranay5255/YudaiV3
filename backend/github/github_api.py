@@ -10,7 +10,6 @@ from typing import List, Optional
 
 from auth.github_oauth import get_github_api
 from models import (
-    AuthToken,
     Commit,
     GitHubBranch,
     GitHubCommit,
@@ -24,8 +23,6 @@ from models import (
     User,
 )
 from sqlalchemy.orm import Session
-
-from utils import utc_now
 
 
 class GitHubAPIError(Exception):
@@ -41,41 +38,14 @@ async def get_user_repositories(
     update the database only if repository doesn't exist, and return the list.
     """
     try:
-        # DEBUG: Check if user has auth token
-        auth_token = db.query(AuthToken).filter(
-            AuthToken.user_id == current_user.id,
-            AuthToken.is_active
-        ).first()
-        
-        if not auth_token:
-            print(f"DEBUG: No auth token found for user {current_user.id}")
-            return []
-        
-        print(f"DEBUG: Found auth token for user {current_user.id}")
-        print(f"DEBUG: Token expires at: {auth_token.expires_at}")
-        print(f"DEBUG: Token scope: {auth_token.scope}")
-        
-        # Check if token is expired
-        if auth_token.expires_at and auth_token.expires_at < utc_now():
-            print("DEBUG: Token is expired")
-            return []
-        
+        # Get GitHub API client - this handles authentication properly
         api = get_github_api(current_user.id, db)
         
-        # DEBUG: Test GitHub API call
+        # Fetch repositories from GitHub API
         try:
             repos_data = api.repos.list_for_authenticated_user(sort="updated", per_page=100)
-            print(f"DEBUG: GitHub API returned {len(repos_data)} repositories")
-            
-            # DEBUG: Print first few repos if any
-            if repos_data:
-                for i, repo in enumerate(repos_data[:3]):
-                    print(f"DEBUG: Repo {i+1}: {repo.full_name}")
-            else:
-                print("DEBUG: No repositories returned from GitHub API")
-                
         except Exception as api_error:
-            print(f"DEBUG: GitHub API error: {str(api_error)}")
+            print(f"GitHub API error: {str(api_error)}")
             return []
         
         for repo_data in repos_data:
@@ -99,6 +69,7 @@ async def get_user_repositories(
                 repo.stargazers_count = repo_data.stargazers_count
                 repo.forks_count = repo_data.forks_count
                 repo.open_issues_count = repo_data.open_issues_count
+                repo.default_branch = repo_data.default_branch
                 repo.github_created_at = repo_data.created_at
                 repo.github_updated_at = repo_data.updated_at
                 repo.pushed_at = repo_data.pushed_at
@@ -107,7 +78,7 @@ async def get_user_repositories(
         return [GitHubRepo.model_validate(r) for r in repos_data]
 
     except Exception as e:
-        print(f"DEBUG: General error in get_user_repositories: {str(e)}")
+        print(f"Error in get_user_repositories: {str(e)}")
         db.rollback()
         raise GitHubAPIError(f"Failed to fetch repositories: {str(e)}")
 
@@ -144,6 +115,7 @@ async def get_repository_details(
             repo.stargazers_count = repo_data.stargazers_count
             repo.forks_count = repo_data.forks_count
             repo.open_issues_count = repo_data.open_issues_count
+            repo.default_branch = repo_data.default_branch
             repo.github_created_at = repo_data.created_at
             repo.github_updated_at = repo_data.updated_at
             repo.pushed_at = repo_data.pushed_at

@@ -153,6 +153,7 @@ class Repository(Base):
     stargazers_count: Mapped[int] = mapped_column(Integer, default=0)
     forks_count: Mapped[int] = mapped_column(Integer, default=0)
     open_issues_count: Mapped[int] = mapped_column(Integer, default=0)
+    default_branch: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     
     # Timestamps from GitHub
     github_created_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -901,6 +902,7 @@ class GitHubRepo(BaseModel):
     stargazers_count: Optional[int] = 0
     forks_count: Optional[int] = 0
     open_issues_count: Optional[int] = 0
+    default_branch: Optional[str] = None
     updated_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     pushed_at: Optional[datetime] = None

@@ -17,7 +17,6 @@ import uvicorn
 # Import all service routers
 from auth import auth_router
 from daifuUserAgent.chat_api import router as daifu_router
-from stateManagement.session_routes import router as session_router
 
 # Import database initialization
 from db.database import init_db
@@ -26,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from github import github_router
 from issueChatServices import issue_router
 from repo_processorGitIngest.filedeps import router as filedeps_router
+from stateManagement.session_routes import router as session_router
 
 
 @asynccontextmanager
