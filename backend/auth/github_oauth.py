@@ -331,16 +331,20 @@ def get_github_api(user_id: int, db: Session):
             detail="Authentication token has expired"
         )
     
-    # Import ghapi here to avoid circular imports
+    # Check if ghapi is available
     try:
-        from ghapi import GhApi
-        return GhApi(token=auth_token.access_token)
-    except ImportError:
+        from ghapi.all import GhApi
+    except ImportError as e:
+        print(f"ImportError for ghapi: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="GitHub API library not available. Please install ghapi."
         )
+    
+    try:
+        return GhApi(token=auth_token.access_token)
     except Exception as e:
+        print(f"Error initializing GhApi: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to initialize GitHub API client: {str(e)}"

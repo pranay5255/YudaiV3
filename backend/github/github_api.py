@@ -9,7 +9,6 @@ for authenticated users, including repository management, issues, and more.
 from typing import List, Optional
 
 from auth.github_oauth import get_github_api
-from ghapi.all import GhApi
 from models import (
     Commit,
     GitHubBranch,
@@ -108,9 +107,6 @@ async def get_repository_details(
     try:
         api = get_github_api(current_user.id, db)
         
-        if GhApi is None:
-            raise GitHubAPIError("GitHub API library not available")
-            
         repo_data = api.repos.get(owner=owner, repo=repo_name)
         
         if not repo_data:
@@ -169,9 +165,6 @@ async def create_issue(
     try:
         api = get_github_api(current_user.id, db)
         
-        if GhApi is None:
-            raise GitHubAPIError("GitHub API library not available")
-            
         issue_data = api.issues.create(
             owner=owner, repo=repo_name, title=title, body=body,
             labels=labels or [], assignees=assignees or []
@@ -220,9 +213,6 @@ async def get_repository_issues(
     try:
         api = get_github_api(current_user.id, db)
         
-        if GhApi is None:
-            raise GitHubAPIError("GitHub API library not available")
-            
         issues_data = api.issues.list_for_repo(owner=owner, repo=repo_name, state=state, per_page=100)
         
         repo = db.query(Repository).filter(Repository.full_name == f"{owner}/{repo_name}").first()
@@ -278,9 +268,6 @@ async def get_repository_pulls(
     try:
         api = get_github_api(current_user.id, db)
         
-        if GhApi is None:
-            raise GitHubAPIError("GitHub API library not available")
-            
         pulls_data = api.pulls.list(owner=owner, repo=repo_name, state=state, per_page=100)
 
         repo = db.query(Repository).filter(Repository.full_name == f"{owner}/{repo_name}").first()
@@ -337,9 +324,6 @@ async def get_repository_commits(
     try:
         api = get_github_api(current_user.id, db)
         
-        if GhApi is None:
-            raise GitHubAPIError("GitHub API library not available")
-            
         commits_data = api.repos.list_commits(owner=owner, repo=repo_name, sha=branch, per_page=100)
 
         repo = db.query(Repository).filter(Repository.full_name == f"{owner}/{repo_name}").first()
@@ -395,9 +379,6 @@ async def get_repository_branches(
     try:
         api = get_github_api(current_user.id, db)
         
-        if GhApi is None:
-            raise GitHubAPIError("GitHub API library not available")
-            
         branches_data = api.repos.list_branches(owner=owner, repo=repo_name, per_page=100)
         
         # Handle case where branches_data might not be iterable
@@ -426,9 +407,6 @@ async def search_repositories(
     try:
         api = get_github_api(current_user.id, db)
         
-        if GhApi is None:
-            raise GitHubAPIError("GitHub API library not available")
-            
         results = api.search.repos(q=query, sort=sort, order=order, per_page=30)
         
         if not results:
