@@ -9,7 +9,7 @@ for authenticated users, including repository management, issues, and more.
 from typing import List, Optional
 
 from auth.github_oauth import get_github_api
-from ghapi import GhApi
+from ghapi.all import GhApi
 from models import (
     Commit,
     GitHubBranch,
