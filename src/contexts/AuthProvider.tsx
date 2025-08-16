@@ -18,6 +18,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [authState, setAuthState] = useState<AuthState>({
     user: null,
     sessionToken: null,
+    githubToken: null,
     isAuthenticated: false,
     isLoading: true,
   });
@@ -30,6 +31,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Check for session token in URL parameters (OAuth callback)
       const urlParams = new URLSearchParams(window.location.search);
       const sessionToken = urlParams.get('session_token');
+      const githubToken = urlParams.get('github_token');
       const userId = urlParams.get('user_id');
       const username = urlParams.get('username');
       const code = urlParams.get('code');
@@ -54,12 +56,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           setAuthState({
             user: user,
             sessionToken: sessionToken,
+            githubToken: githubToken,
             isAuthenticated: true,
             isLoading: false,
           });
 
-          // Store session token in localStorage for persistence
+          // Store both tokens in localStorage for persistence
           localStorage.setItem('session_token', sessionToken);
+          if (githubToken) {
+            localStorage.setItem('github_token', githubToken);
+          }
 
           // Clear URL parameters after successful auth
           const newUrl = new URL(window.location.href);
@@ -68,11 +74,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           
         } catch (error) {
           console.warn('Session validation failed:', error);
-          // Clear any stored token on validation failure
+          // Clear any stored tokens on validation failure
           localStorage.removeItem('session_token');
+          localStorage.removeItem('github_token');
           setAuthState({
             user: null,
             sessionToken: null,
+            githubToken: null,
             isAuthenticated: false,
             isLoading: false,
           });
@@ -83,10 +91,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         window.location.href = '/auth/login';
       } else {
         // No auth data in URL, check for stored session token
-        const storedToken = localStorage.getItem('session_token');
-        if (storedToken) {
+        const storedSessionToken = localStorage.getItem('session_token');
+        const storedGithubToken = localStorage.getItem('github_token');
+        
+        if (storedSessionToken) {
           try {
-            const userData = await ApiService.validateSessionToken(storedToken);
+            const userData = await ApiService.validateSessionToken(storedSessionToken);
             const user: User = {
               id: userData.id,
               github_username: userData.github_username,
@@ -100,13 +110,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             
             setAuthState({
               user: user,
-              sessionToken: storedToken,
+              sessionToken: storedSessionToken,
+              githubToken: storedGithubToken,
               isAuthenticated: true,
               isLoading: false,
             });
           } catch (error) {
             console.warn('Stored session validation failed:', error);
             localStorage.removeItem('session_token');
+            localStorage.removeItem('github_token');
             setAuthState(prev => ({ ...prev, isLoading: false }));
           }
         } else {
@@ -126,6 +138,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setAuthState({
         user: null,
         sessionToken: null,
+        githubToken: null,
         isAuthenticated: false,
         isLoading: false,
       });
@@ -158,9 +171,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } finally {
       // Always clear local state and storage
       localStorage.removeItem('session_token');
+      localStorage.removeItem('github_token');
       setAuthState({
         user: null,
         sessionToken: null,
+        githubToken: null,
         isAuthenticated: false,
         isLoading: false,
       });

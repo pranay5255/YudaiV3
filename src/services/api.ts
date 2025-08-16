@@ -38,20 +38,34 @@ import type {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 export class ApiService {
-  private static getAuthHeaders(sessionToken?: string): HeadersInit {
+  private static getAuthHeaders(sessionToken?: string, githubToken?: string): HeadersInit {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
     
-    // Use session token from parameter or try to get from localStorage
-    if (sessionToken) {
-      headers['Authorization'] = `Bearer ${sessionToken}`;
+    // Use tokens from parameters or try to get from localStorage
+    let tokenToUse = sessionToken;
+    
+    if (githubToken) {
+      // If GitHub token is provided, use it
+      tokenToUse = githubToken;
+    } else if (sessionToken) {
+      // Use session token if provided
+      tokenToUse = sessionToken;
     } else {
-      // Try to get session token from localStorage
-      const tokenFromStorage = localStorage.getItem('session_token');
-      if (tokenFromStorage) {
-        headers['Authorization'] = `Bearer ${tokenFromStorage}`;
+      // Try to get tokens from localStorage, prioritize GitHub token for API calls
+      const githubTokenFromStorage = localStorage.getItem('github_token');
+      const sessionTokenFromStorage = localStorage.getItem('session_token');
+      
+      if (githubTokenFromStorage) {
+        tokenToUse = githubTokenFromStorage;
+      } else if (sessionTokenFromStorage) {
+        tokenToUse = sessionTokenFromStorage;
       }
+    }
+    
+    if (tokenToUse) {
+      headers['Authorization'] = `Bearer ${tokenToUse}`;
     }
     
     return headers;
@@ -223,15 +237,19 @@ export class ApiService {
     files.forEach(file => formData.append('files', file));
 
     const headers: HeadersInit = {};
-    if (githubToken) {
-      headers['Authorization'] = `Bearer ${githubToken}`;
-    } else {
-      // Try to get github token from URL parameters
+    
+    // Get token for authorization
+    let tokenToUse = githubToken;
+    if (!tokenToUse) {
+      const githubTokenFromStorage = localStorage.getItem('github_token');
       const urlParams = new URLSearchParams(window.location.search);
       const tokenFromUrl = urlParams.get('github_token');
-      if (tokenFromUrl) {
-        headers['Authorization'] = `Bearer ${tokenFromUrl}`;
-      }
+      
+      tokenToUse = githubTokenFromStorage || tokenFromUrl || undefined;
+    }
+    
+    if (tokenToUse) {
+      headers['Authorization'] = `Bearer ${tokenToUse}`;
     }
 
     const response = await fetch(`${API_BASE_URL}/file-dependencies/analyze`, {

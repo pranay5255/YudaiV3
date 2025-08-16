@@ -336,37 +336,12 @@ def get_github_api(user_id: int, db: Session):
         from ghapi import GhApi
         return GhApi(token=auth_token.access_token)
     except ImportError:
-        # Fallback: create a simple mock API client for basic functionality
-        class MockGitHubApi:
-            def __init__(self, token):
-                self.token = token
-                self.repos = self
-                self.issues = self
-                self.pulls = self
-                self.search = self
-                
-            def list_for_authenticated_user(self, **kwargs):
-                return []
-                
-            def get(self, **kwargs):
-                return {}
-                
-            def create(self, **kwargs):
-                return {}
-                
-            def list_for_repo(self, **kwargs):
-                return []
-                
-            def list(self, **kwargs):
-                return []
-                
-            def list_commits(self, **kwargs):
-                return []
-                
-            def list_branches(self, **kwargs):
-                return []
-                
-            def repos(self, **kwargs):
-                return {"items": []}
-        
-        return MockGitHubApi(auth_token.access_token)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="GitHub API library not available. Please install ghapi."
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initialize GitHub API client: {str(e)}"
+        )
