@@ -93,10 +93,19 @@ async def chat_daifu(
     try:
         # Get GitHub context if repository info is provided
         github_context = ""
-        if request.repository and request.repository.owner and request.repository.name:
+        repo_owner = None
+        repo_name = None
+        
+        # Check for repository object first (preferred format)
+        if request.repository and request.repository.get("owner") and request.repository.get("name"):
+            repo_owner = request.repository["owner"]
+            repo_name = request.repository["name"]
+        
+        # Get GitHub context if we have repository information
+        if repo_owner and repo_name:
             github_context = await get_github_context(
-                request.repository.owner,
-                request.repository.name,
+                repo_owner,
+                repo_name,
                 current_user,
                 db
             )
