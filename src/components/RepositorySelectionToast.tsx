@@ -29,13 +29,16 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
   const loadBranches = useCallback(async () => {
     if (!selectedRepository) return;
     
+    console.log('Loading branches for repository:', selectedRepository.full_name);
     setLoadingBranches(true);
     setSelectedBranch('');
     setBranches([]);
     
     try {
       const [owner, repo] = selectedRepository.full_name.split('/');
+      console.log('Fetching branches for:', { owner, repo });
       const branchList = await api.getRepositoryBranches(owner, repo);
+      console.log('Received branch list:', branchList);
       
       // Transform API response to match frontend GitHubBranch type
       const transformedBranches: GitHubBranch[] = branchList.map(branch => ({
@@ -44,6 +47,7 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
         protected: false // API doesn't provide this, set default
       }));
       
+      console.log('Transformed branches:', transformedBranches);
       setBranches(transformedBranches);
       
       // Auto-select main or master branch if available, or default branch
@@ -51,8 +55,10 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
         b.name === 'main' || b.name === 'master' || b.name === selectedRepository.default_branch
       );
       if (defaultBranch) {
+        console.log('Auto-selecting default branch:', defaultBranch.name);
         setSelectedBranch(defaultBranch.name);
       } else if (transformedBranches.length > 0) {
+        console.log('Auto-selecting first branch:', transformedBranches[0].name);
         setSelectedBranch(transformedBranches[0].name);
       }
     } catch (error) {
@@ -66,6 +72,7 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
   // Load repositories when toast opens
   useEffect(() => {
     if (isOpen && availableRepositories.length === 0) {
+      console.log('Loading repositories...');
       loadRepositories();
     }
   }, [isOpen, availableRepositories.length, loadRepositories]);
@@ -73,6 +80,7 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
   // Load branches when repository is selected
   useEffect(() => {
     if (selectedRepository) {
+      console.log('Repository selected, loading branches...');
       loadBranches();
     }
   }, [selectedRepository, loadBranches]);
@@ -80,12 +88,17 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
   // Set error from repository context
   useEffect(() => {
     if (repositoryError) {
+      console.log('Repository error:', repositoryError);
       setError(repositoryError);
     }
   }, [repositoryError]);
 
   const handleConfirm = () => {
     if (selectedRepository && selectedBranch) {
+      console.log('Confirming selection:', {
+        repository: selectedRepository.full_name,
+        branch: selectedBranch
+      });
       onConfirm({
         repository: selectedRepository,
         branch: selectedBranch
@@ -94,11 +107,13 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
   };
 
   const handleRepositorySelect = (repo: GitHubRepository) => {
+    console.log('Repository selected:', repo.full_name);
     setSelectedRepository(repo);
     setIsRepoDropdownOpen(false);
   };
 
   const handleBranchSelect = (branchName: string) => {
+    console.log('Branch selected:', branchName);
     setSelectedBranch(branchName);
     setIsBranchDropdownOpen(false);
   };
