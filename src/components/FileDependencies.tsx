@@ -52,12 +52,13 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
 
   const loadFileDependencies = useCallback(async () => {
     if (!sessionState.sessionId) {
-      showError('No active session found');
+      console.log('FileDependencies: No active session found, waiting for session from Chat.tsx');
       return;
     }
 
     setIsLoading(true);
     try {
+      console.log('FileDependencies: Loading dependencies for session:', sessionState.sessionId);
       // Try to get file dependencies from session first
       const sessionDependencies = await ApiService.getFileDependenciesSession(
         sessionState.sessionId
