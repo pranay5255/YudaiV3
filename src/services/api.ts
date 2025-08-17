@@ -161,7 +161,7 @@ export class ApiService {
       throw new Error('session_id is required and cannot be empty');
     }
 
-    const response = await fetch(`${API_BASE_URL}/chat/daifu`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/chat`, {
       method: 'POST',
       headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
@@ -170,7 +170,7 @@ export class ApiService {
   }
 
   static async createIssueFromChat(request: ChatRequest, sessionToken?: string): Promise<CreateIssueFromChatResponse> {
-    const response = await fetch(`${API_BASE_URL}/chat/create-issue`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/create-issue`, {
       method: 'POST',
       headers: ApiService.getAuthHeaders(sessionToken),   
       body: JSON.stringify(request),

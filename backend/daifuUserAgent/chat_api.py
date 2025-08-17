@@ -67,7 +67,7 @@ async def get_github_context(owner: str, repo: str, current_user: User, db: Sess
         return f"Error getting GitHub context: {str(e)}"
 
 router = APIRouter()
-@router.post("/chat/daifu")
+@router.post("/chat")
 async def chat_daifu(
     request: ChatRequest,
     background_tasks: BackgroundTasks,
@@ -175,7 +175,7 @@ async def chat_daifu(
         )
 
 
-@router.post("/chat/create-issue")
+@router.post("/create-issue")
 async def create_issue_from_chat(
     request: ChatRequest,
     db: Session = Depends(get_db),
