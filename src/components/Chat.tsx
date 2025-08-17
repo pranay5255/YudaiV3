@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Send, Plus } from 'lucide-react';
-import { Message, FileItem, ContextCard } from '../types';
+import { Message, FileItem, ContextCard, SelectedRepository } from '../types';
 import type {
   CreateIssueWithContextRequest,
   ChatContextMessage,
@@ -56,6 +56,7 @@ export const Chat: React.FC<ChatProps> = ({
       id: '1',
       content: 'Hi, I am Daifu, your spirit guide across the chaos of context. I will help you create github issues and pull requests by adding the right context required for a given task.You can add the individual text messages to context such as the one below to prioritize text messages in conversations',
       timestamp: new Date(),
+      sessionId: sessionId || 'default',
     },
     {
       id: '2',
@@ -67,6 +68,7 @@ export const Chat: React.FC<ChatProps> = ({
   return messages[Math.floor(Math.random() * messages.length)];
 }`,
       timestamp: new Date(),
+      sessionId: sessionId || 'default',
     },
   ]);
   
@@ -89,7 +91,64 @@ export const Chat: React.FC<ChatProps> = ({
     }
   }, [onShowError]);
 
-  // Create session when repository is selected
+  // Generate UUID4-like session ID using crypto API
+  const generateSessionId = (): string => {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  };
+
+  // Repository selection handler
+  const handleRepositorySelection = useCallback((repository: SelectedRepository) => {
+    console.log('[Chat] Repository selected:', repository);
+    
+    // Generate unique session ID
+    const newSessionId = generateSessionId();
+    console.log('[Chat] Generated new session ID:', newSessionId);
+    
+    // Create session with repository context
+    handleCreateSession(repository, newSessionId);
+  }, []);
+
+  // Separate session creation function
+  const handleCreateSession = useCallback(async (repository: SelectedRepository, sessionId: string) => {
+    try {
+      console.log('[Chat] Creating session for repository:', repository);
+      
+      const repoOwner = repository.repository.owner?.login || repository.repository.full_name.split('/')[0];
+      const repoName = repository.repository.name;
+      
+      await createSession(repoOwner, repoName, repository.branch);
+      
+      // Add default welcome message after successful session creation
+      const welcomeMessage: Message = {
+        id: `welcome-${Date.now()}`,
+        content: `Welcome to your new chat session with repository **${repoOwner}/${repoName}**!
+
+I'm ready to help you with:
+• Creating GitHub issues from our conversations
+• Analyzing code and dependencies
+• Planning development tasks
+• Providing technical guidance
+
+What would you like to work on today?`,
+        timestamp: new Date(),
+        sessionId: sessionId,
+      };
+      
+      // Add welcome message to the chat
+      setMessages(prev => [...prev, welcomeMessage]);
+      
+      console.log('[Chat] Session created successfully with welcome message');
+    } catch (error) {
+      console.error('[Chat] Failed to create session:', error);
+      showError('Failed to create session. Please try again.');
+    }
+  }, [createSession, showError]);
+
+  // Auto-create session when repository is selected
   useEffect(() => {
     console.log('[Chat] Repository or session changed:', {
       selectedRepository,
@@ -97,14 +156,10 @@ export const Chat: React.FC<ChatProps> = ({
     });
 
     if (selectedRepository && !sessionId) {
-      console.log('[Chat] Creating new session for repository:', selectedRepository);
-      createSession(
-        selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0],
-        selectedRepository.repository.name,
-        selectedRepository.branch
-      );
+      console.log('[Chat] Auto-creating session for selected repository');
+      handleRepositorySelection(selectedRepository);
     }
-  }, [selectedRepository, sessionId, createSession]);
+  }, [selectedRepository, sessionId, handleRepositorySelection]);
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading || !sessionId) {
@@ -131,6 +186,7 @@ export const Chat: React.FC<ChatProps> = ({
       id: Date.now().toString(),
       content: currentInput,
       timestamp: new Date(),
+      sessionId: sessionId,
     };
     setMessages(prev => [...prev, userMessage]);
     
@@ -152,8 +208,11 @@ export const Chat: React.FC<ChatProps> = ({
             content: currentInput
           },
           context_cards: contextCards.map(card => card.id),
-          repo_owner: selectedRepository?.repository.owner?.login || selectedRepository?.repository.full_name.split('/')[0],
-          repo_name: selectedRepository?.repository.name
+          repository: selectedRepository ? {
+            owner: selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0],
+            name: selectedRepository.repository.name,
+            branch: selectedRepository.branch
+          } : undefined,
         });
       
         console.log('[Chat] Received API response:', response);
@@ -163,14 +222,17 @@ export const Chat: React.FC<ChatProps> = ({
         id: response.message_id,
         content: response.reply,
         timestamp: new Date(),
+        sessionId: sessionId,
       };
       setMessages(prev => [...prev, assistantMessage]);
       
     } catch (error) {
       console.error('[Chat] API call failed:', error);
       showError('Failed to send message. Please try again.');
+      // Remove the user message that failed to send
       setMessages(prev => prev.filter(msg => msg.id !== userMessage.id));
     } finally {
+      // Always reset loading state
       setIsLoading(false);
     }
   }, [input, isLoading, sessionId, contextCards, selectedRepository, api, showError]);
@@ -289,13 +351,13 @@ export const Chat: React.FC<ChatProps> = ({
         {messages.map((message) => (
           <div
             key={message.id}
-            className={`flex ${message.isCode ? 'justify-start' : 'justify-end'}`}
+            className={`flex ${message.id === '2' ? 'justify-start' : 'justify-end'}`}
             onMouseEnter={() => setHoveredMessage(message.id)}
             onMouseLeave={() => setHoveredMessage(null)}
           >
             <div
               className={`max-w-[70%] rounded-lg p-3 ${
-                message.isCode
+                message.id === '2'
                   ? 'bg-zinc-800 text-zinc-200'
                   : 'bg-blue-600 text-white'
               }`}
