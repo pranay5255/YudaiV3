@@ -15,7 +15,7 @@ class LLMService:
     """Centralized service for LLM interactions"""
     
     # Standard model configuration
-    DEFAULT_MODEL = "deepseek/deepseek-r1-0528:free"
+    DEFAULT_MODEL = "deepseek/deepseek-r1-0528"
     DEFAULT_TEMPERATURE = 0.7
     DEFAULT_MAX_TOKENS = 1000
     DEFAULT_TIMEOUT = 30

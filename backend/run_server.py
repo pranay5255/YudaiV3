@@ -66,7 +66,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/auth", tags=["authentication"])
 app.include_router(github_router, prefix="/github", tags=["github"])
 app.include_router(session_router, prefix="/daifu", tags=["sessions"])
-app.include_router(daifu_router, prefix="/daifu", tags=["chat"])
+app.include_router(daifu_router, prefix="", tags=["chat"])
 app.include_router(issue_router, prefix="/issues", tags=["issues"])
 app.include_router(filedeps_router, prefix="/filedeps", tags=["file-dependencies"])
 
