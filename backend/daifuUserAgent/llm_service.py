@@ -16,8 +16,8 @@ class LLMService:
     
     # Standard model configuration
     DEFAULT_MODEL = "deepseek/deepseek-r1-0528"
-    DEFAULT_TEMPERATURE = 0.7
-    DEFAULT_MAX_TOKENS = 1000
+    DEFAULT_TEMPERATURE = 0.4
+    DEFAULT_MAX_TOKENS = 4000
     DEFAULT_TIMEOUT = 30
     
     @staticmethod
