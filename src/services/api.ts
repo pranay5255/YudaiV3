@@ -163,7 +163,7 @@ export class ApiService {
 
     const response = await fetch(`${API_BASE_URL}/chat/daifu`, {
       method: 'POST',
-      headers: this.getAuthHeaders(sessionToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
     return this.handleResponse<ChatResponse>(response);
@@ -172,7 +172,7 @@ export class ApiService {
   static async createIssueFromChat(request: ChatRequest, sessionToken?: string): Promise<CreateIssueFromChatResponse> {
     const response = await fetch(`${API_BASE_URL}/chat/create-issue`, {
       method: 'POST',
-      headers: this.getAuthHeaders(sessionToken), 
+      headers: ApiService.getAuthHeaders(sessionToken),   
       body: JSON.stringify(request),
     });
     return this.handleResponse<CreateIssueFromChatResponse>(response);
@@ -182,7 +182,7 @@ export class ApiService {
   static async createIssueWithContext(request: CreateIssueWithContextRequest, githubToken?: string): Promise<IssueCreationResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/from-session-enhanced`, {
       method: 'POST',
-      headers: this.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(githubToken),
       body: JSON.stringify(request),
     });
     return this.handleResponse<IssueCreationResponse>(response);
@@ -201,7 +201,7 @@ export class ApiService {
 
     const response = await fetch(`${API_BASE_URL}/issues?${params}`, {
       method: 'GET',
-      headers: this.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(githubToken),
     });
     return this.handleResponse<UserIssueResponse[]>(response);
   }
@@ -209,7 +209,7 @@ export class ApiService {
   static async getIssue(issueId: string, githubToken?: string): Promise<UserIssueResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
       method: 'GET',
-      headers: this.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(githubToken),
     });
     return this.handleResponse<UserIssueResponse>(response);
   }
@@ -217,7 +217,7 @@ export class ApiService {
   static async updateIssue(issueId: string, updates: Partial<UserIssueResponse>, githubToken?: string): Promise<UserIssueResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
       method: 'PUT',
-      headers: this.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(githubToken),
       body: JSON.stringify(updates),
     });
     return this.handleResponse<UserIssueResponse>(response);
@@ -226,7 +226,7 @@ export class ApiService {
   static async deleteIssue(issueId: string, githubToken?: string): Promise<{message: string}> {
     const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
       method: 'DELETE',
-      headers: this.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(githubToken),
     });
     return this.handleResponse<{message: string}>(response);
   }
@@ -263,7 +263,7 @@ export class ApiService {
   static async getFileDependencies(fileId: string, githubToken?: string): Promise<FileContextItem[]> {
     const response = await fetch(`${API_BASE_URL}/file-dependencies/${fileId}`, {
       method: 'GET',
-      headers: this.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(githubToken),
     });
     return this.handleResponse<FileContextItem[]>(response);
   }
@@ -272,7 +272,7 @@ export class ApiService {
   static async getRepositories(githubToken?: string): Promise<RepositoryResponse> {
     const response = await fetch(`${API_BASE_URL}/repositories`, {
       method: 'GET',
-      headers: this.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(githubToken),
     });
     return this.handleResponse<RepositoryResponse>(response);
   }
@@ -280,7 +280,7 @@ export class ApiService {
   static async getRepository(owner: string, name: string, githubToken?: string): Promise<RepositoryDetailsResponse> {
     const response = await fetch(`${API_BASE_URL}/repositories/${owner}/${name}`, {
       method: 'GET',
-      headers: this.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(githubToken),
     });
     return this.handleResponse<RepositoryDetailsResponse>(response);
   }
@@ -288,7 +288,7 @@ export class ApiService {
   static async createGitHubIssueFromUserIssue(issueId: string, githubToken?: string): Promise<CreateGitHubIssueResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/${issueId}/create-github-issue`, {
       method: 'POST',
-      headers: this.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(githubToken),
     });
     return this.handleResponse<CreateGitHubIssueResponse>(response);
   }
@@ -296,7 +296,7 @@ export class ApiService {
   static async extractFileDependencies(repoUrl: string, githubToken?: string): Promise<ExtractFileDependenciesResponse> {
     const response = await fetch(`${API_BASE_URL}/filedeps/extract`, {
       method: 'POST',
-      headers: this.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(githubToken),
       body: JSON.stringify({ repo_url: repoUrl } as ExtractFileDependenciesRequest),
     });
     return this.handleResponse<ExtractFileDependenciesResponse>(response);
@@ -305,7 +305,7 @@ export class ApiService {
   static async getRepositoryBranches(owner: string, repo: string, githubToken?: string): Promise<GitHubBranchAPI[]> {
     const response = await fetch(`${API_BASE_URL}/github/repositories/${owner}/${repo}/branches`, {
       method: 'GET',
-      headers: this.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(githubToken),
     });
     return this.handleResponse<GitHubBranchAPI[]>(response);
   }
@@ -313,7 +313,7 @@ export class ApiService {
   static async getUserRepositories(githubToken?: string): Promise<GitHubRepositoryAPI[]> {
     const response = await fetch(`${API_BASE_URL}/github/repositories`, {
       method: 'GET',
-      headers: this.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(githubToken),
     });
     return this.handleResponse<GitHubRepositoryAPI[]>(response);
   }
@@ -326,7 +326,7 @@ export class ApiService {
   ): Promise<ChatMessageResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/messages`, {
       method: 'POST',
-      headers: this.getAuthHeaders(sessionToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
     return this.handleResponse<ChatMessageResponse>(response);
@@ -339,7 +339,7 @@ export class ApiService {
   ): Promise<ChatMessageResponse[]> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/messages?limit=${limit}`, {
       method: 'GET',
-      headers: this.getAuthHeaders(sessionToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
     });
     return this.handleResponse<ChatMessageResponse[]>(response);
   }
@@ -351,7 +351,7 @@ export class ApiService {
   ): Promise<{success: boolean, message: string}> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/messages/${messageId}`, {
       method: 'DELETE',
-      headers: this.getAuthHeaders(sessionToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
     });
     return this.handleResponse<{success: boolean, message: string}>(response);
   }
@@ -364,7 +364,7 @@ export class ApiService {
   ): Promise<ContextCardResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/context-cards`, {
       method: 'POST',
-      headers: this.getAuthHeaders(sessionToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
     return this.handleResponse<ContextCardResponse>(response);
@@ -376,7 +376,7 @@ export class ApiService {
   ): Promise<ContextCardResponse[]> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/context-cards`, {
       method: 'GET',
-      headers: this.getAuthHeaders(sessionToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
     });
     return this.handleResponse<ContextCardResponse[]>(response);
   }
@@ -388,7 +388,7 @@ export class ApiService {
   ): Promise<{success: boolean, message: string}> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/context-cards/${cardId}`, {
       method: 'DELETE',
-      headers: this.getAuthHeaders(sessionToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
     });
     return this.handleResponse<{success: boolean, message: string}>(response);
   }
@@ -401,7 +401,7 @@ export class ApiService {
   ): Promise<FileEmbeddingResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-dependencies`, {
       method: 'POST',
-      headers: this.getAuthHeaders(sessionToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
     return this.handleResponse<FileEmbeddingResponse>(response);
@@ -413,7 +413,7 @@ export class ApiService {
   ): Promise<FileEmbeddingResponse[]> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-dependencies`, {
       method: 'GET',
-      headers: this.getAuthHeaders(sessionToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
     });
     return this.handleResponse<FileEmbeddingResponse[]>(response);
   }
@@ -425,7 +425,7 @@ export class ApiService {
   ): Promise<{success: boolean, message: string}> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-dependencies/${fileId}`, {
       method: 'DELETE',
-      headers: this.getAuthHeaders(sessionToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
     });
     return this.handleResponse<{success: boolean, message: string}>(response);
   }
