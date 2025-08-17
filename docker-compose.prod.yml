@@ -264,17 +264,5 @@ networks:
 # ✅ Backup volumes (data protection)
 # ✅ Network security (custom subnet, isolation)
 # ✅ Environment file management (secrets separation)
-#
-# Next Steps:
-# 1. Create .env.prod and .env.secrets files
-# 2. Set up log rotation and monitoring
-# 3. Configure SSL certificate backup strategy
-# 4. Test resource limits in staging
-# 5. Monitor performance metrics
-#
-# Critical Security Notes:
-# - Ensure .env.secrets is in .gitignore
-# - Set proper file permissions (600) on secrets
-# - Monitor resource usage and adjust limits
-# - Regular backup verification
+
 # ===========================================

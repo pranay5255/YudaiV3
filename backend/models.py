@@ -756,14 +756,10 @@ class UserIssueResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     
 class ChatRequest(BaseModel):
-    session_id: Optional[str] = Field(
-        default="default", alias="sessionId"
-    )
+    session_id: Optional[str] = Field(default="default", alias="sessionId")
     message: ChatMessageInput
     context_cards: Optional[List[str]] = Field(default_factory=list)
-    repo_owner: Optional[str] = Field(None, alias="repoOwner")
-    repo_name: Optional[str] = Field(None, alias="repoName")
-
+    repository: Optional[Dict[str, str]] = None  # Add this field
     model_config = ConfigDict(populate_by_name=True)
 
 class CreateIssueRequest(BaseModel):

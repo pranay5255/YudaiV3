@@ -54,7 +54,6 @@ export interface LoginUrlResponse {
 
 export interface ChatMessage {
   content: string;
-  is_code: boolean;
 }
 
 export interface ChatRequest {
@@ -67,7 +66,6 @@ export interface ChatRequest {
 
 export interface CreateChatMessageRequest {
   content: string;
-  is_code: boolean;
   sender_type: 'user' | 'assistant' | 'system';
   role: 'user' | 'assistant' | 'system';
   context_cards?: string[];
@@ -85,7 +83,6 @@ export interface ChatResponse {
 export interface ChatContextMessage {
   id: string;
   content: string;
-  isCode: boolean;
   timestamp: string;
 }
 
