@@ -34,11 +34,24 @@ class LLMService:
     @staticmethod
     def build_prompt_from_history(
         repo_context: str, 
-        conversation_history: List[Tuple[str, str]]
+        conversation_history: List[Tuple[str, str]],
+        github_data: tuple = None
     ) -> str:
         """Build prompt from conversation history"""
         from .prompt import build_daifu_prompt
-        return build_daifu_prompt(repo_context, conversation_history)
+        
+        if github_data:
+            repo_details, commits, issues, pulls = github_data
+            return build_daifu_prompt(repo_details, commits, issues, pulls, conversation_history)
+        else:
+            # Fallback to empty data structures
+            repo_details = {"full_name": "Repository", "description": "", "default_branch": "", 
+                           "languages": {}, "topics": [], "license": None, "stargazers_count": 0, 
+                           "forks_count": 0, "open_issues_count": 0, "html_url": ""}
+            commits = []
+            issues = []
+            pulls = []
+            return build_daifu_prompt(repo_details, commits, issues, pulls, conversation_history)
     
     @staticmethod
     async def generate_response(
@@ -122,6 +135,7 @@ class LLMService:
     async def generate_response_with_history(
         repo_context: str,
         conversation_history: List[Tuple[str, str]],
+        github_data: tuple = None,
         model: str = None,
         temperature: float = None,
         max_tokens: int = None,
@@ -141,7 +155,7 @@ class LLMService:
         Returns:
             Generated response text
         """
-        prompt = LLMService.build_prompt_from_history(repo_context, conversation_history)
+        prompt = LLMService.build_prompt_from_history(repo_context, conversation_history, github_data)
         return await LLMService.generate_response(
             prompt=prompt,
             model=model,

@@ -66,6 +66,30 @@ async def get_github_context(owner: str, repo: str, current_user: User, db: Sess
     except Exception as e:
         return f"Error getting GitHub context: {str(e)}"
 
+
+async def get_github_context_data(owner: str, repo: str, current_user: User, db: Session) -> tuple:
+    """Get raw GitHub repository data for prompt building"""
+    try:
+        # Get repository details
+        repo_details = await get_repository_details(owner, repo, current_user, db)
+        
+        # Get recent issues
+        issues = await get_repository_issues(owner, repo, "open", current_user, db)
+        
+        # Get recent PRs
+        pulls = await get_repository_pulls(owner, repo, "open", current_user, db)
+        
+        # Get recent commits on main branch
+        commits = await get_repository_commits(owner, repo, "main", current_user, db)
+        
+        return repo_details, commits, issues, pulls
+    except Exception:
+        # Return empty data structures on error
+        empty_repo = {"full_name": "Repository", "description": "", "default_branch": "", 
+                     "languages": {}, "topics": [], "license": None, "stargazers_count": 0, 
+                     "forks_count": 0, "open_issues_count": 0, "html_url": ""}
+        return empty_repo, [], [], []
+
 router = APIRouter()
 @router.post("/chat")
 async def chat_daifu(
@@ -102,8 +126,16 @@ async def chat_daifu(
             repo_name = request.repository["name"]
         
         # Get GitHub context if we have repository information
+        github_context = ""
+        github_data = None
         if repo_owner and repo_name:
             github_context = await get_github_context(
+                repo_owner,
+                repo_name,
+                current_user,
+                db
+            )
+            github_data = await get_github_context_data(
                 repo_owner,
                 repo_name,
                 current_user,
@@ -135,7 +167,8 @@ async def chat_daifu(
         # Generate AI response
         reply = await LLMService.generate_response_with_history(
             repo_context=github_context,
-            conversation_history=history
+            conversation_history=history,
+            github_data=github_data
         )
         
         # Calculate processing time
