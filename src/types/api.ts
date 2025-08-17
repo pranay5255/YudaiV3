@@ -60,8 +60,11 @@ export interface ChatRequest {
   session_id?: string;
   message: ChatMessage;
   context_cards?: string[];
-  repo_owner?: string;
-  repo_name?: string;
+  repository?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
 }
 
 export interface CreateChatMessageRequest {

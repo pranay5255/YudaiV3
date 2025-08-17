@@ -45,8 +45,8 @@ export interface FileItem {
 export interface Message {
   id: string;
   content: string;
-  isCode: boolean;
   timestamp: Date;
+  sessionId: string;
 }
 
 export interface Toast {
