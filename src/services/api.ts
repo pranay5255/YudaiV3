@@ -102,25 +102,25 @@ export class ApiService {
       },
       body: JSON.stringify(request),
     });
-    return this.handleResponse<CreateSessionResponse>(response);
+    return ApiService.handleResponse<CreateSessionResponse>(response);
   }
 
   // Session Management API Methods
   static async createSession(request: CreateSessionDaifuRequest, sessionToken?: string): Promise<SessionResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions`, {
       method: 'POST',
-      headers: this.getAuthHeaders(sessionToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
-    return this.handleResponse<SessionResponse>(response);
+    return ApiService.handleResponse<SessionResponse>(response);
   }
 
   static async getSessionContext(sessionId: string, sessionToken?: string): Promise<SessionContextResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
       method: 'GET',
-      headers: this.getAuthHeaders(sessionToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
     });
-    return this.handleResponse<SessionContextResponse>(response);
+    return ApiService.handleResponse<SessionContextResponse>(response);
   }
 
   static async validateSessionToken(sessionToken: string): Promise<ValidateSessionResponse> {
@@ -130,7 +130,7 @@ export class ApiService {
         'Content-Type': 'application/json',
       },
     });
-    return this.handleResponse<ValidateSessionResponse>(response);
+    return ApiService.handleResponse<ValidateSessionResponse>(response);
   }
 
   static async logout(sessionToken: string): Promise<LogoutResponse> {
@@ -141,7 +141,7 @@ export class ApiService {
       },
       body: JSON.stringify({ session_token: sessionToken } as LogoutRequest),
     });
-    return this.handleResponse<LogoutResponse>(response);
+    return ApiService.handleResponse<LogoutResponse>(response);
   }
 
   static async getLoginUrl(): Promise<LoginUrlResponse> {
@@ -151,7 +151,7 @@ export class ApiService {
         'Content-Type': 'application/json',
       },
     });
-    return this.handleResponse<LoginUrlResponse>(response);
+    return ApiService.handleResponse<LoginUrlResponse>(response);
   }
 
   // Chat API Methods
@@ -166,7 +166,7 @@ export class ApiService {
       headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
-    return this.handleResponse<ChatResponse>(response);
+    return ApiService.handleResponse<ChatResponse>(response);
   }
 
   static async createIssueFromChat(request: ChatRequest, sessionToken?: string): Promise<CreateIssueFromChatResponse> {
@@ -175,7 +175,7 @@ export class ApiService {
       headers: ApiService.getAuthHeaders(sessionToken),   
       body: JSON.stringify(request),
     });
-    return this.handleResponse<CreateIssueFromChatResponse>(response);
+    return ApiService.handleResponse<CreateIssueFromChatResponse>(response);
   }
 
   // Issue Management API Methods
@@ -185,7 +185,7 @@ export class ApiService {
       headers: ApiService.getAuthHeaders(githubToken),
       body: JSON.stringify(request),
     });
-    return this.handleResponse<IssueCreationResponse>(response);
+    return ApiService.handleResponse<IssueCreationResponse>(response);
   }
 
   static async getIssues(
@@ -203,7 +203,7 @@ export class ApiService {
       method: 'GET',
       headers: ApiService.getAuthHeaders(githubToken),
     });
-    return this.handleResponse<UserIssueResponse[]>(response);
+    return ApiService.handleResponse<UserIssueResponse[]>(response);
   }
 
   static async getIssue(issueId: string, githubToken?: string): Promise<UserIssueResponse> {
@@ -211,7 +211,7 @@ export class ApiService {
       method: 'GET',
       headers: ApiService.getAuthHeaders(githubToken),
     });
-    return this.handleResponse<UserIssueResponse>(response);
+    return ApiService.handleResponse<UserIssueResponse>(response);
   }
 
   static async updateIssue(issueId: string, updates: Partial<UserIssueResponse>, githubToken?: string): Promise<UserIssueResponse> {
@@ -220,7 +220,7 @@ export class ApiService {
       headers: ApiService.getAuthHeaders(githubToken),
       body: JSON.stringify(updates),
     });
-    return this.handleResponse<UserIssueResponse>(response);
+    return ApiService.handleResponse<UserIssueResponse>(response);
   }
 
   static async deleteIssue(issueId: string, githubToken?: string): Promise<{message: string}> {
@@ -228,7 +228,7 @@ export class ApiService {
       method: 'DELETE',
       headers: ApiService.getAuthHeaders(githubToken),
     });
-    return this.handleResponse<{message: string}>(response);
+    return ApiService.handleResponse<{message: string}>(response);
   }
 
   // File Dependencies API Methods
@@ -257,7 +257,7 @@ export class ApiService {
       headers,
       body: formData,
     });
-    return this.handleResponse<FileAnalysisResponse>(response);
+    return ApiService.handleResponse<FileAnalysisResponse>(response);
   }
 
   static async getFileDependencies(fileId: string, githubToken?: string): Promise<FileContextItem[]> {
@@ -265,7 +265,7 @@ export class ApiService {
       method: 'GET',
       headers: ApiService.getAuthHeaders(githubToken),
     });
-    return this.handleResponse<FileContextItem[]>(response);
+    return ApiService.handleResponse<FileContextItem[]>(response);
   }
 
   // Repository Management API Methods
@@ -274,7 +274,7 @@ export class ApiService {
       method: 'GET',
       headers: ApiService.getAuthHeaders(githubToken),
     });
-    return this.handleResponse<RepositoryResponse>(response);
+    return ApiService.handleResponse<RepositoryResponse>(response);
   }
 
   static async getRepository(owner: string, name: string, githubToken?: string): Promise<RepositoryDetailsResponse> {
@@ -282,7 +282,7 @@ export class ApiService {
       method: 'GET',
       headers: ApiService.getAuthHeaders(githubToken),
     });
-    return this.handleResponse<RepositoryDetailsResponse>(response);
+    return ApiService.handleResponse<RepositoryDetailsResponse>(response);
   }
 
   static async createGitHubIssueFromUserIssue(issueId: string, githubToken?: string): Promise<CreateGitHubIssueResponse> {
@@ -290,7 +290,7 @@ export class ApiService {
       method: 'POST',
       headers: ApiService.getAuthHeaders(githubToken),
     });
-    return this.handleResponse<CreateGitHubIssueResponse>(response);
+    return ApiService.handleResponse<CreateGitHubIssueResponse>(response);
   }
 
   static async extractFileDependencies(repoUrl: string, githubToken?: string): Promise<ExtractFileDependenciesResponse> {
@@ -299,7 +299,7 @@ export class ApiService {
       headers: ApiService.getAuthHeaders(githubToken),
       body: JSON.stringify({ repo_url: repoUrl } as ExtractFileDependenciesRequest),
     });
-    return this.handleResponse<ExtractFileDependenciesResponse>(response);
+    return ApiService.handleResponse<ExtractFileDependenciesResponse>(response);
   }
 
   static async getRepositoryBranches(owner: string, repo: string, githubToken?: string): Promise<GitHubBranchAPI[]> {
@@ -307,7 +307,7 @@ export class ApiService {
       method: 'GET',
       headers: ApiService.getAuthHeaders(githubToken),
     });
-    return this.handleResponse<GitHubBranchAPI[]>(response);
+    return ApiService.handleResponse<GitHubBranchAPI[]>(response);
   }
 
   static async getUserRepositories(githubToken?: string): Promise<GitHubRepositoryAPI[]> {
@@ -315,7 +315,7 @@ export class ApiService {
       method: 'GET',
       headers: ApiService.getAuthHeaders(githubToken),
     });
-    return this.handleResponse<GitHubRepositoryAPI[]>(response);
+    return ApiService.handleResponse<GitHubRepositoryAPI[]>(response);
   }
 
   // Chat Messages CRUD
@@ -329,7 +329,7 @@ export class ApiService {
       headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
-    return this.handleResponse<ChatMessageResponse>(response);
+    return ApiService.handleResponse<ChatMessageResponse>(response);
   }
 
   static async getChatMessages(
@@ -341,7 +341,7 @@ export class ApiService {
       method: 'GET',
       headers: ApiService.getAuthHeaders(sessionToken),
     });
-    return this.handleResponse<ChatMessageResponse[]>(response);
+    return ApiService.handleResponse<ChatMessageResponse[]>(response);
   }
 
   static async deleteChatMessage(
@@ -353,7 +353,7 @@ export class ApiService {
       method: 'DELETE',
       headers: ApiService.getAuthHeaders(sessionToken),
     });
-    return this.handleResponse<{success: boolean, message: string}>(response);
+    return ApiService.handleResponse<{success: boolean, message: string}>(response);
   }
 
   // Context Cards CRUD
@@ -367,7 +367,7 @@ export class ApiService {
       headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
-    return this.handleResponse<ContextCardResponse>(response);
+    return ApiService.handleResponse<ContextCardResponse>(response);
   }
 
   static async getContextCards(
@@ -378,7 +378,7 @@ export class ApiService {
       method: 'GET',
       headers: ApiService.getAuthHeaders(sessionToken),
     });
-    return this.handleResponse<ContextCardResponse[]>(response);
+    return ApiService.handleResponse<ContextCardResponse[]>(response);
   }
 
   static async deleteContextCard(
@@ -390,7 +390,7 @@ export class ApiService {
       method: 'DELETE',
       headers: ApiService.getAuthHeaders(sessionToken),
     });
-    return this.handleResponse<{success: boolean, message: string}>(response);
+    return ApiService.handleResponse<{success: boolean, message: string}>(response);
   }
 
   // File Dependencies CRUD
@@ -404,7 +404,7 @@ export class ApiService {
       headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
-    return this.handleResponse<FileEmbeddingResponse>(response);
+    return ApiService.handleResponse<FileEmbeddingResponse>(response);
   }
 
   static async getFileDependenciesSession(
@@ -415,7 +415,7 @@ export class ApiService {
       method: 'GET',
       headers: ApiService.getAuthHeaders(sessionToken),
     });
-    return this.handleResponse<FileEmbeddingResponse[]>(response);
+    return ApiService.handleResponse<FileEmbeddingResponse[]>(response);
   }
 
   static async deleteFileDependency(
@@ -427,6 +427,6 @@ export class ApiService {
       method: 'DELETE',
       headers: ApiService.getAuthHeaders(sessionToken),
     });
-    return this.handleResponse<{success: boolean, message: string}>(response);
+    return ApiService.handleResponse<{success: boolean, message: string}>(response);
   }
 }
