@@ -1,15 +1,14 @@
 """
 Issue Chat Services package for YudaiV3
 
-This package provides services for managing chat sessions and user issues,
+This package provides services for managing user issues,
 including integration with GitHub API for issue creation.
 """
 
-from .chat_service import ChatService
-from .issue_service import IssueService, router as issue_router
+from .issue_service import IssueService
+from .issue_service import router as issue_router
 
 __all__ = [
-    "ChatService",
     "IssueService", 
     "issue_router"
 ] 
