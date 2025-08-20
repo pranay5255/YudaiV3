@@ -52,19 +52,23 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
 
   const loadFileDependencies = useCallback(async () => {
     if (!sessionState.sessionId) {
-      console.log('FileDependencies: No active session found, waiting for session from Chat.tsx');
+      console.log('[FileDependencies] No active session found');
+      setFiles([]);
       return;
     }
 
+    console.log('[FileDependencies] Loading file dependencies for session:', sessionState.sessionId);
     setIsLoading(true);
+    
     try {
-      console.log('FileDependencies: Loading dependencies for session:', sessionState.sessionId);
-      // Try to get file dependencies from session first
+      // First, try to get file dependencies from session
       const sessionDependencies = await ApiService.getFileDependenciesSession(
         sessionState.sessionId
       );
       
       if (sessionDependencies && sessionDependencies.length > 0) {
+        console.log('[FileDependencies] Found session dependencies:', sessionDependencies.length);
+        
         // Convert session file embeddings to ExtendedFileItem format
         const convertedFiles: ExtendedFileItem[] = sessionDependencies.map(dep => ({
           id: dep.id.toString(),
@@ -79,49 +83,64 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
         }));
         setFiles(convertedFiles);
       } else if (repoUrl && sessionState.repositoryInfo) {
+        console.log('[FileDependencies] No session dependencies, extracting from repository:', repoUrl);
+        
         // If no session dependencies, try to extract from repository
         const repoDependencies = await ApiService.extractFileDependencies(
           repoUrl
         );
         
-                 if (repoDependencies && repoDependencies.children) {
-           const convertToExtendedItems = (items: FileDependencyNode[]): ExtendedFileItem[] => {
-             return items.map(item => ({
-               id: item.id,
-               name: item.name,
-               path: undefined, // FileDependencyNode doesn't have path property
-               type: (item.type as 'INTERNAL' | 'EXTERNAL') || 'INTERNAL',
-               tokens: item.tokens || 0,
-               category: item.Category || 'unknown',
-               isDirectory: item.isDirectory || false,
-               children: item.children ? convertToExtendedItems(item.children) : [],
-               expanded: false
-             }));
-           };
+        if (repoDependencies && repoDependencies.children) {
+          const convertToExtendedItems = (items: FileDependencyNode[]): ExtendedFileItem[] => {
+            return items.map(item => ({
+              id: item.id,
+              name: item.name,
+              path: undefined, // FileDependencyNode doesn't have path property
+              type: (item.type as 'INTERNAL' | 'EXTERNAL') || 'INTERNAL',
+              tokens: item.tokens || 0,
+              category: item.Category || 'unknown',
+              isDirectory: item.isDirectory || false,
+              children: item.children ? convertToExtendedItems(item.children) : [],
+              expanded: false
+            }));
+          };
           
           setFiles(convertToExtendedItems(repoDependencies.children));
+        } else {
+          setFiles([]);
         }
       } else {
+        console.log('[FileDependencies] No dependencies found');
         setFiles([]);
       }
     } catch (error) {
-      console.error('Error loading file dependencies:', error);
-      showError('Failed to load file dependencies');
-      setFiles([]);
+      console.error('[FileDependencies] Error loading file dependencies:', error);
+      
+      // Don't show error for 404 - just set empty files
+      if (error instanceof Error && error.message.includes('404')) {
+        console.log('[FileDependencies] 404 error - no file dependencies found for session');
+        setFiles([]);
+      } else {
+        showError('Failed to load file dependencies');
+        setFiles([]);
+      }
     } finally {
       setIsLoading(false);
     }
   }, [sessionState.sessionId, sessionState.repositoryInfo, repoUrl, showError]);
 
-  // Load file dependencies when component mounts or session changes
+  // Load file dependencies when session changes
   useEffect(() => {
     if (sessionState.sessionId) {
       loadFileDependencies();
+    } else {
+      // Clear files when no session
+      setFiles([]);
     }
   }, [sessionState.sessionId, loadFileDependencies]);
 
   const handleRefresh = () => {
-    console.log('Refreshing file dependencies...');
+    console.log('[FileDependencies] Refreshing file dependencies...');
     loadFileDependencies();
   };
 

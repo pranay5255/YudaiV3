@@ -1,10 +1,10 @@
-import { useSession } from '../contexts/SessionProvider';
+import { useSession } from '../contexts/useSession';
 import { UnifiedSessionState, TabState } from '../types';
 
 /**
  * Simplified session state hooks.
  * Provides basic session state access.
- * Session management is not implemented as per requirements.
+ * Session management is handled by SessionProvider.
  */
 
 /**
@@ -56,10 +56,41 @@ export const useTabState = (): TabState => {
 
 /**
  * Helper hook to get connection status
- * Simplified since session management is not implemented
+ * Simplified since session management is handled by SessionProvider
  */
 export const useConnectionStatus = (): 'connected' | 'disconnected' | 'reconnecting' => {
   const { connectionStatus } = useSession();
   return connectionStatus;
+};
+
+/**
+ * Helper hook to get session management functions
+ * Useful for components that need to manage sessions
+ */
+export const useSessionManagement = () => {
+  const session = useSession();
+  return {
+    createSession: session.createSession,
+    loadSession: session.loadSession,
+    clearSession: session.clearSession,
+    setSelectedRepository: session.setSelectedRepository,
+    hasSelectedRepository: session.hasSelectedRepository,
+    clearSelectedRepository: session.clearSelectedRepository,
+    loadRepositories: session.loadRepositories,
+  };
+};
+
+/**
+ * Helper hook to get chat message management functions
+ * Useful for components that need to manage chat messages
+ */
+export const useChatMessageManagement = () => {
+  const session = useSession();
+  return {
+    addChatMessage: session.addChatMessage,
+    updateChatMessage: session.updateChatMessage,
+    clearChatMessages: session.clearChatMessages,
+    loadChatMessages: session.loadChatMessages,
+  };
 };
 

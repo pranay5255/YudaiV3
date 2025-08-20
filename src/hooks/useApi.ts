@@ -58,6 +58,30 @@ export const useApi = () => {
       extractFileDependencies: (repoUrl: string) =>
         ApiService.extractFileDependencies(repoUrl, sessionToken || undefined),
 
+      // Context Cards CRUD methods
+      getContextCards: (sessionId: string) =>
+        ApiService.getContextCards(sessionId, sessionToken || undefined),
+      addContextCard: (sessionId: string, request: Parameters<typeof ApiService.addContextCard>[1]) =>
+        ApiService.addContextCard(sessionId, request, sessionToken || undefined),
+      deleteContextCard: (sessionId: string, cardId: number) =>
+        ApiService.deleteContextCard(sessionId, cardId, sessionToken || undefined),
+
+      // Chat Messages CRUD methods
+      addChatMessage: (sessionId: string, request: Parameters<typeof ApiService.addChatMessage>[1]) =>
+        ApiService.addChatMessage(sessionId, request, sessionToken || undefined),
+      getChatMessages: (sessionId: string, limit?: number) =>
+        ApiService.getChatMessages(sessionId, limit, sessionToken || undefined),
+      deleteChatMessage: (sessionId: string, messageId: string) =>
+        ApiService.deleteChatMessage(sessionId, messageId, sessionToken || undefined),
+
+      // File Dependencies CRUD methods
+      addFileDependency: (sessionId: string, request: Parameters<typeof ApiService.addFileDependency>[1]) =>
+        ApiService.addFileDependency(sessionId, request, sessionToken || undefined),
+      getFileDependenciesSession: (sessionId: string) =>
+        ApiService.getFileDependenciesSession(sessionId, sessionToken || undefined),
+      deleteFileDependency: (sessionId: string, fileId: number) =>
+        ApiService.deleteFileDependency(sessionId, fileId, sessionToken || undefined),
+
       // GitHub integration methods
       createGitHubIssueFromUserIssue: (issueId: string) =>
         ApiService.createGitHubIssueFromUserIssue(issueId, sessionToken || undefined),

@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { useSession } from '../contexts/SessionProvider';
+import { useSession } from '../contexts/useSession';
 import { GitHubRepository, SelectedRepository } from '../types';
 
 /**
