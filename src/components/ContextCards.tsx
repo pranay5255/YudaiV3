@@ -8,7 +8,7 @@ import type {
 } from '../types/api';
 import { UserIssueResponse, ContextCard } from '../types';
 import { useApi } from '../hooks/useApi';
-import { useSession } from '../contexts/SessionProvider';
+import { useSession } from '../contexts/useSession';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -46,10 +46,29 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   const api = useApi();
   const [isLoading, setIsLoading] = useState(false);
 
+  const showError = useCallback((message: string) => {
+    if (onShowError) {
+      onShowError(message);
+    } else {
+      console.error('ContextCards Error:', message);
+    }
+  }, [onShowError]);
+
   const loadContextCards = useCallback(async () => {
-    // TODO: Implement context cards loading when API is ready
-    console.log('Loading context cards for session:', sessionId);
-  }, [sessionId]);
+    if (!sessionId) return;
+    
+    try {
+      console.log('Loading context cards for session:', sessionId);
+      const contextCards = await api.getContextCards(sessionId);
+      console.log('Loaded context cards:', contextCards.length);
+      // Context cards are managed by SessionProvider, so we don't need to update local state here
+      // The cards prop is already passed from SessionProvider which handles the state
+    } catch (error) {
+      console.error('Failed to load context cards:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load context cards';
+      showError(`Failed to load context cards: ${errorMessage}`);
+    }
+  }, [sessionId, api, showError]);
 
   // Load context cards when session changes
   useEffect(() => {
@@ -59,9 +78,20 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   }, [sessionId, loadContextCards]);
 
   const removeContextCard = useCallback(async (cardId: string) => {
-    // TODO: Implement context card removal when API is ready
-    onRemoveCard(cardId);
-  }, [onRemoveCard]);
+    if (!sessionId) return;
+    
+    try {
+      console.log('Removing context card:', cardId);
+      await api.deleteContextCard(sessionId, Number(cardId));
+      console.log('Context card removed successfully');
+      // Call the onRemoveCard callback to update the parent state
+      onRemoveCard(cardId);
+    } catch (error) {
+      console.error('Failed to remove context card:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to remove context card';
+      showError(`Failed to remove context card: ${errorMessage}`);
+    }
+  }, [sessionId, api, onRemoveCard, showError]);
 
   const getSourceIcon = (source: ContextCard['source']) => {
     switch (source) {
@@ -79,14 +109,6 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   };
 
   const totalTokens = cards.reduce((sum, card) => sum + card.tokens, 0);
-
-  const showError = useCallback((message: string) => {
-    if (onShowError) {
-      onShowError(message);
-    } else {
-      console.error('ContextCards Error:', message);
-    }
-  }, [onShowError]);
 
   // Handle create GitHub issue with context cards using unified API
   const handleCreateGitHubIssue = useCallback(async () => {

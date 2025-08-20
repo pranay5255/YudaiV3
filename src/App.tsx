@@ -14,7 +14,7 @@ import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository, ContextCard
 import { FileItem } from './types/fileDependencies';
 import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
-import { useSession } from './contexts/SessionProvider';
+import { useSession } from './contexts/useSession';
 import { UserIssueResponse } from './types';
 import { ChatContextMessage, FileContextItem } from './types/api';
 

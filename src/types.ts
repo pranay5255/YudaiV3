@@ -164,7 +164,6 @@ export interface ChatMessageAPI {
   message_text: string;
   sender_type: 'user' | 'assistant' | 'system';
   role: 'user' | 'assistant' | 'system';
-  is_code: boolean;
   tokens: number;
   model_used?: string;
   processing_time?: number;
@@ -359,6 +358,12 @@ export interface SessionContextValue extends UnifiedSessionState {
   hasSelectedRepository: boolean;
   clearSelectedRepository: () => void;
   loadRepositories: () => Promise<void>;
+  
+  // Chat message management methods
+  addChatMessage: (message: ChatMessageAPI) => void;
+  updateChatMessage: (messageId: string, updates: Partial<ChatMessageAPI>) => void;
+  clearChatMessages: () => void;
+  loadChatMessages: (sessionId: string) => ChatMessageAPI[];
 }
 
 // GitHub Issue Context Structure

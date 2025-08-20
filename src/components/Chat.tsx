@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Send, Plus } from 'lucide-react';
-import { Message, FileItem, ContextCard, SelectedRepository } from '../types';
+import { Message, FileItem, ContextCard, ChatMessageAPI } from '../types';
 import type {
   CreateIssueWithContextRequest,
   ChatContextMessage,
@@ -10,7 +10,7 @@ import type {
 import { UserIssueResponse } from '../types';
 import { useRepository } from '../hooks/useRepository';
 import { useApi } from '../hooks/useApi';
-import { useSession } from '../contexts/SessionProvider';
+import { useSession } from '../contexts/useSession';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -39,10 +39,18 @@ export const Chat: React.FC<ChatProps> = ({
   onShowIssuePreview,
   onShowError
 }) => {
-  const { sessionId, createSession } = useSession();
+  const { sessionId, createSession, addChatMessage, messages: sessionMessages } = useSession();
   const { selectedRepository } = useRepository();
   const api = useApi();
   
+  // Convert session messages to Message format for display
+  const messages: Message[] = sessionMessages.map(msg => ({
+    id: msg.message_id,
+    content: msg.message_text,
+    timestamp: new Date(msg.created_at),
+    sessionId: sessionId || 'default',
+  }));
+
   console.log('[Chat] Initial render with props:', {
     contextCards,
     fileContext,
@@ -51,27 +59,6 @@ export const Chat: React.FC<ChatProps> = ({
   });
 
   // Simplified messages state without session management
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      content: 'Hi, I am Daifu, your spirit guide across the chaos of context. I will help you create github issues and pull requests by adding the right context required for a given task.You can add the individual text messages to context such as the one below to prioritize text messages in conversations',
-      timestamp: new Date(),
-      sessionId: sessionId || 'default',
-    },
-    {
-      id: '2',
-      content: `function getSpiritGuideMessage(): string {
-  const messages = [
-    "In the chaos of code, find your inner peace... or just look at cat memes.",
-
-  ];
-  return messages[Math.floor(Math.random() * messages.length)];
-}`,
-      timestamp: new Date(),
-      sessionId: sessionId || 'default',
-    },
-  ]);
-  
   const [input, setInput] = useState('');
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -91,63 +78,6 @@ export const Chat: React.FC<ChatProps> = ({
     }
   }, [onShowError]);
 
-  // Generate UUID4-like session ID using crypto API
-  const generateSessionId = (): string => {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-      const r = Math.random() * 16 | 0;
-      const v = c === 'x' ? r : (r & 0x3 | 0x8);
-      return v.toString(16);
-    });
-  };
-
-  // Repository selection handler
-  const handleRepositorySelection = useCallback((repository: SelectedRepository) => {
-    console.log('[Chat] Repository selected:', repository);
-    
-    // Generate unique session ID
-    const newSessionId = generateSessionId();
-    console.log('[Chat] Generated new session ID:', newSessionId);
-    
-    // Create session with repository context
-    handleCreateSession(repository, newSessionId);
-  }, []);
-
-  // Separate session creation function
-  const handleCreateSession = useCallback(async (repository: SelectedRepository, sessionId: string) => {
-    try {
-      console.log('[Chat] Creating session for repository:', repository);
-      
-      const repoOwner = repository.repository.owner?.login || repository.repository.full_name.split('/')[0];
-      const repoName = repository.repository.name;
-      
-      await createSession(repoOwner, repoName, repository.branch);
-      
-      // Add default welcome message after successful session creation
-      const welcomeMessage: Message = {
-        id: `welcome-${Date.now()}`,
-        content: `Welcome to your new chat session with repository **${repoOwner}/${repoName}**!
-
-I'm ready to help you with:
-• Creating GitHub issues from our conversations
-• Analyzing code and dependencies
-• Planning development tasks
-• Providing technical guidance
-
-What would you like to work on today?`,
-        timestamp: new Date(),
-        sessionId: sessionId,
-      };
-      
-      // Add welcome message to the chat
-      setMessages(prev => [...prev, welcomeMessage]);
-      
-      console.log('[Chat] Session created successfully with welcome message');
-    } catch (error) {
-      console.error('[Chat] Failed to create session:', error);
-      showError('Failed to create session. Please try again.');
-    }
-  }, [createSession, showError]);
-
   // Auto-create session when repository is selected
   useEffect(() => {
     console.log('[Chat] Repository or session changed:', {
@@ -157,9 +87,49 @@ What would you like to work on today?`,
 
     if (selectedRepository && !sessionId) {
       console.log('[Chat] Auto-creating session for selected repository');
-      handleRepositorySelection(selectedRepository);
+      
+      const repoOwner = selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0];
+      const repoName = selectedRepository.repository.name;
+      
+      createSession(repoOwner, repoName, selectedRepository.branch)
+        .then(() => {
+          // Add default welcome message after successful session creation
+          const welcomeMessage: Message = {
+            id: `welcome-${Date.now()}`,
+            content: `Welcome to your new chat session with repository **${repoOwner}/${repoName}**!
+
+I'm ready to help you with:
+• Creating GitHub issues from our conversations
+• Analyzing code and dependencies
+• Planning development tasks
+• Providing technical guidance
+
+What would you like to work on today?`,
+            timestamp: new Date(),
+            sessionId: sessionId || 'default',
+          };
+          
+          // Add welcome message to session
+          const welcomeMessageAPI: ChatMessageAPI = {
+            id: Date.now(),
+            message_id: `welcome-${Date.now()}`,
+            message_text: welcomeMessage.content,
+            sender_type: 'assistant',
+            role: 'assistant',
+
+            tokens: 0,
+            created_at: welcomeMessage.timestamp.toISOString(),
+          };
+          addChatMessage(welcomeMessageAPI);
+
+          console.log('[Chat] Session created successfully with welcome message');
+        })
+        .catch((error) => {
+          console.error('[Chat] Failed to create session:', error);
+          showError('Failed to create session. Please try again.');
+        });
     }
-  }, [selectedRepository, sessionId, handleRepositorySelection]);
+  }, [selectedRepository, sessionId, createSession, showError, addChatMessage]);
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading || !sessionId) {
@@ -181,61 +151,67 @@ What would you like to work on today?`,
       contextCards: contextCards.map(card => card.id)
     });
 
-    // Add user message to chat immediately
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      content: currentInput,
-      timestamp: new Date(),
-      sessionId: sessionId,
+    // Add user message to session
+    const userMessage: ChatMessageAPI = {
+      id: Date.now(),
+      message_id: Date.now().toString(),
+      message_text: currentInput,
+      sender_type: 'user',
+      role: 'user',
+      tokens: 0,
+      created_at: new Date().toISOString(),
     };
-    setMessages(prev => [...prev, userMessage]);
     
-          try {
-        // Send to chat API for AI response
-        console.log('[Chat] Calling chat API with payload:', {
-          session_id: sessionId,
-          message: {
-            content: currentInput
-          },
-          context_cards: contextCards.map(card => card.id),
-          repo_owner: selectedRepository?.repository.owner?.login || selectedRepository?.repository.full_name.split('/')[0],
-          repo_name: selectedRepository?.repository.name
-        });
+    addChatMessage(userMessage);
+    
+    try {
+      // Send to chat API for AI response
+      console.log('[Chat] Calling chat API with payload:', {
+        session_id: sessionId,
+        message: {
+          content: currentInput
+        },
+        context_cards: contextCards.map(card => card.id),
+        repo_owner: selectedRepository?.repository.owner?.login || selectedRepository?.repository.full_name.split('/')[0],
+        repo_name: selectedRepository?.repository.name
+      });
 
-        const response = await api.sendChatMessage({
-          session_id: sessionId,
-          message: {
-            content: currentInput
-          },
-          context_cards: contextCards.map(card => card.id),
-          repository: selectedRepository ? {
-            owner: selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0],
-            name: selectedRepository.repository.name,
-            branch: selectedRepository.branch
-          } : undefined,
-        });
-      
-        console.log('[Chat] Received API response:', response);
+      const response = await api.sendChatMessage({
+        session_id: sessionId,
+        message: {
+          content: currentInput
+        },
+        context_cards: contextCards.map(card => card.id),
+        repository: selectedRepository ? {
+          owner: selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0],
+          name: selectedRepository.repository.name,
+          branch: selectedRepository.branch
+        } : undefined,
+      });
+    
+      console.log('[Chat] Received API response:', response);
 
-      // Add assistant response to chat
-      const assistantMessage: Message = {
-        id: response.message_id,
-        content: response.reply,
-        timestamp: new Date(),
-        sessionId: sessionId,
+      // Add assistant response to session
+      const assistantMessage: ChatMessageAPI = {
+        id: Date.now() + 1,
+        message_id: response.message_id,
+        message_text: response.reply,
+        sender_type: 'assistant',
+        role: 'assistant',
+        tokens: 0,
+        created_at: new Date().toISOString(),
       };
-      setMessages(prev => [...prev, assistantMessage]);
+      
+      addChatMessage(assistantMessage);
       
     } catch (error) {
       console.error('[Chat] API call failed:', error);
       showError('Failed to send message. Please try again.');
-      // Remove the user message that failed to send
-      setMessages(prev => prev.filter(msg => msg.id !== userMessage.id));
     } finally {
       // Always reset loading state
       setIsLoading(false);
     }
-  }, [input, isLoading, sessionId, contextCards, selectedRepository, api, showError]);
+  }, [input, isLoading, sessionId, contextCards, selectedRepository, api, showError, addChatMessage]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
