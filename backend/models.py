@@ -11,8 +11,6 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
-from utils import utc_now
-
 # ============================================================================
 # ENUMS
 # ============================================================================
@@ -689,6 +687,14 @@ class SessionContextResponse(BaseModel):
     user_issues: Optional[List["UserIssueResponse"]] = Field(default_factory=list)
     file_embeddings: Optional[List["FileEmbeddingResponse"]] = Field(default_factory=list)
 
+# Context Card Models
+class CreateContextCardRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    description: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1)
+    source: str = Field(..., pattern="^(chat|file-deps|upload)$")
+    tokens: int = Field(default=0, ge=0)
+
 # File Embedding Models
 class CreateFileEmbeddingRequest(BaseModel):
     file_path: str = Field(..., min_length=1, max_length=1000)
@@ -783,12 +789,18 @@ class APIResponse(BaseModel):
     error: Optional[str] = Field(None)
 
 class ContextCardResponse(BaseModel):
-    id: str = Field(...)
+    id: int = Field(...)
+    session_id: Optional[int] = Field(None)
     title: str = Field(...)
     description: str = Field(...)
+    content: str = Field(...)
+    source: str = Field(...)
     tokens: int = Field(...)
-    source: ContextSource = Field(...)
-    created_at: datetime = Field(default_factory=utc_now)
+    is_active: bool = Field(default=True)
+    created_at: datetime = Field(...)
+    updated_at: Optional[datetime] = Field(None)
+    
+    model_config = ConfigDict(from_attributes=True)
 
 class IssueResponse(BaseModel):
     issue_id: str = Field(...)

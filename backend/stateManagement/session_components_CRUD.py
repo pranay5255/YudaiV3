@@ -223,6 +223,7 @@ async def add_context_card(
         # Create context card
         context_card = ContextCard(
             user_id=current_user.id,
+            session_id=session.id,
             title=request.title,
             description=request.description,
             content=request.content,
@@ -270,10 +271,10 @@ async def get_context_cards(
                 detail="Session not found"
             )
         
-        # TODO: Add session_id to ContextCard model
         context_cards = db.query(ContextCard).filter(
             and_(
                 ContextCard.user_id == current_user.id,
+                ContextCard.session_id == session.id,
                 ContextCard.is_active == True
             )
         ).all()
@@ -317,7 +318,8 @@ async def delete_context_card(
         context_card = db.query(ContextCard).filter(
             and_(
                 ContextCard.id == card_id,
-                ContextCard.user_id == current_user.id
+                ContextCard.user_id == current_user.id,
+                ContextCard.session_id == session.id
             )
         ).first()
         
