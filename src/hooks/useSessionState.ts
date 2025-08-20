@@ -94,3 +94,15 @@ export const useChatMessageManagement = () => {
   };
 };
 
+/**
+ * Helper hook to get file dependency management functions
+ * Useful for components that need to manage file dependencies
+ */
+export const useFileDependencyManagement = () => {
+  const session = useSession();
+  return {
+    addFileDependency: session.addFileDependency,
+    addMultipleFileDependencies: session.addMultipleFileDependencies,
+  };
+};
+

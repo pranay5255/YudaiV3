@@ -411,11 +411,24 @@ export class ApiService {
     sessionId: string, 
     sessionToken?: string
   ): Promise<FileEmbeddingResponse[]> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-dependencies`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-dependencies/session`, {
       method: 'GET',
       headers: ApiService.getAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<FileEmbeddingResponse[]>(response);
+  }
+
+  static async extractFileDependenciesForSession(
+    sessionId: string,
+    repoUrl: string,
+    sessionToken?: string
+  ): Promise<ExtractFileDependenciesResponse> {
+    const response = await fetch(`${API_BASE_URL}/filedeps/sessions/${sessionId}/extract`, {
+      method: 'POST',
+      headers: ApiService.getAuthHeaders(sessionToken),
+      body: JSON.stringify({ repo_url: repoUrl } as ExtractFileDependenciesRequest),
+    });
+    return ApiService.handleResponse<ExtractFileDependenciesResponse>(response);
   }
 
   static async deleteFileDependency(

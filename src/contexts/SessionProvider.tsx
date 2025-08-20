@@ -147,6 +147,100 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
     return [];
   }, []);
 
+  // File dependency management functions
+  const addFileDependency = useCallback(async (fileDependency: {
+    file_path: string;
+    file_name: string;
+    file_type: string;
+    chunk_index: number;
+    tokens: number;
+    file_metadata?: Record<string, unknown>;
+  }) => {
+    if (!sessionState.sessionId) {
+      console.error('[SessionProvider] Cannot add file dependency: no active session');
+      return;
+    }
+
+    try {
+      console.log('[SessionProvider] Adding file dependency to session:', fileDependency.file_name);
+      
+      const response = await api.addFileDependency(sessionState.sessionId, fileDependency);
+      
+      // Update session state with new file dependency
+      setSessionState(prev => {
+        const newFileContext = [...prev.fileContext, {
+          id: response.id.toString(),
+          name: response.file_name,
+          path: response.file_path,
+          type: 'INTERNAL' as const,
+          tokens: response.tokens,
+          category: response.file_type,
+          created_at: response.created_at,
+        }];
+        
+        return {
+          ...prev,
+          fileContext: newFileContext,
+          lastUpdated: new Date(),
+        };
+      });
+      
+      console.log('[SessionProvider] File dependency added successfully:', response.id);
+      
+    } catch (error) {
+      console.error('[SessionProvider] Failed to add file dependency:', error);
+      throw error;
+    }
+  }, [sessionState.sessionId, api]);
+
+  const addMultipleFileDependencies = useCallback(async (fileDependencies: Array<{
+    file_path: string;
+    file_name: string;
+    file_type: string;
+    chunk_index: number;
+    tokens: number;
+    file_metadata?: Record<string, unknown>;
+  }>) => {
+    if (!sessionState.sessionId) {
+      console.error('[SessionProvider] Cannot add file dependencies: no active session');
+      return;
+    }
+
+    try {
+      console.log('[SessionProvider] Adding multiple file dependencies to session:', fileDependencies.length);
+      
+      const promises = fileDependencies.map(dep => api.addFileDependency(sessionState.sessionId!, dep));
+      const responses = await Promise.all(promises);
+      
+      // Update session state with new file dependencies
+      setSessionState(prev => {
+        const newFileDependencies = responses.map(response => ({
+          id: response.id.toString(),
+          name: response.file_name,
+          path: response.file_path,
+          type: 'INTERNAL' as const,
+          tokens: response.tokens,
+          category: response.file_type,
+          created_at: response.created_at,
+        }));
+        
+        const newFileContext = [...prev.fileContext, ...newFileDependencies];
+        
+        return {
+          ...prev,
+          fileContext: newFileContext,
+          lastUpdated: new Date(),
+        };
+      });
+      
+      console.log('[SessionProvider] Multiple file dependencies added successfully:', responses.length);
+      
+    } catch (error) {
+      console.error('[SessionProvider] Failed to add multiple file dependencies:', error);
+      throw error;
+    }
+  }, [sessionState.sessionId, api]);
+
   // Session management functions
   const createSession = useCallback(async (repoOwner: string, repoName: string, repoBranch: string = 'main') => {
     try {
@@ -486,6 +580,8 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
     updateChatMessage,
     clearChatMessages,
     loadChatMessages,
+    addFileDependency,
+    addMultipleFileDependencies,
   };
 
   return (

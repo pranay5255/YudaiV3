@@ -364,6 +364,24 @@ export interface SessionContextValue extends UnifiedSessionState {
   updateChatMessage: (messageId: string, updates: Partial<ChatMessageAPI>) => void;
   clearChatMessages: () => void;
   loadChatMessages: (sessionId: string) => ChatMessageAPI[];
+  
+  // File dependency management methods
+  addFileDependency: (fileDependency: {
+    file_path: string;
+    file_name: string;
+    file_type: string;
+    chunk_index: number;
+    tokens: number;
+    file_metadata?: Record<string, unknown>;
+  }) => Promise<void>;
+  addMultipleFileDependencies: (fileDependencies: Array<{
+    file_path: string;
+    file_name: string;
+    file_type: string;
+    chunk_index: number;
+    tokens: number;
+    file_metadata?: Record<string, unknown>;
+  }>) => Promise<void>;
 }
 
 // GitHub Issue Context Structure
