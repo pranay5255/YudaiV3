@@ -95,7 +95,7 @@ async def get_session_context(
             and_(
                 ChatSession.session_id == session_id,
                 ChatSession.user_id == current_user.id,
-                ChatSession.is_active == True
+                ChatSession.is_active
             )
         ).first()
         
@@ -124,7 +124,7 @@ async def get_session_context(
         context_cards = db.query(ContextCard).filter(
             and_(
                 ContextCard.session_id == session.id,
-                ContextCard.is_active == True
+                ContextCard.is_active
             )
         ).all()
         

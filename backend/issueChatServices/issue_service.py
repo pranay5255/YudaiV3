@@ -20,7 +20,6 @@ from github.github_api import GitHubAPIError
 from github.github_api import create_issue as create_github_issue
 from models import (
     ChatRequest,
-    ChatSession,
     CreateUserIssueRequest,
     User,
     UserIssue,
@@ -31,6 +30,7 @@ from models import (
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, func
 from sqlalchemy.orm import Session
+
 from utils import utc_now
 
 
@@ -82,17 +82,7 @@ class IssueService:
         # Generate unique issue ID
         issue_id = str(uuid.uuid4())
         
-        # Get chat session if session_id is provided
-        chat_session_id = None
-        if request.session_id:
-            chat_session = db.query(ChatSession).filter(
-                and_(
-                    ChatSession.user_id == user_id,
-                    ChatSession.session_id == request.session_id
-                )
-            ).first()
-            if chat_session:
-                chat_session_id = chat_session.id
+
         
         # Create the issue
         issue = UserIssue(
@@ -104,7 +94,7 @@ class IssueService:
             title=request.title,
             description=request.description,
             session_id=request.session_id,
-            chat_session_id=chat_session_id,
+            chat_session_id=None,
             context_cards=request.context_cards,
             ideas=request.ideas,
             repo_owner=request.repo_owner,

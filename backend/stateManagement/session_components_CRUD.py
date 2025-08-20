@@ -47,7 +47,7 @@ async def add_chat_message(
             and_(
                 ChatSession.session_id == session_id,
                 ChatSession.user_id == current_user.id,
-                ChatSession.is_active == True
+                ChatSession.is_active
             )
         ).first()
         
@@ -109,7 +109,7 @@ async def get_chat_messages(
             and_(
                 ChatSession.session_id == session_id,
                 ChatSession.user_id == current_user.id,
-                ChatSession.is_active == True
+                ChatSession.is_active
             )
         ).first()
         
@@ -148,7 +148,7 @@ async def delete_chat_message(
             and_(
                 ChatSession.session_id == session_id,
                 ChatSession.user_id == current_user.id,
-                ChatSession.is_active == True
+                ChatSession.is_active
             )
         ).first()
         
@@ -210,7 +210,7 @@ async def add_context_card(
             and_(
                 ChatSession.session_id == session_id,
                 ChatSession.user_id == current_user.id,
-                ChatSession.is_active == True
+                ChatSession.is_active
             )
         ).first()
         
@@ -261,7 +261,7 @@ async def get_context_cards(
             and_(
                 ChatSession.session_id == session_id,
                 ChatSession.user_id == current_user.id,
-                ChatSession.is_active == True
+                ChatSession.is_active
             )
         ).first()
         
@@ -275,7 +275,7 @@ async def get_context_cards(
             and_(
                 ContextCard.user_id == current_user.id,
                 ContextCard.session_id == session.id,
-                ContextCard.is_active == True
+                ContextCard.is_active
             )
         ).all()
         
@@ -304,7 +304,7 @@ async def delete_context_card(
             and_(
                 ChatSession.session_id == session_id,
                 ChatSession.user_id == current_user.id,
-                ChatSession.is_active == True
+                ChatSession.is_active
             )
         ).first()
         
@@ -362,7 +362,7 @@ async def add_file_dependency(
             and_(
                 ChatSession.session_id == session_id,
                 ChatSession.user_id == current_user.id,
-                ChatSession.is_active == True
+                ChatSession.is_active
             )
         ).first()
         
@@ -414,7 +414,7 @@ async def get_file_dependencies(
             and_(
                 ChatSession.session_id == session_id,
                 ChatSession.user_id == current_user.id,
-                ChatSession.is_active == True
+                ChatSession.is_active
             )
         ).first()
         
@@ -453,7 +453,7 @@ async def delete_file_dependency(
             and_(
                 ChatSession.session_id == session_id,
                 ChatSession.user_id == current_user.id,
-                ChatSession.is_active == True
+                ChatSession.is_active
             )
         ).first()
         
@@ -490,4 +490,44 @@ async def delete_file_dependency(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete file dependency"
+        )
+
+
+@router.get("/sessions/{session_id}/file-dependencies/session", response_model=List[FileEmbeddingResponse])
+async def get_file_dependencies_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get file dependencies for a session (compatible with FileDependencies.tsx)"""
+    try:
+        # Verify session ownership
+        session = db.query(ChatSession).filter(
+            and_(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+                ChatSession.is_active
+            )
+        ).first()
+        
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+        
+        # Get file embeddings for this session
+        file_embeddings = db.query(FileEmbedding).filter(
+            FileEmbedding.session_id == session.id
+        ).order_by(FileEmbedding.file_path, FileEmbedding.chunk_index).all()
+        
+        return [FileEmbeddingResponse.model_validate(emb) for emb in file_embeddings]
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting session file dependencies: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve session file dependencies"
         )

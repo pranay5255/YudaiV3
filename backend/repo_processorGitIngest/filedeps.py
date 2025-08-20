@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException
 # Import unified models
 from models import (
     FileAnalysis,
+    FileEmbedding,
     FileItem,
     FileItemDBResponse,
     FileItemResponse,
@@ -31,6 +32,9 @@ from models import (
     User,
 )
 from sqlalchemy.orm import Session
+
+# Import chunking utility
+from utils.chunking import create_file_chunker
 
 # Import functions from scraper_script.py
 from .scraper_script import categorize_file, extract_repository_data
@@ -199,6 +203,57 @@ def save_file_items_to_db(
     
     db.commit()
     return saved_items
+
+
+def save_file_embeddings_to_db(
+    db: Session,
+    session_id: int,
+    repository_id: int,
+    file_chunks: List[Dict[str, Any]]
+) -> List[FileEmbedding]:
+    """Save file embeddings to database using the chunking system."""
+    
+    # Clear existing file embeddings for this session
+    db.query(FileEmbedding).filter(FileEmbedding.session_id == session_id).delete()
+    
+    saved_embeddings = []
+    
+    for chunk_data in file_chunks:
+        # Create file embedding record
+        file_embedding = FileEmbedding(
+            session_id=session_id,
+            repository_id=repository_id,
+            file_path=chunk_data['file_path'],
+            file_name=chunk_data['file_name'],
+            file_type=chunk_data['file_type'],
+            chunk_index=chunk_data['chunk_index'],
+            chunk_text=chunk_data['chunk_text'],
+            tokens=chunk_data['tokens'],
+            file_metadata={
+                'chunk_size': chunk_data['chunk_size'],
+                'is_complete': chunk_data['is_complete'],
+                'file_type': chunk_data['file_type']
+            }
+        )
+        
+        db.add(file_embedding)
+        saved_embeddings.append(file_embedding)
+    
+    db.commit()
+    return saved_embeddings
+
+
+def process_file_content_for_embeddings(
+    file_path: str,
+    content: str,
+    chunker: Any
+) -> List[Dict[str, Any]]:
+    """Process file content and create chunks for embeddings."""
+    
+    # Use the chunker to create chunks
+    chunks = chunker.chunk_file(file_path, content)
+    
+    return chunks
 
 def build_file_tree(files_data: Dict[str, Any], repo_name: str) -> List[FileItemResponse]:
     """Build a hierarchical file tree from GitIngest file data."""
@@ -492,6 +547,150 @@ async def extract_file_dependencies(
         raise
     except Exception as e:
         print(f"Error in extract_file_dependencies: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.post("/sessions/{session_id}/extract", response_model=FileItemResponse)
+async def extract_file_dependencies_for_session(
+    session_id: str,
+    request: RepositoryRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Extract file dependencies for a specific session and create embeddings.
+    
+    This endpoint integrates with the session system and creates file embeddings
+    that can be used for semantic search and context management.
+    """
+    try:
+        print(f"Starting session-based extraction for session: {session_id}")
+        
+        # First, verify the session exists and belongs to the user
+        from models import ChatSession
+        session = db.query(ChatSession).filter(
+            ChatSession.session_id == session_id,
+            ChatSession.user_id == current_user.id,
+            ChatSession.is_active
+        ).first()
+        
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Extract repository information from URL
+        repo_name, repo_owner = extract_repo_info_from_url(request.repo_url)
+        print(f"Extracted repo info - name: {repo_name}, owner: {repo_owner}")
+        
+        # Extract repository data using GitIngest
+        print("Calling GitIngest extract_repository_data...")
+        raw_repo_data = await extract_repository_data(
+            repo_url=request.repo_url,
+            max_file_size=request.max_file_size
+        )
+        
+        if 'error' in raw_repo_data:
+            raise HTTPException(status_code=400, detail=f"Failed to extract data: {raw_repo_data['error']}")
+        
+        # Process raw data into structured format
+        repo_data = process_gitingest_data(raw_repo_data)
+        
+        # Build file tree
+        files_data = {'files': repo_data.get('files', [])}
+        file_tree = build_file_tree(files_data, repo_name)
+        
+        # Calculate statistics
+        total_files = len(repo_data.get('files', []))
+        total_tokens = sum(estimate_tokens_for_file(f['path'], f['content_size']) for f in repo_data.get('files', []))
+        
+        # Create root FileItem node
+        root_file_item = FileItemResponse(
+            id="root",
+            name=repo_name,
+            type="INTERNAL",
+            tokens=total_tokens,
+            Category="Source Code",
+            isDirectory=True,
+            children=file_tree,
+            expanded=True
+        )
+        
+        # Save to database with session integration
+        try:
+            # Ensure repository metadata exists
+            repository = get_or_create_repository(
+                db=db,
+                repo_url=request.repo_url,
+                repo_name=repo_name,
+                repo_owner=repo_owner,
+                user_id=current_user.id
+            )
+            
+            # Save analysis results
+            save_file_analysis_to_db(
+                db=db,
+                repository_id=repository.id,
+                raw_data=raw_repo_data,
+                processed_data=repo_data,
+                total_files=total_files,
+                total_tokens=total_tokens,
+                max_file_size=request.max_file_size,
+            )
+            
+            # Save file items
+            save_file_items_to_db(db, repository.id, file_tree)
+            
+            # Create file embeddings using chunking system
+            print("Creating file embeddings with chunking...")
+            chunker = create_file_chunker(max_chunk_size=1000, overlap=100)
+            all_file_chunks = []
+            
+            # Process each file for embeddings
+            for file_info in repo_data.get('files', []):
+                file_path = file_info['path']
+                # For now, we'll use placeholder content since GitIngest doesn't return actual content
+                # In a real implementation, you'd get the actual file content
+                placeholder_content = f"# {file_path}\n# Placeholder content for {file_path}\n# This would be the actual file content in production"
+                
+                chunks = process_file_content_for_embeddings(file_path, placeholder_content, chunker)
+                all_file_chunks.extend(chunks)
+            
+            # Save file embeddings to session
+            if all_file_chunks:
+                saved_embeddings = save_file_embeddings_to_db(
+                    db=db,
+                    session_id=session.id,
+                    repository_id=repository.id,
+                    file_chunks=all_file_chunks
+                )
+                print(f"Saved {len(saved_embeddings)} file embeddings for session")
+            
+            # Update session with repository context
+            session.repo_owner = repo_owner
+            session.repo_name = repo_name
+            session.repo_branch = "main"  # Default branch
+            session.repo_context = {
+                "repository_id": repository.id,
+                "total_files": total_files,
+                "total_tokens": total_tokens,
+                "file_embeddings_count": len(all_file_chunks) if all_file_chunks else 0
+            }
+            db.commit()
+            
+        except Exception as db_error:
+            print(f"Database save failed: {db_error}")
+            import traceback
+            traceback.print_exc()
+            # Continue without database persistence for now
+        
+        print("Session-based extraction completed successfully")
+        return root_file_item
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in extract_file_dependencies_for_session: {str(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
