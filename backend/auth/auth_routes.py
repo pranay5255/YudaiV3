@@ -174,7 +174,7 @@ async def api_create_session(
 
         auth_token = db.query(AuthToken).filter(
             AuthToken.access_token == github_token,
-            AuthToken.is_active == True
+            AuthToken.is_active
         ).first()
         
         if not auth_token:

@@ -20,7 +20,6 @@ from github.github_api import (
     get_repository_issues,
     get_repository_pulls,
 )
-from issueChatServices.chat_service import ChatService
 from issueChatServices.issue_service import IssueService
 from models import (
     ChatRequest,
@@ -142,21 +141,22 @@ async def chat_daifu(
                 db
             )
 
-        # Store user message
-        user_message_db = MessageService.store_user_message(
-            db=db,
-            user_id=current_user.id,
+        # Create user message request
+        user_message_request = MessageService.create_user_message_request(
             session_id=session_id,
             content=request.message.content,
             is_code=request.message.is_code,
             context_cards=request.context_cards
         )
         
+        # Store user message using session_components_CRUD
+        from stateManagement.session_components_CRUD import add_chat_message
+        user_message_db = await add_chat_message(session_id, user_message_request, db, current_user)
+        
         # Synchronous mode: Process immediately and return response
-        # Get conversation history
-        history_messages = ChatService.get_chat_messages(
-            db, current_user.id, session_id, limit=50
-        )
+        # Get conversation history using session_components_CRUD
+        from stateManagement.session_components_CRUD import get_chat_messages
+        history_messages = await get_chat_messages(session_id, 50, db, current_user)
         
         # Convert to format expected by prompt builder
         history = []
@@ -174,14 +174,13 @@ async def chat_daifu(
         # Calculate processing time
         processing_time = (time.time() - start_time) * 1000
         
-        # Store assistant response
-        MessageService.store_assistant_message(
-            db=db,
-            user_id=current_user.id,
+        # Create and store assistant response using session_components_CRUD
+        assistant_message_request = MessageService.create_assistant_message_request(
             session_id=session_id,
             content=reply,
             processing_time=processing_time
         )
+        await add_chat_message(session_id, assistant_message_request, db, current_user)
         
         return {
             "reply": reply,
@@ -194,14 +193,13 @@ async def chat_daifu(
     except HTTPException:
         raise
     except Exception as e:
-        # Store error message
-        MessageService.store_error_message(
-            db=db,
-            user_id=current_user.id,
+        # Create and store error message using session_components_CRUD
+        error_message_request = MessageService.create_error_message_request(
             session_id=session_id,
             error_message=str(e),
             error_type="system"
         )
+        await add_chat_message(session_id, error_message_request, db, current_user)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat processing failed: {str(e)}",

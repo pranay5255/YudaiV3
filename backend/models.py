@@ -444,7 +444,7 @@ class UserIssue(Base):
     chat_session: Mapped[Optional["ChatSession"]] = relationship()
 
 class FileEmbedding(Base):
-    """File embeddings for semantic search using pgvector"""
+    """File embeddings for semantic search and file dependencies storage"""
     __tablename__ = "file_embeddings"
     
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -452,7 +452,7 @@ class FileEmbedding(Base):
     repository_id: Mapped[Optional[int]] = mapped_column(ForeignKey("repositories.id"), nullable=True)
     
     # File information
-    file_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(1000), nullable=False, index=True)
     file_name: Mapped[str] = mapped_column(String(500), nullable=False)
     file_type: Mapped[str] = mapped_column(String(100), nullable=False)
     file_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

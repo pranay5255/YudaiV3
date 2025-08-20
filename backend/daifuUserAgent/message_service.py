@@ -3,12 +3,11 @@ Centralized Message Service for DAifu Agent
 Eliminates duplication in message creation and storage logic
 """
 
+import time
 import uuid
 from typing import List, Optional
 
-from issueChatServices.chat_service import ChatService
 from models import ChatRequest, CreateChatMessageRequest
-from sqlalchemy.orm import Session
 
 
 class MessageService:
@@ -110,85 +109,43 @@ class MessageService:
         )
     
     @staticmethod
-    def store_user_message(
-        db: Session,
-        user_id: int,
+    def create_user_message_request(
         session_id: str,
         content: str,
         is_code: bool = False,
-        context_cards: Optional[List[str]] = None
-    ):
+        context_cards: Optional[List[str]] = None,
+        message_id: Optional[str] = None
+    ) -> CreateChatMessageRequest:
         """
-        Store a user message in the database
+        Create a user message request
         
         Args:
-            db: Database session
-            user_id: User ID
             session_id: Session ID
             content: Message content
             is_code: Whether the message contains code
             context_cards: Optional context cards
+            message_id: Optional custom message ID
+            
+        Returns:
+            CreateChatMessageRequest object
         """
-        user_message_request = MessageService.create_user_message_request(
+        if not message_id:
+            message_id = f"msg_{int(time.time() * 1000)}"
+            
+        return CreateChatMessageRequest(
             session_id=session_id,
-            content=content,
+            message_id=message_id,
+            message_text=content,
+            sender_type="user",
+            role="user",
             is_code=is_code,
-            context_cards=context_cards
+            tokens=len(content) // 4,  # Rough token estimation
+            context_cards=context_cards or []
         )
-        return ChatService.create_chat_message(db, user_id, user_message_request)
     
-    @staticmethod
-    def store_assistant_message(
-        db: Session,
-        user_id: int,
-        session_id: str,
-        content: str,
-        model_used: str = "deepseek/deepseek-r1-0528:free",
-        processing_time: Optional[float] = None
-    ):
-        """
-        Store an assistant message in the database
-        
-        Args:
-            db: Database session
-            user_id: User ID
-            session_id: Session ID
-            content: Message content
-            model_used: Model used for generation
-            processing_time: Processing time in milliseconds
-        """
-        assistant_message_request = MessageService.create_assistant_message_request(
-            session_id=session_id,
-            content=content,
-            model_used=model_used,
-            processing_time=processing_time
-        )
-        return ChatService.create_chat_message(db, user_id, assistant_message_request)
+
     
-    @staticmethod
-    def store_error_message(
-        db: Session,
-        user_id: int,
-        session_id: str,
-        error_message: str,
-        error_type: str = "system"
-    ):
-        """
-        Store an error message in the database
-        
-        Args:
-            db: Database session
-            user_id: User ID
-            session_id: Session ID
-            error_message: Error message
-            error_type: Type of error
-        """
-        error_message_request = MessageService.create_error_message_request(
-            session_id=session_id,
-            error_message=error_message,
-            error_type=error_type
-        )
-        return ChatService.create_chat_message(db, user_id, error_message_request)
+
     
     @staticmethod
     def convert_chat_request_to_message_request(

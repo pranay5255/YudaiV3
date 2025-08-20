@@ -65,7 +65,7 @@ def validate_session_token(db: Session, session_token: str) -> Optional[User]:
         
         db_session_token = db.query(SessionToken).filter(
             SessionToken.session_token == session_token,
-            SessionToken.is_active == True
+            SessionToken.is_active
         ).first()
         
         if not db_session_token:
