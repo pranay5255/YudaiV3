@@ -358,13 +358,14 @@ export interface SessionContextValue extends UnifiedSessionState {
   hasSelectedRepository: boolean;
   clearSelectedRepository: () => void;
   loadRepositories: () => Promise<void>;
-  
+
   // Chat message management methods
-  addChatMessage: (message: ChatMessageAPI) => void;
+  addChatMessage: (message: ChatMessageAPI) => Promise<void>;
   updateChatMessage: (messageId: string, updates: Partial<ChatMessageAPI>) => void;
   clearChatMessages: () => void;
-  loadChatMessages: (sessionId: string) => ChatMessageAPI[];
-  
+  loadChatMessages: (sessionId: string) => Promise<void>;
+  deleteChatMessage: (messageId: string) => Promise<void>;
+
   // File dependency management methods
   addFileDependency: (fileDependency: {
     file_path: string;
@@ -382,6 +383,20 @@ export interface SessionContextValue extends UnifiedSessionState {
     tokens: number;
     file_metadata?: Record<string, unknown>;
   }>) => Promise<void>;
+  loadFileDependencies: () => Promise<void>;
+  deleteFileDependency: (fileId: string) => Promise<void>;
+  extractFileDependenciesForSession: (repoUrl: string) => Promise<void>;
+
+  // Context card management methods
+  addContextCard: (card: {
+    title: string;
+    description: string;
+    source: 'chat' | 'file-deps' | 'upload';
+    tokens: number;
+    content?: string;
+  }) => Promise<void>;
+  removeContextCard: (cardId: string) => Promise<void>;
+  loadContextCards: (sessionId: string) => Promise<void>;
 }
 
 // GitHub Issue Context Structure

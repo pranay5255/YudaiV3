@@ -10,11 +10,12 @@ import { DetailModal } from './components/DetailModal';
 import { ToastContainer } from './components/Toast';
 import { RepositorySelectionToast } from './components/RepositorySelectionToast';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository, ContextCard } from './types';
+import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository } from './types';
 import { FileItem } from './types/fileDependencies';
 import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
 import { useSession } from './contexts/useSession';
+import { useContextCardManagement } from './hooks/useSessionState';
 import { UserIssueResponse } from './types';
 import { ChatContextMessage, FileContextItem } from './types/api';
 
@@ -124,24 +125,7 @@ function AppContent() {
     setIsDiffModalOpen(true);
   };
 
-  const addToContext = (content: string, source: 'chat' | 'file-deps' | 'upload' = 'chat') => {
-    if (!sessionId) {
-      addToast('Please select a repository to start a session first', 'error');
-      return;
-    }
-
-    // Create a new context card from the content
-    const contextCard: ContextCard = {
-      id: `${source}-${Date.now()}`,
-      title: `${source === 'chat' ? 'Chat Message' : source === 'file-deps' ? 'File Content' : 'Upload'}`,
-      description: content.length > 100 ? content.substring(0, 100) + '...' : content,
-      tokens: Math.ceil(content.length / 4), // Rough token estimation
-      source: source,
-    };
-
-    console.log('Adding to context:', { content, source, contextCard, sessionId });
-    addToast(`Added ${source} content to context`, 'success');
-  };
+  const { addContextCard, removeContextCard } = useContextCardManagement();
 
   const addFileToContext = (file: FileItem) => {
     if (!sessionId) {
@@ -149,8 +133,14 @@ function AppContent() {
       return;
     }
 
-    console.log('Adding file to context:', { file, sessionId });
-    addToast(`Added ${file.name || file.file_name} to context`, 'success');
+    addContextCard({
+      title: file.name || file.file_name || 'File',
+      description: file.path || '',
+      source: 'file-deps',
+      tokens: file.tokens,
+    })
+      .then(() => addToast(`Added ${file.name || file.file_name} to context`, 'success'))
+      .catch(() => addToast('Failed to add file to context', 'error'));
   };
 
   const removeContextCardHandler = (id: string) => {
@@ -158,9 +148,10 @@ function AppContent() {
       addToast('No active session to remove context from', 'error');
       return;
     }
-    
-    console.log('Removing context card:', { id, sessionId });
-    addToast('Removed context card', 'info');
+
+    removeContextCard(id)
+      .then(() => addToast('Removed context card', 'info'))
+      .catch(() => addToast('Failed to remove context card', 'error'));
   };
 
   const handleShowFileDetails = (file: FileItem) => {
@@ -183,9 +174,6 @@ function AppContent() {
       case 'chat':
         return (
           <Chat
-            onAddToContext={addToContext}
-            contextCards={contextCards}
-            fileContext={fileContext}
             onShowIssuePreview={handleShowIssuePreview}
             onShowError={addToast}
           />
@@ -193,7 +181,6 @@ function AppContent() {
       case 'file-deps':
         return (
           <FileDependencies
-            onAddToContext={addFileToContext}
             onShowDetails={handleShowFileDetails}
             onShowError={addToast}
           />

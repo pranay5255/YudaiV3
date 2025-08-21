@@ -15,7 +15,8 @@ import type {
   SessionResponse as ApiSessionResponse,
   SessionContextResponse as ApiSessionContextResponse,
   FileEmbeddingResponse as ApiFileEmbeddingResponse,
-  ContextCardResponse as ApiContextCardResponse
+  ContextCardResponse as ApiContextCardResponse,
+  FileDependencyNode
 } from '../types/api';
 import { useApi } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
@@ -82,22 +83,40 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
 
 
   // Chat message management functions
-  const addChatMessage = useCallback((message: ChatMessageAPI) => {
-    setSessionState(prev => {
-      const newMessages = [...prev.messages, message];
-      
-      // Persist messages to localStorage
-      if (prev.sessionId) {
+  const addChatMessage = useCallback(async (message: ChatMessageAPI) => {
+    if (!sessionState.sessionId) {
+      setSessionState(prev => ({ ...prev, error: 'No active session' }));
+      return;
+    }
+
+    try {
+      await api.addChatMessage(sessionState.sessionId, {
+        content: message.message_text,
+        sender_type: message.sender_type,
+        role: message.role,
+        context_cards: message.context_cards,
+        referenced_files: message.referenced_files,
+      });
+
+      setSessionState(prev => {
+        const newMessages = [...prev.messages, message];
+
+        // Persist messages to localStorage
         localStorage.setItem(`chat_messages_${prev.sessionId}`, JSON.stringify(newMessages));
-      }
-      
-      return {
-        ...prev,
-        messages: newMessages,
-        lastUpdated: new Date(),
-      };
-    });
-  }, []);
+
+        return {
+          ...prev,
+          messages: newMessages,
+          lastUpdated: new Date(),
+          error: null,
+        };
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to add chat message';
+      setSessionState(prev => ({ ...prev, error: msg }));
+      throw error;
+    }
+  }, [sessionState.sessionId, api]);
 
   const updateChatMessage = useCallback((messageId: string, updates: Partial<ChatMessageAPI>) => {
     setSessionState(prev => {
@@ -133,19 +152,59 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
     });
   }, []);
 
-  const loadChatMessages = useCallback((sessionId: string) => {
+  const loadChatMessages = useCallback(async (sessionId: string) => {
     try {
-      const storedMessages = localStorage.getItem(`chat_messages_${sessionId}`);
-      if (storedMessages) {
-        const messages: ChatMessageAPI[] = JSON.parse(storedMessages);
-        console.log('[SessionProvider] Loaded chat messages from storage:', messages.length);
-        return messages;
-      }
+      const messages = await api.getChatMessages(sessionId);
+      const transformed: ChatMessageAPI[] = messages.map(msg => ({
+        id: msg.id,
+        message_id: msg.message_id,
+        message_text: msg.message_text,
+        sender_type: msg.sender_type as 'user' | 'assistant' | 'system',
+        role: msg.role as 'user' | 'assistant' | 'system',
+        tokens: msg.tokens,
+        model_used: msg.model_used,
+        processing_time: msg.processing_time,
+        context_cards: msg.context_cards,
+        referenced_files: msg.referenced_files,
+        error_message: msg.error_message,
+        created_at: msg.created_at,
+        updated_at: msg.updated_at,
+      }));
+
+      setSessionState(prev => ({
+        ...prev,
+        messages: transformed,
+        lastUpdated: new Date(),
+        error: null,
+      }));
+
+      // Persist to localStorage
+      localStorage.setItem(`chat_messages_${sessionId}`, JSON.stringify(transformed));
     } catch (error) {
-      console.error('[SessionProvider] Failed to load chat messages:', error);
+      const msg = error instanceof Error ? error.message : 'Failed to load chat messages';
+      setSessionState(prev => ({ ...prev, error: msg }));
     }
-    return [];
-  }, []);
+  }, [api]);
+
+  const deleteChatMessage = useCallback(async (messageId: string) => {
+    if (!sessionState.sessionId) {
+      setSessionState(prev => ({ ...prev, error: 'No active session' }));
+      return;
+    }
+
+    try {
+      await api.deleteChatMessage(sessionState.sessionId, messageId);
+      setSessionState(prev => {
+        const newMessages = prev.messages.filter(m => m.message_id !== messageId);
+        localStorage.setItem(`chat_messages_${prev.sessionId}`, JSON.stringify(newMessages));
+        return { ...prev, messages: newMessages, lastUpdated: new Date(), error: null };
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to delete chat message';
+      setSessionState(prev => ({ ...prev, error: msg }));
+      throw error;
+    }
+  }, [sessionState.sessionId, api]);
 
   // File dependency management functions
   const addFileDependency = useCallback(async (fileDependency: {
@@ -240,6 +299,173 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
       throw error;
     }
   }, [sessionState.sessionId, api]);
+
+  const loadFileDependencies = useCallback(async () => {
+    if (!sessionState.sessionId) {
+      setSessionState(prev => ({ ...prev, error: 'No active session' }));
+      return;
+    }
+
+    try {
+      const deps = await api.getFileDependenciesSession(sessionState.sessionId);
+      const converted: FileItem[] = deps.map(dep => ({
+        id: dep.id.toString(),
+        name: dep.file_name,
+        path: dep.file_path,
+        type: 'INTERNAL' as const,
+        tokens: dep.tokens,
+        category: dep.file_type,
+        created_at: dep.created_at,
+      }));
+
+      setSessionState(prev => ({
+        ...prev,
+        fileContext: converted,
+        lastUpdated: new Date(),
+        error: null,
+      }));
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to load file dependencies';
+      setSessionState(prev => ({ ...prev, error: msg }));
+    }
+  }, [sessionState.sessionId, api]);
+
+  const deleteFileDependency = useCallback(async (fileId: string) => {
+    if (!sessionState.sessionId) {
+      setSessionState(prev => ({ ...prev, error: 'No active session' }));
+      return;
+    }
+
+    try {
+      await api.deleteFileDependency(sessionState.sessionId, parseInt(fileId));
+      setSessionState(prev => ({
+        ...prev,
+        fileContext: prev.fileContext.filter(f => f.id !== fileId),
+        lastUpdated: new Date(),
+        error: null,
+      }));
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to delete file dependency';
+      setSessionState(prev => ({ ...prev, error: msg }));
+      throw error;
+    }
+  }, [sessionState.sessionId, api]);
+
+  const extractFileDependenciesForSession = useCallback(async (repoUrl: string) => {
+    if (!sessionState.sessionId) {
+      setSessionState(prev => ({ ...prev, error: 'No active session' }));
+      return;
+    }
+
+    try {
+      const response = await api.extractFileDependenciesForSession(sessionState.sessionId, repoUrl);
+
+      const convertNodes = (nodes: FileDependencyNode[]): FileItem[] => {
+        return nodes.map(node => ({
+          id: node.id,
+          name: node.name,
+          path: node.path || node.file_path,
+          type: (node.type as 'INTERNAL' | 'EXTERNAL') || 'INTERNAL',
+          tokens: node.tokens || 0,
+          category: node.Category || 'unknown',
+          isDirectory: node.isDirectory,
+          children: node.children ? convertNodes(node.children) : [],
+        }));
+      };
+
+      const converted = response.children ? convertNodes(response.children) : [];
+      setSessionState(prev => ({
+        ...prev,
+        fileContext: converted,
+        lastUpdated: new Date(),
+        error: null,
+      }));
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to extract file dependencies';
+      setSessionState(prev => ({ ...prev, error: msg }));
+      throw error;
+    }
+  }, [sessionState.sessionId, api]);
+
+  // Context card management functions
+  const addContextCard = useCallback(async (card: {
+    title: string;
+    description: string;
+    source: 'chat' | 'file-deps' | 'upload';
+    tokens: number;
+    content?: string;
+  }) => {
+    if (!sessionState.sessionId) {
+      setSessionState(prev => ({ ...prev, error: 'No active session' }));
+      return;
+    }
+
+    try {
+      const response = await api.addContextCard(sessionState.sessionId, card);
+      const newCard: ContextCard = {
+        id: response.id.toString(),
+        title: response.title,
+        description: response.description,
+        tokens: response.tokens,
+        source: response.source as 'chat' | 'file-deps' | 'upload',
+      };
+
+      setSessionState(prev => ({
+        ...prev,
+        contextCards: [...prev.contextCards, newCard],
+        lastUpdated: new Date(),
+        error: null,
+      }));
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to add context card';
+      setSessionState(prev => ({ ...prev, error: msg }));
+      throw error;
+    }
+  }, [sessionState.sessionId, api]);
+
+  const removeContextCard = useCallback(async (cardId: string) => {
+    if (!sessionState.sessionId) {
+      setSessionState(prev => ({ ...prev, error: 'No active session' }));
+      return;
+    }
+
+    try {
+      await api.deleteContextCard(sessionState.sessionId, parseInt(cardId));
+      setSessionState(prev => ({
+        ...prev,
+        contextCards: prev.contextCards.filter(c => c.id !== cardId),
+        lastUpdated: new Date(),
+        error: null,
+      }));
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to remove context card';
+      setSessionState(prev => ({ ...prev, error: msg }));
+      throw error;
+    }
+  }, [sessionState.sessionId, api]);
+
+  const loadContextCards = useCallback(async (sessionId: string) => {
+    try {
+      const cards = await api.getContextCards(sessionId);
+      const transformed: ContextCard[] = cards.map(card => ({
+        id: card.id.toString(),
+        title: card.title,
+        description: card.description,
+        tokens: card.tokens,
+        source: card.source as 'chat' | 'file-deps' | 'upload',
+      }));
+
+      setSessionState(prev => ({
+        ...prev,
+        contextCards: transformed,
+        lastUpdated: new Date(),
+        error: null,
+      }));
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to load context cards';
+      setSessionState(prev => ({ ...prev, error: msg }));
+    }
+  }, [api]);
 
   // Session management functions
   const createSession = useCallback(async (repoOwner: string, repoName: string, repoBranch: string = 'main') => {
@@ -580,8 +806,15 @@ export const SessionProvider: React.FC<SessionProviderProps> = ({ children }) =>
     updateChatMessage,
     clearChatMessages,
     loadChatMessages,
+    deleteChatMessage,
     addFileDependency,
     addMultipleFileDependencies,
+    loadFileDependencies,
+    deleteFileDependency,
+    extractFileDependenciesForSession,
+    addContextCard,
+    removeContextCard,
+    loadContextCards,
   };
 
   return (

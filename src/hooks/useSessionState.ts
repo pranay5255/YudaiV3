@@ -91,6 +91,7 @@ export const useChatMessageManagement = () => {
     updateChatMessage: session.updateChatMessage,
     clearChatMessages: session.clearChatMessages,
     loadChatMessages: session.loadChatMessages,
+    deleteChatMessage: session.deleteChatMessage,
   };
 };
 
@@ -103,6 +104,21 @@ export const useFileDependencyManagement = () => {
   return {
     addFileDependency: session.addFileDependency,
     addMultipleFileDependencies: session.addMultipleFileDependencies,
+    loadFileDependencies: session.loadFileDependencies,
+    deleteFileDependency: session.deleteFileDependency,
+    extractFileDependenciesForSession: session.extractFileDependenciesForSession,
+  };
+};
+
+/**
+ * Helper hook to get context card management functions
+ */
+export const useContextCardManagement = () => {
+  const session = useSession();
+  return {
+    addContextCard: session.addContextCard,
+    removeContextCard: session.removeContextCard,
+    loadContextCards: session.loadContextCards,
   };
 };
 

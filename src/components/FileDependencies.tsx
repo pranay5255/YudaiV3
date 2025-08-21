@@ -1,12 +1,9 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { ChevronRight, ChevronDown, Plus, Folder, File, RefreshCw } from 'lucide-react';
 import { FileItem } from '../types';
-import { useSessionState, useFileDependencyManagement } from '../hooks/useSessionState';
-import { ApiService } from '../services/api';
-import type { FileDependencyNode } from '../types/api';
+import { useSessionState, useFileDependencyManagement, useContextCardManagement } from '../hooks/useSessionState';
 
 interface FileDependenciesProps {
-  onAddToContext: (file: FileItem) => void;
   onShowDetails: (file: FileItem) => void;
   onShowError?: (error: string) => void;
   repoUrl?: string; // Optional repository URL to analyze
@@ -19,16 +16,17 @@ interface ExtendedFileItem extends FileItem {
 }
 
 export const FileDependencies: React.FC<FileDependenciesProps> = ({
-  onAddToContext,
   onShowDetails,
   onShowError,
   repoUrl
 }) => {
   const sessionState = useSessionState();
-  const { addMultipleFileDependencies } = useFileDependencyManagement();
+  const { loadFileDependencies: loadFileDeps, extractFileDependenciesForSession } = useFileDependencyManagement();
+  const { addContextCard } = useContextCardManagement();
   const [files, setFiles] = useState<ExtendedFileItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStates, setLoadingStates] = useState<{[key: string]: boolean}>({});
+  const [loaded, setLoaded] = useState(false);
 
   const showError = useCallback((message: string) => {
     if (onShowError) {
@@ -51,247 +49,92 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     setFiles(toggleInTree(files));
   }, [files]);
 
-  const loadFileDependencies = useCallback(async () => {
+  const loadDeps = useCallback(async () => {
+    if (loaded) return;
     if (!sessionState.sessionId) {
-      console.log('[FileDependencies] No active session found');
       setFiles([]);
       return;
     }
 
-    console.log('[FileDependencies] Loading file dependencies for session:', sessionState.sessionId);
-    setIsLoading(true);
-    
-    try {
-      // First, try to get file dependencies from session
-      const sessionDependencies = await ApiService.getFileDependenciesSession(
-        sessionState.sessionId
-      );
-      
-      if (sessionDependencies && sessionDependencies.length > 0) {
-        console.log('[FileDependencies] Found session dependencies:', sessionDependencies.length);
-        
-        // Convert session file embeddings to ExtendedFileItem format
-        const convertedFiles: ExtendedFileItem[] = sessionDependencies.map(dep => ({
-          id: dep.id.toString(),
-          name: dep.file_name,
-          path: dep.file_path,
-          type: 'INTERNAL',
-          tokens: dep.tokens,
-          category: dep.file_type,
-          isDirectory: false,
-          children: [],
-          expanded: false
-        }));
-        setFiles(convertedFiles);
-      } else if (repoUrl && sessionState.repositoryInfo) {
-        console.log('[FileDependencies] No session dependencies, extracting from repository:', repoUrl);
-        
-        // If no session dependencies, try to extract from repository
-        const repoDependencies = await ApiService.extractFileDependencies(
-          repoUrl
-        );
-        
-        if (repoDependencies && repoDependencies.children) {
-          console.log('[FileDependencies] Extracted dependencies from repository, adding to session');
-          
-          // Convert FileDependencyNode to CreateFileEmbeddingRequest format
-          const convertToFileEmbeddingRequests = (items: FileDependencyNode[], parentPath: string = ''): Array<{
-            file_path: string;
-            file_name: string;
-            file_type: string;
-            chunk_index: number;
-            tokens: number;
-            file_metadata?: Record<string, unknown>;
-          }> => {
-            const requests: Array<{
-              file_path: string;
-              file_name: string;
-              file_type: string;
-              chunk_index: number;
-              tokens: number;
-              file_metadata?: Record<string, unknown>;
-            }> = [];
-            
-            items.forEach(item => {
-              const currentPath = parentPath ? `${parentPath}/${item.name}` : item.name;
-              
-              // Add the current item
-              requests.push({
-                file_path: currentPath,
-                file_name: item.name,
-                file_type: item.Category || 'unknown',
-                chunk_index: 0, // Default chunk index
-                tokens: item.tokens || 0,
-                file_metadata: {
-                  isDirectory: item.isDirectory || false,
-                  type: item.type || 'INTERNAL',
-                  category: item.Category || 'unknown',
-                }
-              });
-              
-              // Recursively add children
-              if (item.children && item.children.length > 0) {
-                requests.push(...convertToFileEmbeddingRequests(item.children, currentPath));
-              }
-            });
-            
-            return requests;
-          };
-          
-          const fileEmbeddingRequests = convertToFileEmbeddingRequests(repoDependencies.children);
-          
-          // Add file dependencies to session
-          await addMultipleFileDependencies(fileEmbeddingRequests);
-          
-          // Convert to ExtendedFileItem format for display
-          const convertToExtendedItems = (items: FileDependencyNode[]): ExtendedFileItem[] => {
-            return items.map(item => ({
-              id: item.id,
-              name: item.name,
-              path: undefined, // FileDependencyNode doesn't have path property
-              type: (item.type as 'INTERNAL' | 'EXTERNAL') || 'INTERNAL',
-              tokens: item.tokens || 0,
-              category: item.Category || 'unknown',
-              isDirectory: item.isDirectory || false,
-              children: item.children ? convertToExtendedItems(item.children) : [],
-              expanded: false
-            }));
-          };
-          
-          setFiles(convertToExtendedItems(repoDependencies.children));
-        } else {
-          setFiles([]);
-        }
-      } else {
-        console.log('[FileDependencies] No dependencies found');
-        setFiles([]);
-      }
-    } catch (error) {
-      console.error('[FileDependencies] Error loading file dependencies:', error);
-      
-      // Don't show error for 404 - just set empty files
-      if (error instanceof Error && error.message.includes('404')) {
-        console.log('[FileDependencies] 404 error - no file dependencies found for session');
-        setFiles([]);
-      } else {
+    if (sessionState.fileContext && sessionState.fileContext.length > 0) {
+      const converted: ExtendedFileItem[] = sessionState.fileContext.map(dep => ({
+        id: dep.id.toString(),
+        name: dep.name || dep.file_name || '',
+        path: dep.path || dep.file_path,
+        type: dep.type || 'INTERNAL',
+        tokens: dep.tokens,
+        category: dep.category || dep.file_type || 'unknown',
+        isDirectory: false,
+        children: [],
+        expanded: false,
+      }));
+      setFiles(converted);
+      setLoaded(true);
+    } else if (repoUrl) {
+      setIsLoading(true);
+      try {
+        await extractFileDependenciesForSession(repoUrl);
+      } catch (error) {
         showError('Failed to load file dependencies');
-        setFiles([]);
+      } finally {
+        setIsLoading(false);
       }
-    } finally {
-      setIsLoading(false);
     }
-  }, [sessionState.sessionId, sessionState.repositoryInfo, repoUrl, showError, addMultipleFileDependencies]);
+  }, [loaded, sessionState.sessionId, sessionState.fileContext, repoUrl, extractFileDependenciesForSession, showError]);
 
   // Load file dependencies when session changes
   useEffect(() => {
-    if (sessionState.sessionId) {
-      loadFileDependencies();
-    } else {
-      // Clear files when no session
-      setFiles([]);
-    }
-  }, [sessionState.sessionId, sessionState.repositoryInfo, loadFileDependencies]);
+    loadDeps();
+  }, [loadDeps, sessionState.fileContext, sessionState.sessionId]);
 
   const handleRefresh = async () => {
     console.log('[FileDependencies] Refreshing file dependencies...');
-    
-    // Clear existing files first
-    setFiles([]);
-    
-    // Reload file dependencies
-    await loadFileDependencies();
+    setIsLoading(true);
+    try {
+      await loadFileDeps();
+      setLoaded(false);
+      await loadDeps();
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleForceExtract = async () => {
-    if (!repoUrl || !sessionState.repositoryInfo) {
-      console.log('[FileDependencies] Cannot force extract: no repository URL or info');
+    if (!repoUrl) {
+      console.log('[FileDependencies] Cannot force extract: no repository URL');
       return;
     }
 
     console.log('[FileDependencies] Force extracting file dependencies from repository:', repoUrl);
     setIsLoading(true);
-    
+
     try {
-      // Force extract from repository
-      const repoDependencies = await ApiService.extractFileDependencies(repoUrl);
-      
-      if (repoDependencies && repoDependencies.children) {
-        console.log('[FileDependencies] Force extracted dependencies, adding to session');
-        
-        // Convert FileDependencyNode to CreateFileEmbeddingRequest format
-        const convertToFileEmbeddingRequests = (items: FileDependencyNode[], parentPath: string = ''): Array<{
-          file_path: string;
-          file_name: string;
-          file_type: string;
-          chunk_index: number;
-          tokens: number;
-          file_metadata?: Record<string, unknown>;
-        }> => {
-          const requests: Array<{
-            file_path: string;
-            file_name: string;
-            file_type: string;
-            chunk_index: number;
-            tokens: number;
-            file_metadata?: Record<string, unknown>;
-          }> = [];
-          
-          items.forEach(item => {
-            const currentPath = parentPath ? `${parentPath}/${item.name}` : item.name;
-            
-            // Add the current item
-            requests.push({
-              file_path: currentPath,
-              file_name: item.name,
-              file_type: item.Category || 'unknown',
-              chunk_index: 0, // Default chunk index
-              tokens: item.tokens || 0,
-              file_metadata: {
-                isDirectory: item.isDirectory || false,
-                type: item.type || 'INTERNAL',
-                category: item.Category || 'unknown',
-              }
-            });
-            
-            // Recursively add children
-            if (item.children && item.children.length > 0) {
-              requests.push(...convertToFileEmbeddingRequests(item.children, currentPath));
-            }
-          });
-          
-          return requests;
-        };
-        
-        const fileEmbeddingRequests = convertToFileEmbeddingRequests(repoDependencies.children);
-        
-        // Add file dependencies to session
-        await addMultipleFileDependencies(fileEmbeddingRequests);
-        
-        // Convert to ExtendedFileItem format for display
-        const convertToExtendedItems = (items: FileDependencyNode[]): ExtendedFileItem[] => {
-          return items.map(item => ({
-            id: item.id,
-            name: item.name,
-            path: undefined, // FileDependencyNode doesn't have path property
-            type: (item.type as 'INTERNAL' | 'EXTERNAL') || 'INTERNAL',
-            tokens: item.tokens || 0,
-            category: item.Category || 'unknown',
-            isDirectory: item.isDirectory || false,
-            children: item.children ? convertToExtendedItems(item.children) : [],
-            expanded: false
-          }));
-        };
-        
-        setFiles(convertToExtendedItems(repoDependencies.children));
-      } else {
-        setFiles([]);
-      }
+      await extractFileDependenciesForSession(repoUrl);
+      await loadFileDeps();
+      setLoaded(false);
+      await loadDeps();
     } catch (error) {
       console.error('[FileDependencies] Error force extracting file dependencies:', error);
       showError('Failed to extract file dependencies from repository');
       setFiles([]);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleAddToContext = async (item: ExtendedFileItem) => {
+    setLoadingStates(prev => ({ ...prev, [item.id]: true }));
+    try {
+      await addContextCard({
+        title: item.name || item.file_name,
+        description: item.path || '',
+        source: 'file-deps',
+        tokens: item.tokens,
+      });
+    } catch {
+      showError?.('Failed to add file to context');
+    } finally {
+      setLoadingStates(prev => ({ ...prev, [item.id]: false }));
     }
   };
 
@@ -338,11 +181,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setLoadingStates(prev => ({ ...prev, [item.id]: true }));
-                    onAddToContext(item);
-                    setTimeout(() => {
-                      setLoadingStates(prev => ({ ...prev, [item.id]: false }));
-                    }, 1000);
+                    handleAddToContext(item);
                   }}
                   className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded"
                   title="Add to context"
@@ -370,7 +209,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
         </div>
       );
     });
-  }, [onAddToContext, onShowDetails, toggleExpanded, loadingStates]);
+  }, [handleAddToContext, onShowDetails, toggleExpanded, loadingStates]);
 
   return (
     <div className="h-full flex flex-col bg-white">

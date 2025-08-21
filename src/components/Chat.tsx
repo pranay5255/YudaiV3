@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Send, Plus } from 'lucide-react';
-import { Message, FileItem, ContextCard, ChatMessageAPI } from '../types';
+import { Message, ChatMessageAPI } from '../types';
 import type {
   CreateIssueWithContextRequest,
   ChatContextMessage,
@@ -11,6 +11,7 @@ import { UserIssueResponse } from '../types';
 import { useRepository } from '../hooks/useRepository';
 import { useApi } from '../hooks/useApi';
 import { useSession } from '../contexts/useSession';
+import { useContextCardManagement } from '../hooks/useSessionState';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -25,21 +26,16 @@ interface IssuePreviewData extends GitHubIssuePreview {
 }
 
 interface ChatProps {
-  onAddToContext: (content: string) => void;
-  contextCards?: ContextCard[];
-  fileContext?: FileItem[];
   onShowIssuePreview?: (issuePreview: IssuePreviewData) => void;
   onShowError?: (error: string) => void;
 }
 
 export const Chat: React.FC<ChatProps> = ({
-  onAddToContext,
-  contextCards = [],
-  fileContext = [],
   onShowIssuePreview,
   onShowError
 }) => {
-  const { sessionId, createSession, addChatMessage, messages: sessionMessages } = useSession();
+  const { sessionId, createSession, addChatMessage, messages: sessionMessages, contextCards, fileContext } = useSession();
+  const { addContextCard } = useContextCardManagement();
   const { selectedRepository } = useRepository();
   const api = useApi();
   
@@ -85,51 +81,59 @@ export const Chat: React.FC<ChatProps> = ({
       sessionId
     });
 
-    if (selectedRepository && !sessionId) {
+    if (selectedRepository && !sessionId && !sessionInitRef.current) {
+      sessionInitRef.current = true;
       console.log('[Chat] Auto-creating session for selected repository');
-      
+
       const repoOwner = selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0];
       const repoName = selectedRepository.repository.name;
-      
-      createSession(repoOwner, repoName, selectedRepository.branch)
-        .then(() => {
-          // Add default welcome message after successful session creation
+
+      (async () => {
+        try {
+          await createSession(repoOwner, repoName, selectedRepository.branch);
+
           const welcomeMessage: Message = {
             id: `welcome-${Date.now()}`,
-            content: `Welcome to your new chat session with repository **${repoOwner}/${repoName}**!
-
-I'm ready to help you with:
-• Creating GitHub issues from our conversations
-• Analyzing code and dependencies
-• Planning development tasks
-• Providing technical guidance
-
-What would you like to work on today?`,
+            content: `Welcome to your new chat session with repository **${repoOwner}/${repoName}**!\n\nI'm ready to help you with:\n• Creating GitHub issues from our conversations\n• Analyzing code and dependencies\n• Planning development tasks\n• Providing technical guidance\n\nWhat would you like to work on today?`,
             timestamp: new Date(),
             sessionId: sessionId || 'default',
           };
-          
-          // Add welcome message to session
+
           const welcomeMessageAPI: ChatMessageAPI = {
             id: Date.now(),
             message_id: `welcome-${Date.now()}`,
             message_text: welcomeMessage.content,
             sender_type: 'assistant',
             role: 'assistant',
-
             tokens: 0,
             created_at: welcomeMessage.timestamp.toISOString(),
           };
-          addChatMessage(welcomeMessageAPI);
+          await addChatMessage(welcomeMessageAPI);
 
           console.log('[Chat] Session created successfully with welcome message');
-        })
-        .catch((error) => {
+        } catch (error) {
           console.error('[Chat] Failed to create session:', error);
           showError('Failed to create session. Please try again.');
-        });
+        } finally {
+          sessionInitRef.current = false;
+        }
+      })();
     }
   }, [selectedRepository, sessionId, createSession, showError, addChatMessage]);
+
+  const handleAddToContext = useCallback(async (content: string) => {
+    try {
+      await addContextCard({
+        title: 'Chat Message',
+        description: content.length > 100 ? content.substring(0, 100) + '...' : content,
+        source: 'chat',
+        tokens: Math.ceil(content.length / 4),
+        content,
+      });
+    } catch {
+      showError('Failed to add to context');
+    }
+  }, [addContextCard, showError]);
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading || !sessionId) {
@@ -162,7 +166,7 @@ What would you like to work on today?`,
       created_at: new Date().toISOString(),
     };
     
-    addChatMessage(userMessage);
+    await addChatMessage(userMessage);
     
     try {
       // Send to chat API for AI response
@@ -202,7 +206,7 @@ What would you like to work on today?`,
         created_at: new Date().toISOString(),
       };
       
-      addChatMessage(assistantMessage);
+      await addChatMessage(assistantMessage);
       
     } catch (error) {
       console.error('[Chat] API call failed:', error);
@@ -342,7 +346,7 @@ What would you like to work on today?`,
               {hoveredMessage === message.id && message.id !== '1' && message.id !== '2' && (
                 <div className="mt-2 flex gap-2">
                   <button
-                    onClick={() => onAddToContext(message.content)}
+                    onClick={() => handleAddToContext(message.content)}
                     className="text-xs bg-zinc-700 hover:bg-zinc-600 px-2 py-1 rounded"
                   >
                     Add to Context
