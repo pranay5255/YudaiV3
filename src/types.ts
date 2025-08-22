@@ -417,3 +417,104 @@ export interface GitHubIssueContext {
   };
 }
 
+// ============================================================================
+// REACT QUERY MUTATION TYPES
+// ============================================================================
+
+// Session mutation types
+export interface CreateSessionMutationData {
+  repoOwner: string;
+  repoName: string;
+  repoBranch?: string;
+}
+
+export interface AddMessageMutationData {
+  sessionId: string;
+  message: ChatMessageAPI;
+}
+
+export interface UpdateMessageMutationData {
+  sessionId: string;
+  messageId: string;
+  updates: Partial<ChatMessageAPI>;
+}
+
+// Context card mutation types
+export interface AddContextCardMutationData {
+  sessionId: string;
+  card: {
+    title: string;
+    description: string;
+    source: 'chat' | 'file-deps' | 'upload';
+    tokens: number;
+    content?: string;
+  };
+}
+
+export interface RemoveContextCardMutationData {
+  sessionId: string;
+  cardId: string;
+}
+
+// File dependency mutation types
+export interface AddFileDependencyMutationData {
+  sessionId: string;
+  fileDependency: {
+    file_path: string;
+    file_name: string;
+    file_type: string;
+    chunk_index: number;
+    tokens: number;
+    file_metadata?: Record<string, unknown>;
+  };
+}
+
+// Mutation context types for optimistic updates
+export interface MessageMutationContext {
+  previousMessages: ChatMessageAPI[];
+  optimisticMessage: ChatMessageAPI;
+}
+
+export interface ContextCardMutationContext {
+  previousCards: ContextCard[];
+  optimisticCard?: ContextCard;
+}
+
+export interface FileDependencyMutationContext {
+  previousFiles: FileItem[];
+  optimisticFile?: FileItem;
+}
+
+// Query hook return types for better type safety
+export interface UseSessionQueryResult {
+  data: SessionContextResponse | undefined;
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+  refetch: () => void;
+}
+
+export interface UseChatMessagesQueryResult {
+  data: ChatMessageAPI[];
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+  refetch: () => void;
+}
+
+export interface UseContextCardsQueryResult {
+  data: ContextCard[];
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+  refetch: () => void;
+}
+
+export interface UseFileDependenciesQueryResult {
+  data: FileItem[];
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+  refetch: () => void;
+}
+

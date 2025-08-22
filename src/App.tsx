@@ -13,8 +13,8 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository, FileItem } from './types';
 import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
-import { useSession } from './contexts/useSession';
-import { useContextCardManagement } from './hooks/useSessionState';
+import { useSessionStore } from './stores/sessionStore';
+import { useSession, useContextCards, useFileDependencies, useAddContextCard, useRemoveContextCard } from './hooks/useSessionQueries';
 import { UserIssueResponse } from './types';
 import { ChatContextMessage, FileContextItem } from './types/api';
 
@@ -56,12 +56,25 @@ function AppContent() {
   // Auth and repository contexts
   const { user, isAuthenticated } = useAuth();
   const { setSelectedRepository, hasSelectedRepository } = useRepository();
-  const { sessionId, contextCards, fileContext } = useSession();
+  
+  // Zustand store for state management
+  const { 
+    activeSessionId, 
+    activeTab, 
+    setActiveTab,
+    sidebarCollapsed, 
+    setSidebarCollapsed
+  } = useSessionStore();
+  
+  // React Query hooks for data fetching
+  const { data: sessionData, isLoading: isSessionLoading } = useSession(activeSessionId || '');
+  const { data: contextCards = [] } = useContextCards(activeSessionId || '');
+  const { data: fileContext = [] } = useFileDependencies(activeSessionId || '');
+  const addContextCardMutation = useAddContextCard();
+  const removeContextCardMutation = useRemoveContextCard();
   
   // Local UI state
   const [currentStep] = useState<ProgressStep>('DAifu');
-  const [activeTab, setActiveTab] = useState<TabType>('chat');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -90,6 +103,28 @@ function AppContent() {
       return () => clearTimeout(timer);
     }
   }, [isAuthenticated, user, hasSelectedRepository]);
+
+  // Session initialization check
+  useEffect(() => {
+    if (isAuthenticated && user && !activeSessionId && hasSelectedRepository) {
+      console.log('User is authenticated and has selected repository but no active session');
+      // Optionally auto-create a session or prompt user
+      addToast('Ready to start a chat session!', 'info');
+    }
+  }, [isAuthenticated, user, activeSessionId, hasSelectedRepository]);
+
+  // Debug log session and data state
+  useEffect(() => {
+    if (activeSessionId) {
+      console.log('Session state:', {
+        sessionId: activeSessionId,
+        sessionData: sessionData ? 'loaded' : 'loading',
+        contextCardsCount: contextCards.length,
+        fileContextCount: fileContext.length,
+        isLoading: isSessionLoading
+      });
+    }
+  }, [activeSessionId, sessionData, contextCards, fileContext, isSessionLoading]);
 
   const handleRepositoryConfirm = async (selection: SelectedRepository) => {
     try {
@@ -124,33 +159,39 @@ function AppContent() {
     setIsDiffModalOpen(true);
   };
 
-  const { addContextCard, removeContextCard } = useContextCardManagement();
-
   const addFileToContext = (file: FileItem) => {
-    if (!sessionId) {
+    if (!activeSessionId) {
       addToast('Please select a repository to start a session first', 'error');
       return;
     }
 
-    addContextCard({
-      title: file.name || file.file_name || 'File',
-      description: file.path || '',
-      source: 'file-deps',
-      tokens: file.tokens,
-    })
-      .then(() => addToast(`Added ${file.name || file.file_name} to context`, 'success'))
-      .catch(() => addToast('Failed to add file to context', 'error'));
+    addContextCardMutation.mutate({
+      sessionId: activeSessionId,
+      card: {
+        title: file.name || file.file_name || 'File',
+        description: file.path || '',
+        source: 'file-deps',
+        tokens: file.tokens,
+      }
+    }, {
+      onSuccess: () => addToast(`Added ${file.name || file.file_name} to context`, 'success'),
+      onError: () => addToast('Failed to add file to context', 'error'),
+    });
   };
 
   const removeContextCardHandler = (id: string) => {
-    if (!sessionId) {
+    if (!activeSessionId) {
       addToast('No active session to remove context from', 'error');
       return;
     }
 
-    removeContextCard(id)
-      .then(() => addToast('Removed context card', 'info'))
-      .catch(() => addToast('Failed to remove context card', 'error'));
+    removeContextCardMutation.mutate({
+      sessionId: activeSessionId,
+      cardId: id,
+    }, {
+      onSuccess: () => addToast('Removed context card', 'info'),
+      onError: () => addToast('Failed to remove context card', 'error'),
+    });
   };
 
   const handleShowFileDetails = (file: FileItem) => {

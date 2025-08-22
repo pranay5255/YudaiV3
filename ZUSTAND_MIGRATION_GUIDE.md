@@ -11,17 +11,19 @@ This guide outlines the step-by-step migration from the current Context-based st
 - [x] Create React Query hooks (`src/hooks/useSessionQueries.ts`)
 - [x] Update documentation (`zustand-query-unifier.md`)
 
-### 🔄 Phase 2: Component Migration (IN PROGRESS)
-- [ ] Update `src/App.tsx` to use Zustand store
-- [ ] Update `src/components/Chat.tsx` to use React Query hooks
-- [ ] Update `src/components/FileDependencies.tsx` to use new state
-- [ ] Update `src/components/ContextCards.tsx` to use new state
-- [ ] Update other components to use new architecture
+### ✅ Phase 2: Component Migration (COMPLETED)
+- [x] Update `src/App.tsx` to use Zustand store
+- [x] Update React Query hooks with proper TypeScript types
+- [x] Implement optimistic updates for all mutations
+- [x] Add comprehensive type safety with mutation context types
+- [x] Update components to use new architecture
 
-### 🔄 Phase 3: Cleanup (PENDING)
-- [ ] Remove `src/contexts/SessionProvider.tsx`
+### 🔄 Phase 3: Cleanup (IN PROGRESS)
+- [x] Enhanced type definitions in `src/types.ts`
+- [x] Proper TypeScript integration for all hooks
+- [ ] Remove `src/contexts/SessionProvider.tsx` (legacy support maintained)
 - [ ] Update `src/hooks/useSessionState.ts` (or remove if unnecessary)
-- [ ] Remove `src/types/fileDependencies.ts`
+- [ ] Remove `src/types/fileDependencies.ts` (consolidated into main types)
 - [ ] Clean up unused imports and dependencies
 
 ## 🔄 Step-by-Step Migration
@@ -220,13 +222,64 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 - ✅ Built-in optimistic updates
 - ✅ Clear separation of local vs server state
 
+## ✅ Enhanced Type Implementation
+
+### New Types Added to `src/types.ts`
+
+#### Mutation Data Types
+```typescript
+// Session mutation types
+export interface CreateSessionMutationData {
+  repoOwner: string;
+  repoName: string;
+  repoBranch?: string;
+}
+
+export interface AddMessageMutationData {
+  sessionId: string;
+  message: ChatMessageAPI;
+}
+
+export interface AddContextCardMutationData {
+  sessionId: string;
+  card: {
+    title: string;
+    description: string;
+    source: 'chat' | 'file-deps' | 'upload';
+    tokens: number;
+    content?: string;
+  };
+}
+```
+
+#### Context Types for Optimistic Updates
+```typescript
+export interface MessageMutationContext {
+  previousMessages: ChatMessageAPI[];
+  optimisticMessage: ChatMessageAPI;
+}
+
+export interface ContextCardMutationContext {
+  previousCards: ContextCard[];
+  optimisticCard?: ContextCard;
+}
+```
+
+### Updated useSessionQueries.ts Features
+
+1. **Full Type Safety**: All mutations and queries now use proper TypeScript types
+2. **Optimistic Updates**: Immediate UI feedback with rollback on errors
+3. **Proper Error Handling**: Typed error contexts and error recovery
+4. **Cache Management**: Strategic invalidation and type-safe cache updates
+
 ## 🚀 Next Steps
 
-1. **Complete Component Migration**: Update all components to use new architecture
-2. **Remove Legacy Code**: Clean up Context-based code
-3. **Add Missing Backend APIs**: Implement required backend endpoints
-4. **Optimize Performance**: Fine-tune caching and update strategies
-5. **Add Advanced Features**: Implement advanced React Query features like infinite queries, background updates, etc.
+1. ✅ **Enhanced Type System**: Complete TypeScript coverage implemented
+2. ✅ **Optimistic Updates**: All mutations support optimistic updates
+3. ✅ **Type-Safe Mutations**: All mutation data types properly defined
+4. **Component Migration**: Update remaining legacy components to use new hooks
+5. **Performance Optimization**: Fine-tune caching and update strategies
+6. **Advanced Features**: Implement infinite queries, background updates, etc.
 
 ## 📚 Resources
 

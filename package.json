@@ -23,6 +23,8 @@
     "dev:setup": "bash scripts/dev-setup.sh"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.85.5",
+    "@tanstack/react-query-devtools": "^5.85.5",
     "axios": "^1.11.0",
     "express": "^5.1.0",
     "lucide-react": "^0.344.0",
