@@ -618,6 +618,16 @@ class CreateChatMessageRequest(BaseModel):
     referenced_files: Optional[List[str]] = Field(default_factory=list)
     error_message: Optional[str] = Field(None)
 
+class UpdateChatMessageRequest(BaseModel):
+    message_text: Optional[str] = Field(None, min_length=1)
+    is_code: Optional[bool] = Field(None)
+    tokens: Optional[int] = Field(None, ge=0)
+    model_used: Optional[str] = Field(None, max_length=100)
+    processing_time: Optional[float] = Field(None, ge=0)
+    context_cards: Optional[List[str]] = Field(None)
+    referenced_files: Optional[List[str]] = Field(None)
+    error_message: Optional[str] = Field(None)
+
 class ChatSessionResponse(BaseModel):
     id: int
     session_id: str
@@ -658,6 +668,12 @@ class CreateSessionRequest(BaseModel):
     title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = Field(None)
 
+class UpdateSessionRequest(BaseModel):
+    title: Optional[str] = Field(None, max_length=255)
+    description: Optional[str] = Field(None)
+    repo_branch: Optional[str] = Field(None, max_length=255)
+    is_active: Optional[bool] = Field(None)
+
 class SessionResponse(BaseModel):
     id: int
     session_id: str
@@ -695,6 +711,14 @@ class CreateContextCardRequest(BaseModel):
     source: str = Field(..., pattern="^(chat|file-deps|upload)$")
     tokens: int = Field(default=0, ge=0)
 
+class UpdateContextCardRequest(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None, min_length=1)
+    content: Optional[str] = Field(None, min_length=1)
+    source: Optional[str] = Field(None, pattern="^(chat|file-deps|upload)$")
+    tokens: Optional[int] = Field(None, ge=0)
+    is_active: Optional[bool] = Field(None)
+
 # File Embedding Models
 class CreateFileEmbeddingRequest(BaseModel):
     file_path: str = Field(..., min_length=1, max_length=1000)
@@ -704,6 +728,16 @@ class CreateFileEmbeddingRequest(BaseModel):
     chunk_text: str = Field(..., min_length=1)
     chunk_index: int = Field(default=0, ge=0)
     tokens: int = Field(default=0, ge=0)
+    file_metadata: Optional[Dict[str, Any]] = Field(None)
+
+class UpdateFileEmbeddingRequest(BaseModel):
+    file_path: Optional[str] = Field(None, min_length=1, max_length=1000)
+    file_name: Optional[str] = Field(None, min_length=1, max_length=500)
+    file_type: Optional[str] = Field(None, min_length=1, max_length=100)
+    file_content: Optional[str] = Field(None)
+    chunk_text: Optional[str] = Field(None, min_length=1)
+    chunk_index: Optional[int] = Field(None, ge=0)
+    tokens: Optional[int] = Field(None, ge=0)
     file_metadata: Optional[Dict[str, Any]] = Field(None)
 
 class FileEmbeddingResponse(BaseModel):
