@@ -8,8 +8,7 @@ from urllib.parse import urlencode
 
 from auth.auth_utils import (
     create_session_token,
-    #deactivate_session_token,
-    #TODO: Add deactivate/delete session token function
+    deactivate_session_token,
     validate_session_token,
 )
 from auth.github_oauth import (
@@ -294,9 +293,9 @@ async def api_logout(request: SessionTokenRequest, db: Session = Depends(get_db)
     """Logout user by deactivating session token"""
     try:
         logger.info(f"Processing logout for session token: {request.session_token[:10]}...")
-        # TODO: Implement actual session token deactivation
-        # For now just return success
-        success = True
+        
+        # Deactivate the session token
+        success = deactivate_session_token(db, request.session_token)
         
         if success:
             logger.info("User logged out successfully")

@@ -3,7 +3,6 @@ Centralized Message Service for DAifu Agent
 Eliminates duplication in message creation and storage logic
 """
 
-import time
 import uuid
 from typing import List, Optional
 
@@ -108,44 +107,6 @@ class MessageService:
             error_message=error_message,
         )
     
-    @staticmethod
-    def create_user_message_request(
-        session_id: str,
-        content: str,
-        is_code: bool = False,
-        context_cards: Optional[List[str]] = None,
-        message_id: Optional[str] = None
-    ) -> CreateChatMessageRequest:
-        """
-        Create a user message request
-        
-        Args:
-            session_id: Session ID
-            content: Message content
-            is_code: Whether the message contains code
-            context_cards: Optional context cards
-            message_id: Optional custom message ID
-            
-        Returns:
-            CreateChatMessageRequest object
-        """
-        if not message_id:
-            message_id = f"msg_{int(time.time() * 1000)}"
-            
-        return CreateChatMessageRequest(
-            session_id=session_id,
-            message_id=message_id,
-            message_text=content,
-            sender_type="user",
-            role="user",
-            is_code=is_code,
-            tokens=len(content) // 4,  # Rough token estimation
-            context_cards=context_cards or []
-        )
-    
-
-    
-
     
     @staticmethod
     def convert_chat_request_to_message_request(

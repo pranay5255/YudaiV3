@@ -4,27 +4,30 @@ Handles session creation and component CRUD operations
 """
 import logging
 import uuid
-
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import and_
-from sqlalchemy.orm import Session
+from typing import List
 
 from auth.github_oauth import get_current_user
 from db.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, status
 from models import (
-    ChatSession,
-    CreateSessionRequest,
-    SessionResponse,
-    SessionContextResponse,
-    User,
-    ChatMessageResponse,
-    UserIssueResponse,
-    FileEmbeddingResponse,
+    APIResponse,
     ChatMessage,
-    UserIssue,
-    FileEmbedding,
+    ChatMessageResponse,
+    ChatSession,
     ContextCard,
+    CreateSessionRequest,
+    FileEmbedding,
+    FileEmbeddingResponse,
+    SessionContextResponse,
+    SessionResponse,
+    UpdateSessionRequest,
+    User,
+    UserIssue,
+    UserIssueResponse,
 )
+from sqlalchemy import and_
+from sqlalchemy.orm import Session
+
 from utils import utc_now
 
 logger = logging.getLogger(__name__)
@@ -167,4 +170,121 @@ async def get_session_context(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve session context"
+        )
+
+# ============================================================================
+# MISSING SESSION MANAGEMENT APIs
+# ============================================================================
+
+@router.get("/sessions", response_model=List[SessionResponse])
+async def list_user_sessions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List all sessions for the current user"""
+    try:
+        sessions = db.query(ChatSession).filter(
+            and_(
+                ChatSession.user_id == current_user.id,
+                ChatSession.is_active
+            )
+        ).order_by(ChatSession.last_activity.desc()).all()
+        
+        return [SessionResponse.model_validate(session) for session in sessions]
+        
+    except Exception as e:
+        logger.error(f"Error listing user sessions: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve user sessions"
+        )
+
+@router.put("/sessions/{session_id}", response_model=SessionResponse)
+async def update_session(
+    session_id: str,
+    updates: UpdateSessionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update a session"""
+    try:
+        # Get session and verify ownership
+        session = db.query(ChatSession).filter(
+            and_(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+                ChatSession.is_active
+            )
+        ).first()
+        
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+        
+        # Apply updates only for non-None fields
+        update_data = updates.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(session, field, value)
+        
+        session.updated_at = utc_now()
+        
+        db.commit()
+        db.refresh(session)
+        
+        return SessionResponse.model_validate(session)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating session: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update session"
+        )
+
+@router.delete("/sessions/{session_id}", response_model=APIResponse)
+async def delete_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a session (soft delete by setting is_active=False)"""
+    try:
+        # Get session and verify ownership
+        session = db.query(ChatSession).filter(
+            and_(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+                ChatSession.is_active
+            )
+        ).first()
+        
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+        
+        # Soft delete the session
+        session.is_active = False
+        session.updated_at = utc_now()
+        
+        db.commit()
+        
+        return APIResponse(
+            success=True,
+            message=f"Session {session_id} deleted successfully"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting session: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete session"
         )

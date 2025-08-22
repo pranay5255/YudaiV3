@@ -90,3 +90,32 @@ def validate_session_token(db: Session, session_token: str) -> Optional[User]:
     except Exception as e:
         logger.error(f"Error validating session token: {str(e)}", exc_info=True)
         return None
+
+def deactivate_session_token(db: Session, session_token: str) -> bool:
+    """Deactivate a session token by setting is_active=False"""
+    try:
+        logger.info(f"Deactivating session token: {session_token[:10]}...")
+        
+        # Find the session token
+        db_session_token = db.query(SessionToken).filter(
+            SessionToken.session_token == session_token,
+            SessionToken.is_active
+        ).first()
+        
+        if not db_session_token:
+            logger.warning(f"Session token not found or already inactive: {session_token[:10]}...")
+            return False
+        
+        # Deactivate the token
+        db_session_token.is_active = False
+        db_session_token.updated_at = utc_now()
+        
+        db.commit()
+        
+        logger.info(f"Successfully deactivated session token: {session_token[:10]}...")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error deactivating session token: {str(e)}", exc_info=True)
+        db.rollback()
+        return False

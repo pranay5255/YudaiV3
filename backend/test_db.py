@@ -722,40 +722,7 @@ def test_data_consistency():
     except Exception as e:
         result.fail_test("Data Consistency Setup", str(e))
 
-def test_auth_api_endpoints():
-    """Deprecated: API endpoint tests are intentionally omitted in this script."""
-    result.section("API TESTS OMITTED")
-    result.info("Skipping authentication endpoint tests by design.")
-
-def test_github_api_endpoints():
-    """Deprecated: API endpoint tests are intentionally omitted in this script."""
-    result.section("API TESTS OMITTED")
-    result.info("Skipping GitHub endpoint tests by design.")
-
-def test_chat_api_endpoints():
-    """Deprecated: API endpoint tests are intentionally omitted in this script."""
-    result.section("API TESTS OMITTED")
-    result.info("Skipping chat/DAifu endpoint tests by design.")
-
-def test_session_api_endpoints():
-    """Deprecated: API endpoint tests are intentionally omitted in this script."""
-    result.section("API TESTS OMITTED")
-    result.info("Skipping session endpoint tests by design.")
-
-def test_issues_api_endpoints():
-    """Deprecated: API endpoint tests are intentionally omitted in this script."""
-    result.section("API TESTS OMITTED")
-    result.info("Skipping issues endpoint tests by design.")
-
-def test_filedeps_api_endpoints():
-    """Deprecated: API endpoint tests are intentionally omitted in this script."""
-    result.section("API TESTS OMITTED")
-    result.info("Skipping file-dependencies endpoint tests by design.")
-
-def test_database_api_integration():
-    """Deprecated: API integration tests are intentionally omitted in this script."""
-    result.section("API TESTS OMITTED")
-    result.info("Skipping database-API integration tests by design.")
+# All deprecated API test functions removed - they were stub functions that didn't actually test anything
 
 def main():
     """Main validation function"""
