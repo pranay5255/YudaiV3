@@ -1,22 +1,28 @@
 import { useCallback } from 'react';
-import { useSession } from '../contexts/useSession';
+import { useSessionStore } from '../stores/sessionStore';
 import { GitHubRepository, SelectedRepository } from '../types';
 
 /**
  * Custom hook to access repository state and management functions
- * Must be used within a SessionProvider
  */
 export const useRepository = () => {
-  const session = useSession();
+  const {
+    selectedRepository,
+    setSelectedRepository,
+    availableRepositories,
+    isLoadingRepositories,
+    repositoryError
+  } = useSessionStore();
+
   return {
-    selectedRepository: session.selectedRepository,
-    setSelectedRepository: session.setSelectedRepository,
-    hasSelectedRepository: session.hasSelectedRepository,
-    clearSelectedRepository: session.clearSelectedRepository,
-    availableRepositories: session.availableRepositories,
-    isLoadingRepositories: session.isLoadingRepositories,
-    loadRepositories: session.loadRepositories,
-    repositoryError: session.repositoryError,
+    selectedRepository,
+    setSelectedRepository,
+    hasSelectedRepository: !!selectedRepository,
+    clearSelectedRepository: () => setSelectedRepository(null),
+    availableRepositories,
+    isLoadingRepositories,
+    loadRepositories: () => {}, // TODO: Implement repository loading
+    repositoryError,
   };
 };
 
@@ -27,12 +33,15 @@ export const useRepositorySelection = () => {
   const {
     selectedRepository,
     setSelectedRepository,
-    hasSelectedRepository,
-    clearSelectedRepository,
     availableRepositories,
     isLoadingRepositories,
     repositoryError
-  } = useRepository();
+  } = useSessionStore();
+
+  const hasSelectedRepository = !!selectedRepository;
+  const clearSelectedRepository = useCallback(() => {
+    setSelectedRepository(null);
+  }, [setSelectedRepository]);
 
   const selectRepositoryWithBranch = useCallback((
     repository: GitHubRepository,
@@ -46,7 +55,7 @@ export const useRepositorySelection = () => {
   }, [setSelectedRepository]);
 
   const getRepositoryByName = useCallback((fullName: string): GitHubRepository | undefined => {
-    return availableRepositories.find(repo => repo.full_name === fullName);
+    return availableRepositories.find((repo: GitHubRepository) => repo.full_name === fullName);
   }, [availableRepositories]);
 
   const getCurrentRepositoryUrl = useCallback((): string | null => {

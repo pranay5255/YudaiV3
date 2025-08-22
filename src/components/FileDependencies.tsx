@@ -1,7 +1,12 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { ChevronRight, ChevronDown, Plus, Folder, File, RefreshCw } from 'lucide-react';
 import { FileItem } from '../types';
-import { useSessionState, useFileDependencyManagement, useContextCardManagement } from '../hooks/useSessionState';
+import { useSessionStore } from '../stores/sessionStore';
+import {
+  useFileDependencies,
+  useAddContextCard
+} from '../hooks/useSessionQueries';
+import { useApi } from '../hooks/useApi';
 
 interface FileDependenciesProps {
   onShowDetails: (file: FileItem) => void;
@@ -20,13 +25,16 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
   onShowError,
   repoUrl
 }) => {
-  const sessionState = useSessionState();
-  const { loadFileDependencies: loadFileDeps, extractFileDependenciesForSession } = useFileDependencyManagement();
-  const { addContextCard } = useContextCardManagement();
+  // Zustand store for state management
+  const { activeSessionId, selectedRepository } = useSessionStore();
+  
+  // React Query hooks for data and mutations
+  const { data: fileContext = [], isLoading, refetch } = useFileDependencies(activeSessionId || '');
+  const addContextCardMutation = useAddContextCard();
+  
+  const api = useApi();
   const [files, setFiles] = useState<ExtendedFileItem[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [loadingStates, setLoadingStates] = useState<{[key: string]: boolean}>({});
-  const [loaded, setLoaded] = useState(false);
 
   const showError = useCallback((message: string) => {
     if (onShowError) {
@@ -49,15 +57,10 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     setFiles(toggleInTree(files));
   }, [files]);
 
-  const loadDeps = useCallback(async () => {
-    if (loaded) return;
-    if (!sessionState.sessionId) {
-      setFiles([]);
-      return;
-    }
-
-    if (sessionState.fileContext && sessionState.fileContext.length > 0) {
-      const converted: ExtendedFileItem[] = sessionState.fileContext.map(dep => ({
+  // Convert file context to extended file items when data changes
+  useEffect(() => {
+    if (fileContext && fileContext.length > 0) {
+      const converted: ExtendedFileItem[] = fileContext.map(dep => ({
         id: dep.id.toString(),
         name: dep.name || dep.file_name || '',
         path: dep.path || dep.file_path,
@@ -69,74 +72,56 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
         expanded: false,
       }));
       setFiles(converted);
-      setLoaded(true);
-    } else if (repoUrl) {
-      setIsLoading(true);
-      try {
-        await extractFileDependenciesForSession(repoUrl);
-      } catch (error) {
-        showError('Failed to load file dependencies');
-      } finally {
-        setIsLoading(false);
-      }
+    } else {
+      setFiles([]);
     }
-  }, [loaded, sessionState.sessionId, sessionState.fileContext, repoUrl, extractFileDependenciesForSession, showError]);
-
-  // Load file dependencies when session changes
-  useEffect(() => {
-    loadDeps();
-  }, [loadDeps, sessionState.fileContext, sessionState.sessionId]);
+  }, [fileContext]);
 
   const handleRefresh = async () => {
     console.log('[FileDependencies] Refreshing file dependencies...');
-    setIsLoading(true);
-    try {
-      await loadFileDeps();
-      setLoaded(false);
-      await loadDeps();
-    } finally {
-      setIsLoading(false);
-    }
+    refetch();
   };
 
   const handleForceExtract = async () => {
-    if (!repoUrl) {
-      console.log('[FileDependencies] Cannot force extract: no repository URL');
+    if (!repoUrl || !activeSessionId) {
+      console.log('[FileDependencies] Cannot force extract: no repository URL or session');
       return;
     }
 
     console.log('[FileDependencies] Force extracting file dependencies from repository:', repoUrl);
-    setIsLoading(true);
 
     try {
-      await extractFileDependenciesForSession(repoUrl);
-      await loadFileDeps();
-      setLoaded(false);
-      await loadDeps();
+      // Call API to extract file dependencies for the session
+      await api.extractFileDependenciesForSession(activeSessionId, repoUrl);
+      // Refetch the file dependencies after extraction
+      refetch();
     } catch (error) {
       console.error('[FileDependencies] Error force extracting file dependencies:', error);
       showError('Failed to extract file dependencies from repository');
-      setFiles([]);
-    } finally {
-      setIsLoading(false);
     }
   };
 
-  const handleAddToContext = async (item: ExtendedFileItem) => {
+  const handleAddToContext = useCallback(async (item: ExtendedFileItem) => {
+    if (!activeSessionId) {
+      showError?.('No active session to add context to');
+      return;
+    }
+
     setLoadingStates(prev => ({ ...prev, [item.id]: true }));
-    try {
-      await addContextCard({
+    
+    addContextCardMutation.mutate({
+      sessionId: activeSessionId,
+      card: {
         title: item.name || item.file_name || 'File',
         description: item.path || '',
         source: 'file-deps',
         tokens: item.tokens,
-      });
-    } catch {
-      showError?.('Failed to add file to context');
-    } finally {
-      setLoadingStates(prev => ({ ...prev, [item.id]: false }));
-    }
-  };
+      },
+    }, {
+      onError: () => showError?.('Failed to add file to context'),
+      onSettled: () => setLoadingStates(prev => ({ ...prev, [item.id]: false })),
+    });
+  }, [activeSessionId, showError, addContextCardMutation]);
 
   // Optimized file tree rendering with proper TypeScript types
   const renderFileTree = useCallback((items: ExtendedFileItem[], depth = 0) => {
@@ -217,7 +202,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
         <div>
           <h3 className="font-semibold text-gray-800">File Dependencies</h3>
           <p className="text-sm text-gray-600 truncate">
-            {sessionState.repositoryInfo?.full_name || 'No repository selected'}
+            {selectedRepository?.repository.full_name || 'No repository selected'}
           </p>
         </div>
         <div className="flex gap-2">
@@ -229,7 +214,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
-          {repoUrl && sessionState.repositoryInfo && (
+          {repoUrl && selectedRepository && (
             <button
               onClick={handleForceExtract}
               disabled={isLoading}
@@ -247,7 +232,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
           <div className="flex items-center justify-center h-40">
             <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
             <span className="ml-2 text-gray-600">
-              {sessionState.fileContext.length === 0 ? 'Extracting file dependencies...' : 'Analyzing repository...'}
+              {fileContext.length === 0 ? 'Extracting file dependencies...' : 'Analyzing repository...'}
             </span>
           </div>
         ) : files.length === 0 ? (
@@ -255,8 +240,8 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
             <File className="w-12 h-12 mx-auto mb-2 text-gray-300" />
             <p>No files found</p>
             <p className="text-sm">
-              {sessionState.repositoryInfo ? 
-                'Try refreshing or use the extract button to analyze the repository' : 
+              {selectedRepository ?
+                'Try refreshing or use the extract button to analyze the repository' :
                 'Select a repository to analyze file dependencies'
               }
             </p>
@@ -271,9 +256,9 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
       <div className="p-2 border-t bg-gray-50 text-xs text-gray-500">
         <div className="flex justify-between items-center">
           <span>Files: {files.length} | Total tokens: {files.reduce((sum, file) => sum + (file.tokens || 0), 0)}</span>
-          <span>Session files: {sessionState.fileContext.length}</span>
+          <span>Session files: {fileContext.length}</span>
         </div>
-        {sessionState.fileContext.length > 0 && (
+        {fileContext.length > 0 && (
           <div className="mt-1 text-xs text-blue-600">
             💡 Tip: Files are automatically included in chat context and GitHub issue creation
           </div>
