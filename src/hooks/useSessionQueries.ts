@@ -9,9 +9,22 @@ import {
   ChatMessageAPI, 
   ContextCard, 
   FileItem,
-  SessionResponse,
-  SessionContextResponse 
+  CreateSessionMutationData,
+  AddMessageMutationData,
+  UpdateMessageMutationData,
+  AddContextCardMutationData,
+  RemoveContextCardMutationData,
+  AddFileDependencyMutationData,
+  MessageMutationContext,
+  ContextCardMutationContext,
+
 } from '../types';
+import type {
+  ChatMessageResponse,
+  ContextCardResponse,
+  FileEmbeddingResponse,
+  SessionResponse
+} from '../types/api';
 
 // Query keys for consistent cache management
 export const QueryKeys = {
@@ -37,17 +50,32 @@ export const useSessions = () => {
 
 export const useSession = (sessionId: string) => {
   const api = useApi();
-  const { setMessages, setContextCards, setFileContext } = useSessionStore();
+  const { setMessages } = useSessionStore();
   
   return useQuery({
     queryKey: QueryKeys.session(sessionId),
-    queryFn: async (): Promise<SessionContextResponse> => {
+    queryFn: async () => {
       const context = await api.getSessionContext(sessionId);
       
-      // Update Zustand store with fetched data
-      if (context.messages) {
-        setMessages(context.messages);
-      }
+      // Transform messages to frontend format
+      const transformedMessages: ChatMessageAPI[] = context.messages?.map((msg: ChatMessageResponse) => ({
+        id: msg.id,
+        message_id: msg.message_id,
+        message_text: msg.message_text,
+        sender_type: msg.sender_type as 'user' | 'assistant' | 'system',
+        role: msg.role as 'user' | 'assistant' | 'system',
+        tokens: msg.tokens,
+        model_used: msg.model_used,
+        processing_time: msg.processing_time,
+        context_cards: msg.context_cards,
+        referenced_files: msg.referenced_files,
+        error_message: msg.error_message,
+        created_at: msg.created_at,
+        updated_at: msg.updated_at,
+      })) || [];
+      
+      // Update Zustand store with transformed data
+      setMessages(transformedMessages);
       
       return context;
     },
@@ -67,10 +95,27 @@ export const useChatMessages = (sessionId: string) => {
     queryFn: async (): Promise<ChatMessageAPI[]> => {
       const messages = await api.getChatMessages(sessionId);
       
-      // Update Zustand store
-      setMessages(messages);
+      // Transform messages to frontend format
+      const transformedMessages: ChatMessageAPI[] = messages.map((msg: ChatMessageResponse) => ({
+        id: msg.id,
+        message_id: msg.message_id,
+        message_text: msg.message_text,
+        sender_type: msg.sender_type as 'user' | 'assistant' | 'system',
+        role: msg.role as 'user' | 'assistant' | 'system',
+        tokens: msg.tokens,
+        model_used: msg.model_used,
+        processing_time: msg.processing_time,
+        context_cards: msg.context_cards,
+        referenced_files: msg.referenced_files,
+        error_message: msg.error_message,
+        created_at: msg.created_at,
+        updated_at: msg.updated_at,
+      }));
       
-      return messages;
+      // Update Zustand store
+      setMessages(transformedMessages);
+      
+      return transformedMessages;
     },
     enabled: !!sessionId,
     staleTime: 30 * 1000, // 30 seconds
@@ -84,21 +129,21 @@ export const useAddMessage = () => {
   const { addMessage } = useSessionStore();
   
   return useMutation({
-    mutationFn: async ({ sessionId, message }: { sessionId: string; message: any }) => {
+    mutationFn: async ({ sessionId, message }: AddMessageMutationData) => {
       return await api.addChatMessage(sessionId, message);
     },
-    onMutate: async ({ sessionId, message }) => {
+    onMutate: async ({ sessionId, message }): Promise<MessageMutationContext> => {
       // Cancel any outgoing refetches
       await queryClient.cancelQueries({ queryKey: QueryKeys.messages(sessionId) });
       
       // Snapshot the previous value
-      const previousMessages = queryClient.getQueryData(QueryKeys.messages(sessionId));
+      const previousMessages = queryClient.getQueryData<ChatMessageAPI[]>(QueryKeys.messages(sessionId)) || [];
       
       // Optimistically update the cache
       const optimisticMessage: ChatMessageAPI = {
         id: Date.now(),
         message_id: message.message_id || Date.now().toString(),
-        message_text: message.content,
+        message_text: message.message_text,
         sender_type: message.sender_type,
         role: message.role,
         tokens: message.tokens || 0,
@@ -115,13 +160,13 @@ export const useAddMessage = () => {
       
       return { previousMessages, optimisticMessage };
     },
-    onError: (err, { sessionId }, context) => {
+    onError: (_err: Error, { sessionId }: AddMessageMutationData, context?: MessageMutationContext) => {
       // If the mutation fails, use the context returned from onMutate to roll back
       if (context?.previousMessages) {
         queryClient.setQueryData(QueryKeys.messages(sessionId), context.previousMessages);
       }
     },
-    onSettled: (data, error, { sessionId }) => {
+    onSettled: (_data: ChatMessageResponse | undefined, _error: Error | null, { sessionId }: AddMessageMutationData) => {
       // Always refetch after error or success
       queryClient.invalidateQueries({ queryKey: QueryKeys.messages(sessionId) });
     },
@@ -134,18 +179,10 @@ export const useUpdateMessage = () => {
   const { updateMessage } = useSessionStore();
   
   return useMutation({
-    mutationFn: async ({ 
-      sessionId, 
-      messageId, 
-      updates 
-    }: { 
-      sessionId: string; 
-      messageId: string; 
-      updates: Partial<ChatMessageAPI> 
-    }) => {
+    mutationFn: async ({ sessionId, messageId, updates }: UpdateMessageMutationData) => {
       return await api.updateChatMessage?.(sessionId, messageId, updates);
     },
-    onSuccess: (data, { sessionId, messageId, updates }) => {
+    onSuccess: (_data: ChatMessageResponse | undefined, { sessionId, messageId, updates }: UpdateMessageMutationData) => {
       // Update the cache
       queryClient.setQueryData(QueryKeys.messages(sessionId), (old: ChatMessageAPI[] = []) =>
         old.map(msg => msg.message_id === messageId ? { ...msg, ...updates } : msg)
@@ -191,23 +228,43 @@ export const useAddContextCard = () => {
   const { addContextCard } = useSessionStore();
   
   return useMutation({
-    mutationFn: async ({ 
-      sessionId, 
-      card 
-    }: { 
-      sessionId: string; 
-      card: {
-        title: string;
-        description: string;
-        source: 'chat' | 'file-deps' | 'upload';
-        tokens: number;
-        content?: string;
-      }
-    }) => {
+    mutationFn: async ({ sessionId, card }: AddContextCardMutationData) => {
       return await api.addContextCard(sessionId, card);
     },
-    onSuccess: (data, { sessionId }) => {
-      // Transform the response and update stores
+    onMutate: async ({ sessionId, card }): Promise<ContextCardMutationContext> => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: QueryKeys.contextCards(sessionId) });
+      
+      // Snapshot the previous value
+      const previousCards = queryClient.getQueryData<ContextCard[]>(QueryKeys.contextCards(sessionId)) || [];
+      
+      // Optimistically update the cache
+      const optimisticCard: ContextCard = {
+        id: Date.now().toString(),
+        title: card.title,
+        description: card.description,
+        tokens: card.tokens,
+        source: card.source,
+      };
+      
+      queryClient.setQueryData(QueryKeys.contextCards(sessionId), (old: ContextCard[] = []) => [
+        ...old,
+        optimisticCard,
+      ]);
+      
+      // Update Zustand store optimistically
+      addContextCard(optimisticCard);
+      
+      return { previousCards, optimisticCard };
+    },
+    onError: (_err: Error, { sessionId }: AddContextCardMutationData, context?: ContextCardMutationContext) => {
+      // If the mutation fails, use the context returned from onMutate to roll back
+      if (context?.previousCards) {
+        queryClient.setQueryData(QueryKeys.contextCards(sessionId), context.previousCards);
+      }
+    },
+    onSuccess: (data: ContextCardResponse, { sessionId }: AddContextCardMutationData) => {
+      // Transform the response and update stores with real data
       const newCard: ContextCard = {
         id: data.id.toString(),
         title: data.title,
@@ -216,10 +273,60 @@ export const useAddContextCard = () => {
         source: data.source as 'chat' | 'file-deps' | 'upload',
       };
       
-      // Update Zustand store
-      addContextCard(newCard);
+      // Update cache with real data
+      queryClient.setQueryData(QueryKeys.contextCards(sessionId), (old: ContextCard[] = []) => {
+        // Replace optimistic entry with real data
+        return old.map(card => 
+          card.id === data.id.toString() ? newCard : card
+        ).filter((card, index, self) => 
+          self.findIndex(c => c.title === card.title && c.description === card.description) === index
+        );
+      });
       
-      // Invalidate and refetch
+      // Update Zustand store with real data
+      addContextCard(newCard);
+    },
+    onSettled: (_data: ContextCardResponse | undefined, _error: Error | null, { sessionId }: AddContextCardMutationData) => {
+      // Always refetch after error or success
+      queryClient.invalidateQueries({ queryKey: QueryKeys.contextCards(sessionId) });
+    },
+  });
+};
+
+export const useRemoveContextCard = () => {
+  const api = useApi();
+  const queryClient = useQueryClient();
+  const { removeContextCard } = useSessionStore();
+  
+  return useMutation({
+    mutationFn: async ({ sessionId, cardId }: RemoveContextCardMutationData) => {
+      return await api.deleteContextCard(sessionId, parseInt(cardId));
+    },
+    onMutate: async ({ sessionId, cardId }): Promise<ContextCardMutationContext> => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: QueryKeys.contextCards(sessionId) });
+      
+      // Snapshot the previous value
+      const previousCards = queryClient.getQueryData<ContextCard[]>(QueryKeys.contextCards(sessionId)) || [];
+      
+      // Optimistically update the cache
+      queryClient.setQueryData(QueryKeys.contextCards(sessionId), (old: ContextCard[] = []) =>
+        old.filter(card => card.id !== cardId)
+      );
+      
+      // Update Zustand store optimistically
+      removeContextCard(cardId);
+      
+      return { previousCards };
+    },
+    onError: (_err: Error, { sessionId }: RemoveContextCardMutationData, context?: ContextCardMutationContext) => {
+      // If the mutation fails, use the context returned from onMutate to roll back
+      if (context?.previousCards) {
+        queryClient.setQueryData(QueryKeys.contextCards(sessionId), context.previousCards);
+      }
+    },
+    onSettled: (_data: { success: boolean; message: string } | undefined, _error: Error | null, { sessionId }: RemoveContextCardMutationData) => {
+      // Always refetch after error or success
       queryClient.invalidateQueries({ queryKey: QueryKeys.contextCards(sessionId) });
     },
   });
@@ -261,23 +368,10 @@ export const useAddFileDependency = () => {
   const { addFileItem } = useSessionStore();
   
   return useMutation({
-    mutationFn: async ({ 
-      sessionId, 
-      fileDependency 
-    }: { 
-      sessionId: string; 
-      fileDependency: {
-        file_path: string;
-        file_name: string;
-        file_type: string;
-        chunk_index: number;
-        tokens: number;
-        file_metadata?: Record<string, unknown>;
-      }
-    }) => {
+    mutationFn: async ({ sessionId, fileDependency }: AddFileDependencyMutationData) => {
       return await api.addFileDependency(sessionId, fileDependency);
     },
-    onSuccess: (data, { sessionId }) => {
+    onSuccess: (data: FileEmbeddingResponse, { sessionId }: AddFileDependencyMutationData) => {
       // Transform the response and update stores
       const newFile: FileItem = {
         id: data.id.toString(),
@@ -302,18 +396,10 @@ export const useAddFileDependency = () => {
 export const useCreateSession = () => {
   const api = useApi();
   const queryClient = useQueryClient();
-  const { setActiveSession, clearSession } = useSessionStore();
+  const { setActiveSession } = useSessionStore();
   
   return useMutation({
-    mutationFn: async ({ 
-      repoOwner, 
-      repoName, 
-      repoBranch = 'main' 
-    }: { 
-      repoOwner: string; 
-      repoName: string; 
-      repoBranch?: string 
-    }) => {
+    mutationFn: async ({ repoOwner, repoName, repoBranch = 'main' }: CreateSessionMutationData) => {
       return await api.createSession({
         repo_owner: repoOwner,
         repo_name: repoName,
@@ -321,7 +407,7 @@ export const useCreateSession = () => {
         title: `Chat - ${repoOwner}/${repoName}`,
       });
     },
-    onSuccess: (data) => {
+    onSuccess: (data: SessionResponse) => {
       // Update Zustand store
       setActiveSession(data.session_id);
       
@@ -334,15 +420,14 @@ export const useCreateSession = () => {
 export const useDeleteSession = () => {
   const api = useApi();
   const queryClient = useQueryClient();
-  const { clearSession } = useSessionStore();
   
   return useMutation({
     mutationFn: async (sessionId: string) => {
       return await api.deleteSession?.(sessionId);
     },
-    onSuccess: (data, sessionId) => {
+    onSuccess: (_data: { success: boolean; message: string }, sessionId: string) => {
       // Clear Zustand store if this was the active session
-      clearSession();
+      // TODO: Only clear if this was the active session
       
       // Invalidate all related queries
       queryClient.invalidateQueries({ queryKey: QueryKeys.sessions });

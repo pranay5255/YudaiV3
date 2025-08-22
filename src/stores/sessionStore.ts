@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
-import { SelectedRepository, TabType, ContextCard, FileItem, ChatMessageAPI } from '../types';
+import { SelectedRepository, TabType, ContextCard, FileItem, ChatMessageAPI, GitHubRepository } from '../types';
 
 // Enhanced types for the session store
 interface SessionState {
@@ -8,10 +8,11 @@ interface SessionState {
   activeSessionId: string | null;
   isLoading: boolean;
   error: string | null;
+  sessionInitialized: boolean;
   
   // Repository state
   selectedRepository: SelectedRepository | null;
-  availableRepositories: any[];
+  availableRepositories: GitHubRepository[];
   isLoadingRepositories: boolean;
   repositoryError: string | null;
   
@@ -33,8 +34,9 @@ interface SessionState {
   clearSession: () => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+  setSessionInitialized: (initialized: boolean) => void;
   setSelectedRepository: (repository: SelectedRepository | null) => void;
-  setAvailableRepositories: (repositories: any[]) => void;
+  setAvailableRepositories: (repositories: GitHubRepository[]) => void;
   setRepositoryLoading: (loading: boolean) => void;
   setRepositoryError: (error: string | null) => void;
   setActiveTab: (tab: TabType) => void;
@@ -66,6 +68,7 @@ export const useSessionStore = create<SessionState>()(
         activeSessionId: null,
         isLoading: false,
         error: null,
+        sessionInitialized: false,
         
         // Repository state
         selectedRepository: null,
@@ -88,12 +91,13 @@ export const useSessionStore = create<SessionState>()(
         
         // Core actions
         setActiveSession: (sessionId: string) =>
-          set({ activeSessionId: sessionId, error: null }),
+          set({ activeSessionId: sessionId, error: null, sessionInitialized: true }),
         
         clearSession: () =>
           set({ 
             activeSessionId: null, 
             error: null,
+            sessionInitialized: false,
             sessionData: {
               messages: [],
               contextCards: [],
@@ -109,11 +113,14 @@ export const useSessionStore = create<SessionState>()(
         setError: (error: string | null) =>
           set({ error }),
         
+        setSessionInitialized: (initialized: boolean) =>
+          set({ sessionInitialized: initialized }),
+        
         // Repository actions
         setSelectedRepository: (repository: SelectedRepository | null) =>
           set({ selectedRepository: repository, repositoryError: null }),
         
-        setAvailableRepositories: (repositories: any[]) =>
+        setAvailableRepositories: (repositories: GitHubRepository[]) =>
           set({ availableRepositories: repositories }),
         
         setRepositoryLoading: (loading: boolean) =>
@@ -253,6 +260,7 @@ export const useSessionStore = create<SessionState>()(
           selectedRepository: state.selectedRepository,
           activeTab: state.activeTab,
           sidebarCollapsed: state.sidebarCollapsed,
+          sessionInitialized: state.sessionInitialized,
         }),
       }
     ),

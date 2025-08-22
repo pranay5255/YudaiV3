@@ -123,6 +123,31 @@ export class ApiService {
     return ApiService.handleResponse<SessionContextResponse>(response);
   }
 
+  static async getUserSessions(sessionToken?: string): Promise<SessionResponse[]> {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions`, {
+      method: 'GET',
+      headers: ApiService.getAuthHeaders(sessionToken),
+    });
+    return ApiService.handleResponse<SessionResponse[]>(response);
+  }
+
+  static async updateSession(sessionId: string, updates: Partial<SessionResponse>, sessionToken?: string): Promise<SessionResponse> {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
+      method: 'PUT',
+      headers: ApiService.getAuthHeaders(sessionToken),
+      body: JSON.stringify(updates),
+    });
+    return ApiService.handleResponse<SessionResponse>(response);
+  }
+
+  static async deleteSession(sessionId: string, sessionToken?: string): Promise<{success: boolean, message: string}> {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
+      method: 'DELETE',
+      headers: ApiService.getAuthHeaders(sessionToken),
+    });
+    return ApiService.handleResponse<{success: boolean, message: string}>(response);
+  }
+
   static async validateSessionToken(sessionToken: string): Promise<ValidateSessionResponse> {
     const response = await fetch(`/auth/api/user?session_token=${sessionToken}`, {
       method: 'GET',
@@ -342,6 +367,20 @@ export class ApiService {
       headers: ApiService.getAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<ChatMessageResponse[]>(response);
+  }
+
+  static async updateChatMessage(
+    sessionId: string, 
+    messageId: string, 
+    updates: Partial<ChatMessageResponse>, 
+    sessionToken?: string
+  ): Promise<ChatMessageResponse> {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/messages/${messageId}`, {
+      method: 'PUT',
+      headers: ApiService.getAuthHeaders(sessionToken),
+      body: JSON.stringify(updates),
+    });
+    return ApiService.handleResponse<ChatMessageResponse>(response);
   }
 
   static async deleteChatMessage(
