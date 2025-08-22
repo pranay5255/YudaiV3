@@ -53,7 +53,7 @@ export interface LoginUrlResponse {
 // ============================================================================
 
 export interface ChatMessage {
-  content: string;
+  message_text: string;
 }
 
 export interface ChatRequest {
@@ -68,7 +68,7 @@ export interface ChatRequest {
 }
 
 export interface CreateChatMessageRequest {
-  content: string;
+  message_text: string;
   sender_type: 'user' | 'assistant' | 'system';
   role: 'user' | 'assistant' | 'system';
   context_cards?: string[];
@@ -194,6 +194,29 @@ export interface CreateSessionDaifuRequest {
   repo_branch?: string;
   title?: string;
   description?: string;
+}
+
+export interface UpdateSessionRequest {
+  title?: string;
+  description?: string;
+  repo_branch?: string;
+}
+
+export interface UpdateMessageRequest {
+  message_text?: string;
+  tokens?: number;
+}
+
+export interface UpdateContextCardRequest {
+  title?: string;
+  description?: string;
+  content?: string;
+}
+
+export interface UpdateFileDependencyRequest {
+  file_path?: string;
+  tokens?: number;
+  file_metadata?: Record<string, unknown>;
 }
 
 export interface SessionResponse {

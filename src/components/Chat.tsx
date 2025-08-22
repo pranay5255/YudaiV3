@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Send, Plus } from 'lucide-react';
-import { Message, FileItem, ContextCard, ChatMessageAPI } from '../types';
+import { Message, ChatMessageAPI } from '../types';
 import type {
   CreateIssueWithContextRequest,
   ChatContextMessage,
@@ -10,7 +10,15 @@ import type {
 import { UserIssueResponse } from '../types';
 import { useRepository } from '../hooks/useRepository';
 import { useApi } from '../hooks/useApi';
-import { useSession } from '../contexts/useSession';
+import { useSessionStore } from '../stores/sessionStore';
+import {
+  useChatMessages,
+  useAddMessage,
+  useCreateSession,
+  useContextCards,
+  useFileDependencies,
+  useAddContextCard
+} from '../hooks/useSessionQueries';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -25,37 +33,45 @@ interface IssuePreviewData extends GitHubIssuePreview {
 }
 
 interface ChatProps {
-  onAddToContext: (content: string) => void;
-  contextCards?: ContextCard[];
-  fileContext?: FileItem[];
   onShowIssuePreview?: (issuePreview: IssuePreviewData) => void;
   onShowError?: (error: string) => void;
 }
 
 export const Chat: React.FC<ChatProps> = ({
-  onAddToContext,
-  contextCards = [],
-  fileContext = [],
   onShowIssuePreview,
   onShowError
 }) => {
-  const { sessionId, createSession, addChatMessage, messages: sessionMessages } = useSession();
-  const { selectedRepository } = useRepository();
-  const api = useApi();
+  // Zustand store for state management
+  const { activeSessionId, selectedRepository } = useSessionStore();
+  const { selectedRepository: repoFromHook } = useRepository();
   
-  // Convert session messages to Message format for display
-  const messages: Message[] = sessionMessages.map(msg => ({
+  // Use repository from hook if available, otherwise from store
+  const currentRepository = selectedRepository || repoFromHook;
+  
+  // React Query hooks for data and mutations
+  const { data: chatMessages = [] } = useChatMessages(activeSessionId || '');
+  const { data: contextCards = [] } = useContextCards(activeSessionId || '');
+  const { data: fileContext = [] } = useFileDependencies(activeSessionId || '');
+  const addMessageMutation = useAddMessage();
+  const createSessionMutation = useCreateSession();
+  const addContextCardMutation = useAddContextCard();
+  
+  const api = useApi();
+  const sessionInitRef = useRef(false);
+  
+  // Convert API messages to Message format for display
+  const messages: Message[] = chatMessages.map(msg => ({
     id: msg.message_id,
     content: msg.message_text,
     timestamp: new Date(msg.created_at),
-    sessionId: sessionId || 'default',
+    sessionId: activeSessionId || 'default',
   }));
 
   console.log('[Chat] Initial render with props:', {
-    contextCards,
-    fileContext,
-    sessionId,
-    selectedRepository
+    contextCards: contextCards.length,
+    fileContext: fileContext.length,
+    sessionId: activeSessionId,
+    selectedRepository: currentRepository
   });
 
   // Simplified messages state without session management
@@ -69,6 +85,29 @@ export const Chat: React.FC<ChatProps> = ({
     msg.id !== '1' && msg.id !== '2'
   ).length;
 
+  // Get relevant files based on current conversation context
+  const relevantFiles = useMemo(() => {
+    if (!fileContext || fileContext.length === 0) return [];
+    
+    // Simple relevance scoring based on file type and recent messages
+    const recentMessages = messages.slice(-3); // Last 3 messages
+    const messageText = recentMessages.map(m => m.content).join(' ').toLowerCase();
+    
+    return fileContext
+      .filter(file => {
+        // Prioritize files that might be relevant to the conversation
+        const fileName = (file.name || file.file_name || '').toLowerCase();
+        const filePath = (file.path || file.file_path || '').toLowerCase();
+        
+        // Check if file name or path contains keywords from recent messages
+        const keywords = messageText.split(' ').filter(word => word.length > 3);
+        return keywords.some(keyword => 
+          fileName.includes(keyword) || filePath.includes(keyword)
+        );
+      })
+      .slice(0, 3); // Show top 3 relevant files
+  }, [fileContext, messages]);
+
   const showError = useCallback((message: string) => {
     console.error('[Chat] Error occurred:', message);
     if (onShowError) {
@@ -81,62 +120,78 @@ export const Chat: React.FC<ChatProps> = ({
   // Auto-create session when repository is selected
   useEffect(() => {
     console.log('[Chat] Repository or session changed:', {
-      selectedRepository,
-      sessionId
+      selectedRepository: currentRepository,
+      sessionId: activeSessionId
     });
 
-    if (selectedRepository && !sessionId) {
+    if (currentRepository && !activeSessionId && !sessionInitRef.current) {
+      sessionInitRef.current = true;
       console.log('[Chat] Auto-creating session for selected repository');
-      
-      const repoOwner = selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0];
-      const repoName = selectedRepository.repository.name;
-      
-      createSession(repoOwner, repoName, selectedRepository.branch)
-        .then(() => {
-          // Add default welcome message after successful session creation
-          const welcomeMessage: Message = {
-            id: `welcome-${Date.now()}`,
-            content: `Welcome to your new chat session with repository **${repoOwner}/${repoName}**!
 
-I'm ready to help you with:
-• Creating GitHub issues from our conversations
-• Analyzing code and dependencies
-• Planning development tasks
-• Providing technical guidance
+      const repoOwner = currentRepository.repository.owner?.login || currentRepository.repository.full_name.split('/')[0];
+      const repoName = currentRepository.repository.name;
 
-What would you like to work on today?`,
-            timestamp: new Date(),
-            sessionId: sessionId || 'default',
-          };
+      createSessionMutation.mutate({
+        repoOwner,
+        repoName,
+        repoBranch: currentRepository.branch,
+      }, {
+        onSuccess: async (sessionData) => {
+          console.log('[Chat] Session created successfully:', sessionData.session_id);
           
-          // Add welcome message to session
           const welcomeMessageAPI: ChatMessageAPI = {
             id: Date.now(),
             message_id: `welcome-${Date.now()}`,
-            message_text: welcomeMessage.content,
+            message_text: `Welcome to your new chat session with repository **${repoOwner}/${repoName}**!\n\nI'm ready to help you with:\n• Creating GitHub issues from our conversations\n• Analyzing code and dependencies\n• Planning development tasks\n• Providing technical guidance\n\nWhat would you like to work on today?`,
             sender_type: 'assistant',
             role: 'assistant',
-
             tokens: 0,
-            created_at: welcomeMessage.timestamp.toISOString(),
+            created_at: new Date().toISOString(),
           };
-          addChatMessage(welcomeMessageAPI);
-
-          console.log('[Chat] Session created successfully with welcome message');
-        })
-        .catch((error) => {
+          
+          // Add welcome message after session creation
+          addMessageMutation.mutate({
+            sessionId: sessionData.session_id,
+            message: welcomeMessageAPI,
+          });
+        },
+        onError: (error) => {
           console.error('[Chat] Failed to create session:', error);
           showError('Failed to create session. Please try again.');
-        });
+        },
+        onSettled: () => {
+          sessionInitRef.current = false;
+        }
+      });
     }
-  }, [selectedRepository, sessionId, createSession, showError, addChatMessage]);
+  }, [currentRepository, activeSessionId, createSessionMutation, addMessageMutation, showError]);
+
+  const handleAddToContext = useCallback(async (content: string) => {
+    if (!activeSessionId) {
+      showError('No active session to add context to');
+      return;
+    }
+
+    addContextCardMutation.mutate({
+      sessionId: activeSessionId,
+      card: {
+        title: 'Chat Message',
+        description: content.length > 100 ? content.substring(0, 100) + '...' : content,
+        source: 'chat',
+        tokens: Math.ceil(content.length / 4),
+        content,
+      },
+    }, {
+      onError: () => showError('Failed to add to context'),
+    });
+  }, [activeSessionId, addContextCardMutation, showError]);
 
   const handleSend = useCallback(async () => {
-    if (!input.trim() || isLoading || !sessionId) {
-      console.log('[Chat] Send blocked:', { 
-        hasInput: !!input.trim(), 
-        isLoading, 
-        hasSession: !!sessionId 
+    if (!input.trim() || isLoading || !activeSessionId) {
+      console.log('[Chat] Send blocked:', {
+        hasInput: !!input.trim(),
+        isLoading,
+        hasSession: !!activeSessionId
       });
       return;
     }
@@ -147,71 +202,73 @@ What would you like to work on today?`,
     
     console.log('[Chat] Sending message:', {
       input: currentInput,
-      sessionId,
+      sessionId: activeSessionId,
       contextCards: contextCards.map(card => card.id)
     });
 
-    // Add user message to session
+    // Create user message
     const userMessage: ChatMessageAPI = {
       id: Date.now(),
       message_id: Date.now().toString(),
       message_text: currentInput,
       sender_type: 'user',
       role: 'user',
-      tokens: 0,
+      tokens: Math.ceil(currentInput.length / 4),
       created_at: new Date().toISOString(),
     };
     
-    addChatMessage(userMessage);
-    
     try {
+      // Add user message with optimistic update
+      await addMessageMutation.mutateAsync({
+        sessionId: activeSessionId,
+        message: userMessage,
+      });
+
       // Send to chat API for AI response
       console.log('[Chat] Calling chat API with payload:', {
-        session_id: sessionId,
-        message: {
-          content: currentInput
-        },
+        session_id: activeSessionId,
+        message: { message_text: currentInput },
         context_cards: contextCards.map(card => card.id),
-        repo_owner: selectedRepository?.repository.owner?.login || selectedRepository?.repository.full_name.split('/')[0],
-        repo_name: selectedRepository?.repository.name
+        repo_owner: currentRepository?.repository.owner?.login || currentRepository?.repository.full_name.split('/')[0],
+        repo_name: currentRepository?.repository.name
       });
 
       const response = await api.sendChatMessage({
-        session_id: sessionId,
-        message: {
-          content: currentInput
-        },
+        session_id: activeSessionId,
+        message: { message_text: currentInput },
         context_cards: contextCards.map(card => card.id),
-        repository: selectedRepository ? {
-          owner: selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0],
-          name: selectedRepository.repository.name,
-          branch: selectedRepository.branch
+        repository: currentRepository ? {
+          owner: currentRepository.repository.owner?.login || currentRepository.repository.full_name.split('/')[0],
+          name: currentRepository.repository.name,
+          branch: currentRepository.branch
         } : undefined,
       });
     
       console.log('[Chat] Received API response:', response);
 
-      // Add assistant response to session
+      // Add assistant response
       const assistantMessage: ChatMessageAPI = {
         id: Date.now() + 1,
         message_id: response.message_id,
         message_text: response.reply,
         sender_type: 'assistant',
         role: 'assistant',
-        tokens: 0,
+        tokens: Math.ceil(response.reply.length / 4), // Calculate tokens based on response length
         created_at: new Date().toISOString(),
       };
       
-      addChatMessage(assistantMessage);
+      await addMessageMutation.mutateAsync({
+        sessionId: activeSessionId,
+        message: assistantMessage,
+      });
       
     } catch (error) {
-      console.error('[Chat] API call failed:', error);
+      console.error('[Chat] Message sending failed:', error);
       showError('Failed to send message. Please try again.');
     } finally {
-      // Always reset loading state
       setIsLoading(false);
     }
-  }, [input, isLoading, sessionId, contextCards, selectedRepository, api, showError, addChatMessage]);
+  }, [input, isLoading, activeSessionId, contextCards, currentRepository, api, showError, addMessageMutation]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -221,10 +278,10 @@ What would you like to work on today?`,
   };
 
   const handleCreateGitHubIssue = useCallback(async () => {
-    if (isCreatingIssue || !selectedRepository) {
+    if (isCreatingIssue || !currentRepository) {
       console.log('[Chat] Issue creation blocked:', {
         isCreatingIssue,
-        hasRepository: !!selectedRepository
+        hasRepository: !!currentRepository
       });
       return;
     }
@@ -258,14 +315,14 @@ What would you like to work on today?`,
 
       // Prepare the request using the proper API method
       const request: CreateIssueWithContextRequest = {
-        title: `Issue from Chat Session - ${selectedRepository.repository.name}`,
+        title: `Issue from Chat Session - ${currentRepository.repository.name}`,
         description: 'This issue was generated from a chat conversation with file dependency context.',
         chat_messages: conversationMessages,
         file_context: fileContextItems,
         repository_info: {
-          owner: selectedRepository.repository.full_name.split('/')[0],
-          name: selectedRepository.repository.full_name.split('/')[1],
-          branch: selectedRepository.branch
+          owner: currentRepository.repository.full_name.split('/')[0],
+          name: currentRepository.repository.full_name.split('/')[1],
+          branch: currentRepository.branch
         },
         priority: 'medium'
       };
@@ -297,14 +354,14 @@ What would you like to work on today?`,
     } finally {
       setIsCreatingIssue(false);
     }
-  }, [isCreatingIssue, selectedRepository, messages, fileContext, api, onShowIssuePreview, showError]);
+  }, [isCreatingIssue, currentRepository, messages, fileContext, api, onShowIssuePreview, showError]);
 
 
 
   return (
     <div className="h-full flex flex-col">
       {/* Session Status Indicator */}
-      {!selectedRepository && (
+      {!currentRepository && (
         <div className="bg-yellow-600/20 border border-yellow-600/30 rounded-lg p-4 mb-4">
           <div className="text-yellow-400 font-medium mb-2">No Active Repository</div>
           <div className="text-yellow-300 text-sm mb-3">
@@ -322,6 +379,32 @@ What would you like to work on today?`,
         </div>
       )}
       
+      {/* File Context Display */}
+      {relevantFiles.length > 0 && (
+        <div className="bg-zinc-900/50 border border-zinc-700 rounded-lg p-3 mx-4 mb-4">
+          <div className="text-sm text-zinc-400 mb-2">📁 Relevant Files</div>
+          <div className="space-y-1">
+            {relevantFiles.map((file) => (
+              <div key={file.id} className="flex items-center justify-between text-xs">
+                <span className="text-zinc-300 truncate flex-1">
+                  {file.name || file.file_name}
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-500">{file.tokens} tokens</span>
+                  <button
+                    onClick={() => handleAddToContext(`File: ${file.name || file.file_name} (${file.path || file.file_path})`)}
+                    className="text-blue-400 hover:text-blue-300 text-xs"
+                    title="Add file to context"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Messages Container */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((message) => (
@@ -342,7 +425,7 @@ What would you like to work on today?`,
               {hoveredMessage === message.id && message.id !== '1' && message.id !== '2' && (
                 <div className="mt-2 flex gap-2">
                   <button
-                    onClick={() => onAddToContext(message.content)}
+                    onClick={() => handleAddToContext(message.content)}
                     className="text-xs bg-zinc-700 hover:bg-zinc-600 px-2 py-1 rounded"
                   >
                     Add to Context
@@ -373,13 +456,13 @@ What would you like to work on today?`,
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder={selectedRepository ? "Type your message..." : "Select a repository to start chatting..."}
-            disabled={!selectedRepository || isLoading}
+            placeholder={currentRepository ? "Type your message..." : "Select a repository to start chatting..."}
+            disabled={!currentRepository || isLoading}
             className="flex-1 bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 text-white placeholder-zinc-400 focus:outline-none focus:border-blue-500 disabled:opacity-50"
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isLoading || !selectedRepository}
+            disabled={!input.trim() || isLoading || !currentRepository}
             className="bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg flex items-center gap-2"
           >
             {isLoading ? (
@@ -391,9 +474,9 @@ What would you like to work on today?`,
           </button>
           <button
             onClick={handleCreateGitHubIssue}
-            disabled={isCreatingIssue || userMessageCount < 1 || !selectedRepository}
+            disabled={isCreatingIssue || userMessageCount < 1 || !currentRepository}
             className="bg-green-600 hover:bg-green-700 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg flex items-center gap-2"
-            title={!selectedRepository ? 'Select a repository first' : userMessageCount < 1 ? 'Send at least one message' : 'Create GitHub issue from conversation'}
+            title={!currentRepository ? 'Select a repository first' : userMessageCount < 1 ? 'Send at least one message' : 'Create GitHub issue from conversation'}
           >
             {isCreatingIssue ? (
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />

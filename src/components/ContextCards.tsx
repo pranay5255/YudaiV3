@@ -8,7 +8,8 @@ import type {
 } from '../types/api';
 import { UserIssueResponse, ContextCard } from '../types';
 import { useApi } from '../hooks/useApi';
-import { useSession } from '../contexts/useSession';
+import { useSessionStore } from '../stores/sessionStore';
+import { useRepository } from '../hooks/useRepository';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -42,7 +43,13 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   onShowError, 
   repositoryInfo 
 }) => {
-  const { sessionId, repositoryInfo: sessionRepositoryInfo } = useSession();
+  // Zustand store for state management
+  const { activeSessionId, selectedRepository } = useSessionStore();
+  const { selectedRepository: repoFromHook } = useRepository();
+  
+  // Use repository from hook if available, otherwise from store
+  const currentRepository = selectedRepository || repoFromHook;
+  
   const api = useApi();
   const [isLoading, setIsLoading] = useState(false);
 
@@ -54,35 +61,19 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
     }
   }, [onShowError]);
 
-  const loadContextCards = useCallback(async () => {
-    if (!sessionId) return;
-    
-    try {
-      console.log('Loading context cards for session:', sessionId);
-      const contextCards = await api.getContextCards(sessionId);
-      console.log('Loaded context cards:', contextCards.length);
-      // Context cards are managed by SessionProvider, so we don't need to update local state here
-      // The cards prop is already passed from SessionProvider which handles the state
-    } catch (error) {
-      console.error('Failed to load context cards:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to load context cards';
-      showError(`Failed to load context cards: ${errorMessage}`);
-    }
-  }, [sessionId, api, showError]);
-
-  // Load context cards when session changes
+  // Load context cards when session changes (cards are now passed as props from parent)
   useEffect(() => {
-    if (sessionId) {
-      loadContextCards();
+    if (activeSessionId && cards.length === 0) {
+      console.log('Context cards available:', cards.length);
     }
-  }, [sessionId, loadContextCards]);
+  }, [activeSessionId, cards]);
 
   const removeContextCard = useCallback(async (cardId: string) => {
-    if (!sessionId) return;
+    if (!activeSessionId) return;
     
     try {
       console.log('Removing context card:', cardId);
-      await api.deleteContextCard(sessionId, Number(cardId));
+      await api.deleteContextCard(activeSessionId, Number(cardId));
       console.log('Context card removed successfully');
       // Call the onRemoveCard callback to update the parent state
       onRemoveCard(cardId);
@@ -91,7 +82,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
       const errorMessage = error instanceof Error ? error.message : 'Failed to remove context card';
       showError(`Failed to remove context card: ${errorMessage}`);
     }
-  }, [sessionId, api, onRemoveCard, showError]);
+  }, [activeSessionId, api, onRemoveCard, showError]);
 
   const getSourceIcon = (source: ContextCard['source']) => {
     switch (source) {
@@ -112,7 +103,12 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
 
   // Handle create GitHub issue with context cards using unified API
   const handleCreateGitHubIssue = useCallback(async () => {
-    const repoInfo = repositoryInfo || sessionRepositoryInfo;
+    const repoInfo = repositoryInfo || (currentRepository ? {
+      owner: currentRepository.repository.owner?.login || currentRepository.repository.full_name.split('/')[0],
+      name: currentRepository.repository.name,
+      branch: currentRepository.branch
+    } : null);
+    
     if (isLoading || !repoInfo) {
       if (!repoInfo) {
         showError('No repository selected. Please select a repository first.');
@@ -174,7 +170,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, repositoryInfo, sessionRepositoryInfo, cards, api, onShowIssuePreview, showError]);
+  }, [isLoading, repositoryInfo, currentRepository, cards, api, onShowIssuePreview, showError]);
 
   return (
     <div className="h-full flex flex-col">
@@ -250,12 +246,12 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
         </div>
         <button
           onClick={handleCreateGitHubIssue}
-          disabled={cards.length === 0 || isLoading || !repositoryInfo}
+          disabled={cards.length === 0 || isLoading || (!repositoryInfo && !currentRepository)}
           className="w-full h-11 bg-primary hover:bg-primary/80 disabled:opacity-50
                    disabled:cursor-not-allowed text-white rounded-xl font-medium
                    transition-colors"
           title={
-            !repositoryInfo
+            !repositoryInfo && !currentRepository
               ? 'Select a repository first'
               : cards.length === 0
                 ? 'Add context cards first'

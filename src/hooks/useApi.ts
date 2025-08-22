@@ -21,6 +21,12 @@ export const useApi = () => {
       // Session management methods
       getSessionContext: (sessionId: string) =>
         ApiService.getSessionContext(sessionId, sessionToken || undefined),
+      getUserSessions: () =>
+        ApiService.getUserSessions(sessionToken || undefined),
+      updateSession: (sessionId: string, updates: Parameters<typeof ApiService.updateSession>[1]) =>
+        ApiService.updateSession(sessionId, updates, sessionToken || undefined),
+      deleteSession: (sessionId: string) =>
+        ApiService.deleteSession(sessionId, sessionToken || undefined),
 
       // Chat methods
       sendChatMessage: (request: Parameters<typeof ApiService.sendChatMessage>[0]) =>
@@ -71,6 +77,8 @@ export const useApi = () => {
         ApiService.addChatMessage(sessionId, request, sessionToken || undefined),
       getChatMessages: (sessionId: string, limit?: number) =>
         ApiService.getChatMessages(sessionId, limit, sessionToken || undefined),
+      updateChatMessage: (sessionId: string, messageId: string, updates: Parameters<typeof ApiService.updateChatMessage>[2]) =>
+        ApiService.updateChatMessage(sessionId, messageId, updates, sessionToken || undefined),
       deleteChatMessage: (sessionId: string, messageId: string) =>
         ApiService.deleteChatMessage(sessionId, messageId, sessionToken || undefined),
 
@@ -79,6 +87,8 @@ export const useApi = () => {
         ApiService.addFileDependency(sessionId, request, sessionToken || undefined),
       getFileDependenciesSession: (sessionId: string) =>
         ApiService.getFileDependenciesSession(sessionId, sessionToken || undefined),
+      extractFileDependenciesForSession: (sessionId: string, repoUrl: string) =>
+        ApiService.extractFileDependenciesForSession(sessionId, repoUrl, sessionToken || undefined),
       deleteFileDependency: (sessionId: string, fileId: number) =>
         ApiService.deleteFileDependency(sessionId, fileId, sessionToken || undefined),
 
