@@ -126,7 +126,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     setLoadingStates(prev => ({ ...prev, [item.id]: true }));
     try {
       await addContextCard({
-        title: item.name || item.file_name,
+        title: item.name || item.file_name || 'File',
         description: item.path || '',
         source: 'file-deps',
         tokens: item.tokens,
@@ -269,7 +269,15 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
       </div>
 
       <div className="p-2 border-t bg-gray-50 text-xs text-gray-500">
-        Displayed files: {files.length} | Session files: {sessionState.fileContext.length} | Total tokens: {files.reduce((sum, file) => sum + (file.tokens || 0), 0)}
+        <div className="flex justify-between items-center">
+          <span>Files: {files.length} | Total tokens: {files.reduce((sum, file) => sum + (file.tokens || 0), 0)}</span>
+          <span>Session files: {sessionState.fileContext.length}</span>
+        </div>
+        {sessionState.fileContext.length > 0 && (
+          <div className="mt-1 text-xs text-blue-600">
+            💡 Tip: Files are automatically included in chat context and GitHub issue creation
+          </div>
+        )}
       </div>
     </div>
   );

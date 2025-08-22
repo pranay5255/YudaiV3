@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Send, Plus } from 'lucide-react';
 import { Message, ChatMessageAPI } from '../types';
 import type {
@@ -38,6 +38,7 @@ export const Chat: React.FC<ChatProps> = ({
   const { addContextCard } = useContextCardManagement();
   const { selectedRepository } = useRepository();
   const api = useApi();
+  const sessionInitRef = useRef(false);
   
   // Convert session messages to Message format for display
   const messages: Message[] = sessionMessages.map(msg => ({
@@ -64,6 +65,29 @@ export const Chat: React.FC<ChatProps> = ({
   const userMessageCount = messages.filter(msg =>
     msg.id !== '1' && msg.id !== '2'
   ).length;
+
+  // Get relevant files based on current conversation context
+  const relevantFiles = useMemo(() => {
+    if (!fileContext || fileContext.length === 0) return [];
+    
+    // Simple relevance scoring based on file type and recent messages
+    const recentMessages = messages.slice(-3); // Last 3 messages
+    const messageText = recentMessages.map(m => m.content).join(' ').toLowerCase();
+    
+    return fileContext
+      .filter(file => {
+        // Prioritize files that might be relevant to the conversation
+        const fileName = (file.name || file.file_name || '').toLowerCase();
+        const filePath = (file.path || file.file_path || '').toLowerCase();
+        
+        // Check if file name or path contains keywords from recent messages
+        const keywords = messageText.split(' ').filter(word => word.length > 3);
+        return keywords.some(keyword => 
+          fileName.includes(keyword) || filePath.includes(keyword)
+        );
+      })
+      .slice(0, 3); // Show top 3 relevant files
+  }, [fileContext, messages]);
 
   const showError = useCallback((message: string) => {
     console.error('[Chat] Error occurred:', message);
@@ -326,6 +350,32 @@ export const Chat: React.FC<ChatProps> = ({
         </div>
       )}
       
+      {/* File Context Display */}
+      {relevantFiles.length > 0 && (
+        <div className="bg-zinc-900/50 border border-zinc-700 rounded-lg p-3 mx-4 mb-4">
+          <div className="text-sm text-zinc-400 mb-2">📁 Relevant Files</div>
+          <div className="space-y-1">
+            {relevantFiles.map((file) => (
+              <div key={file.id} className="flex items-center justify-between text-xs">
+                <span className="text-zinc-300 truncate flex-1">
+                  {file.name || file.file_name}
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-zinc-500">{file.tokens} tokens</span>
+                  <button
+                    onClick={() => handleAddToContext(`File: ${file.name || file.file_name} (${file.path || file.file_path})`)}
+                    className="text-blue-400 hover:text-blue-300 text-xs"
+                    title="Add file to context"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Messages Container */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((message) => (
