@@ -121,10 +121,6 @@ export const useSessionStore = create<SessionState>()(
         // Auth actions
         initializeAuth: async () => {
           try {
-            console.log('[SessionStore] Starting authentication initialization');
-            console.log('[SessionStore] Current URL:', window.location.href);
-            console.log('[SessionStore] Current pathname:', window.location.pathname);
-            console.log('[SessionStore] Current search:', window.location.search);
             set({ authLoading: true, authError: null });
 
             // Check for session token in URL parameters (OAuth callback)
@@ -137,8 +133,6 @@ export const useSessionStore = create<SessionState>()(
 
             if (sessionToken && userId && username) {
               // We have session token from OAuth callback, validate it
-              console.log('[SessionStore] Found session token in URL parameters, validating...');
-              console.log('[SessionStore] Making API call to validate session token...');
               try {
                 const userData = await ApiService.validateSessionToken(sessionToken);
                 
@@ -154,7 +148,6 @@ export const useSessionStore = create<SessionState>()(
                   last_login: new Date().toISOString(),
                 };
                 
-                console.log('[SessionStore] Session token validation successful, user authenticated');
                 set({
                   user: user,
                   sessionToken: sessionToken,
@@ -177,10 +170,6 @@ export const useSessionStore = create<SessionState>()(
                 
               } catch (error) {
                 console.warn('[SessionStore] Session validation failed:', error);
-                console.error('[SessionStore] API call error details:', {
-                  error: error instanceof Error ? error.message : error,
-                  stack: error instanceof Error ? error.stack : undefined
-                });
                 // Clear any stored tokens on validation failure
                 localStorage.removeItem('session_token');
                 localStorage.removeItem('github_token');
@@ -193,21 +182,15 @@ export const useSessionStore = create<SessionState>()(
                   authError: 'Session validation failed',
                 });
               }
-                          } else if (code) {
+            } else if (code) {
               // We have authorization code but no session token yet, redirect to login
-              console.warn('[SessionStore] Authorization code received but no session token, redirecting to login');
               window.location.href = '/auth/login';
-                          } else {
+            } else {
               // No auth data in URL, check for stored session token
-              console.log('[SessionStore] No auth data in URL, checking localStorage for stored tokens');
               const storedSessionToken = localStorage.getItem('session_token');
               const storedGithubToken = localStorage.getItem('github_token');
-              console.log('[SessionStore] Stored session token:', storedSessionToken ? 'Found' : 'Not found');
-              console.log('[SessionStore] Stored GitHub token:', storedGithubToken ? 'Found' : 'Not found');
               
               if (storedSessionToken) {
-                console.log('[SessionStore] Found stored session token, validating...');
-                console.log('[SessionStore] Making API call to validate stored session token...');
                 try {
                   const userData = await ApiService.validateSessionToken(storedSessionToken);
                   const user: User = {
@@ -221,7 +204,6 @@ export const useSessionStore = create<SessionState>()(
                     last_login: new Date().toISOString(),
                   };
                   
-                  console.log('[SessionStore] Stored session token validation successful');
                   set({
                     user: user,
                     sessionToken: storedSessionToken,
@@ -232,10 +214,6 @@ export const useSessionStore = create<SessionState>()(
                   });
                 } catch (error) {
                   console.warn('[SessionStore] Stored session validation failed:', error);
-                  console.error('[SessionStore] Stored session API call error details:', {
-                    error: error instanceof Error ? error.message : error,
-                    stack: error instanceof Error ? error.stack : undefined
-                  });
                   localStorage.removeItem('session_token');
                   localStorage.removeItem('github_token');
                   set({
@@ -249,15 +227,12 @@ export const useSessionStore = create<SessionState>()(
                 }
               } else {
                 // No stored token, check if we're on a protected route
-                console.log('[SessionStore] No stored session token found');
                 const currentPath = window.location.pathname;
                 if (currentPath.startsWith('/auth/callback')) {
                   // We're on callback page but no auth data, redirect to login
-                  console.log('[SessionStore] On callback page without auth data, redirecting to login');
                   window.location.href = '/auth/login';
                 } else {
                   // Not on callback page, explicitly set as not authenticated
-                  console.log('[SessionStore] Setting user as not authenticated');
                   set({
                     user: null,
                     sessionToken: null,
@@ -269,8 +244,6 @@ export const useSessionStore = create<SessionState>()(
                 }
               }
             }
-            
-            console.log('[SessionStore] Authentication initialization completed');
           } catch (error) {
             console.error('[SessionStore] Auth initialization failed:', error);
             set({

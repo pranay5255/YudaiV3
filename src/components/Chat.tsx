@@ -64,12 +64,7 @@ export const Chat: React.FC<ChatProps> = ({
     sessionId: activeSessionId || 'default',
   }));
 
-  console.log('[Chat] Initial render with props:', {
-    contextCards: contextCards.length,
-    fileContext: fileContext.length,
-    sessionId: activeSessionId,
-    selectedRepository: selectedRepository
-  });
+
 
   // Simplified messages state without session management
   const [input, setInput] = useState('');
@@ -116,16 +111,8 @@ export const Chat: React.FC<ChatProps> = ({
 
   // Auto-create session when repository is selected and user is authenticated
   useEffect(() => {
-    console.log('[Chat] Repository, session, or auth changed:', {
-      selectedRepository: selectedRepository,
-      sessionId: activeSessionId,
-      isAuthenticated,
-      user: !!user
-    });
-
     if (isAuthenticated && user && selectedRepository && !activeSessionId && !sessionInitRef.current) {
       sessionInitRef.current = true;
-      console.log('[Chat] Auto-creating session for selected repository');
 
       const repoOwner = selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0];
       const repoName = selectedRepository.repository.name;
@@ -136,7 +123,6 @@ export const Chat: React.FC<ChatProps> = ({
         repoBranch: selectedRepository.branch,
       }, {
         onSuccess: async (sessionData) => {
-          console.log('[Chat] Session created successfully:', sessionData.session_id);
           
           const welcomeMessageAPI: ChatMessageAPI = {
             id: Date.now(),
@@ -187,23 +173,12 @@ export const Chat: React.FC<ChatProps> = ({
 
   const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading || !activeSessionId) {
-      console.log('[Chat] Send blocked:', {
-        hasInput: !!input.trim(),
-        isLoading,
-        hasSession: !!activeSessionId
-      });
       return;
     }
     
     const currentInput = input;
     setInput('');
     setIsLoading(true);
-    
-    console.log('[Chat] Sending message:', {
-      input: currentInput,
-      sessionId: activeSessionId,
-      contextCards: contextCards.map(card => card.id)
-    });
 
     // Create user message
     const userMessage: ChatMessageAPI = {
@@ -224,14 +199,6 @@ export const Chat: React.FC<ChatProps> = ({
       });
 
       // Send to chat API for AI response
-      console.log('[Chat] Calling chat API with payload:', {
-        session_id: activeSessionId,
-        message: { message_text: currentInput },
-        context_cards: contextCards.map(card => card.id),
-        repo_owner: selectedRepository?.repository.owner?.login || selectedRepository?.repository.full_name.split('/')[0],
-        repo_name: selectedRepository?.repository.name
-      });
-
       const response = await api.sendChatMessage({
         session_id: activeSessionId,
         message: { message_text: currentInput },
@@ -242,8 +209,6 @@ export const Chat: React.FC<ChatProps> = ({
           branch: selectedRepository.branch
         } : undefined,
       });
-    
-      console.log('[Chat] Received API response:', response);
 
       // Add assistant response
       const assistantMessage: ChatMessageAPI = {
@@ -278,15 +243,10 @@ export const Chat: React.FC<ChatProps> = ({
 
   const handleCreateGitHubIssue = useCallback(async () => {
     if (isCreatingIssue || !selectedRepository) {
-      console.log('[Chat] Issue creation blocked:', {
-        isCreatingIssue,
-        hasRepository: !!selectedRepository
-      });
       return;
     }
     
     setIsCreatingIssue(true);
-    console.log('[Chat] Starting issue creation');
     
     try {
       // Filter out system messages and convert to ChatContextMessage format
@@ -310,8 +270,6 @@ export const Chat: React.FC<ChatProps> = ({
         path: file.path || file.file_path
       }));
 
-      console.log('[Chat] Prepared file context:', fileContextItems);
-
       // Prepare the request using the proper API method
       const request: CreateIssueWithContextRequest = {
         title: `Issue from Chat Session - ${selectedRepository.repository.name}`,
@@ -326,12 +284,8 @@ export const Chat: React.FC<ChatProps> = ({
         priority: 'medium'
       };
 
-      console.log('[Chat] Sending create issue request:', request);
-
       // Use the proper API method for creating issues with context
       const response = await api.createIssueWithContext(request);
-      
-      console.log('[Chat] Received issue creation response:', response);
 
       if (response.success && onShowIssuePreview) {
         const issuePreview: IssuePreviewData = {

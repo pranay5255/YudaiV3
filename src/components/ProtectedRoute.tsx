@@ -1,4 +1,4 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useEffect, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { LoginPage } from '../components/LoginPage';
 
@@ -19,21 +19,33 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   loadingComponent
 }) => {
   const { isAuthenticated, isLoading, user } = useAuth();
+  const [timeoutReached, setTimeoutReached] = useState(false);
 
-  // Show loading spinner while checking authentication
-  if (isLoading) {
+  // Add timeout to prevent infinite loading
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      console.warn('[ProtectedRoute] Authentication timeout reached, forcing login page');
+      setTimeoutReached(true);
+    }, 5000); // 5 second timeout
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Show loading spinner while checking authentication (with timeout fallback)
+  if (isLoading && !timeoutReached) {
     return loadingComponent || (
       <div className="min-h-screen bg-bg flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
           <p className="text-fg/70">Verifying authentication...</p>
+          <p className="text-xs text-fg/50 mt-2">This may take a few seconds...</p>
         </div>
       </div>
     );
   }
 
-  // Show login page if not authenticated
-  if (!isAuthenticated || !user) {
+  // Show login page if not authenticated or timeout reached
+  if (!isAuthenticated || !user || timeoutReached) {
     return fallback ? <>{fallback}</> : <LoginPage />;
   }
 

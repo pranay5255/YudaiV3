@@ -36,8 +36,6 @@ export const useSessionManagement = () => {
 
   // Initialize authentication and handle OAuth callback on app launch
   useEffect(() => {
-    console.log('[SessionManagement] Initializing authentication and session management');
-    
     // This will run once on app launch (or on returning from OAuth redirect)
     // and update the Zustand store accordingly
     initializeAuth();
@@ -46,13 +44,9 @@ export const useSessionManagement = () => {
   // Auto-create session when repository is selected and user is authenticated
   useEffect(() => {
     if (isAuthenticated && user && selectedRepository && !activeSessionId && !sessionInitialized && !isLoading && !authLoading) {
-      console.log('[SessionManagement] Auto-creating session for selected repository');
-      
       createSessionMutation.mutate(selectedRepository, {
         onSuccess: (sessionId) => {
-          if (sessionId) {
-            console.log('[SessionManagement] Session created successfully:', sessionId);
-          } else {
+          if (!sessionId) {
             console.error('[SessionManagement] Failed to create session');
             setError('Failed to create session');
           }
@@ -68,8 +62,6 @@ export const useSessionManagement = () => {
   // Validate session exists when activeSessionId changes
   useEffect(() => {
     if (isAuthenticated && user && activeSessionId && !sessionInitialized) {
-      console.log('[SessionManagement] Validating session exists:', activeSessionId);
-      
       ensureSessionMutation.mutate(activeSessionId, {
         onSuccess: (exists) => {
           if (!exists) {
