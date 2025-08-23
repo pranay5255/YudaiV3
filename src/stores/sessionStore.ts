@@ -122,6 +122,9 @@ export const useSessionStore = create<SessionState>()(
         initializeAuth: async () => {
           try {
             console.log('[SessionStore] Starting authentication initialization');
+            console.log('[SessionStore] Current URL:', window.location.href);
+            console.log('[SessionStore] Current pathname:', window.location.pathname);
+            console.log('[SessionStore] Current search:', window.location.search);
             set({ authLoading: true, authError: null });
 
             // Check for session token in URL parameters (OAuth callback)
@@ -135,6 +138,7 @@ export const useSessionStore = create<SessionState>()(
             if (sessionToken && userId && username) {
               // We have session token from OAuth callback, validate it
               console.log('[SessionStore] Found session token in URL parameters, validating...');
+              console.log('[SessionStore] Making API call to validate session token...');
               try {
                 const userData = await ApiService.validateSessionToken(sessionToken);
                 
@@ -173,6 +177,10 @@ export const useSessionStore = create<SessionState>()(
                 
               } catch (error) {
                 console.warn('[SessionStore] Session validation failed:', error);
+                console.error('[SessionStore] API call error details:', {
+                  error: error instanceof Error ? error.message : error,
+                  stack: error instanceof Error ? error.stack : undefined
+                });
                 // Clear any stored tokens on validation failure
                 localStorage.removeItem('session_token');
                 localStorage.removeItem('github_token');
@@ -194,9 +202,12 @@ export const useSessionStore = create<SessionState>()(
               console.log('[SessionStore] No auth data in URL, checking localStorage for stored tokens');
               const storedSessionToken = localStorage.getItem('session_token');
               const storedGithubToken = localStorage.getItem('github_token');
+              console.log('[SessionStore] Stored session token:', storedSessionToken ? 'Found' : 'Not found');
+              console.log('[SessionStore] Stored GitHub token:', storedGithubToken ? 'Found' : 'Not found');
               
               if (storedSessionToken) {
                 console.log('[SessionStore] Found stored session token, validating...');
+                console.log('[SessionStore] Making API call to validate stored session token...');
                 try {
                   const userData = await ApiService.validateSessionToken(storedSessionToken);
                   const user: User = {
@@ -221,6 +232,10 @@ export const useSessionStore = create<SessionState>()(
                   });
                 } catch (error) {
                   console.warn('[SessionStore] Stored session validation failed:', error);
+                  console.error('[SessionStore] Stored session API call error details:', {
+                    error: error instanceof Error ? error.message : error,
+                    stack: error instanceof Error ? error.stack : undefined
+                  });
                   localStorage.removeItem('session_token');
                   localStorage.removeItem('github_token');
                   set({
