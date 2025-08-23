@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
 
 /**
@@ -14,6 +15,17 @@ export const useAuth = () => {
     logout,
     refreshAuth 
   } = useSessionStore();
+
+  // Debug logging for auth state changes
+  useEffect(() => {
+    console.log('[useAuth] Auth state from session store:', {
+      isAuthenticated,
+      isLoading,
+      hasUser: !!user,
+      authError,
+      timestamp: new Date().toISOString()
+    });
+  }, [isAuthenticated, isLoading, user, authError]);
 
   return {
     user,

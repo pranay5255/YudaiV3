@@ -21,15 +21,36 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   const { isAuthenticated, isLoading, user } = useAuth();
   const [timeoutReached, setTimeoutReached] = useState(false);
 
+  // Debug logging for authentication state
+  useEffect(() => {
+    console.log('[ProtectedRoute] Auth state changed:', {
+      isAuthenticated,
+      isLoading,
+      hasUser: !!user,
+      timeoutReached,
+      timestamp: new Date().toISOString()
+    });
+  }, [isAuthenticated, isLoading, user, timeoutReached]);
+
   // Add timeout to prevent infinite loading
   useEffect(() => {
+    console.log('[ProtectedRoute] Setting up timeout timer');
     const timer = setTimeout(() => {
       console.warn('[ProtectedRoute] Authentication timeout reached, forcing login page');
+      console.warn('[ProtectedRoute] Current state at timeout:', {
+        isAuthenticated,
+        isLoading,
+        hasUser: !!user,
+        timestamp: new Date().toISOString()
+      });
       setTimeoutReached(true);
     }, 5000); // 5 second timeout
 
-    return () => clearTimeout(timer);
-  }, []);
+    return () => {
+      console.log('[ProtectedRoute] Clearing timeout timer');
+      clearTimeout(timer);
+    };
+  }, [isAuthenticated, isLoading, user]);
 
   // Show loading spinner while checking authentication (with timeout fallback)
   if (isLoading && !timeoutReached) {

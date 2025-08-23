@@ -72,8 +72,13 @@ export class ApiService {
   }
 
   private static async handleResponse<T>(response: Response): Promise<T> {
+    console.log('[ApiService] handleResponse called with status:', response.status);
+    
     if (!response.ok) {
+      console.error('[ApiService] Response not ok, status:', response.status);
+      
       if (response.status === 401) {
+        console.log('[ApiService] 401 Unauthorized, redirecting to login');
         // Redirect to login instead of clearing localStorage
         window.location.href = '/auth/login';
         throw new Error('Authentication required');
@@ -83,14 +88,25 @@ export class ApiService {
       try {
         const errorData = await response.json();
         errorMessage = errorData.detail || errorData.message || errorMessage;
-      } catch {
+        console.error('[ApiService] Parsed error data:', errorData);
+      } catch (parseError) {
+        console.error('[ApiService] Failed to parse error JSON:', parseError);
         // If we can't parse error JSON, use the default message
       }
       
+      console.error('[ApiService] Throwing error:', errorMessage);
       throw new Error(errorMessage);
     }
 
-    return response.json();
+    console.log('[ApiService] Response ok, parsing JSON');
+    try {
+      const data = await response.json();
+      console.log('[ApiService] Successfully parsed response:', data);
+      return data;
+    } catch (parseError) {
+      console.error('[ApiService] Failed to parse response JSON:', parseError);
+      throw new Error('Failed to parse response');
+    }
   }
 
   // Authentication API Methods
@@ -149,13 +165,31 @@ export class ApiService {
   }
 
   static async validateSessionToken(sessionToken: string): Promise<ValidateSessionResponse> {
-    const response = await fetch(`/auth/api/user?session_token=${sessionToken}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-    return ApiService.handleResponse<ValidateSessionResponse>(response);
+    console.log('[ApiService] Validating session token:', sessionToken ? 'Token provided' : 'No token');
+    console.log('[ApiService] Making request to:', `/auth/api/user?session_token=${sessionToken}`);
+    
+    try {
+      const response = await fetch(`/auth/api/user?session_token=${sessionToken}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      console.log('[ApiService] Response status:', response.status);
+      console.log('[ApiService] Response ok:', response.ok);
+      
+      if (!response.ok) {
+        console.error('[ApiService] Validation failed with status:', response.status);
+        const errorText = await response.text();
+        console.error('[ApiService] Error response body:', errorText);
+      }
+      
+      return ApiService.handleResponse<ValidateSessionResponse>(response);
+    } catch (error) {
+      console.error('[ApiService] Exception during session validation:', error);
+      throw error;
+    }
   }
 
   static async logout(sessionToken: string): Promise<LogoutResponse> {
