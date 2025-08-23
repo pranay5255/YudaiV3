@@ -29,6 +29,14 @@ export const useAuth = () => {
     });
   }, [isAuthenticated, isLoading, user, sessionToken, authError]);
 
+  // Handle /auth/success route for post-auth redirect
+  useEffect(() => {
+    if (window.location.pathname === '/auth/success') {
+      console.log('[useAuth] Detected /auth/success, refreshing auth...');
+      refreshAuth();
+    }
+  }, [refreshAuth]);
+
   return {
     user,
     sessionToken,
