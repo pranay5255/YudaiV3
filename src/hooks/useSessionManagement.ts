@@ -20,7 +20,6 @@ export const useSessionManagement = () => {
     user,
     activeTab,
     sidebarCollapsed,
-    initializeAuth,
     createSessionForRepository,
     ensureSessionExists,
     setActiveSession,
@@ -33,13 +32,6 @@ export const useSessionManagement = () => {
 
   const createSessionMutation = useCreateSessionFromRepository();
   const ensureSessionMutation = useEnsureSessionExists();
-
-  // Initialize authentication and handle OAuth callback on app launch
-  useEffect(() => {
-    // This will run once on app launch (or on returning from OAuth redirect)
-    // and update the Zustand store accordingly
-    initializeAuth();
-  }, [initializeAuth]);
 
   // Auto-create session when repository is selected and user is authenticated
   useEffect(() => {

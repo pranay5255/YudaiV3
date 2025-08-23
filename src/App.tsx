@@ -296,6 +296,14 @@ function AppContent() {
 }
 
 function App() {
+  const { initializeAuth } = useAuth();
+  
+  // Initialize authentication on app mount - this must happen before ProtectedRoute
+  useEffect(() => {
+    console.log('[App] Initializing authentication on app mount');
+    initializeAuth();
+  }, [initializeAuth]);
+
   return (
     <ProtectedRoute>
       <AppContent />
