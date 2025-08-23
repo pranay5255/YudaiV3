@@ -38,37 +38,45 @@ import type {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 export class ApiService {
-  private static getAuthHeaders(sessionToken?: string, githubToken?: string): HeadersInit {
+  /**
+   * Build authorization headers for API requests
+   *
+   * @param sessionToken Optional session token to use
+   * @param githubToken Optional GitHub token to fall back to
+   * @param allowGitHubFallback When true, will use GitHub token only if no session token
+   */
+  private static getAuthHeaders(
+    sessionToken?: string,
+    githubToken?: string,
+    allowGitHubFallback: boolean = false
+  ): HeadersInit {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
-    
-    // Use tokens from parameters or try to get from localStorage
-    let tokenToUse = sessionToken;
-    
-    if (githubToken) {
-      // If GitHub token is provided, use it
-      tokenToUse = githubToken;
-    } else if (sessionToken) {
-      // Use session token if provided
-      tokenToUse = sessionToken;
-    } else {
-      // Try to get tokens from localStorage, prioritize GitHub token for API calls
-      const githubTokenFromStorage = localStorage.getItem('github_token');
-      const sessionTokenFromStorage = localStorage.getItem('session_token');
-      
-      if (githubTokenFromStorage) {
-        tokenToUse = githubTokenFromStorage;
-      } else if (sessionTokenFromStorage) {
-        tokenToUse = sessionTokenFromStorage;
-      }
+
+    const session = sessionToken || localStorage.getItem('session_token');
+    const github = githubToken || localStorage.getItem('github_token');
+
+    let tokenToUse = session;
+    if (!tokenToUse && allowGitHubFallback) {
+      tokenToUse = github || undefined;
     }
-    
+
     if (tokenToUse) {
       headers['Authorization'] = `Bearer ${tokenToUse}`;
     }
-    
+
     return headers;
+  }
+
+  /** Get headers using only the session token */
+  static getSessionAuthHeaders(sessionToken?: string): HeadersInit {
+    return ApiService.getAuthHeaders(sessionToken);
+  }
+
+  /** Get headers preferring session token but falling back to GitHub token */
+  static getGitHubAuthHeaders(githubToken?: string, sessionToken?: string): HeadersInit {
+    return ApiService.getAuthHeaders(sessionToken, githubToken, true);
   }
 
   private static async handleResponse<T>(response: Response): Promise<T> {
@@ -125,7 +133,7 @@ export class ApiService {
   static async createSession(request: CreateSessionDaifuRequest, sessionToken?: string): Promise<SessionResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions`, {
       method: 'POST',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
     return ApiService.handleResponse<SessionResponse>(response);
@@ -134,7 +142,7 @@ export class ApiService {
   static async getSessionContext(sessionId: string, sessionToken?: string): Promise<SessionContextResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<SessionContextResponse>(response);
   }
@@ -142,7 +150,7 @@ export class ApiService {
   static async getUserSessions(sessionToken?: string): Promise<SessionResponse[]> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<SessionResponse[]>(response);
   }
@@ -150,7 +158,7 @@ export class ApiService {
   static async updateSession(sessionId: string, updates: Partial<SessionResponse>, sessionToken?: string): Promise<SessionResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
       method: 'PUT',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
       body: JSON.stringify(updates),
     });
     return ApiService.handleResponse<SessionResponse>(response);
@@ -159,7 +167,7 @@ export class ApiService {
   static async deleteSession(sessionId: string, sessionToken?: string): Promise<{success: boolean, message: string}> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
       method: 'DELETE',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<{success: boolean, message: string}>(response);
   }
@@ -223,7 +231,7 @@ export class ApiService {
 
     const response = await fetch(`${API_BASE_URL}/daifu/chat`, {
       method: 'POST',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
     return ApiService.handleResponse<ChatResponse>(response);
@@ -232,7 +240,7 @@ export class ApiService {
   static async createIssueFromChat(request: ChatRequest, sessionToken?: string): Promise<CreateIssueFromChatResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/create-issue`, {
       method: 'POST',
-      headers: ApiService.getAuthHeaders(sessionToken),   
+      headers: ApiService.getSessionAuthHeaders(sessionToken),   
       body: JSON.stringify(request),
     });
     return ApiService.handleResponse<CreateIssueFromChatResponse>(response);
@@ -242,7 +250,7 @@ export class ApiService {
   static async createIssueWithContext(request: CreateIssueWithContextRequest, githubToken?: string): Promise<IssueCreationResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/from-session-enhanced`, {
       method: 'POST',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getGitHubAuthHeaders(githubToken),
       body: JSON.stringify(request),
     });
     return ApiService.handleResponse<IssueCreationResponse>(response);
@@ -261,7 +269,7 @@ export class ApiService {
 
     const response = await fetch(`${API_BASE_URL}/issues?${params}`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getGitHubAuthHeaders(githubToken),
     });
     return ApiService.handleResponse<UserIssueResponse[]>(response);
   }
@@ -269,7 +277,7 @@ export class ApiService {
   static async getIssue(issueId: string, githubToken?: string): Promise<UserIssueResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getGitHubAuthHeaders(githubToken),
     });
     return ApiService.handleResponse<UserIssueResponse>(response);
   }
@@ -277,7 +285,7 @@ export class ApiService {
   static async updateIssue(issueId: string, updates: Partial<UserIssueResponse>, githubToken?: string): Promise<UserIssueResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
       method: 'PUT',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getGitHubAuthHeaders(githubToken),
       body: JSON.stringify(updates),
     });
     return ApiService.handleResponse<UserIssueResponse>(response);
@@ -286,7 +294,7 @@ export class ApiService {
   static async deleteIssue(issueId: string, githubToken?: string): Promise<{message: string}> {
     const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
       method: 'DELETE',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getGitHubAuthHeaders(githubToken),
     });
     return ApiService.handleResponse<{message: string}>(response);
   }
@@ -296,21 +304,9 @@ export class ApiService {
     const formData = new FormData();
     files.forEach(file => formData.append('files', file));
 
-    const headers: HeadersInit = {};
-    
-    // Get token for authorization
-    let tokenToUse = githubToken;
-    if (!tokenToUse) {
-      const githubTokenFromStorage = localStorage.getItem('github_token');
-      const urlParams = new URLSearchParams(window.location.search);
-      const tokenFromUrl = urlParams.get('github_token');
-      
-      tokenToUse = githubTokenFromStorage || tokenFromUrl || undefined;
-    }
-    
-    if (tokenToUse) {
-      headers['Authorization'] = `Bearer ${tokenToUse}`;
-    }
+    // Use GitHub auth headers but remove content-type for FormData
+    const headers = ApiService.getGitHubAuthHeaders(githubToken) as Record<string, string>;
+    delete headers['Content-Type'];
 
     const response = await fetch(`${API_BASE_URL}/file-dependencies/analyze`, {
       method: 'POST',
@@ -323,7 +319,7 @@ export class ApiService {
   static async getFileDependencies(fileId: string, githubToken?: string): Promise<FileContextItem[]> {
     const response = await fetch(`${API_BASE_URL}/file-dependencies/${fileId}`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getGitHubAuthHeaders(githubToken),
     });
     return ApiService.handleResponse<FileContextItem[]>(response);
   }
@@ -332,7 +328,7 @@ export class ApiService {
   static async getRepositories(githubToken?: string): Promise<RepositoryResponse> {
     const response = await fetch(`${API_BASE_URL}/repositories`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getGitHubAuthHeaders(githubToken),
     });
     return ApiService.handleResponse<RepositoryResponse>(response);
   }
@@ -340,7 +336,7 @@ export class ApiService {
   static async getRepository(owner: string, name: string, githubToken?: string): Promise<RepositoryDetailsResponse> {
     const response = await fetch(`${API_BASE_URL}/repositories/${owner}/${name}`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getGitHubAuthHeaders(githubToken),
     });
     return ApiService.handleResponse<RepositoryDetailsResponse>(response);
   }
@@ -348,7 +344,7 @@ export class ApiService {
   static async createGitHubIssueFromUserIssue(issueId: string, githubToken?: string): Promise<CreateGitHubIssueResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/${issueId}/create-github-issue`, {
       method: 'POST',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getGitHubAuthHeaders(githubToken),
     });
     return ApiService.handleResponse<CreateGitHubIssueResponse>(response);
   }
@@ -356,7 +352,7 @@ export class ApiService {
   static async extractFileDependencies(repoUrl: string, githubToken?: string): Promise<ExtractFileDependenciesResponse> {
     const response = await fetch(`${API_BASE_URL}/filedeps/extract`, {
       method: 'POST',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getGitHubAuthHeaders(githubToken),
       body: JSON.stringify({ repo_url: repoUrl } as ExtractFileDependenciesRequest),
     });
     return ApiService.handleResponse<ExtractFileDependenciesResponse>(response);
@@ -365,7 +361,7 @@ export class ApiService {
   static async getRepositoryBranches(owner: string, repo: string, githubToken?: string): Promise<GitHubBranchAPI[]> {
     const response = await fetch(`${API_BASE_URL}/github/repositories/${owner}/${repo}/branches`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getGitHubAuthHeaders(githubToken),
     });
     return ApiService.handleResponse<GitHubBranchAPI[]>(response);
   }
@@ -373,7 +369,7 @@ export class ApiService {
   static async getUserRepositories(githubToken?: string): Promise<GitHubRepositoryAPI[]> {
     const response = await fetch(`${API_BASE_URL}/github/repositories`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getGitHubAuthHeaders(githubToken),
     });
     return ApiService.handleResponse<GitHubRepositoryAPI[]>(response);
   }
@@ -386,7 +382,7 @@ export class ApiService {
   ): Promise<ChatMessageResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/messages`, {
       method: 'POST',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
     return ApiService.handleResponse<ChatMessageResponse>(response);
@@ -399,7 +395,7 @@ export class ApiService {
   ): Promise<ChatMessageResponse[]> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/messages?limit=${limit}`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<ChatMessageResponse[]>(response);
   }
@@ -412,7 +408,7 @@ export class ApiService {
   ): Promise<ChatMessageResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/messages/${messageId}`, {
       method: 'PUT',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
       body: JSON.stringify(updates),
     });
     return ApiService.handleResponse<ChatMessageResponse>(response);
@@ -425,7 +421,7 @@ export class ApiService {
   ): Promise<{success: boolean, message: string}> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/messages/${messageId}`, {
       method: 'DELETE',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<{success: boolean, message: string}>(response);
   }
@@ -438,7 +434,7 @@ export class ApiService {
   ): Promise<ContextCardResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/context-cards`, {
       method: 'POST',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
     return ApiService.handleResponse<ContextCardResponse>(response);
@@ -450,7 +446,7 @@ export class ApiService {
   ): Promise<ContextCardResponse[]> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/context-cards`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<ContextCardResponse[]>(response);
   }
@@ -462,7 +458,7 @@ export class ApiService {
   ): Promise<{success: boolean, message: string}> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/context-cards/${cardId}`, {
       method: 'DELETE',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<{success: boolean, message: string}>(response);
   }
@@ -475,7 +471,7 @@ export class ApiService {
   ): Promise<FileEmbeddingResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-deps`, {
       method: 'POST',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
     return ApiService.handleResponse<FileEmbeddingResponse>(response);
@@ -487,7 +483,7 @@ export class ApiService {
   ): Promise<FileEmbeddingResponse[]> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-deps/session`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<FileEmbeddingResponse[]>(response);
   }
@@ -499,7 +495,7 @@ export class ApiService {
   ): Promise<ExtractFileDependenciesResponse> {
     const response = await fetch(`${API_BASE_URL}/filedeps/sessions/${sessionId}/extract`, {
       method: 'POST',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
       body: JSON.stringify({ repo_url: repoUrl } as ExtractFileDependenciesRequest),
     });
     return ApiService.handleResponse<ExtractFileDependenciesResponse>(response);
@@ -512,7 +508,7 @@ export class ApiService {
   ): Promise<{success: boolean, message: string}> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-deps/${fileId}`, {
       method: 'DELETE',
-      headers: ApiService.getAuthHeaders(sessionToken),
+      headers: ApiService.getSessionAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<{success: boolean, message: string}>(response);
   }

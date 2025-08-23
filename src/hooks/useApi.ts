@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { ApiService } from '../services/api';
 import { useAuth } from './useAuth';
+import { useSessionStore } from '../stores/sessionStore';
 
 /**
  * Centralized API hook for consistent service access across components
@@ -8,6 +9,7 @@ import { useAuth } from './useAuth';
  */
 export const useApi = () => {
   const { sessionToken } = useAuth();
+  const { githubToken } = useSessionStore();
 
   // Wrap ApiService methods to automatically include session token
   const api = useCallback(() => {
@@ -37,25 +39,25 @@ export const useApi = () => {
 
       // Issue management methods
       createIssueWithContext: (request: Parameters<typeof ApiService.createIssueWithContext>[0]) =>
-        ApiService.createIssueWithContext(request, sessionToken || undefined),
+        ApiService.createIssueWithContext(request, githubToken || undefined),
       getIssues: (repoOwner?: string, repoName?: string, limit?: number) =>
-        ApiService.getIssues(repoOwner, repoName, limit, sessionToken || undefined),
+        ApiService.getIssues(repoOwner, repoName, limit, githubToken || undefined),
       getIssue: (issueId: string) =>
-        ApiService.getIssue(issueId, sessionToken || undefined),
+        ApiService.getIssue(issueId, githubToken || undefined),
       updateIssue: (issueId: string, updates: Parameters<typeof ApiService.updateIssue>[1]) =>
-        ApiService.updateIssue(issueId, updates, sessionToken || undefined),
+        ApiService.updateIssue(issueId, updates, githubToken || undefined),
       deleteIssue: (issueId: string) =>
-        ApiService.deleteIssue(issueId, sessionToken || undefined),
+        ApiService.deleteIssue(issueId, githubToken || undefined),
 
       // Repository methods
       getRepositories: () =>
-        ApiService.getRepositories(sessionToken || undefined),
+        ApiService.getRepositories(githubToken || undefined),
       getRepository: (owner: string, name: string) =>
-        ApiService.getRepository(owner, name, sessionToken || undefined),
+        ApiService.getRepository(owner, name, githubToken || undefined),
       getUserRepositories: () =>
-        ApiService.getUserRepositories(sessionToken || undefined),
+        ApiService.getUserRepositories(githubToken || undefined),
       getRepositoryBranches: (owner: string, repo: string) =>
-        ApiService.getRepositoryBranches(owner, repo, sessionToken || undefined),
+        ApiService.getRepositoryBranches(owner, repo, githubToken || undefined),
 
       // Chat Messages CRUD methods
       addChatMessage: (sessionId: string, request: Parameters<typeof ApiService.addChatMessage>[1]) =>
@@ -87,9 +89,9 @@ export const useApi = () => {
 
       // GitHub integration methods
       createGitHubIssueFromUserIssue: (issueId: string) =>
-        ApiService.createGitHubIssueFromUserIssue(issueId, sessionToken || undefined),
+        ApiService.createGitHubIssueFromUserIssue(issueId, githubToken || undefined),
     };
-  }, [sessionToken]);
+  }, [sessionToken, githubToken]);
 
   // Use useMemo to stabilize the returned object and prevent infinite loops
   // This ensures the API object only changes when sessionToken changes
