@@ -735,21 +735,6 @@ async def create_github_issue_from_user_issue(
         )
 
 
-@router.post("/from-chat", response_model=UserIssueResponse)
-async def create_issue_from_chat(
-    chat_request: ChatRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Create an issue from a chat request"""
-    try:
-        return IssueService.create_issue_from_chat(db, current_user.id, chat_request)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create issue from chat: {str(e)}"
-        )
-
 
 @router.get("/statistics", response_model=Dict[str, Any])
 async def get_issue_statistics(

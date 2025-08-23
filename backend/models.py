@@ -796,7 +796,7 @@ class UserIssueResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     
 class ChatRequest(BaseModel):
-    session_id: Optional[str] = Field(default="default", alias="sessionId")
+    session_id: str = Field(..., alias="sessionId")
     message: ChatMessageInput
     context_cards: Optional[List[str]] = Field(default_factory=list)
     repository: Optional[Dict[str, str]] = None  # Add this field

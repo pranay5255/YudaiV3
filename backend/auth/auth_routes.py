@@ -4,6 +4,7 @@ Authentication Routes for GitHub OAuth
 Enhanced with proper logging and error handling
 """
 import logging
+import os
 from urllib.parse import urlencode
 
 from auth.auth_utils import (
@@ -22,17 +23,15 @@ from auth.github_oauth import (
 from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPBearer
 from models import (
-    AuthToken,
-    CreateSessionFromGitHubRequest,
     CreateSessionTokenRequest,
     SessionTokenRequest,
     SessionTokenResponse,
-    User,
 )
 from sqlalchemy.orm import Session
 
-from utils import utc_now
+# utc_now not used directly in this module after cleanup
 
 # Configure logger for this module
 logger = logging.getLogger(__name__)
@@ -65,7 +64,7 @@ async def auth_callback(
             error_msg = "Authorized, but no code provided."
             logger.warning("OAuth callback received without authorization code")
             return RedirectResponse(
-                url=f"https://yudai.app/auth/callback?error={error_msg}",
+                url=f"{os.getenv('FRONTEND_BASE_URL','http://localhost:3000')}/auth/callback?error={error_msg}",
                 status_code=302
             )
         
@@ -118,7 +117,7 @@ async def auth_callback(
             "github_id": user.github_user_id
         }
         
-        redirect_url = f"https://yudai.app/auth/callback?{urlencode(auth_params)}"
+        redirect_url = f"{os.getenv('FRONTEND_BASE_URL','http://localhost:3000')}/auth/callback?{urlencode(auth_params)}"
         logger.info(f"Redirecting user {user.github_username} to frontend with session token")
         
         return RedirectResponse(url=redirect_url, status_code=302)
@@ -127,7 +126,7 @@ async def auth_callback(
         error_msg = f"GitHub OAuth error: {str(e)}"
         logger.error(f"GitHub OAuth error during callback: {str(e)}")
         return RedirectResponse(
-            url=f"https://yudai.app/auth/callback?error={error_msg}",
+            url=f"{os.getenv('FRONTEND_BASE_URL','http://localhost:3000')}/auth/callback?error={error_msg}",
             status_code=302
         )
         
@@ -140,96 +139,7 @@ async def auth_callback(
         )
 
 
-@router.post("/api/create-session")
-async def api_create_session(
-    request: CreateSessionFromGitHubRequest,
-    db: Session = Depends(get_db)
-):
-    """
-    Create a session token using GitHub auth token
-    This endpoint creates a session token and links it to the existing AuthToken
-    
-    Args:
-        request: Request containing GitHub access token from OAuth
-        db: Database session
-        
-    Returns:
-        Session token response with user data
-    """
-    try:
-        logger.info("Creating session token from GitHub token")
-        
-        github_token = request.github_token
-        
-        if not github_token:
-            logger.warning("Session creation requested without GitHub token")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="GitHub token is required"
-            )
-        
-        # Find the active AuthToken for this GitHub token
-
-
-        auth_token = db.query(AuthToken).filter(
-            AuthToken.access_token == github_token,
-            AuthToken.is_active
-        ).first()
-        
-        if not auth_token:
-            logger.warning(f"No active AuthToken found for GitHub token: {github_token[:10]}...")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired GitHub token"
-            )
-        
-        # Check if AuthToken is expired
-        if auth_token.expires_at and auth_token.expires_at < utc_now():
-            logger.info(f"AuthToken expired, deactivating: {github_token[:10]}...")
-            auth_token.is_active = False
-            db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="GitHub token has expired"
-            )
-        
-        # Get the user
-        user = db.query(User).filter(User.id == auth_token.user_id).first()
-        
-        if not user:
-            logger.warning(f"User not found for valid AuthToken: {github_token[:10]}...")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found"
-            )
-        
-        # Create session token using auth_utils
-        session_token = create_session_token(db, user.id, expires_in_hours=24)
-        logger.info(f"Successfully created session token for user: {user.github_username}")
-        
-        return SessionTokenResponse(
-            session_token=session_token.session_token,
-            expires_at=session_token.expires_at,
-            user={
-                "id": user.id,
-                "github_username": user.github_username,
-                "github_user_id": user.github_user_id,
-                "email": user.email,
-                "display_name": user.display_name,
-                "avatar_url": user.avatar_url,
-                "created_at": user.created_at.isoformat(),
-                "last_login": user.last_login.isoformat() if user.last_login else None
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating session from GitHub token: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
+# Removed: /api/create-session (avoids exposing GitHub token to frontend)
 
 
 # Simple API endpoints for frontend integration (minimal)
@@ -248,27 +158,13 @@ async def api_login():
 
 
 @router.get("/api/user")
-async def api_get_user_by_session_token(session_token: str, db: Session = Depends(get_db)):
-    """Get user by session token - for frontend to verify authentication"""
+async def api_get_user(db: Session = Depends(get_db), credentials=Depends(HTTPBearer())):
+    """Get user by Bearer session token in Authorization header."""
     try:
-        if not session_token:
-            logger.warning("User validation requested without session token")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Session token is required"
-            )
-        
-        logger.debug(f"Validating session token: {session_token[:10]}...")
-        user = validate_session_token(db, session_token)
-        
+        token = credentials.credentials if credentials else None
+        user = validate_session_token(db, token) if token else None
         if not user:
-            logger.info(f"Invalid or expired session token: {session_token[:10]}...")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired session token"
-            )
-        
-        logger.debug(f"Successfully validated session for user: {user.github_username}")
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session token")
         return {
             "id": user.id,
             "github_username": user.github_username,
@@ -277,15 +173,11 @@ async def api_get_user_by_session_token(session_token: str, db: Session = Depend
             "email": user.email,
             "avatar_url": user.avatar_url
         }
-        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in api_get_user_by_session_token: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
+        logger.error(f"Error in api_get_user: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.post("/api/logout")
@@ -317,25 +209,15 @@ async def api_refresh_session(
     request: CreateSessionTokenRequest,
     db: Session = Depends(get_db)
 ):
-    """Create a new session token for a user (for testing/admin purposes)"""
+    """Create a new session token for a user. Guard with env flag ADMIN_SESSION_REFRESH=true."""
+    if os.getenv("ADMIN_SESSION_REFRESH", "false").lower() != "true":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enabled")
     try:
         from models import User
-        
-        logger.info(f"Refreshing session token for user_id: {request.user_id}")
-        
-        # Verify user exists
         user = db.query(User).filter(User.id == request.user_id).first()
         if not user:
-            logger.warning(f"Session refresh attempted for non-existent user_id: {request.user_id}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
-            )
-        
-        # Create new session token (this deactivates all existing tokens)
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
         session_token = create_session_token(db, user.id, request.expires_in_hours)
-        logger.info(f"Successfully refreshed session token for user: {user.github_username}")
-        
         return SessionTokenResponse(
             session_token=session_token.session_token,
             expires_at=session_token.expires_at,
@@ -350,12 +232,8 @@ async def api_refresh_session(
                 "last_login": user.last_login.isoformat() if user.last_login else None
             }
         )
-        
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error refreshing session token: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")

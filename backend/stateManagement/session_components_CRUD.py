@@ -98,6 +98,8 @@ async def add_chat_message(
             detail="Failed to add chat message"
         )
 
+## (messages list endpoint defined below)
+
 @router.get("/sessions/{session_id}/messages", response_model=List[ChatMessageResponse])
 async def get_chat_messages(
     session_id: str,
@@ -704,7 +706,7 @@ async def get_file_dependencies(
             detail="Failed to retrieve file dependencies"
         )
 
-@router.delete("/sessions/{session_id}/file-dependencies/{file_id}")
+@router.delete("/sessions/{session_id}/file-deps/{file_id}")
 async def delete_file_dependency(
     session_id: str,
     file_id: int,
@@ -880,7 +882,7 @@ async def bulk_add_file_dependencies(
         )
 
 
-@router.get("/sessions/{session_id}/file-dependencies/session", response_model=List[FileEmbeddingResponse])
+@router.get("/sessions/{session_id}/file-deps/session", response_model=List[FileEmbeddingResponse])
 async def get_file_dependencies_session(
     session_id: str,
     db: Session = Depends(get_db),
