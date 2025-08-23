@@ -10,7 +10,7 @@ import type {
 import { UserIssueResponse } from '../types';
 import { useRepository } from '../hooks/useRepository';
 import { useApi } from '../hooks/useApi';
-import { useSessionStore } from '../stores/sessionStore';
+import { useSessionManagement } from '../hooks/useSessionManagement';
 import {
   useChatMessages,
   useAddMessage,
@@ -41,8 +41,8 @@ export const Chat: React.FC<ChatProps> = ({
   onShowIssuePreview,
   onShowError
 }) => {
-  // Zustand store for state management
-  const { activeSessionId, selectedRepository } = useSessionStore();
+  // Session management hook for state management
+  const { activeSessionId, selectedRepository, isAuthenticated, user } = useSessionManagement();
   const { selectedRepository: repoFromHook } = useRepository();
   
   // Use repository from hook if available, otherwise from store
@@ -117,14 +117,16 @@ export const Chat: React.FC<ChatProps> = ({
     }
   }, [onShowError]);
 
-  // Auto-create session when repository is selected
+  // Auto-create session when repository is selected and user is authenticated
   useEffect(() => {
-    console.log('[Chat] Repository or session changed:', {
+    console.log('[Chat] Repository, session, or auth changed:', {
       selectedRepository: currentRepository,
-      sessionId: activeSessionId
+      sessionId: activeSessionId,
+      isAuthenticated,
+      user: !!user
     });
 
-    if (currentRepository && !activeSessionId && !sessionInitRef.current) {
+    if (isAuthenticated && user && currentRepository && !activeSessionId && !sessionInitRef.current) {
       sessionInitRef.current = true;
       console.log('[Chat] Auto-creating session for selected repository');
 
@@ -164,7 +166,7 @@ export const Chat: React.FC<ChatProps> = ({
         }
       });
     }
-  }, [currentRepository, activeSessionId, createSessionMutation, addMessageMutation, showError]);
+  }, [isAuthenticated, user, currentRepository, activeSessionId, createSessionMutation, addMessageMutation, showError]);
 
   const handleAddToContext = useCallback(async (content: string) => {
     if (!activeSessionId) {

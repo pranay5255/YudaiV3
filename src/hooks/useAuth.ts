@@ -1,22 +1,45 @@
-import { useContext } from 'react';
-import { AuthContext, AuthContextValue } from '../contexts/AuthProvider';
+import { useSessionStore } from '../stores/sessionStore';
 
 /**
- * Custom hook to access authentication state and methods
- * Must be used within an AuthProvider
+ * Custom hook to access authentication state and methods from the session store
+ * This replaces the AuthProvider and makes the session store the sole source of truth
  */
-export const useAuth = (): AuthContextValue => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
+export const useAuth = () => {
+  const {
+    user,
+    sessionToken,
+    githubToken,
+    isAuthenticated,
+    authLoading,
+    authError,
+    initializeAuth,
+    login,
+    logout,
+    refreshAuth,
+    setAuthLoading,
+    setAuthError,
+  } = useSessionStore();
+
+  return {
+    user,
+    sessionToken,
+    githubToken,
+    isAuthenticated,
+    isLoading: authLoading,
+    error: authError,
+    login,
+    logout,
+    refreshAuth,
+    initializeAuth,
+    setAuthLoading,
+    setAuthError,
+  };
 };
 
 /**
  * Helper hook to get only authentication status (for components that don't need full auth context)
  */
-export const useAuthStatus = (): { isAuthenticated: boolean; isLoading: boolean } => {
+export const useAuthStatus = () => {
   const { isAuthenticated, isLoading } = useAuth();
   return { isAuthenticated, isLoading };
 };

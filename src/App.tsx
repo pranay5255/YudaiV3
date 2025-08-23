@@ -13,7 +13,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository, FileItem } from './types';
 import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
-import { useSessionStore } from './stores/sessionStore';
+import { useSessionManagement } from './hooks/useSessionManagement';
 import { useSession, useContextCards, useFileDependencies, useAddContextCard, useRemoveContextCard } from './hooks/useSessionQueries';
 import { UserIssueResponse } from './types';
 import { ChatContextMessage, FileContextItem } from './types/api';
@@ -57,14 +57,14 @@ function AppContent() {
   const { user, isAuthenticated } = useAuth();
   const { setSelectedRepository, hasSelectedRepository } = useRepository();
   
-  // Zustand store for state management
+  // Session management hook for state management
   const { 
     activeSessionId, 
     activeTab, 
     setActiveTab,
     sidebarCollapsed, 
     setSidebarCollapsed
-  } = useSessionStore();
+  } = useSessionManagement();
   
   // React Query hooks for data fetching
   const { data: sessionData, isLoading: isSessionLoading } = useSession(activeSessionId || '');
