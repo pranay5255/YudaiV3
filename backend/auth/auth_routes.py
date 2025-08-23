@@ -77,7 +77,7 @@ async def auth_callback(
             error_msg = "Unable to exchange code for token."
             logger.error(f"Token exchange failed: {token_data}")
             return RedirectResponse(
-                url=f"https://yudai.app/auth/callback?error={error_msg}",
+                url=f"{os.getenv('FRONTEND_BASE_URL','http://localhost:3000')}/auth/callback?error={error_msg}",
                 status_code=302
             )
         
@@ -91,7 +91,7 @@ async def auth_callback(
             error_msg = "Unable to get user information."
             logger.error("Failed to retrieve GitHub user information")
             return RedirectResponse(
-                url=f"https://yudai.app/auth/callback?error={error_msg}",
+                url=f"{os.getenv('FRONTEND_BASE_URL','http://localhost:3000')}/auth/callback?error={error_msg}",
                 status_code=302
             )
         
@@ -134,7 +134,7 @@ async def auth_callback(
         error_msg = "Authentication failed due to internal error"
         logger.error(f"Unexpected error in auth callback: {str(e)}", exc_info=True)
         return RedirectResponse(
-            url=f"https://yudai.app/auth/callback?error={error_msg}",
+            url=f"{os.getenv('FRONTEND_BASE_URL','http://localhost:3000')}/auth/callback?error={error_msg}",
             status_code=302
         )
 
