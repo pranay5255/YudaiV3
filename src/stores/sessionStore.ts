@@ -162,7 +162,7 @@ export const useSessionStore = create<SessionState>()(
               set({
                 user: user,
                 sessionToken: sessionToken,
-                githubToken: null, // No github_token in URL, but we have github_id
+                githubToken: sessionToken, // No github_token in URL, but we have github_id
                 isAuthenticated: true,
                 authLoading: false,
                 authError: null,
