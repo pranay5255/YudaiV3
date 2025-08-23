@@ -21,6 +21,8 @@ import type {
   FileAnalysisResponse,
   ExtractFileDependenciesRequest,
   ExtractFileDependenciesResponse,
+  CreateSessionRequest,
+  CreateSessionResponse,
 } from '../types/api';
 
 // API base URL from environment or fallback to relative path
