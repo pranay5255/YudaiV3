@@ -32,25 +32,34 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     });
   }, [isAuthenticated, isLoading, user, timeoutReached]);
 
-  // Add timeout to prevent infinite loading
+  // Add timeout to prevent infinite loading - only when not authenticated
   useEffect(() => {
-    console.log('[ProtectedRoute] Setting up timeout timer');
-    const timer = setTimeout(() => {
-      console.warn('[ProtectedRoute] Authentication timeout reached, forcing login page');
-      console.warn('[ProtectedRoute] Current state at timeout:', {
-        isAuthenticated,
-        isLoading,
-        hasUser: !!user,
-        timestamp: new Date().toISOString()
-      });
-      setTimeoutReached(true);
-    }, 5000); // 5 second timeout
+    // Only set timeout if we're loading and not authenticated
+    if (isLoading && !isAuthenticated && !user) {
+      console.log('[ProtectedRoute] Setting up timeout timer for unauthenticated user');
+      const timer = setTimeout(() => {
+        console.warn('[ProtectedRoute] Authentication timeout reached, forcing login page');
+        console.warn('[ProtectedRoute] Current state at timeout:', {
+          isAuthenticated,
+          isLoading,
+          hasUser: !!user,
+          timestamp: new Date().toISOString()
+        });
+        setTimeoutReached(true);
+      }, 5000); // 5 second timeout
 
-    return () => {
-      console.log('[ProtectedRoute] Clearing timeout timer');
-      clearTimeout(timer);
-    };
-  }, [isAuthenticated, isLoading, user]);
+      return () => {
+        console.log('[ProtectedRoute] Clearing timeout timer');
+        clearTimeout(timer);
+      };
+    } else {
+      // Clear timeout if user becomes authenticated
+      if (isAuthenticated && user) {
+        console.log('[ProtectedRoute] User authenticated, clearing timeout');
+        setTimeoutReached(false);
+      }
+    }
+  }, [isLoading, isAuthenticated, user]);
 
   // Show loading spinner while checking authentication (with timeout fallback)
   if (isLoading && !timeoutReached) {
