@@ -130,67 +130,53 @@ export const useSessionStore = create<SessionState>()(
             // Check for session token in URL parameters (OAuth callback)
             const urlParams = new URLSearchParams(window.location.search);
             const sessionToken = urlParams.get('session_token');
-            const githubToken = urlParams.get('github_token');
+            // const githubToken = urlParams.get('github_token');
             const userId = urlParams.get('user_id');
             const username = urlParams.get('username');
             const code = urlParams.get('code');
 
             if (sessionToken && userId && username) {
-              // We have session token from OAuth callback, validate it
-              console.log('[SessionStore] Found session token in URL parameters, validating...');
-              try {
-                const userData = await ApiService.validateSessionToken(sessionToken);
-                
-                // Transform userData to match User type with proper field mapping
-                const user: User = {
-                  id: userData.id,
-                  github_username: userData.github_username,
-                  github_user_id: userData.github_id,
-                  email: userData.email,
-                  display_name: userData.display_name,
-                  avatar_url: userData.avatar_url,
-                  created_at: new Date().toISOString(),
-                  last_login: new Date().toISOString(),
-                };
-                
-                set({
-                  user: user,
-                  sessionToken: sessionToken,
-                  githubToken: githubToken,
-                  isAuthenticated: true,
-                  authLoading: false,
-                  authError: null,
-                });
+              // We have session token from OAuth callback, use the data directly from URL
+              console.log('[SessionStore] Found session token in URL parameters, using callback data directly');
+              
+              // Extract user data from URL parameters (already provided by OAuth callback)
+              const name = urlParams.get('name') || username;
+              const email = urlParams.get('email') || '';
+              const avatar = urlParams.get('avatar') || '';
+              const githubId = urlParams.get('github_id') || '';
+              
+              // Create user object from callback data
+              const user: User = {
+                id: parseInt(userId),
+                github_username: username,
+                github_user_id: githubId,
+                email: email,
+                display_name: name,
+                avatar_url: avatar,
+                created_at: new Date().toISOString(),
+                last_login: new Date().toISOString(),
+              };
+              
+              console.log('[SessionStore] User data from callback:', user);
+              
+              set({
+                user: user,
+                sessionToken: sessionToken,
+                githubToken: null, // No github_token in URL, but we have github_id
+                isAuthenticated: true,
+                authLoading: false,
+                authError: null,
+              });
 
-                // Store both tokens in localStorage for persistence
-                localStorage.setItem('session_token', sessionToken);
-                if (githubToken) {
-                  localStorage.setItem('github_token', githubToken);
-                }
-
-                // Clear URL parameters after successful auth
-                const newUrl = new URL(window.location.href);
-                newUrl.search = '';
-                window.history.replaceState({}, '', newUrl.toString());
-                
-                              } catch (error) {
-                  console.warn('[SessionStore] Session validation failed:', error);
-                  console.error('[SessionStore] Session validation error details:', {
-                    error: error instanceof Error ? error.message : error,
-                    stack: error instanceof Error ? error.stack : undefined
-                  });
-                  // Clear any stored tokens on validation failure
-                  localStorage.removeItem('session_token');
-                  localStorage.removeItem('github_token');
-                  set({
-                    user: null,
-                    sessionToken: null,
-                    githubToken: null,
-                    isAuthenticated: false,
-                    authLoading: false,
-                    authError: 'Session validation failed',
-                  });
-                }
+              // Store session token in localStorage for persistence
+              localStorage.setItem('session_token', sessionToken);
+              
+              // Clear URL parameters after successful auth
+              const newUrl = new URL(window.location.href);
+              newUrl.search = '';
+              window.history.replaceState({}, '', newUrl.toString());
+              
+              console.log('[SessionStore] Authentication completed successfully from callback');
             } else if (code) {
               // We have authorization code but no session token yet, redirect to login
               window.location.href = '/auth/login';
