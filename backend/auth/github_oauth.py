@@ -221,46 +221,20 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db)
 ) -> User:
-    """
-    FastAPI dependency to get current authenticated user from Bearer token
-    
-    Args:
-        credentials: Bearer token from Authorization header
-        db: Database session
-        
-    Returns:
-        User: Authenticated user object
-        
-    Raises:
-        HTTPException: If token is invalid or user not found
-    """
     token = credentials.credentials
-
-    # 1) Try to authenticate using a SessionToken (frontend session)
+    
+    # Always try session token first (frontend sends this)
     session_token = db.query(SessionToken).filter(
         SessionToken.session_token == token,
         SessionToken.is_active,
     ).first()
-
-    if session_token:
-        # Check expiry for session token
-        if session_token.expires_at and session_token.expires_at < utc_now():
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Session token has expired",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
+    
+    if session_token and session_token.expires_at > utc_now():
         user = db.query(User).filter(User.id == session_token.user_id).first()
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return user
-
-    # 2) Fallback: authenticate using an AuthToken (GitHub OAuth access token)
+        if user:
+            return user
+    
+    # Fallback to GitHub token only if needed
     auth_token = db.query(AuthToken).filter(
         AuthToken.access_token == token,
         AuthToken.is_active,
