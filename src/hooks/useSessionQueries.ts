@@ -3,7 +3,6 @@
  * Handles server state and caching for sessions, messages, context cards, and file dependencies
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useApi } from './useApi';
 import { useSessionStore } from '../stores/sessionStore';
 import {
   ChatMessageAPI,
@@ -17,12 +16,13 @@ import {
   ContextCardMutationContext,
   SelectedRepository,
 } from '../types';
-import type {
-  ChatMessageResponse,
-  ContextCardResponse,
-  CreateChatMessageRequest,
-  SessionResponse
-} from '../types/api';
+import {
+  sessionApi,
+  type ChatMessageResponse,
+  type ContextCardResponse,
+  type CreateChatMessageRequest,
+  type SessionResponse,
+} from '../services/sessionApi';
 
 // Helper function to check if error is a session not found error
 const isSessionNotFoundError = (error: unknown): boolean => {
@@ -79,14 +79,13 @@ export const QueryKeys = {
 
 
 export const useSession = (sessionId: string) => {
-  const api = useApi();
   const { setMessages, sessionToken, clearSession } = useSessionStore();
   
   return useQuery({
     queryKey: QueryKeys.session(sessionId),
     queryFn: async () => {
       try {
-        const context = await api.getSessionContext(sessionId);
+        const context = await sessionApi.getSessionContext(sessionId, sessionToken || undefined);
         
         // Transform messages to frontend format
         const transformedMessages: ChatMessageAPI[] = context.messages?.map((msg: ChatMessageResponse) => ({
@@ -127,14 +126,13 @@ export const useSession = (sessionId: string) => {
 
 // Chat message queries
 export const useChatMessages = (sessionId: string) => {
-  const api = useApi();
   const { setMessages, sessionToken, clearSession } = useSessionStore();
   
   return useQuery({
     queryKey: QueryKeys.messages(sessionId),
     queryFn: async (): Promise<ChatMessageAPI[]> => {
       try {
-        const messages = await api.getChatMessages(sessionId, 100);
+        const messages = await sessionApi.getChatMessages(sessionId, 100, sessionToken || undefined);
         
         // Transform messages to frontend format
         const transformedMessages: ChatMessageAPI[] = messages.map((msg: ChatMessageResponse) => ({
@@ -174,9 +172,8 @@ export const useChatMessages = (sessionId: string) => {
 };
 
 export const useAddMessage = () => {
-  const api = useApi();
   const queryClient = useQueryClient();
-  const { addMessage } = useSessionStore();
+  const { addMessage, sessionToken } = useSessionStore();
   
   return useMutation({
     mutationFn: async ({ sessionId, message }: AddMessageMutationData) => {
@@ -196,7 +193,7 @@ export const useAddMessage = () => {
         error_message: message.error_message
       };
       
-      return await api.addChatMessage(sessionId, createRequest);
+      return await sessionApi.addChatMessage(sessionId, createRequest, sessionToken || undefined);
     },
     onMutate: async ({ sessionId, message }): Promise<MessageMutationContext> => {
       // Cancel any outgoing refetches
@@ -243,14 +240,13 @@ export const useAddMessage = () => {
 
 // Context card queries
 export const useContextCards = (sessionId: string) => {
-  const api = useApi();
   const { setContextCards, sessionToken, clearSession } = useSessionStore();
   
   return useQuery({
     queryKey: QueryKeys.contextCards(sessionId),
     queryFn: async (): Promise<ContextCard[]> => {
       try {
-        const cards = await api.getContextCards(sessionId);
+        const cards = await sessionApi.getContextCards(sessionId, sessionToken || undefined);
         
         // Transform and update Zustand store
         const transformedCards: ContextCard[] = cards.map(card => ({
@@ -280,13 +276,12 @@ export const useContextCards = (sessionId: string) => {
 };
 
 export const useAddContextCard = () => {
-  const api = useApi();
   const queryClient = useQueryClient();
-  const { addContextCard } = useSessionStore();
+  const { addContextCard, sessionToken } = useSessionStore();
   
   return useMutation({
     mutationFn: async ({ sessionId, card }: AddContextCardMutationData) => {
-      return await api.addContextCard(sessionId, card);
+      return await sessionApi.addContextCard(sessionId, card, sessionToken || undefined);
     },
     onMutate: async ({ sessionId, card }): Promise<ContextCardMutationContext> => {
       // Cancel any outgoing refetches
@@ -351,13 +346,12 @@ export const useAddContextCard = () => {
 };
 
 export const useRemoveContextCard = () => {
-  const api = useApi();
   const queryClient = useQueryClient();
-  const { removeContextCard } = useSessionStore();
+  const { removeContextCard, sessionToken } = useSessionStore();
   
   return useMutation({
     mutationFn: async ({ sessionId, cardId }: RemoveContextCardMutationData) => {
-      return await api.deleteContextCard(sessionId, parseInt(cardId));
+      return await sessionApi.deleteContextCard(sessionId, parseInt(cardId), sessionToken || undefined);
     },
     onMutate: async ({ sessionId, cardId }): Promise<ContextCardMutationContext> => {
       // Cancel any outgoing refetches
@@ -391,14 +385,13 @@ export const useRemoveContextCard = () => {
 
 // File dependency queries
 export const useFileDependencies = (sessionId: string) => {
-  const api = useApi();
   const { setFileContext, sessionToken, clearSession } = useSessionStore();
   
   return useQuery({
     queryKey: QueryKeys.fileDependencies(sessionId),
     queryFn: async (): Promise<FileItem[]> => {
       try {
-        const deps = await api.getFileDependenciesSession(sessionId);
+        const deps = await sessionApi.getFileDependenciesSession(sessionId, sessionToken || undefined);
         
         // Transform and update Zustand store
         const transformedFiles: FileItem[] = deps.map(dep => ({
@@ -433,18 +426,20 @@ export const useFileDependencies = (sessionId: string) => {
 
 // Session management mutations
 export const useCreateSession = () => {
-  const api = useApi();
   const queryClient = useQueryClient();
-  const { setActiveSession } = useSessionStore();
+  const { setActiveSession, sessionToken } = useSessionStore();
   
   return useMutation({
     mutationFn: async ({ repoOwner, repoName, repoBranch = 'main' }: CreateSessionMutationData) => {
-      return await api.createSession({
-        repo_owner: repoOwner,
-        repo_name: repoName,
-        repo_branch: repoBranch,
-        title: `Chat - ${repoOwner}/${repoName}`,
-      });
+      return await sessionApi.createSession(
+        {
+          repo_owner: repoOwner,
+          repo_name: repoName,
+          repo_branch: repoBranch,
+          title: `Chat - ${repoOwner}/${repoName}`,
+        },
+        sessionToken || undefined,
+      );
     },
     onSuccess: (data: SessionResponse) => {
       // Update Zustand store
