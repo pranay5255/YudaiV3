@@ -13,12 +13,13 @@ export const useApi = () => {
   const api = useCallback(() => {
     return {
       // Auth methods
-      createSession: ApiService.createSession,
       validateSessionToken: ApiService.validateSessionToken,
       logout: (token?: string) => ApiService.logout(token || sessionToken || ''),
       getLoginUrl: ApiService.getLoginUrl,
 
       // Session management methods
+      createSession: (request: Parameters<typeof ApiService.createSession>[0]) =>
+        ApiService.createSession(request, sessionToken || undefined),
       getSessionContext: (sessionId: string) =>
         ApiService.getSessionContext(sessionId, sessionToken || undefined),
       getUserSessions: () =>
@@ -56,22 +57,6 @@ export const useApi = () => {
       getRepositoryBranches: (owner: string, repo: string) =>
         ApiService.getRepositoryBranches(owner, repo, sessionToken || undefined),
 
-      // File dependencies methods
-      analyzeFileDependencies: (files: File[]) =>
-        ApiService.analyzeFileDependencies(files, sessionToken || undefined),
-      getFileDependencies: (fileId: string) =>
-        ApiService.getFileDependencies(fileId, sessionToken || undefined),
-      extractFileDependencies: (repoUrl: string) =>
-        ApiService.extractFileDependencies(repoUrl, sessionToken || undefined),
-
-      // Context Cards CRUD methods
-      getContextCards: (sessionId: string) =>
-        ApiService.getContextCards(sessionId, sessionToken || undefined),
-      addContextCard: (sessionId: string, request: Parameters<typeof ApiService.addContextCard>[1]) =>
-        ApiService.addContextCard(sessionId, request, sessionToken || undefined),
-      deleteContextCard: (sessionId: string, cardId: number) =>
-        ApiService.deleteContextCard(sessionId, cardId, sessionToken || undefined),
-
       // Chat Messages CRUD methods
       addChatMessage: (sessionId: string, request: Parameters<typeof ApiService.addChatMessage>[1]) =>
         ApiService.addChatMessage(sessionId, request, sessionToken || undefined),
@@ -81,6 +66,14 @@ export const useApi = () => {
         ApiService.updateChatMessage(sessionId, messageId, updates, sessionToken || undefined),
       deleteChatMessage: (sessionId: string, messageId: string) =>
         ApiService.deleteChatMessage(sessionId, messageId, sessionToken || undefined),
+
+      // Context Cards CRUD methods
+      addContextCard: (sessionId: string, request: Parameters<typeof ApiService.addContextCard>[1]) =>
+        ApiService.addContextCard(sessionId, request, sessionToken || undefined),
+      getContextCards: (sessionId: string) =>
+        ApiService.getContextCards(sessionId, sessionToken || undefined),
+      deleteContextCard: (sessionId: string, cardId: number) =>
+        ApiService.deleteContextCard(sessionId, cardId, sessionToken || undefined),
 
       // File Dependencies CRUD methods
       addFileDependency: (sessionId: string, request: Parameters<typeof ApiService.addFileDependency>[1]) =>

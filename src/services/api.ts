@@ -467,13 +467,13 @@ export class ApiService {
     return ApiService.handleResponse<{success: boolean, message: string}>(response);
   }
 
-  // File Dependencies CRUD
+  // File Dependencies CRUD - Fixed paths to use consistent /file-deps
   static async addFileDependency(
     sessionId: string, 
     request: CreateFileEmbeddingRequest, 
     sessionToken?: string
   ): Promise<FileEmbeddingResponse> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-dependencies`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-deps`, {
       method: 'POST',
       headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
@@ -485,7 +485,7 @@ export class ApiService {
     sessionId: string, 
     sessionToken?: string
   ): Promise<FileEmbeddingResponse[]> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-dependencies/session`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-deps/session`, {
       method: 'GET',
       headers: ApiService.getAuthHeaders(sessionToken),
     });
@@ -510,10 +510,13 @@ export class ApiService {
     fileId: number, 
     sessionToken?: string
   ): Promise<{success: boolean, message: string}> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-dependencies/${fileId}`, {
+    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-deps/${fileId}`, {
       method: 'DELETE',
       headers: ApiService.getAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<{success: boolean, message: string}>(response);
   }
+
+  // DEAD CODE REMOVED: analyzeFileDependencies and getFileDependencies methods
+  // These are not used anywhere in the frontend components
 }

@@ -615,7 +615,7 @@ async def bulk_add_context_cards(
 # FILE DEPENDENCIES CRUD
 # ============================================================================
 
-@router.post("/sessions/{session_id}/file-dependencies", response_model=FileEmbeddingResponse)
+@router.post("/sessions/{session_id}/file-deps", response_model=FileEmbeddingResponse)
 async def add_file_dependency(
     session_id: str,
     request: CreateFileEmbeddingRequest,
@@ -668,7 +668,7 @@ async def add_file_dependency(
             detail="Failed to add file dependency"
         )
 
-@router.get("/sessions/{session_id}/file-dependencies", response_model=List[FileEmbeddingResponse])
+@router.get("/sessions/{session_id}/file-deps", response_model=List[FileEmbeddingResponse])
 async def get_file_dependencies(
     session_id: str,
     db: Session = Depends(get_db),

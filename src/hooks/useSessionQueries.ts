@@ -20,6 +20,7 @@ import {
 import type {
   ChatMessageResponse,
   ContextCardResponse,
+  CreateChatMessageRequest,
   SessionResponse
 } from '../types/api';
 
@@ -117,7 +118,23 @@ export const useAddMessage = () => {
   
   return useMutation({
     mutationFn: async ({ sessionId, message }: AddMessageMutationData) => {
-      return await api.addChatMessage(sessionId, message);
+      // Transform ChatMessageAPI to CreateChatMessageRequest
+      const createRequest: CreateChatMessageRequest = {
+        session_id: sessionId,
+        message_id: message.message_id,
+        message_text: message.message_text,
+        sender_type: message.sender_type,
+        role: message.role,
+        is_code: false, // Default value
+        tokens: message.tokens,
+        model_used: message.model_used,
+        processing_time: message.processing_time,
+        context_cards: message.context_cards || [],
+        referenced_files: message.referenced_files || [],
+        error_message: message.error_message
+      };
+      
+      return await api.addChatMessage(sessionId, createRequest);
     },
     onMutate: async ({ sessionId, message }): Promise<MessageMutationContext> => {
       // Cancel any outgoing refetches

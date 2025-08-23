@@ -7,6 +7,7 @@ import { useSessionStore } from '../stores/sessionStore';
 export const useAuth = () => {
   const { 
     user, 
+    sessionToken,
     isAuthenticated, 
     authLoading: isLoading, 
     authError,
@@ -22,13 +23,15 @@ export const useAuth = () => {
       isAuthenticated,
       isLoading,
       hasUser: !!user,
+      hasSessionToken: !!sessionToken,
       authError,
       timestamp: new Date().toISOString()
     });
-  }, [isAuthenticated, isLoading, user, authError]);
+  }, [isAuthenticated, isLoading, user, sessionToken, authError]);
 
   return {
     user,
+    sessionToken,
     isAuthenticated,
     isLoading,
     authError,
