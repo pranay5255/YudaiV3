@@ -64,7 +64,7 @@ pnpm install
 - **Local Backend**: Ensure the Python backend is running locally. Refer to the [backend setup guide](#backend-setup) (TBD: link to backend-specific instructions).
 - **Hosted Backend**: Create a `.env` file in the project root and add:
   ```bash
-  VITE_API_URL=https://your-backend-api-url.com
+  VITE_API_BASE_URL=https://your-backend-api-url.com
   ```
   Replace `https://your-backend-api-url.com` with your hosted backend URL.
 
