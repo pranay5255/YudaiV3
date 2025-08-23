@@ -453,11 +453,15 @@ export const useCreateSession = () => {
 
 // New hook for creating session from repository selection
 export const useCreateSessionFromRepository = () => {
-  const { createSessionForRepository } = useSessionStore();
+  const { createSessionForRepository, sessionLoadingEnabled, setSessionLoadingEnabled } = useSessionStore();
   const queryClient = useQueryClient();
   
   return useMutation({
     mutationFn: async (repository: SelectedRepository) => {
+      // Only load session if enabled, otherwise always create new
+      if (!sessionLoadingEnabled) {
+        setSessionLoadingEnabled(false);
+      }
       return await createSessionForRepository(repository);
     },
     onSuccess: (sessionId: string | null) => {

@@ -101,7 +101,11 @@ export class ApiService {
   }
 
   // Authentication API Methods
-  static async createAuthSession(request: CreateSessionRequest): Promise<CreateSessionResponse> {
+  static async createAuthSession(request: CreateSessionRequest, sessionLoadingEnabled?: boolean): Promise<CreateSessionResponse> {
+    // If session loading is disabled, always create a new session
+    if (sessionLoadingEnabled === false) {
+      // ...existing code...
+    }
     const response = await fetch(`/auth/api/create-session`, {
       method: 'POST',
       headers: {

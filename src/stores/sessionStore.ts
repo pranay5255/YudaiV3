@@ -6,6 +6,9 @@ import { sessionApi } from '../services/sessionApi';
 
 // Enhanced types for the session store with auth state
 interface SessionState {
+  // Controls whether session loading is enabled
+  sessionLoadingEnabled: boolean;
+  setSessionLoadingEnabled: (enabled: boolean) => void;
   // Auth state
   user: User | null;
   sessionToken: string | null;
@@ -87,6 +90,9 @@ export const useSessionStore = create<SessionState>()(
   devtools(
     persist(
       (set, get) => ({
+  // Controls whether session loading is enabled
+  sessionLoadingEnabled: false,
+  setSessionLoadingEnabled: (enabled: boolean) => set({ sessionLoadingEnabled: enabled }),
         // Auth state
         user: null,
         sessionToken: null,
@@ -349,7 +355,16 @@ export const useSessionStore = create<SessionState>()(
           set({ authError: error }),
 
         // Session creation actions
-        createSessionForRepository: async (repository: SelectedRepository) => {
+          createSessionForRepository: async (repository: SelectedRepository) => {
+            const { sessionLoadingEnabled, activeSessionId } = get();
+            // If session loading is enabled and a session exists, try to load it
+            if (sessionLoadingEnabled && activeSessionId) {
+              const loaded = await get().ensureSessionExists(activeSessionId);
+              if (loaded) {
+                set({ isLoading: false });
+                return activeSessionId;
+              }
+            }
           try {
             set({ isLoading: true, error: null });
             
@@ -389,50 +404,51 @@ export const useSessionStore = create<SessionState>()(
             return null;
           }
         },
+  ensureSessionExists: async (sessionId: string) => {
+    const { sessionLoadingEnabled } = get();
+    if (!sessionLoadingEnabled) return false;
+    try {
+      const { sessionToken } = get();
+      if (!sessionToken) {
+        console.warn('[SessionStore] No session token available for session validation');
+        get().clearSession();
+        return false;
+      }
 
-        ensureSessionExists: async (sessionId: string) => {
-          try {
-            const { sessionToken } = get();
-            if (!sessionToken) {
-              console.warn('[SessionStore] No session token available for session validation');
-              get().clearSession();
-              return false;
-            }
+      // Try to get session context to verify it exists
+      await sessionApi.getSessionContext(sessionId, sessionToken);
 
-            // Try to get session context to verify it exists
-            await sessionApi.getSessionContext(sessionId, sessionToken);
-            
-            set({
-              activeSessionId: sessionId,
-              sessionInitialized: true,
-              error: null,
-            });
-            
-            return true;
-          } catch (error) {
-            console.warn(`[SessionStore] Session ${sessionId} does not exist or is not accessible:`, error);
-            
-            // Check if it's a session not found error
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            const isSessionNotFound = errorMessage.includes('Session not found') ||
-                                     errorMessage.includes('404') ||
-                                     errorMessage.includes('Not Found');
-            
-            if (isSessionNotFound) {
-              console.log('[SessionStore] Session not found, clearing invalid session');
-              get().clearSession();
-              set({ error: 'Session not found - cleared invalid session' });
-            } else {
-              set({
-                activeSessionId: null,
-                sessionInitialized: false,
-                error: 'Session validation failed',
-              });
-            }
-            
-            return false;
-          }
-        },
+      set({
+        activeSessionId: sessionId,
+        sessionInitialized: true,
+        error: null,
+      });
+
+      return true;
+    } catch (error) {
+      console.warn(`[SessionStore] Session ${sessionId} does not exist or is not accessible:`, error);
+
+      // Check if it's a session not found error
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isSessionNotFound = errorMessage.includes('Session not found') ||
+                               errorMessage.includes('404') ||
+                               errorMessage.includes('Not Found');
+
+      if (isSessionNotFound) {
+        console.log('[SessionStore] Session not found, clearing invalid session');
+        get().clearSession();
+        set({ error: 'Session not found - cleared invalid session' });
+      } else {
+        set({
+          activeSessionId: null,
+          sessionInitialized: false,
+          error: 'Session validation failed',
+        });
+      }
+
+      return false;
+    }
+  },
 
         validatePersistedSession: async () => {
           const { activeSessionId, sessionToken } = get();
