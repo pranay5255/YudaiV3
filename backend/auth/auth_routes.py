@@ -117,7 +117,7 @@ async def auth_callback(
             "github_id": user.github_user_id
         }
         
-        redirect_url = f"{os.getenv('FRONTEND_BASE_URL','http://localhost:3000')}/auth/callback?{urlencode(auth_params)}"
+        redirect_url = f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/auth/callback?{urlencode(auth_params)}"
         logger.info(f"Redirecting user {user.github_username} to frontend with session token")
         
         return RedirectResponse(url=redirect_url, status_code=302)
@@ -126,7 +126,7 @@ async def auth_callback(
         error_msg = f"GitHub OAuth error: {str(e)}"
         logger.error(f"GitHub OAuth error during callback: {str(e)}")
         return RedirectResponse(
-            url=f"{os.getenv('FRONTEND_BASE_URL','http://localhost:3000')}/auth/callback?error={error_msg}",
+            url=f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/auth/callback?error={error_msg}",
             status_code=302
         )
         
@@ -134,7 +134,7 @@ async def auth_callback(
         error_msg = "Authentication failed due to internal error"
         logger.error(f"Unexpected error in auth callback: {str(e)}", exc_info=True)
         return RedirectResponse(
-            url=f"{os.getenv('FRONTEND_BASE_URL','http://localhost:3000')}/auth/callback?error={error_msg}",
+            url=f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/auth/callback?error={error_msg}",
             status_code=302
         )
 
