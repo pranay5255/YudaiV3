@@ -3,8 +3,6 @@
 // State flow from frontend calls to database operations is documented in context/dbSchema.md
 import { UserIssueResponse } from '../types';
 import type {
-  CreateSessionRequest,
-  CreateSessionResponse,
   ValidateSessionResponse,
   LogoutRequest,
   LogoutResponse,
@@ -23,6 +21,8 @@ import type {
   FileAnalysisResponse,
   ExtractFileDependenciesRequest,
   ExtractFileDependenciesResponse,
+  CreateSessionRequest,
+  CreateSessionResponse,
 } from '../types/api';
 
 // API base URL from environment or fallback to relative path
@@ -112,6 +112,7 @@ export class ApiService {
     return ApiService.handleResponse<CreateSessionResponse>(response);
   }
 
+  // Authentication API Methods (backend/auth/auth_routes.py)
   static async validateSessionToken(sessionToken: string): Promise<ValidateSessionResponse> {
     console.log('[ApiService] Validating session token:', sessionToken ? 'Token provided' : 'No token');
     console.log('[ApiService] Making request to:', `/auth/api/user`);
@@ -162,7 +163,7 @@ export class ApiService {
     return ApiService.handleResponse<LoginUrlResponse>(response);
   }
 
-  // Chat API Methods
+  // Chat API Methods (backend/daifuUserAgent/chat_api.py)
   static async sendChatMessage(request: ChatRequest, sessionToken?: string): Promise<ChatResponse> {
     // Validate session_id is required
     if (!request.session_id?.trim()) {
@@ -186,7 +187,7 @@ export class ApiService {
     return ApiService.handleResponse<CreateIssueFromChatResponse>(response);
   }
 
-  // Issue Management API Methods
+  // Issue Management API Methods (backend/issueChatServices/issue_service.py)
   static async createIssueWithContext(request: CreateIssueWithContextRequest, githubToken?: string): Promise<IssueCreationResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/from-session-enhanced`, {
       method: 'POST',
@@ -239,7 +240,7 @@ export class ApiService {
     return ApiService.handleResponse<{message: string}>(response);
   }
 
-  // File Dependencies API Methods
+  // File Dependencies API Methods (backend/repo_processorGitIngest/filedeps.py)
   static async analyzeFileDependencies(files: File[], githubToken?: string): Promise<FileAnalysisResponse> {
     const formData = new FormData();
     files.forEach(file => formData.append('files', file));
@@ -276,7 +277,7 @@ export class ApiService {
     return ApiService.handleResponse<FileContextItem[]>(response);
   }
 
-  // Repository Management API Methods
+  // Repository Management API Methods (backend/github/github_routes.py)
   static async getRepositories(githubToken?: string): Promise<RepositoryResponse> {
     const response = await fetch(`${API_BASE_URL}/repositories`, {
       method: 'GET',
