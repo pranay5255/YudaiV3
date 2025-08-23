@@ -1,9 +1,18 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
-import { SelectedRepository, TabType, ContextCard, FileItem, ChatMessageAPI, GitHubRepository } from '../types';
+import { SelectedRepository, TabType, ContextCard, FileItem, ChatMessageAPI, GitHubRepository, User } from '../types';
+import { ApiService } from '../services/api';
 
-// Enhanced types for the session store
+// Enhanced types for the session store with auth state
 interface SessionState {
+  // Auth state
+  user: User | null;
+  sessionToken: string | null;
+  githubToken: string | null;
+  isAuthenticated: boolean;
+  authLoading: boolean;
+  authError: string | null;
+  
   // Core session state
   activeSessionId: string | null;
   isLoading: boolean;
@@ -29,7 +38,19 @@ interface SessionState {
     lastUpdated: Date | null;
   };
   
-  // Actions
+  // Auth actions
+  initializeAuth: () => Promise<void>;
+  login: () => Promise<void>;
+  logout: () => Promise<void>;
+  refreshAuth: () => Promise<void>;
+  setAuthLoading: (loading: boolean) => void;
+  setAuthError: (error: string | null) => void;
+  
+  // Session creation actions
+  createSessionForRepository: (repository: SelectedRepository) => Promise<string | null>;
+  ensureSessionExists: (sessionId: string) => Promise<boolean>;
+  
+  // Core actions
   setActiveSession: (sessionId: string) => void;
   clearSession: () => void;
   setLoading: (loading: boolean) => void;
@@ -63,7 +84,15 @@ interface SessionState {
 export const useSessionStore = create<SessionState>()(
   devtools(
     persist(
-      (set) => ({
+      (set, get) => ({
+        // Auth state
+        user: null,
+        sessionToken: null,
+        githubToken: null,
+        isAuthenticated: false,
+        authLoading: true,
+        authError: null,
+        
         // Initial state
         activeSessionId: null,
         isLoading: false,
@@ -87,6 +116,265 @@ export const useSessionStore = create<SessionState>()(
           fileContext: [],
           totalTokens: 0,
           lastUpdated: null,
+        },
+        
+        // Auth actions
+        initializeAuth: async () => {
+          try {
+            set({ authLoading: true, authError: null });
+
+            // Check for session token in URL parameters (OAuth callback)
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionToken = urlParams.get('session_token');
+            const githubToken = urlParams.get('github_token');
+            const userId = urlParams.get('user_id');
+            const username = urlParams.get('username');
+            const code = urlParams.get('code');
+
+            if (sessionToken && userId && username) {
+              // We have session token from OAuth callback, validate it
+              try {
+                const userData = await ApiService.validateSessionToken(sessionToken);
+                
+                // Transform userData to match User type with proper field mapping
+                const user: User = {
+                  id: userData.id,
+                  github_username: userData.github_username,
+                  github_user_id: userData.github_id,
+                  email: userData.email,
+                  display_name: userData.display_name,
+                  avatar_url: userData.avatar_url,
+                  created_at: new Date().toISOString(),
+                  last_login: new Date().toISOString(),
+                };
+                
+                set({
+                  user: user,
+                  sessionToken: sessionToken,
+                  githubToken: githubToken,
+                  isAuthenticated: true,
+                  authLoading: false,
+                  authError: null,
+                });
+
+                // Store both tokens in localStorage for persistence
+                localStorage.setItem('session_token', sessionToken);
+                if (githubToken) {
+                  localStorage.setItem('github_token', githubToken);
+                }
+
+                // Clear URL parameters after successful auth
+                const newUrl = new URL(window.location.href);
+                newUrl.search = '';
+                window.history.replaceState({}, '', newUrl.toString());
+                
+              } catch (error) {
+                console.warn('Session validation failed:', error);
+                // Clear any stored tokens on validation failure
+                localStorage.removeItem('session_token');
+                localStorage.removeItem('github_token');
+                set({
+                  user: null,
+                  sessionToken: null,
+                  githubToken: null,
+                  isAuthenticated: false,
+                  authLoading: false,
+                  authError: 'Session validation failed',
+                });
+              }
+            } else if (code) {
+              // We have authorization code but no session token yet, redirect to login
+              console.warn('Authorization code received but no session token, redirecting to login');
+              window.location.href = '/auth/login';
+            } else {
+              // No auth data in URL, check for stored session token
+              const storedSessionToken = localStorage.getItem('session_token');
+              const storedGithubToken = localStorage.getItem('github_token');
+              
+              if (storedSessionToken) {
+                try {
+                  const userData = await ApiService.validateSessionToken(storedSessionToken);
+                  const user: User = {
+                    id: userData.id,
+                    github_username: userData.github_username,
+                    github_user_id: userData.github_id,
+                    email: userData.email,
+                    display_name: userData.display_name,
+                    avatar_url: userData.avatar_url,
+                    created_at: new Date().toISOString(),
+                    last_login: new Date().toISOString(),
+                  };
+                  
+                  set({
+                    user: user,
+                    sessionToken: storedSessionToken,
+                    githubToken: storedGithubToken,
+                    isAuthenticated: true,
+                    authLoading: false,
+                    authError: null,
+                  });
+                } catch (error) {
+                  console.warn('Stored session validation failed:', error);
+                  localStorage.removeItem('session_token');
+                  localStorage.removeItem('github_token');
+                  set({
+                    user: null,
+                    sessionToken: null,
+                    githubToken: null,
+                    isAuthenticated: false,
+                    authLoading: false,
+                    authError: 'Stored session validation failed',
+                  });
+                }
+              } else {
+                // No stored token, check if we're on a protected route
+                const currentPath = window.location.pathname;
+                if (currentPath.startsWith('/auth/callback')) {
+                  // We're on callback page but no auth data, redirect to login
+                  window.location.href = '/auth/login';
+                } else {
+                  // Not on callback page, just set as not authenticated
+                  set({ authLoading: false });
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Auth initialization failed:', error);
+            set({
+              user: null,
+              sessionToken: null,
+              githubToken: null,
+              isAuthenticated: false,
+              authLoading: false,
+              authError: 'Auth initialization failed',
+            });
+          }
+        },
+
+        login: async () => {
+          try {
+            set({ authLoading: true, authError: null });
+            // Get login URL from backend and redirect
+            const { login_url } = await ApiService.getLoginUrl();
+            window.location.href = login_url;
+          } catch (error) {
+            console.error('Login failed:', error);
+            set({ authLoading: false, authError: 'Login failed' });
+            throw error;
+          }
+        },
+
+        logout: async () => {
+          try {
+            const { sessionToken } = get();
+            if (sessionToken) {
+              await ApiService.logout(sessionToken);
+            }
+          } catch (error) {
+            console.warn('Logout API call failed:', error);
+          } finally {
+            // Always clear local state and storage
+            localStorage.removeItem('session_token');
+            localStorage.removeItem('github_token');
+            set({
+              user: null,
+              sessionToken: null,
+              githubToken: null,
+              isAuthenticated: false,
+              authLoading: false,
+              authError: null,
+              activeSessionId: null,
+              error: null,
+              sessionInitialized: false,
+              sessionData: {
+                messages: [],
+                contextCards: [],
+                fileContext: [],
+                totalTokens: 0,
+                lastUpdated: null,
+              }
+            });
+            
+            // Redirect to login page
+            window.location.href = '/auth/login';
+          }
+        },
+
+        refreshAuth: async () => {
+          await get().initializeAuth();
+        },
+
+        setAuthLoading: (loading: boolean) =>
+          set({ authLoading: loading }),
+
+        setAuthError: (error: string | null) =>
+          set({ authError: error }),
+
+        // Session creation actions
+        createSessionForRepository: async (repository: SelectedRepository) => {
+          try {
+            set({ isLoading: true, error: null });
+            
+            const { sessionToken } = get();
+            if (!sessionToken) {
+              throw new Error('No session token available');
+            }
+
+            const repoOwner = repository.repository.owner?.login || repository.repository.full_name.split('/')[0];
+            const repoName = repository.repository.name;
+
+            const sessionData = await ApiService.createSession({
+              repo_owner: repoOwner,
+              repo_name: repoName,
+              repo_branch: repository.branch,
+              title: `Chat - ${repoOwner}/${repoName}`,
+            }, sessionToken);
+
+            set({ 
+              activeSessionId: sessionData.session_id,
+              selectedRepository: repository,
+              sessionInitialized: true,
+              isLoading: false,
+              error: null,
+            });
+
+            return sessionData.session_id;
+          } catch (error) {
+            console.error('Failed to create session:', error);
+            set({ 
+              isLoading: false, 
+              error: error instanceof Error ? error.message : 'Failed to create session' 
+            });
+            return null;
+          }
+        },
+
+        ensureSessionExists: async (sessionId: string) => {
+          try {
+            const { sessionToken } = get();
+            if (!sessionToken) {
+              return false;
+            }
+
+            // Try to get session context to verify it exists
+            await ApiService.getSessionContext(sessionId, sessionToken);
+            
+            set({ 
+              activeSessionId: sessionId,
+              sessionInitialized: true,
+              error: null,
+            });
+            
+            return true;
+          } catch (error) {
+            console.warn(`Session ${sessionId} does not exist or is not accessible,`, error);
+            set({ 
+              activeSessionId: null,
+              sessionInitialized: false,
+              error: 'Session not found',
+            });
+            return false;
+          }
         },
         
         // Core actions
@@ -261,6 +549,10 @@ export const useSessionStore = create<SessionState>()(
           activeTab: state.activeTab,
           sidebarCollapsed: state.sidebarCollapsed,
           sessionInitialized: state.sessionInitialized,
+          // persist auth state
+          user: state.user,
+          sessionToken: state.sessionToken,
+          isAuthenticated: state.isAuthenticated,
         }),
       }
     ),
@@ -270,90 +562,5 @@ export const useSessionStore = create<SessionState>()(
   )
 );
 
-// Example usage with React Query (commented out for now)
-/*
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
-// Session queries
-export const useSessions = () => {
-  return useQuery({
-    queryKey: ['sessions'],
-    queryFn: () => fetchSessions(),
-  });
-};
-
-export const useSession = (sessionId: string) => {
-  return useQuery({
-    queryKey: ['session', sessionId],
-    queryFn: () => fetchSession(sessionId),
-    enabled: !!sessionId,
-  });
-};
-
-// Chat message queries
-export const useChatMessages = (sessionId: string) => {
-  return useQuery({
-    queryKey: ['messages', sessionId],
-    queryFn: () => fetchMessages(sessionId),
-    enabled: !!sessionId,
-  });
-};
-
-export const useAddMessage = () => {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: addMessage,
-    onSuccess: (data, variables) => {
-      // Invalidate and refetch messages
-      queryClient.invalidateQueries({ queryKey: ['messages', variables.sessionId] });
-      
-      // Optimistically update the cache
-      queryClient.setQueryData(['messages', variables.sessionId], (old: any) => {
-        return old ? [...old, data] : [data];
-      });
-    },
-  });
-};
-
-// Context card queries
-export const useContextCards = (sessionId: string) => {
-  return useQuery({
-    queryKey: ['context-cards', sessionId],
-    queryFn: () => fetchContextCards(sessionId),
-    enabled: !!sessionId,
-  });
-};
-
-export const useAddContextCard = () => {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: addContextCard,
-    onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['context-cards', variables.sessionId] });
-    },
-  });
-};
-
-// File dependency queries
-export const useFileDependencies = (sessionId: string) => {
-  return useQuery({
-    queryKey: ['file-deps', sessionId],
-    queryFn: () => fetchFileDependencies(sessionId),
-    enabled: !!sessionId,
-  });
-};
-
-export const useAddFileDependency = () => {
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: addFileDependency,
-    onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['file-deps', variables.sessionId] });
-    },
-  });
-};
-*/
 

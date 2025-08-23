@@ -11,18 +11,15 @@ import {
   FileItem,
   CreateSessionMutationData,
   AddMessageMutationData,
-  UpdateMessageMutationData,
   AddContextCardMutationData,
   RemoveContextCardMutationData,
-  AddFileDependencyMutationData,
   MessageMutationContext,
   ContextCardMutationContext,
-
+  SelectedRepository,
 } from '../types';
 import type {
   ChatMessageResponse,
   ContextCardResponse,
-  FileEmbeddingResponse,
   SessionResponse
 } from '../types/api';
 
@@ -36,21 +33,11 @@ export const QueryKeys = {
   repositories: ['repositories'] as const,
 };
 
-// Session queries
-export const useSessions = () => {
-  const api = useApi();
-  
-  return useQuery({
-    queryKey: QueryKeys.sessions,
-    queryFn: () => api.getUserSessions?.() || Promise.resolve([]),
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes
-  });
-};
+
 
 export const useSession = (sessionId: string) => {
   const api = useApi();
-  const { setMessages } = useSessionStore();
+  const { setMessages, sessionToken } = useSessionStore();
   
   return useQuery({
     queryKey: QueryKeys.session(sessionId),
@@ -79,7 +66,7 @@ export const useSession = (sessionId: string) => {
       
       return context;
     },
-    enabled: !!sessionId,
+    enabled: !!sessionId && !!sessionToken,
     staleTime: 2 * 60 * 1000, // 2 minutes
     gcTime: 5 * 60 * 1000, // 5 minutes
   });
@@ -88,12 +75,12 @@ export const useSession = (sessionId: string) => {
 // Chat message queries
 export const useChatMessages = (sessionId: string) => {
   const api = useApi();
-  const { setMessages } = useSessionStore();
+  const { setMessages, sessionToken } = useSessionStore();
   
   return useQuery({
     queryKey: QueryKeys.messages(sessionId),
     queryFn: async (): Promise<ChatMessageAPI[]> => {
-      const messages = await api.getChatMessages(sessionId);
+      const messages = await api.getChatMessages(sessionId, 100);
       
       // Transform messages to frontend format
       const transformedMessages: ChatMessageAPI[] = messages.map((msg: ChatMessageResponse) => ({
@@ -117,7 +104,7 @@ export const useChatMessages = (sessionId: string) => {
       
       return transformedMessages;
     },
-    enabled: !!sessionId,
+    enabled: !!sessionId && !!sessionToken,
     staleTime: 30 * 1000, // 30 seconds
     gcTime: 5 * 60 * 1000, // 5 minutes
   });
@@ -173,31 +160,12 @@ export const useAddMessage = () => {
   });
 };
 
-export const useUpdateMessage = () => {
-  const api = useApi();
-  const queryClient = useQueryClient();
-  const { updateMessage } = useSessionStore();
-  
-  return useMutation({
-    mutationFn: async ({ sessionId, messageId, updates }: UpdateMessageMutationData) => {
-      return await api.updateChatMessage?.(sessionId, messageId, updates);
-    },
-    onSuccess: (_data: ChatMessageResponse | undefined, { sessionId, messageId, updates }: UpdateMessageMutationData) => {
-      // Update the cache
-      queryClient.setQueryData(QueryKeys.messages(sessionId), (old: ChatMessageAPI[] = []) =>
-        old.map(msg => msg.message_id === messageId ? { ...msg, ...updates } : msg)
-      );
-      
-      // Update Zustand store
-      updateMessage(messageId, updates);
-    },
-  });
-};
+
 
 // Context card queries
 export const useContextCards = (sessionId: string) => {
   const api = useApi();
-  const { setContextCards } = useSessionStore();
+  const { setContextCards, sessionToken } = useSessionStore();
   
   return useQuery({
     queryKey: QueryKeys.contextCards(sessionId),
@@ -217,7 +185,7 @@ export const useContextCards = (sessionId: string) => {
       
       return transformedCards;
     },
-    enabled: !!sessionId,
+    enabled: !!sessionId && !!sessionToken,
     staleTime: 2 * 60 * 1000, // 2 minutes
   });
 };
@@ -335,7 +303,7 @@ export const useRemoveContextCard = () => {
 // File dependency queries
 export const useFileDependencies = (sessionId: string) => {
   const api = useApi();
-  const { setFileContext } = useSessionStore();
+  const { setFileContext, sessionToken } = useSessionStore();
   
   return useQuery({
     queryKey: QueryKeys.fileDependencies(sessionId),
@@ -357,40 +325,12 @@ export const useFileDependencies = (sessionId: string) => {
       
       return transformedFiles;
     },
-    enabled: !!sessionId,
+    enabled: !!sessionId && !!sessionToken,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 };
 
-export const useAddFileDependency = () => {
-  const api = useApi();
-  const queryClient = useQueryClient();
-  const { addFileItem } = useSessionStore();
-  
-  return useMutation({
-    mutationFn: async ({ sessionId, fileDependency }: AddFileDependencyMutationData) => {
-      return await api.addFileDependency(sessionId, fileDependency);
-    },
-    onSuccess: (data: FileEmbeddingResponse, { sessionId }: AddFileDependencyMutationData) => {
-      // Transform the response and update stores
-      const newFile: FileItem = {
-        id: data.id.toString(),
-        name: data.file_name,
-        path: data.file_path,
-        type: 'INTERNAL' as const,
-        tokens: data.tokens,
-        category: data.file_type,
-        created_at: data.created_at,
-      };
-      
-      // Update Zustand store
-      addFileItem(newFile);
-      
-      // Invalidate and refetch
-      queryClient.invalidateQueries({ queryKey: QueryKeys.fileDependencies(sessionId) });
-    },
-  });
-};
+
 
 // Session management mutations
 export const useCreateSession = () => {
@@ -417,25 +357,34 @@ export const useCreateSession = () => {
   });
 };
 
-export const useDeleteSession = () => {
-  const api = useApi();
+// New hook for creating session from repository selection
+export const useCreateSessionFromRepository = () => {
+  const { createSessionForRepository } = useSessionStore();
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: async (sessionId: string) => {
-      return await api.deleteSession?.(sessionId);
+    mutationFn: async (repository: SelectedRepository) => {
+      return await createSessionForRepository(repository);
     },
-    onSuccess: (_data: { success: boolean; message: string }, sessionId: string) => {
-      // Clear Zustand store if this was the active session
-      // TODO: Only clear if this was the active session
-      
-      // Invalidate all related queries
-      queryClient.invalidateQueries({ queryKey: QueryKeys.sessions });
-      queryClient.removeQueries({ queryKey: QueryKeys.session(sessionId) });
-      queryClient.removeQueries({ queryKey: QueryKeys.messages(sessionId) });
-      queryClient.removeQueries({ queryKey: QueryKeys.contextCards(sessionId) });
-      queryClient.removeQueries({ queryKey: QueryKeys.fileDependencies(sessionId) });
+    onSuccess: (sessionId: string | null) => {
+      if (sessionId) {
+        // Invalidate sessions list
+        queryClient.invalidateQueries({ queryKey: QueryKeys.sessions });
+      }
     },
   });
 };
+
+// New hook for ensuring session exists
+export const useEnsureSessionExists = () => {
+  const { ensureSessionExists } = useSessionStore();
+  
+  return useMutation({
+    mutationFn: async (sessionId: string) => {
+      return await ensureSessionExists(sessionId);
+    },
+  });
+};
+
+
 
