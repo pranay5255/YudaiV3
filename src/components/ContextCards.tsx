@@ -44,11 +44,8 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   repositoryInfo 
 }) => {
   // Zustand store for state management
-  const { activeSessionId, selectedRepository } = useSessionStore();
-  const { selectedRepository: repoFromHook } = useRepository();
-  
-  // Use repository from hook if available, otherwise from store
-  const currentRepository = selectedRepository || repoFromHook;
+  const { activeSessionId } = useSessionStore();
+  const { selectedRepository } = useRepository();
   
   const api = useApi();
   const [isLoading, setIsLoading] = useState(false);
@@ -103,10 +100,10 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
 
   // Handle create GitHub issue with context cards using unified API
   const handleCreateGitHubIssue = useCallback(async () => {
-    const repoInfo = repositoryInfo || (currentRepository ? {
-      owner: currentRepository.repository.owner?.login || currentRepository.repository.full_name.split('/')[0],
-      name: currentRepository.repository.name,
-      branch: currentRepository.branch
+    const repoInfo = repositoryInfo || (selectedRepository ? {
+      owner: selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0],
+      name: selectedRepository.repository.name,
+      branch: selectedRepository.branch
     } : null);
     
     if (isLoading || !repoInfo) {
@@ -170,7 +167,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, repositoryInfo, currentRepository, cards, api, onShowIssuePreview, showError]);
+  }, [isLoading, repositoryInfo, selectedRepository, cards, api, onShowIssuePreview, showError]);
 
   return (
     <div className="h-full flex flex-col">
@@ -246,12 +243,12 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
         </div>
         <button
           onClick={handleCreateGitHubIssue}
-          disabled={cards.length === 0 || isLoading || (!repositoryInfo && !currentRepository)}
+          disabled={cards.length === 0 || isLoading || (!repositoryInfo && !selectedRepository)}
           className="w-full h-11 bg-primary hover:bg-primary/80 disabled:opacity-50
                    disabled:cursor-not-allowed text-white rounded-xl font-medium
                    transition-colors"
           title={
-            !repositoryInfo && !currentRepository
+            !repositoryInfo && !selectedRepository
               ? 'Select a repository first'
               : cards.length === 0
                 ? 'Add context cards first'

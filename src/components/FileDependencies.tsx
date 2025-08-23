@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { ChevronRight, ChevronDown, Plus, Folder, File, RefreshCw } from 'lucide-react';
 import { FileItem } from '../types';
 import { useSessionStore } from '../stores/sessionStore';
+import { useRepository } from '../hooks/useRepository';
 import {
   useFileDependencies,
   useAddContextCard
@@ -25,8 +26,9 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
   onShowError,
   repoUrl
 }) => {
-  // Zustand store for state management
-  const { activeSessionId, selectedRepository } = useSessionStore();
+  // Zustand store for session ID, repository hook for repository state
+  const { activeSessionId } = useSessionStore();
+  const { selectedRepository } = useRepository();
   
   // React Query hooks for data and mutations
   const { data: fileContext = [], isLoading, refetch } = useFileDependencies(activeSessionId || '');

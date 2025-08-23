@@ -42,11 +42,8 @@ export const Chat: React.FC<ChatProps> = ({
   onShowError
 }) => {
   // Session management hook for state management
-  const { activeSessionId, selectedRepository, isAuthenticated, user } = useSessionManagement();
-  const { selectedRepository: repoFromHook } = useRepository();
-  
-  // Use repository from hook if available, otherwise from store
-  const currentRepository = selectedRepository || repoFromHook;
+  const { activeSessionId, isAuthenticated, user } = useSessionManagement();
+  const { selectedRepository } = useRepository();
   
   // React Query hooks for data and mutations
   const { data: chatMessages = [] } = useChatMessages(activeSessionId || '');
@@ -71,7 +68,7 @@ export const Chat: React.FC<ChatProps> = ({
     contextCards: contextCards.length,
     fileContext: fileContext.length,
     sessionId: activeSessionId,
-    selectedRepository: currentRepository
+    selectedRepository: selectedRepository
   });
 
   // Simplified messages state without session management
@@ -120,23 +117,23 @@ export const Chat: React.FC<ChatProps> = ({
   // Auto-create session when repository is selected and user is authenticated
   useEffect(() => {
     console.log('[Chat] Repository, session, or auth changed:', {
-      selectedRepository: currentRepository,
+      selectedRepository: selectedRepository,
       sessionId: activeSessionId,
       isAuthenticated,
       user: !!user
     });
 
-    if (isAuthenticated && user && currentRepository && !activeSessionId && !sessionInitRef.current) {
+    if (isAuthenticated && user && selectedRepository && !activeSessionId && !sessionInitRef.current) {
       sessionInitRef.current = true;
       console.log('[Chat] Auto-creating session for selected repository');
 
-      const repoOwner = currentRepository.repository.owner?.login || currentRepository.repository.full_name.split('/')[0];
-      const repoName = currentRepository.repository.name;
+      const repoOwner = selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0];
+      const repoName = selectedRepository.repository.name;
 
       createSessionMutation.mutate({
         repoOwner,
         repoName,
-        repoBranch: currentRepository.branch,
+        repoBranch: selectedRepository.branch,
       }, {
         onSuccess: async (sessionData) => {
           console.log('[Chat] Session created successfully:', sessionData.session_id);
@@ -166,7 +163,7 @@ export const Chat: React.FC<ChatProps> = ({
         }
       });
     }
-  }, [isAuthenticated, user, currentRepository, activeSessionId, createSessionMutation, addMessageMutation, showError]);
+  }, [isAuthenticated, user, selectedRepository, activeSessionId, createSessionMutation, addMessageMutation, showError]);
 
   const handleAddToContext = useCallback(async (content: string) => {
     if (!activeSessionId) {
@@ -231,18 +228,18 @@ export const Chat: React.FC<ChatProps> = ({
         session_id: activeSessionId,
         message: { message_text: currentInput },
         context_cards: contextCards.map(card => card.id),
-        repo_owner: currentRepository?.repository.owner?.login || currentRepository?.repository.full_name.split('/')[0],
-        repo_name: currentRepository?.repository.name
+        repo_owner: selectedRepository?.repository.owner?.login || selectedRepository?.repository.full_name.split('/')[0],
+        repo_name: selectedRepository?.repository.name
       });
 
       const response = await api.sendChatMessage({
         session_id: activeSessionId,
         message: { message_text: currentInput },
         context_cards: contextCards.map(card => card.id),
-        repository: currentRepository ? {
-          owner: currentRepository.repository.owner?.login || currentRepository.repository.full_name.split('/')[0],
-          name: currentRepository.repository.name,
-          branch: currentRepository.branch
+        repository: selectedRepository ? {
+          owner: selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0],
+          name: selectedRepository.repository.name,
+          branch: selectedRepository.branch
         } : undefined,
       });
     
@@ -270,7 +267,7 @@ export const Chat: React.FC<ChatProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, activeSessionId, contextCards, currentRepository, api, showError, addMessageMutation]);
+  }, [input, isLoading, activeSessionId, contextCards, selectedRepository, api, showError, addMessageMutation]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -280,10 +277,10 @@ export const Chat: React.FC<ChatProps> = ({
   };
 
   const handleCreateGitHubIssue = useCallback(async () => {
-    if (isCreatingIssue || !currentRepository) {
+    if (isCreatingIssue || !selectedRepository) {
       console.log('[Chat] Issue creation blocked:', {
         isCreatingIssue,
-        hasRepository: !!currentRepository
+        hasRepository: !!selectedRepository
       });
       return;
     }
@@ -317,14 +314,14 @@ export const Chat: React.FC<ChatProps> = ({
 
       // Prepare the request using the proper API method
       const request: CreateIssueWithContextRequest = {
-        title: `Issue from Chat Session - ${currentRepository.repository.name}`,
+        title: `Issue from Chat Session - ${selectedRepository.repository.name}`,
         description: 'This issue was generated from a chat conversation with file dependency context.',
         chat_messages: conversationMessages,
         file_context: fileContextItems,
         repository_info: {
-          owner: currentRepository.repository.full_name.split('/')[0],
-          name: currentRepository.repository.full_name.split('/')[1],
-          branch: currentRepository.branch
+          owner: selectedRepository.repository.full_name.split('/')[0],
+          name: selectedRepository.repository.full_name.split('/')[1],
+          branch: selectedRepository.branch
         },
         priority: 'medium'
       };
@@ -356,14 +353,14 @@ export const Chat: React.FC<ChatProps> = ({
     } finally {
       setIsCreatingIssue(false);
     }
-  }, [isCreatingIssue, currentRepository, messages, fileContext, api, onShowIssuePreview, showError]);
+  }, [isCreatingIssue, selectedRepository, messages, fileContext, api, onShowIssuePreview, showError]);
 
 
 
   return (
     <div className="h-full flex flex-col">
       {/* Session Status Indicator */}
-      {!currentRepository && (
+      {!selectedRepository && (
         <div className="bg-yellow-600/20 border border-yellow-600/30 rounded-lg p-4 mb-4">
           <div className="text-yellow-400 font-medium mb-2">No Active Repository</div>
           <div className="text-yellow-300 text-sm mb-3">
@@ -458,13 +455,13 @@ export const Chat: React.FC<ChatProps> = ({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder={currentRepository ? "Type your message..." : "Select a repository to start chatting..."}
-            disabled={!currentRepository || isLoading}
+            placeholder={selectedRepository ? "Type your message..." : "Select a repository to start chatting..."}
+            disabled={!selectedRepository || isLoading}
             className="flex-1 bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 text-white placeholder-zinc-400 focus:outline-none focus:border-blue-500 disabled:opacity-50"
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isLoading || !currentRepository}
+            disabled={!input.trim() || isLoading || !selectedRepository}
             className="bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg flex items-center gap-2"
           >
             {isLoading ? (
@@ -476,9 +473,9 @@ export const Chat: React.FC<ChatProps> = ({
           </button>
           <button
             onClick={handleCreateGitHubIssue}
-            disabled={isCreatingIssue || userMessageCount < 1 || !currentRepository}
+            disabled={isCreatingIssue || userMessageCount < 1 || !selectedRepository}
             className="bg-green-600 hover:bg-green-700 disabled:bg-zinc-600 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg flex items-center gap-2"
-            title={!currentRepository ? 'Select a repository first' : userMessageCount < 1 ? 'Send at least one message' : 'Create GitHub issue from conversation'}
+            title={!selectedRepository ? 'Select a repository first' : userMessageCount < 1 ? 'Send at least one message' : 'Create GitHub issue from conversation'}
           >
             {isCreatingIssue ? (
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />

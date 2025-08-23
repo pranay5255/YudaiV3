@@ -1,9 +1,12 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Wifi } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import { useSessionStore } from '../stores/sessionStore';
 
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
+  onReauth?: () => void;
 }
 
 interface State {
@@ -14,7 +17,7 @@ interface State {
   isNetworkError: boolean;
 }
 
-export class ErrorBoundary extends Component<Props, State> {
+class ErrorBoundaryClass extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
@@ -162,3 +165,41 @@ export class ErrorBoundary extends Component<Props, State> {
     return this.props.children;
   }
 }
+
+// Wrapper component that provides auth context to the ErrorBoundary
+interface ErrorBoundaryWrapperProps {
+  children: ReactNode;
+  fallback?: ReactNode;
+}
+
+export const ErrorBoundary: React.FC<ErrorBoundaryWrapperProps> = ({
+  children,
+  fallback
+}) => {
+  const { login, logout } = useAuth();
+  const { setAuthError } = useSessionStore();
+
+  const handleReauth = async () => {
+    try {
+      console.log('[ErrorBoundary] Attempting to re-authenticate user');
+      setAuthError(null); // Clear any existing auth errors
+      await logout(); // Clear current session state
+      await login();  // Redirect to login through session store
+    } catch (error) {
+      console.error('[ErrorBoundary] Re-authentication failed:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Re-authentication failed';
+      setAuthError(errorMessage);
+      // Fallback to direct redirect if session store login fails
+      window.location.href = '/auth/login';
+    }
+  };
+
+  return (
+    <ErrorBoundaryClass
+      fallback={fallback}
+      onReauth={handleReauth}
+    >
+      {children}
+    </ErrorBoundaryClass>
+  );
+};
