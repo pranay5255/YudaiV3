@@ -3,8 +3,6 @@
 // State flow from frontend calls to database operations is documented in context/dbSchema.md
 import { UserIssueResponse } from '../types';
 import type {
-  CreateSessionRequest,
-  CreateSessionResponse,
   ValidateSessionResponse,
   LogoutRequest,
   LogoutResponse,
@@ -24,6 +22,7 @@ import type {
   ExtractFileDependenciesRequest,
   ExtractFileDependenciesResponse,
   CreateSessionDaifuRequest,
+  UpdateSessionRequest,
   SessionResponse,
   SessionContextResponse,
   CreateChatMessageRequest,
@@ -109,19 +108,7 @@ export class ApiService {
     }
   }
 
-  // Authentication API Methods
-  static async createAuthSession(request: CreateSessionRequest): Promise<CreateSessionResponse> {
-    const response = await fetch(`/auth/api/create-session`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-    });
-    return ApiService.handleResponse<CreateSessionResponse>(response);
-  }
-
-  // Session Management API Methods
+  // Session Management API Methods (backend/stateManagement/session_routes.py)
   static async createSession(request: CreateSessionDaifuRequest, sessionToken?: string): Promise<SessionResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions`, {
       method: 'POST',
@@ -147,7 +134,7 @@ export class ApiService {
     return ApiService.handleResponse<SessionResponse[]>(response);
   }
 
-  static async updateSession(sessionId: string, updates: Partial<SessionResponse>, sessionToken?: string): Promise<SessionResponse> {
+  static async updateSession(sessionId: string, updates: UpdateSessionRequest, sessionToken?: string): Promise<SessionResponse> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
       method: 'PUT',
       headers: ApiService.getAuthHeaders(sessionToken),
@@ -164,6 +151,7 @@ export class ApiService {
     return ApiService.handleResponse<{success: boolean, message: string}>(response);
   }
 
+  // Authentication API Methods (backend/auth/auth_routes.py)
   static async validateSessionToken(sessionToken: string): Promise<ValidateSessionResponse> {
     console.log('[ApiService] Validating session token:', sessionToken ? 'Token provided' : 'No token');
     console.log('[ApiService] Making request to:', `/auth/api/user`);
@@ -214,7 +202,7 @@ export class ApiService {
     return ApiService.handleResponse<LoginUrlResponse>(response);
   }
 
-  // Chat API Methods
+  // Chat API Methods (backend/daifuUserAgent/chat_api.py)
   static async sendChatMessage(request: ChatRequest, sessionToken?: string): Promise<ChatResponse> {
     // Validate session_id is required
     if (!request.session_id?.trim()) {
@@ -238,7 +226,7 @@ export class ApiService {
     return ApiService.handleResponse<CreateIssueFromChatResponse>(response);
   }
 
-  // Issue Management API Methods
+  // Issue Management API Methods (backend/issueChatServices/issue_service.py)
   static async createIssueWithContext(request: CreateIssueWithContextRequest, githubToken?: string): Promise<IssueCreationResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/from-session-enhanced`, {
       method: 'POST',
@@ -291,7 +279,7 @@ export class ApiService {
     return ApiService.handleResponse<{message: string}>(response);
   }
 
-  // File Dependencies API Methods
+  // File Dependencies API Methods (backend/repo_processorGitIngest/filedeps.py)
   static async analyzeFileDependencies(files: File[], githubToken?: string): Promise<FileAnalysisResponse> {
     const formData = new FormData();
     files.forEach(file => formData.append('files', file));
@@ -328,7 +316,7 @@ export class ApiService {
     return ApiService.handleResponse<FileContextItem[]>(response);
   }
 
-  // Repository Management API Methods
+  // Repository Management API Methods (backend/github/github_routes.py)
   static async getRepositories(githubToken?: string): Promise<RepositoryResponse> {
     const response = await fetch(`${API_BASE_URL}/repositories`, {
       method: 'GET',
@@ -378,7 +366,7 @@ export class ApiService {
     return ApiService.handleResponse<GitHubRepositoryAPI[]>(response);
   }
 
-  // Chat Messages CRUD
+  // Chat Messages CRUD (backend/stateManagement/session_components_CRUD.py)
   static async addChatMessage(
     sessionId: string, 
     request: CreateChatMessageRequest, 
@@ -430,7 +418,7 @@ export class ApiService {
     return ApiService.handleResponse<{success: boolean, message: string}>(response);
   }
 
-  // Context Cards CRUD
+  // Context Cards CRUD (backend/stateManagement/session_components_CRUD.py)
   static async addContextCard(
     sessionId: string, 
     request: CreateContextCardRequest, 
@@ -467,7 +455,7 @@ export class ApiService {
     return ApiService.handleResponse<{success: boolean, message: string}>(response);
   }
 
-  // File Dependencies CRUD - Fixed paths to use consistent /file-deps
+  // File Dependencies CRUD (backend/stateManagement/session_components_CRUD.py)
   static async addFileDependency(
     sessionId: string, 
     request: CreateFileEmbeddingRequest, 
@@ -517,6 +505,4 @@ export class ApiService {
     return ApiService.handleResponse<{success: boolean, message: string}>(response);
   }
 
-  // DEAD CODE REMOVED: analyzeFileDependencies and getFileDependencies methods
-  // These are not used anywhere in the frontend components
 }
