@@ -49,6 +49,7 @@ interface SessionState {
   // Session creation actions
   createSessionForRepository: (repository: SelectedRepository) => Promise<string | null>;
   ensureSessionExists: (sessionId: string) => Promise<boolean>;
+  validatePersistedSession: () => Promise<void>;
   
   // Core actions
   setActiveSession: (sessionId: string) => void;
@@ -171,6 +172,9 @@ export const useSessionStore = create<SessionState>()(
               // Store session token in localStorage for persistence
               localStorage.setItem('session_token', sessionToken);
               
+              // Clear any old persisted session that might be invalid
+              get().clearSession();
+              
               // Clear URL parameters after successful auth
               const newUrl = new URL(window.location.href);
               newUrl.search = '';
@@ -211,6 +215,9 @@ export const useSessionStore = create<SessionState>()(
                     authLoading: false,
                     authError: null,
                   });
+
+                  // After successful auth, validate any persisted session
+                  await get().validatePersistedSession();
                 } catch (error) {
                   console.warn('[SessionStore] Stored session validation failed:', error);
                   console.error('[SessionStore] Stored session validation error details:', {
@@ -219,6 +226,10 @@ export const useSessionStore = create<SessionState>()(
                   });
                   localStorage.removeItem('session_token');
                   localStorage.removeItem('github_token');
+                  
+                  // Clear any persisted session state since auth failed
+                  get().clearSession();
+                  
                   set({
                     user: null,
                     sessionToken: null,
@@ -240,6 +251,10 @@ export const useSessionStore = create<SessionState>()(
                 } else {
                   // Not on callback page, explicitly set as not authenticated
                   console.log('[SessionStore] Setting user as not authenticated');
+                  
+                  // Clear any persisted session state since not authenticated
+                  get().clearSession();
+                  
                   set({
                     user: null,
                     sessionToken: null,
@@ -258,6 +273,10 @@ export const useSessionStore = create<SessionState>()(
               error: error instanceof Error ? error.message : error,
               stack: error instanceof Error ? error.stack : undefined
             });
+            
+            // Clear any persisted session state since auth initialization failed
+            get().clearSession();
+            
             set({
               user: null,
               sessionToken: null,
@@ -371,13 +390,15 @@ export const useSessionStore = create<SessionState>()(
           try {
             const { sessionToken } = get();
             if (!sessionToken) {
+              console.warn('[SessionStore] No session token available for session validation');
+              get().clearSession();
               return false;
             }
 
             // Try to get session context to verify it exists
             await ApiService.getSessionContext(sessionId, sessionToken);
             
-            set({ 
+            set({
               activeSessionId: sessionId,
               sessionInitialized: true,
               error: null,
@@ -385,13 +406,63 @@ export const useSessionStore = create<SessionState>()(
             
             return true;
           } catch (error) {
-            console.warn(`Session ${sessionId} does not exist or is not accessible,`, error);
-            set({ 
-              activeSessionId: null,
-              sessionInitialized: false,
-              error: 'Session not found',
-            });
+            console.warn(`[SessionStore] Session ${sessionId} does not exist or is not accessible:`, error);
+            
+            // Check if it's a session not found error
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const isSessionNotFound = errorMessage.includes('Session not found') ||
+                                     errorMessage.includes('404') ||
+                                     errorMessage.includes('Not Found');
+            
+            if (isSessionNotFound) {
+              console.log('[SessionStore] Session not found, clearing invalid session');
+              get().clearSession();
+              set({ error: 'Session not found - cleared invalid session' });
+            } else {
+              set({
+                activeSessionId: null,
+                sessionInitialized: false,
+                error: 'Session validation failed',
+              });
+            }
+            
             return false;
+          }
+        },
+
+        validatePersistedSession: async () => {
+          const { activeSessionId, sessionToken } = get();
+          
+          if (!activeSessionId || !sessionToken) {
+            console.log('[SessionStore] No persisted session to validate');
+            return;
+          }
+
+          console.log(`[SessionStore] Validating persisted session: ${activeSessionId}`);
+          
+          try {
+            // Try to validate the persisted session
+            await ApiService.getSessionContext(activeSessionId, sessionToken);
+            console.log(`[SessionStore] Persisted session ${activeSessionId} is valid`);
+            
+            // Session is valid, mark as initialized
+            set({
+              sessionInitialized: true,
+              error: null,
+            });
+          } catch (error) {
+            console.warn(`[SessionStore] Persisted session ${activeSessionId} is invalid:`, error);
+            
+            // Check if it's a session not found error
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const isSessionNotFound = errorMessage.includes('Session not found') ||
+                                     errorMessage.includes('404') ||
+                                     errorMessage.includes('Not Found');
+            
+            if (isSessionNotFound) {
+              console.log('[SessionStore] Persisted session not found, clearing');
+              get().clearSession();
+            }
           }
         },
         
@@ -399,11 +470,13 @@ export const useSessionStore = create<SessionState>()(
         setActiveSession: (sessionId: string) =>
           set({ activeSessionId: sessionId, error: null, sessionInitialized: true }),
         
-        clearSession: () =>
-          set({ 
-            activeSessionId: null, 
+        clearSession: () => {
+          console.log('[SessionStore] Clearing session state');
+          set({
+            activeSessionId: null,
             error: null,
             sessionInitialized: false,
+            selectedRepository: null,
             sessionData: {
               messages: [],
               contextCards: [],
@@ -411,7 +484,8 @@ export const useSessionStore = create<SessionState>()(
               totalTokens: 0,
               lastUpdated: null,
             }
-          }),
+          });
+        },
         
         setLoading: (loading: boolean) =>
           set({ isLoading: loading }),

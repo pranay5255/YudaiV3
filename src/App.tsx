@@ -10,6 +10,7 @@ import { DetailModal } from './components/DetailModal';
 import { ToastContainer } from './components/Toast';
 import { RepositorySelectionToast } from './components/RepositorySelectionToast';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { SessionErrorBoundary } from './components/SessionErrorBoundary';
 import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository, FileItem } from './types';
 import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
@@ -58,11 +59,11 @@ function AppContent() {
   const { setSelectedRepository, hasSelectedRepository } = useRepository();
   
   // Session management hook for state management
-  const { 
-    activeSessionId, 
-    activeTab, 
+  const {
+    activeSessionId,
+    activeTab,
     setActiveTab,
-    sidebarCollapsed, 
+    sidebarCollapsed,
     setSidebarCollapsed
   } = useSessionManagement();
   
@@ -304,10 +305,28 @@ function App() {
     initializeAuth();
   }, [initializeAuth]);
 
+  // Handle session errors by clearing session and optionally logging out
+  const handleSessionError = () => {
+    console.log('[App] Handling session error - clearing session state');
+    // Don't automatically logout as user might still be authenticated
+    // Just clear the invalid session
+  };
+
+  // Handle retry by re-initializing auth
+  const handleRetry = () => {
+    console.log('[App] Retrying after error - re-initializing auth');
+    initializeAuth();
+  };
+
   return (
-    <ProtectedRoute>
-      <AppContent />
-    </ProtectedRoute>
+    <SessionErrorBoundary
+      onSessionError={handleSessionError}
+      onRetry={handleRetry}
+    >
+      <ProtectedRoute>
+        <AppContent />
+      </ProtectedRoute>
+    </SessionErrorBoundary>
   );
 }
 
