@@ -47,7 +47,9 @@ This module provides authentication services for YudaiV3 using GitHub OAuth. The
 
 ### 2. Validate Session Token
 
-**Endpoint**: `GET /auth/api/user?session_token=<token>`
+**Endpoint**: `GET /auth/api/user`
+
+**Headers**: `Authorization: Bearer <session_token>`
 
 **Description**: Validates a session token and returns user information.
 

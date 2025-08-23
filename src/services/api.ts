@@ -166,13 +166,14 @@ export class ApiService {
 
   static async validateSessionToken(sessionToken: string): Promise<ValidateSessionResponse> {
     console.log('[ApiService] Validating session token:', sessionToken ? 'Token provided' : 'No token');
-    console.log('[ApiService] Making request to:', `/auth/api/user?session_token=${sessionToken}`);
+    console.log('[ApiService] Making request to:', `/auth/api/user`);
     
     try {
-      const response = await fetch(`/auth/api/user?session_token=${sessionToken}`, {
+      const response = await fetch(`/auth/api/user`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionToken}`,
         },
       });
       
