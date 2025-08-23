@@ -8,8 +8,8 @@ RUN npm install -g pnpm
 WORKDIR /app
 
 # Accept build args for environment variables
-ARG VITE_API_URL
-ENV VITE_API_URL=$VITE_API_URL
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 # Copy package files
 COPY package*.json pnpm-lock.yaml* ./

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { SelectedRepository, TabType, ContextCard, FileItem, ChatMessageAPI, GitHubRepository, User } from '../types';
 import { ApiService } from '../services/api';
+import { sessionApi } from '../services/sessionApi';
 
 // Enhanced types for the session store with auth state
 interface SessionState {
@@ -360,12 +361,15 @@ export const useSessionStore = create<SessionState>()(
             const repoOwner = repository.repository.owner?.login || repository.repository.full_name.split('/')[0];
             const repoName = repository.repository.name;
 
-            const sessionData = await ApiService.createSession({
-              repo_owner: repoOwner,
-              repo_name: repoName,
-              repo_branch: repository.branch,
-              title: `Chat - ${repoOwner}/${repoName}`,
-            }, sessionToken);
+            const sessionData = await sessionApi.createSession(
+              {
+                repo_owner: repoOwner,
+                repo_name: repoName,
+                repo_branch: repository.branch,
+                title: `Chat - ${repoOwner}/${repoName}`,
+              },
+              sessionToken,
+            );
 
             set({ 
               activeSessionId: sessionData.session_id,
@@ -396,7 +400,7 @@ export const useSessionStore = create<SessionState>()(
             }
 
             // Try to get session context to verify it exists
-            await ApiService.getSessionContext(sessionId, sessionToken);
+            await sessionApi.getSessionContext(sessionId, sessionToken);
             
             set({
               activeSessionId: sessionId,
@@ -442,7 +446,7 @@ export const useSessionStore = create<SessionState>()(
           
           try {
             // Try to validate the persisted session
-            await ApiService.getSessionContext(activeSessionId, sessionToken);
+            await sessionApi.getSessionContext(activeSessionId, sessionToken);
             console.log(`[SessionStore] Persisted session ${activeSessionId} is valid`);
             
             // Session is valid, mark as initialized

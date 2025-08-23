@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from 'react';
 import { ApiService } from '../services/api';
+import { sessionApi } from '../services/sessionApi';
 import { useAuth } from './useAuth';
 
 /**
@@ -18,16 +19,15 @@ export const useApi = () => {
       getLoginUrl: ApiService.getLoginUrl,
 
       // Session management methods
-      createSession: (request: Parameters<typeof ApiService.createSession>[0]) =>
-        ApiService.createSession(request, sessionToken || undefined),
+      createSession: (request: Parameters<typeof sessionApi.createSession>[0]) =>
+        sessionApi.createSession(request, sessionToken || undefined),
       getSessionContext: (sessionId: string) =>
-        ApiService.getSessionContext(sessionId, sessionToken || undefined),
-      getUserSessions: () =>
-        ApiService.getUserSessions(sessionToken || undefined),
-      updateSession: (sessionId: string, updates: Parameters<typeof ApiService.updateSession>[1]) =>
-        ApiService.updateSession(sessionId, updates, sessionToken || undefined),
+        sessionApi.getSessionContext(sessionId, sessionToken || undefined),
+      getUserSessions: () => sessionApi.getUserSessions(sessionToken || undefined),
+      updateSession: (sessionId: string, updates: Parameters<typeof sessionApi.updateSession>[1]) =>
+        sessionApi.updateSession(sessionId, updates, sessionToken || undefined),
       deleteSession: (sessionId: string) =>
-        ApiService.deleteSession(sessionId, sessionToken || undefined),
+        sessionApi.deleteSession(sessionId, sessionToken || undefined),
 
       // Chat methods
       sendChatMessage: (request: Parameters<typeof ApiService.sendChatMessage>[0]) =>
@@ -58,32 +58,35 @@ export const useApi = () => {
         ApiService.getRepositoryBranches(owner, repo, sessionToken || undefined),
 
       // Chat Messages CRUD methods
-      addChatMessage: (sessionId: string, request: Parameters<typeof ApiService.addChatMessage>[1]) =>
-        ApiService.addChatMessage(sessionId, request, sessionToken || undefined),
+      addChatMessage: (sessionId: string, request: Parameters<typeof sessionApi.addChatMessage>[1]) =>
+        sessionApi.addChatMessage(sessionId, request, sessionToken || undefined),
       getChatMessages: (sessionId: string, limit?: number) =>
-        ApiService.getChatMessages(sessionId, limit, sessionToken || undefined),
-      updateChatMessage: (sessionId: string, messageId: string, updates: Parameters<typeof ApiService.updateChatMessage>[2]) =>
-        ApiService.updateChatMessage(sessionId, messageId, updates, sessionToken || undefined),
+        sessionApi.getChatMessages(sessionId, limit, sessionToken || undefined),
+      updateChatMessage: (
+        sessionId: string,
+        messageId: string,
+        updates: Parameters<typeof sessionApi.updateChatMessage>[2],
+      ) => sessionApi.updateChatMessage(sessionId, messageId, updates, sessionToken || undefined),
       deleteChatMessage: (sessionId: string, messageId: string) =>
-        ApiService.deleteChatMessage(sessionId, messageId, sessionToken || undefined),
+        sessionApi.deleteChatMessage(sessionId, messageId, sessionToken || undefined),
 
       // Context Cards CRUD methods
-      addContextCard: (sessionId: string, request: Parameters<typeof ApiService.addContextCard>[1]) =>
-        ApiService.addContextCard(sessionId, request, sessionToken || undefined),
+      addContextCard: (sessionId: string, request: Parameters<typeof sessionApi.addContextCard>[1]) =>
+        sessionApi.addContextCard(sessionId, request, sessionToken || undefined),
       getContextCards: (sessionId: string) =>
-        ApiService.getContextCards(sessionId, sessionToken || undefined),
+        sessionApi.getContextCards(sessionId, sessionToken || undefined),
       deleteContextCard: (sessionId: string, cardId: number) =>
-        ApiService.deleteContextCard(sessionId, cardId, sessionToken || undefined),
+        sessionApi.deleteContextCard(sessionId, cardId, sessionToken || undefined),
 
       // File Dependencies CRUD methods
-      addFileDependency: (sessionId: string, request: Parameters<typeof ApiService.addFileDependency>[1]) =>
-        ApiService.addFileDependency(sessionId, request, sessionToken || undefined),
+      addFileDependency: (sessionId: string, request: Parameters<typeof sessionApi.addFileDependency>[1]) =>
+        sessionApi.addFileDependency(sessionId, request, sessionToken || undefined),
       getFileDependenciesSession: (sessionId: string) =>
-        ApiService.getFileDependenciesSession(sessionId, sessionToken || undefined),
+        sessionApi.getFileDependenciesSession(sessionId, sessionToken || undefined),
       extractFileDependenciesForSession: (sessionId: string, repoUrl: string) =>
-        ApiService.extractFileDependenciesForSession(sessionId, repoUrl, sessionToken || undefined),
+        sessionApi.extractFileDependenciesForSession(sessionId, repoUrl, sessionToken || undefined),
       deleteFileDependency: (sessionId: string, fileId: number) =>
-        ApiService.deleteFileDependency(sessionId, fileId, sessionToken || undefined),
+        sessionApi.deleteFileDependency(sessionId, fileId, sessionToken || undefined),
 
       // GitHub integration methods
       createGitHubIssueFromUserIssue: (issueId: string) =>
