@@ -64,7 +64,7 @@ async def auth_callback(
             error_msg = "Authorized, but no code provided."
             logger.warning("OAuth callback received without authorization code")
             return RedirectResponse(
-                url=f"{os.getenv('FRONTEND_BASE_URL','http://localhost:3000')}/auth/callback?error={error_msg}",
+                url=f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/?error={error_msg}",
                 status_code=302
             )
         
@@ -117,7 +117,7 @@ async def auth_callback(
             "github_id": user.github_user_id
         }
         
-        redirect_url = f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/auth/callback?{urlencode(auth_params)}"
+        redirect_url = f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/auth/success?{urlencode(auth_params)}"
         logger.info(f"Redirecting user {user.github_username} to frontend with session token")
         
         return RedirectResponse(url=redirect_url, status_code=302)

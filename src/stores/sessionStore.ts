@@ -233,7 +233,7 @@ export const useSessionStore = create<SessionState>()(
                 console.log('[SessionStore] No stored session token found');
                 const currentPath = window.location.pathname;
                 console.log('[SessionStore] Current path:', currentPath);
-                if (currentPath.startsWith('/auth/callback')) {
+                if (currentPath.startsWith('/auth/callback') || currentPath.startsWith('/auth/success')) {
                   // We're on callback page but no auth data, redirect to login
                   console.log('[SessionStore] On callback page without auth data, redirecting to login');
                   window.location.href = '/auth/login';
