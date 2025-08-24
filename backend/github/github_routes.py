@@ -71,124 +71,124 @@ async def get_repository_info(
             detail=str(e)
         )
 
-@router.post("/repositories/{owner}/{repo}/issues", response_model=GitHubIssue)
-async def create_repository_issue(
-    owner: str,
-    repo: str,
-    request: CreateIssueRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Create a new issue in a repository
-    """
-    try:
-        return await create_issue(
-            owner=owner,
-            repo=repo,
-            title=request.title,
-            body=request.description,
-            current_user=current_user,
-            db=db,
-            labels=getattr(request, "labels", None),
-            assignees=getattr(request, "assignees", None)
-        )
-    except GitHubAPIError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+# @router.post("/repositories/{owner}/{repo}/issues", response_model=GitHubIssue)
+# async def create_repository_issue(
+#     owner: str,
+#     repo: str,
+#     request: CreateIssueRequest,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Create a new issue in a repository
+#     """
+#     try:
+#         return await create_issue(
+#             owner=owner,
+#             repo=repo,
+#             title=request.title,
+#             body=request.description,
+#             current_user=current_user,
+#             db=db,
+#             labels=getattr(request, "labels", None),
+#             assignees=getattr(request, "assignees", None)
+#         )
+#     except GitHubAPIError as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail=str(e)
+#         )
 
-@router.get("/repositories/{owner}/{repo}/issues", response_model=List[GitHubIssue])
-async def get_repository_issues_list(
-    owner: str,
-    repo: str,
-    state: str = Query("open", description="Issue state: open, closed, all"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Get issues for a repository
-    """
-    try:
-        return await get_repository_issues(owner, repo, state, current_user, db)
-    except GitHubAPIError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+# @router.get("/repositories/{owner}/{repo}/issues", response_model=List[GitHubIssue])
+# async def get_repository_issues_list(
+#     owner: str,
+#     repo: str,
+#     state: str = Query("open", description="Issue state: open, closed, all"),
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Get issues for a repository
+#     """
+#     try:
+#         return await get_repository_issues(owner, repo, state, current_user, db)
+#     except GitHubAPIError as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail=str(e)
+#         )
 
-@router.get("/repositories/{owner}/{repo}/pulls", response_model=List[GitHubPullRequest])
-async def get_repository_pulls_list(
-    owner: str,
-    repo: str,
-    state: str = Query("open", description="PR state: open, closed, all"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Get pull requests for a repository
-    """
-    try:
-        return await get_repository_pulls(owner, repo, state, current_user, db)
-    except GitHubAPIError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+# @router.get("/repositories/{owner}/{repo}/pulls", response_model=List[GitHubPullRequest])
+# async def get_repository_pulls_list(
+#     owner: str,
+#     repo: str,
+#     state: str = Query("open", description="PR state: open, closed, all"),
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Get pull requests for a repository
+#     """
+#     try:
+#         return await get_repository_pulls(owner, repo, state, current_user, db)
+#     except GitHubAPIError as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail=str(e)
+#         )
 
-@router.get("/repositories/{owner}/{repo}/commits", response_model=List[GitHubCommit])
-async def get_repository_commits_list(
-    owner: str,
-    repo: str,
-    branch: str = Query("main", description="Branch name"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Get commits for a repository branch
-    """
-    try:
-        return await get_repository_commits(owner, repo, branch, current_user, db)
-    except GitHubAPIError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+# @router.get("/repositories/{owner}/{repo}/commits", response_model=List[GitHubCommit])
+# async def get_repository_commits_list(
+#     owner: str,
+#     repo: str,
+#     branch: str = Query("main", description="Branch name"),
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Get commits for a repository branch
+#     """
+#     try:
+#         return await get_repository_commits(owner, repo, branch, current_user, db)
+#     except GitHubAPIError as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail=str(e)
+#         )
 
-@router.get("/repositories/{owner}/{repo}/branches", response_model=List[GitHubBranch])
-async def get_repository_branches_list(
-    owner: str,
-    repo: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Get branches for a repository
-    """
-    try:
-        return await get_repository_branches(owner, repo, current_user, db)
-    except GitHubAPIError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+# @router.get("/repositories/{owner}/{repo}/branches", response_model=List[GitHubBranch])
+# async def get_repository_branches_list(
+#     owner: str,
+#     repo: str,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Get branches for a repository
+#     """
+#     try:
+#         return await get_repository_branches(owner, repo, current_user, db)
+#     except GitHubAPIError as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail=str(e)
+#         )
 
-@router.get("/search/repositories", response_model=GitHubSearchResponse)
-async def search_github_repositories(
-    q: str = Query(..., description="Search query"),
-    sort: str = Query("stars", description="Sort field: stars, forks, help-wanted-issues, updated"),
-    order: str = Query("desc", description="Sort order: desc, asc"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Search repositories on GitHub
-    """
-    try:
-        return await search_repositories(q, current_user, db, sort, order)
-    except GitHubAPIError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+# @router.get("/search/repositories", response_model=GitHubSearchResponse)
+# async def search_github_repositories(
+#     q: str = Query(..., description="Search query"),
+#     sort: str = Query("stars", description="Sort field: stars, forks, help-wanted-issues, updated"),
+#     order: str = Query("desc", description="Sort order: desc, asc"),
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Search repositories on GitHub
+#     """
+#     try:
+#         return await search_repositories(q, current_user, db, sort, order)
+#     except GitHubAPIError as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail=str(e)
+#         )

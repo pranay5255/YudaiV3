@@ -292,61 +292,61 @@ class IssueService:
             
             return UserIssueResponse.model_validate(issue)
     
-    @staticmethod
-    def get_issue_statistics(
-        db: Session,
-        user_id: int
-    ) -> Dict[str, Any]:
-        """Get comprehensive statistics for user issues with session context"""
-        total_issues = db.query(UserIssue).filter(UserIssue.user_id == user_id).count()
+    # @staticmethod
+    # def get_issue_statistics(
+    #     db: Session,
+    #     user_id: int
+    # ) -> Dict[str, Any]:
+    #     """Get comprehensive statistics for user issues with session context"""
+    #     total_issues = db.query(UserIssue).filter(UserIssue.user_id == user_id).count()
         
-        pending_issues = db.query(UserIssue).filter(
-            and_(
-                UserIssue.user_id == user_id,
-                UserIssue.status == "pending"
-            )
-        ).count()
+    #     pending_issues = db.query(UserIssue).filter(
+    #         and_(
+    #             UserIssue.user_id == user_id,
+    #             UserIssue.status == "pending"
+    #         )
+    #     ).count()
         
-        completed_issues = db.query(UserIssue).filter(
-            and_(
-                UserIssue.user_id == user_id,
-                UserIssue.status == "completed"
-            )
-        ).count()
+    #     completed_issues = db.query(UserIssue).filter(
+    #         and_(
+    #             UserIssue.user_id == user_id,
+    #             UserIssue.status == "completed"
+    #         )
+    #     ).count()
         
-        failed_issues = db.query(UserIssue).filter(
-            and_(
-                UserIssue.user_id == user_id,
-                UserIssue.status == "failed"
-            )
-        ).count()
+    #     failed_issues = db.query(UserIssue).filter(
+    #         and_(
+    #             UserIssue.user_id == user_id,
+    #             UserIssue.status == "failed"
+    #         )
+    #     ).count()
         
-        # Get issues linked to sessions
-        issues_with_sessions = db.query(UserIssue).filter(
-            and_(
-                UserIssue.user_id == user_id,
-                UserIssue.session_id.isnot(None)
-            )
-        ).count()
+    #     # Get issues linked to sessions
+    #     issues_with_sessions = db.query(UserIssue).filter(
+    #         and_(
+    #             UserIssue.user_id == user_id,
+    #             UserIssue.session_id.isnot(None)
+    #         )
+    #     ).count()
         
-        # Get average processing time
-        avg_processing_time = db.query(func.avg(UserIssue.processing_time)).filter(
-            and_(
-                UserIssue.user_id == user_id,
-                UserIssue.processing_time.isnot(None)
-            )
-        ).scalar() or 0
+    #     # Get average processing time
+    #     avg_processing_time = db.query(func.avg(UserIssue.processing_time)).filter(
+    #         and_(
+    #             UserIssue.user_id == user_id,
+    #             UserIssue.processing_time.isnot(None)
+    #         )
+    #     ).scalar() or 0
         
-        return {
-            "total_issues": total_issues,
-            "pending_issues": pending_issues,
-            "completed_issues": completed_issues,
-            "failed_issues": failed_issues,
-            "issues_with_sessions": issues_with_sessions,
-            "avg_processing_time": float(avg_processing_time),
-            "success_rate": completed_issues / total_issues if total_issues > 0 else 0,
-            "session_integration_rate": issues_with_sessions / total_issues if total_issues > 0 else 0
-        }
+    #     return {
+    #         "total_issues": total_issues,
+    #         "pending_issues": pending_issues,
+    #         "completed_issues": completed_issues,
+    #         "failed_issues": failed_issues,
+    #         "issues_with_sessions": issues_with_sessions,
+    #         "avg_processing_time": float(avg_processing_time),
+    #         "success_rate": completed_issues / total_issues if total_issues > 0 else 0,
+    #         "session_integration_rate": issues_with_sessions / total_issues if total_issues > 0 else 0
+    #     }
 
     @staticmethod
     def generate_github_issue_preview(

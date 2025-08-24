@@ -203,36 +203,36 @@ async def api_logout(request: SessionTokenRequest, db: Session = Depends(get_db)
         )
 
 
-@router.post("/api/refresh-session")
-async def api_refresh_session(
-    request: CreateSessionTokenRequest,
-    db: Session = Depends(get_db)
-):
-    """Create a new session token for a user. Guard with env flag ADMIN_SESSION_REFRESH=true."""
-    if os.getenv("ADMIN_SESSION_REFRESH", "false").lower() != "true":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enabled")
-    try:
-        from models import User
-        user = db.query(User).filter(User.id == request.user_id).first()
-        if not user:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-        session_token = create_session_token(db, user.id, request.expires_in_hours)
-        return SessionTokenResponse(
-            session_token=session_token.session_token,
-            expires_at=session_token.expires_at,
-            user={
-                "id": user.id,
-                "github_username": user.github_username,
-                "github_user_id": user.github_user_id,
-                "email": user.email,
-                "display_name": user.display_name,
-                "avatar_url": user.avatar_url,
-                "created_at": user.created_at.isoformat(),
-                "last_login": user.last_login.isoformat() if user.last_login else None
-            }
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error refreshing session token: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+# @router.post("/api/refresh-session")
+# async def api_refresh_session(
+#     request: CreateSessionTokenRequest,
+#     db: Session = Depends(get_db)
+# ):
+#     """Create a new session token for a user. Guard with env flag ADMIN_SESSION_REFRESH=true."""
+#     if os.getenv("ADMIN_SESSION_REFRESH", "false").lower() != "true":
+#         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enabled")
+#     try:
+#         from models import User
+#         user = db.query(User).filter(User.id == request.user_id).first()
+#         if not user:
+#             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+#         session_token = create_session_token(db, user.id, request.expires_in_hours)
+#         return SessionTokenResponse(
+#             session_token=session_token.session_token,
+#             expires_at=session_token.expires_at,
+#             user={
+#                 "id": user.id,
+#                 "github_username": user.github_username,
+#                 "github_user_id": user.github_user_id,
+#                 "email": user.email,
+#                 "display_name": user.display_name,
+#                 "avatar_url": user.avatar_url,
+#                 "created_at": user.created_at.isoformat(),
+#                 "last_login": user.last_login.isoformat() if user.last_login else None
+#             }
+#         )
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         logger.error(f"Error refreshing session token: {str(e)}", exc_info=True)
+#         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")

@@ -106,35 +106,35 @@ def build_daifu_prompt(
     return prompt
 
 
-def get_github_context(github_context: str) -> str:
-    from github.github_api import (
-        get_repository_details,
-        get_repository_commits,
-        get_repository_issues,
-        get_repository_pulls,
-    )
-    from models import User
+# def get_github_context(github_context: str) -> str:
+#     from github.github_api import (
+#         get_repository_details,
+#         get_repository_commits,
+#         get_repository_issues,
+#         get_repository_pulls,
+#     )
+#     from models import User
 
-    import asyncio
+#     import asyncio
 
-    async def get_github_context_full(
-        owner: str,
-        repo: str,
-        current_user: User,
-        db
-    ) -> str:
-        """
-        Gather and format all relevant repository-level text content for prompt context.
-        Includes repo details, commits, issues, and pull requests.
-        """
-        # Fetch all data concurrently
-        repo_details_task = get_repository_details(owner, repo, current_user, db)
-        commits_task = get_repository_commits(owner, repo, "main", current_user, db)
-        issues_task = get_repository_issues(owner, repo, "all", current_user, db)
-        pulls_task = get_repository_pulls(owner, repo, "all", current_user, db)
+#     async def get_github_context_full(
+#         owner: str,
+#         repo: str,
+#         current_user: User,
+#         db
+#     ) -> str:
+#         """
+#         Gather and format all relevant repository-level text content for prompt context.
+#         Includes repo details, commits, issues, and pull requests.
+#         """
+#         # Fetch all data concurrently
+#         repo_details_task = get_repository_details(owner, repo, current_user, db)
+#         commits_task = get_repository_commits(owner, repo, "main", current_user, db)
+#         issues_task = get_repository_issues(owner, repo, "all", current_user, db)
+#         pulls_task = get_repository_pulls(owner, repo, "all", current_user, db)
 
-        repo_details, commits, issues, pulls = await asyncio.gather(
-            repo_details_task, commits_task, issues_task, pulls_task
-        )
+#         repo_details, commits, issues, pulls = await asyncio.gather(
+#             repo_details_task, commits_task, issues_task, pulls_task
+#         )
 
-        return build_daifu_prompt(repo_details, commits, issues, pulls, [])
+#         return build_daifu_prompt(repo_details, commits, issues, pulls, [])

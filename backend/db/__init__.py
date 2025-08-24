@@ -4,12 +4,8 @@ Database package for YudaiV3
 
 from models import (
     AuthToken,
-    ChatMessage,
-    ChatSession,
-    ContextCard,
     FileAnalysis,
     FileItem,
-    IdeaItem,
     Repository,
     SessionToken,
     User,
@@ -30,9 +26,5 @@ __all__ = [
     "Repository",
     "FileItem",
     "FileAnalysis",
-    "ContextCard",
-    "IdeaItem",
-    "ChatSession",
-    "ChatMessage",
     "UserIssue"
 ] 

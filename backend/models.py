@@ -284,118 +284,118 @@ class FileAnalysis(Base):
     # Relationships
     repository: Mapped["Repository"] = relationship(back_populates="file_analyses")
 
-class ContextCard(Base):
-    """Context cards created by users"""
-    __tablename__ = "context_cards"
+# class ContextCard(Base):
+#     """Context cards created by users"""
+#     __tablename__ = "context_cards"
     
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    session_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chat_sessions.id"), nullable=True)
+#     id: Mapped[int] = mapped_column(primary_key=True, index=True)
+#     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+#     session_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chat_sessions.id"), nullable=True)
     
-    # Context data
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    source: Mapped[str] = mapped_column(String(50), nullable=False)
-    tokens: Mapped[int] = mapped_column(Integer, default=0)
+#     # Context data
+#     title: Mapped[str] = mapped_column(String(255), nullable=False)
+#     description: Mapped[str] = mapped_column(Text, nullable=False)
+#     content: Mapped[str] = mapped_column(Text, nullable=False)
+#     source: Mapped[str] = mapped_column(String(50), nullable=False)
+#     tokens: Mapped[int] = mapped_column(Integer, default=0)
     
-    # Metadata
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+#     # Metadata
+#     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+#     # Timestamps
+#     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+#     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
     
-    # Relationships
-    user: Mapped["User"] = relationship()
-    session: Mapped[Optional["ChatSession"]] = relationship()
+#     # Relationships
+#     user: Mapped["User"] = relationship()
+#     session: Mapped[Optional["ChatSession"]] = relationship()
 
-class IdeaItem(Base):
-    """Ideas to implement"""
-    # TODO: Make this compatible to display for @IdeasToImplement.tsx
-    __tablename__ = "idea_items"
+# class IdeaItem(Base):
+#     """Ideas to implement"""
+#     # TODO: Make this compatible to display for @IdeasToImplement.tsx
+#     __tablename__ = "idea_items"
     
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+#     id: Mapped[int] = mapped_column(primary_key=True, index=True)
+#     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     
-    # Idea data
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    complexity: Mapped[str] = mapped_column(String(10), nullable=False)
+#     # Idea data
+#     title: Mapped[str] = mapped_column(String(255), nullable=False)
+#     description: Mapped[str] = mapped_column(Text, nullable=False)
+#     complexity: Mapped[str] = mapped_column(String(10), nullable=False)
     
-    # Status
-    status: Mapped[str] = mapped_column(String(50), default="pending")
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+#     # Status
+#     status: Mapped[str] = mapped_column(String(50), default="pending")
+#     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+#     # Timestamps
+#     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+#     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
     
-    # Relationships
-    user: Mapped["User"] = relationship()
+#     # Relationships
+#     user: Mapped["User"] = relationship()
 
-class ChatSession(Base):
-    """Chat sessions for user conversations"""
-    __tablename__ = "chat_sessions"
+# class ChatSession(Base):
+#     """Chat sessions for user conversations"""
+#     __tablename__ = "chat_sessions"
     
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+#     id: Mapped[int] = mapped_column(primary_key=True, index=True)
+#     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     
-    # Session data
-    session_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+#     # Session data
+#     session_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+#     title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+#     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    # Repository context (session backbone)
-    repo_owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
-    repo_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
-    repo_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default="main")
-    repo_context: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)  # Repository metadata
+#     # Repository context (session backbone)
+#     repo_owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+#     repo_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+#     repo_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default="main")
+#     repo_context: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)  # Repository metadata
     
-    # Status and statistics
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    total_messages: Mapped[int] = mapped_column(Integer, default=0)
-    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+#     # Status and statistics
+#     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+#     total_messages: Mapped[int] = mapped_column(Integer, default=0)
+#     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
     
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
-    last_activity: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+#     # Timestamps
+#     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+#     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+#     last_activity: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
-    # Relationships
-    user: Mapped["User"] = relationship(back_populates="chat_sessions")
-    messages: Mapped[List["ChatMessage"]] = relationship(back_populates="session", cascade="all, delete-orphan")
-    file_embeddings: Mapped[List["FileEmbedding"]] = relationship(back_populates="session", cascade="all, delete-orphan")
-    context_cards: Mapped[List["ContextCard"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+#     # Relationships
+#     user: Mapped["User"] = relationship(back_populates="chat_sessions")
+#     messages: Mapped[List["ChatMessage"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+#     file_embeddings: Mapped[List["FileEmbedding"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+#     context_cards: Mapped[List["ContextCard"]] = relationship(back_populates="session", cascade="all, delete-orphan")
 
-class ChatMessage(Base):
-    """Individual chat messages within sessions"""
-    __tablename__ = "chat_messages"
+# class ChatMessage(Base):
+#     """Individual chat messages within sessions"""
+#     __tablename__ = "chat_messages"
     
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id"), nullable=False)
+#     id: Mapped[int] = mapped_column(primary_key=True, index=True)
+#     session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id"), nullable=False)
     
-    # Message data
-    message_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    message_text: Mapped[str] = mapped_column(Text, nullable=False)
-    sender_type: Mapped[str] = mapped_column(String(50), nullable=False)  # user, assistant, system
-    role: Mapped[str] = mapped_column(String(50), nullable=False)  # user, assistant, system
-    is_code: Mapped[bool] = mapped_column(Boolean, default=False)
+#     # Message data
+#     message_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+#     message_text: Mapped[str] = mapped_column(Text, nullable=False)
+#     sender_type: Mapped[str] = mapped_column(String(50), nullable=False)  # user, assistant, system
+#     role: Mapped[str] = mapped_column(String(50), nullable=False)  # user, assistant, system
+#     is_code: Mapped[bool] = mapped_column(Boolean, default=False)
     
-    # Metadata
-    tokens: Mapped[int] = mapped_column(Integer, default=0)
-    model_used: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    processing_time: Mapped[Optional[float]] = mapped_column(nullable=True)  # milliseconds
-    context_cards: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
-    referenced_files: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+#     # Metadata
+#     tokens: Mapped[int] = mapped_column(Integer, default=0)
+#     model_used: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+#     processing_time: Mapped[Optional[float]] = mapped_column(nullable=True)  # milliseconds
+#     context_cards: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
+#     referenced_files: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
+#     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+#     # Timestamps
+#     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+#     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
     
-    # Relationships
-    session: Mapped["ChatSession"] = relationship(back_populates="messages")
+#     # Relationships
+#     session: Mapped["ChatSession"] = relationship(back_populates="messages")
 
 class UserIssue(Base):
     """User-generated issues for agent processing (distinct from GitHub Issues)"""
