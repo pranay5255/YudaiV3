@@ -31,7 +31,6 @@ from models import (
 )
 from sqlalchemy.orm import Session
 
-# utc_now not used directly in this module after cleanup
 
 # Configure logger for this module
 logger = logging.getLogger(__name__)

@@ -25,8 +25,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from github import github_router
 from issueChatServices import issue_router
 from repo_processorGitIngest.filedeps import router as filedeps_router
-from stateManagement.session_components_CRUD import router as session_components_router
-from stateManagement.session_routes import router as session_router
 
 
 @asynccontextmanager
