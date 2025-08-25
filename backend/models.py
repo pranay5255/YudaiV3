@@ -73,10 +73,8 @@ class User(Base):
     auth_tokens: Mapped[List["AuthToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     repositories: Mapped[List["Repository"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     session_tokens: Mapped[List["SessionToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-    chat_sessions: Mapped[List["ChatSession"]] = relationship(
-        back_populates="user",
-        cascade="all, delete-orphan"
-    )
+    # chat_sessions: Mapped[List["ChatSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
 
 class AuthToken(Base):
     """Authentication tokens for GitHub OAuth"""
@@ -414,7 +412,7 @@ class UserIssue(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     session_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
-    chat_session_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chat_sessions.id"), nullable=True)
+    # chat_session_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chat_sessions.id"), nullable=True)
     
     # Context and metadata
     context_cards: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)  # Array of context card IDs
@@ -440,15 +438,13 @@ class UserIssue(Base):
     
     # Relationships
     user: Mapped["User"] = relationship()
-    context_card: Mapped[Optional["ContextCard"]] = relationship()
-    chat_session: Mapped[Optional["ChatSession"]] = relationship()
 
 class FileEmbedding(Base):
     """File embeddings for semantic search and file dependencies storage"""
     __tablename__ = "file_embeddings"
     
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id"), nullable=False)
+    # session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id"), nullable=False)
     repository_id: Mapped[Optional[int]] = mapped_column(ForeignKey("repositories.id"), nullable=True)
     
     # File information
@@ -471,7 +467,6 @@ class FileEmbedding(Base):
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
-    session: Mapped["ChatSession"] = relationship(back_populates="file_embeddings")
     repository: Mapped[Optional["Repository"]] = relationship()
 
 class OAuthState(Base):

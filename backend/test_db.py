@@ -329,9 +329,8 @@ def test_model_relationships():
     
     try:
         from db.database import SessionLocal
-        from models import ChatMessage, ChatSession, Repository, User
+        from models import Repository, User
 
-        from utils import utc_now
         
         db = SessionLocal()
         
@@ -360,32 +359,32 @@ def test_model_relationships():
         db.commit()
         db.refresh(test_repo)
         
-        # Test User -> ChatSession relationship
-        test_session = ChatSession(
-            user_id=test_user.id,
-            session_id=f"relationship_test_session_{unique_id}",
-            title="Relationship Test Session",
-            is_active=True,
-            total_messages=0,
-            total_tokens=0,
-            last_activity=utc_now()
-        )
-        db.add(test_session)
-        db.commit()
-        db.refresh(test_session)
+        # Test User -> ChatSession relationship (DISABLED - ChatSession model commented out)
+        # test_session = ChatSession(
+        #     user_id=test_user.id,
+        #     session_id=f"relationship_test_session_{unique_id}",
+        #     title="Relationship Test Session",
+        #     is_active=True,
+        #     total_messages=0,
+        #     total_tokens=0,
+        #     last_activity=utc_now()
+        # )
+        # db.add(test_session)
+        # db.commit()
+        # db.refresh(test_session)
         
-        # Test ChatSession -> ChatMessage relationship
-        test_message = ChatMessage(
-            session_id=test_session.id,
-            message_id=f"rel_test_msg_{unique_id}",
-            message_text="Test relationship message",
-            sender_type="user",
-            role="user",
-            tokens=5
-        )
-        db.add(test_message)
-        db.commit()
-        db.refresh(test_message)
+        # Test ChatSession -> ChatMessage relationship (DISABLED - ChatSession model commented out)
+        # test_message = ChatMessage(
+        #     session_id=test_session.id,
+        #     message_id=f"rel_test_msg_{unique_id}",
+        #     message_text="Test relationship message",
+        #     sender_type="user",
+        #     role="user",
+        #     tokens=5
+        # )
+        # db.add(test_message)
+        # db.commit()
+        # db.refresh(test_message)
         
         # Test forward relationships
         if test_repo.user.id == test_user.id:
@@ -399,11 +398,11 @@ def test_model_relationships():
         else:
             result.fail_test("User -> Repository Relationship", "Backward relationship failed")
         
-        # Test nested relationships
-        if test_message.session.user.id == test_user.id:
-            result.pass_test("ChatMessage -> Session -> User Relationship")
-        else:
-            result.fail_test("ChatMessage -> Session -> User Relationship", "Nested relationship failed")
+        # Test nested relationships (DISABLED - ChatSession model commented out)
+        # if test_message.session.user.id == test_user.id:
+        #     result.pass_test("ChatMessage -> Session -> User Relationship")
+        # else:
+        #     result.fail_test("ChatMessage -> Session -> User Relationship", "Nested relationship failed")
         
         # Test cascade delete (clean up)
         db.delete(test_user)  # Should cascade to related objects
@@ -411,10 +410,10 @@ def test_model_relationships():
         
         # Verify cascade worked
         remaining_repo = db.query(Repository).filter(Repository.id == test_repo.id).first()
-        remaining_session = db.query(ChatSession).filter(ChatSession.id == test_session.id).first()
-        remaining_message = db.query(ChatMessage).filter(ChatMessage.id == test_message.id).first()
+        # remaining_session = db.query(ChatSession).filter(ChatSession.id == test_session.id).first()
+        # remaining_message = db.query(ChatMessage).filter(ChatMessage.id == test_message.id).first()
         
-        if not remaining_repo and not remaining_session and not remaining_message:
+        if not remaining_repo:  # and not remaining_session and not remaining_message:
             result.pass_test("Cascade Delete - User Deletion")
         else:
             result.fail_test("Cascade Delete - User Deletion", "Cascade delete failed")
@@ -436,9 +435,8 @@ def test_data_consistency():
     
     try:
         from db.database import SessionLocal
-        from models import ChatSession, SessionResponse, User
+        from models import User
 
-        from utils import utc_now
         
         db = SessionLocal()
         
@@ -453,41 +451,41 @@ def test_data_consistency():
         db.commit()
         db.refresh(test_user)
         
-        # Create session
-        test_session = ChatSession(
-            user_id=test_user.id,
-            session_id=f"consistency_test_session_{unique_id}",
-            title="Consistency Test",
-            description="Test session for data consistency",
-            repo_owner="test_owner",
-            repo_name="test_repo",
-            repo_branch="main",
-            is_active=True,
-            total_messages=5,
-            total_tokens=100,
-            last_activity=utc_now()
-        )
-        db.add(test_session)
-        db.commit()
-        db.refresh(test_session)
+        # Create session (DISABLED - ChatSession model commented out)
+        # test_session = ChatSession(
+        #     user_id=test_user.id,
+        #     session_id=f"consistency_test_session_{unique_id}",
+        #     title="Consistency Test",
+        #     description="Test session for data consistency",
+        #     repo_owner="test_owner",
+        #     repo_name="test_repo",
+        #     repo_branch="main",
+        #     is_active=True,
+        #     total_messages=5,
+        #     total_tokens=100,
+        #     last_activity=utc_now()
+        # )
+        # db.add(test_session)
+        # db.commit()
+        # db.refresh(test_session)
         
-        # Test SessionResponse model validation
-        try:
-            session_response = SessionResponse.model_validate(test_session)
-            
-            # Verify data consistency
-            if (session_response.session_id == test_session.session_id and
-                session_response.title == test_session.title and
-                session_response.total_messages == test_session.total_messages):
-                result.pass_test("SessionResponse - Data Consistency")
-            else:
-                result.fail_test("SessionResponse - Data Consistency", "Data mismatch")
-                
-        except Exception as e:
-            result.fail_test("SessionResponse - Data Consistency", str(e))
+        # Test SessionResponse model validation (DISABLED - ChatSession model commented out)
+        # try:
+        #     session_response = SessionResponse.model_validate(test_session)
+        #     
+        #     # Verify data consistency
+        #     if (session_response.session_id == test_session.session_id and
+        #         session_response.title == test_session.title and
+        #         session_response.total_messages == test_session.total_messages):
+        #         result.pass_test("SessionResponse - Data Consistency")
+        #     else:
+        #         result.fail_test("SessionResponse - Data Consistency", "Data mismatch")
+        #         
+        # except Exception as e:
+        #     result.fail_test("SessionResponse - Data Consistency", str(e))
         
         # Cleanup
-        db.delete(test_session)
+        # db.delete(test_session)
         db.delete(test_user)
         db.commit()
         db.close()

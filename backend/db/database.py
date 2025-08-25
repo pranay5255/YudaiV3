@@ -9,6 +9,7 @@ from datetime import timedelta
 from models import Base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from utils import utc_now
 
 # Database URL from environment variables
@@ -66,14 +67,9 @@ def create_sample_data():
     """
     from models import (
         AuthToken,
-        ChatMessage,
-        ChatSession,
         Commit,
-        ContextCard,
         FileAnalysis,
-        FileEmbedding,
         FileItem,
-        IdeaItem,
         Issue,
         PullRequest,
         Repository,
@@ -321,136 +317,6 @@ def create_sample_data():
             db.add(analysis)
         db.commit()
         
-        # Sample ContextCards
-        sample_context_cards = [
-            ContextCard(
-                user_id=1,
-                title="Authentication System Design",
-                description="Design patterns for implementing OAuth2 authentication",
-                content="The authentication system should use OAuth2 with JWT tokens...",
-                source="chat",
-                tokens=800,
-                is_active=True
-            ),
-            ContextCard(
-                user_id=1,
-                title="Database Schema",
-                description="User and session management database schema",
-                content="CREATE TABLE users (id SERIAL PRIMARY KEY, username VARCHAR(255)...",
-                source="file-deps",
-                tokens=600,
-                is_active=True
-            )
-        ]
-        
-        for card in sample_context_cards:
-            db.add(card)
-        db.commit()
-        
-        # Sample IdeaItems
-        sample_ideas = [
-            IdeaItem(
-                user_id=1,
-                title="Add real-time notifications",
-                description="Implement WebSocket-based real-time notifications for user actions",
-                complexity="M",
-                status="pending",
-                is_active=True
-            ),
-            IdeaItem(
-                user_id=1,
-                title="Implement caching layer",
-                description="Add Redis caching to improve application performance",
-                complexity="L",
-                status="pending",
-                is_active=True
-            )
-        ]
-        
-        for idea in sample_ideas:
-            db.add(idea)
-        db.commit()
-        
-        # Sample ChatSessions with repository context
-        sample_sessions = [
-            ChatSession(
-                user_id=1,
-                session_id="session_001",
-                title="Authentication Discussion",
-                description="Discussion about implementing OAuth2 authentication",
-                repo_owner="alice_dev",
-                repo_name="awesome-project",
-                repo_branch="main",
-                repo_context={
-                    "owner": "alice_dev",
-                    "name": "awesome-project",
-                    "branch": "main",
-                    "full_name": "alice_dev/awesome-project",
-                    "html_url": "https://github.com/alice_dev/awesome-project",
-                    "created_at": utc_now().isoformat()
-                },
-                is_active=True,
-                total_messages=5,
-                total_tokens=1200,
-                last_activity=utc_now() - timedelta(hours=2)
-            ),
-            ChatSession(
-                user_id=2,
-                session_id="session_002",
-                title="Database Design",
-                description="Planning the database schema for the new feature",
-                repo_owner="bob_coder",
-                repo_name="cool-app",
-                repo_branch="development",
-                repo_context={
-                    "owner": "bob_coder",
-                    "name": "cool-app",
-                    "branch": "development",
-                    "full_name": "bob_coder/cool-app",
-                    "html_url": "https://github.com/bob_coder/cool-app",
-                    "created_at": utc_now().isoformat()
-                },
-                is_active=True,
-                total_messages=3,
-                total_tokens=800,
-                last_activity=utc_now() - timedelta(hours=1)
-            )
-        ]
-        
-        for session in sample_sessions:
-            db.add(session)
-        db.commit()
-        
-        # Sample ChatMessages
-        sample_messages = [
-            ChatMessage(
-                session_id=1,
-                message_id="msg_001",
-                message_text="How should we implement OAuth2 authentication?",
-                sender_type="user",
-                role="user",
-                is_code=False,
-                tokens=15,
-                model_used="gpt-4",
-                processing_time=1.2
-            ),
-            ChatMessage(
-                session_id=1,
-                message_id="msg_002",
-                message_text="I recommend using the OAuth2 authorization code flow with PKCE for security...",
-                sender_type="assistant",
-                role="assistant",
-                is_code=False,
-                tokens=45,
-                model_used="gpt-4",
-                processing_time=2.1
-            )
-        ]
-        
-        for message in sample_messages:
-            db.add(message)
-        db.commit()
-        
         # Sample UserIssues
         sample_user_issues = [
             UserIssue(
@@ -462,7 +328,7 @@ def create_sample_data():
                 title="OAuth2 Authentication Implementation",
                 description="Help needed to implement OAuth2 authentication flow",
                 session_id="session_001",
-                chat_session_id=1,
+                # chat_session_id=1,  # DISABLED - ChatSession model commented out
                 context_cards='["card_001", "card_002"]',
                 ideas='["idea_001"]',
                 repo_owner="alice_dev",
@@ -477,45 +343,45 @@ def create_sample_data():
             db.add(user_issue)
         db.commit()
         
-        # Sample FileEmbeddings for session context
-        sample_file_embeddings = [
-            FileEmbedding(
-                session_id=1,
-                repository_id=1,
-                file_path="src/main.py",
-                file_name="main.py",
-                file_type="python",
-                file_content="# Main application file\n\ndef main():\n    print('Hello, World!')\n\nif __name__ == '__main__':\n    main()",
-                chunk_index=0,
-                chunk_text="# Main application file\n\ndef main():\n    print('Hello, World!')",
-                tokens=25,
-                file_metadata={
-                    "size": 500,
-                    "encoding": "utf-8",
-                    "lines": 6
-                }
-            ),
-            FileEmbedding(
-                session_id=1,
-                repository_id=1,
-                file_path="requirements.txt",
-                file_name="requirements.txt",
-                file_type="text",
-                file_content="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
-                chunk_index=0,
-                chunk_text="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
-                tokens=15,
-                file_metadata={
-                    "size": 200,
-                    "encoding": "utf-8",
-                    "lines": 3
-                }
-            )
-        ]
-        
-        for file_embedding in sample_file_embeddings:
-            db.add(file_embedding)
-        db.commit()
+        # Sample FileEmbeddings for session context (DISABLED - ChatSession model commented out)
+        # sample_file_embeddings = [
+        #     FileEmbedding(
+        #         # session_id=1,  # DISABLED - ChatSession model commented out
+        #         repository_id=1,
+        #         file_path="src/main.py",
+        #         file_name="main.py",
+        #         file_type="python",
+        #         file_content="# Main application file\n\ndef main():\n    print('Hello, World!')\n\nif __name__ == '__main__':\n    main()",
+        #         chunk_index=0,
+        #         chunk_text="# Main application file\n\ndef main():\n    print('Hello, World!')",
+        #         tokens=25,
+        #         file_metadata={
+        #             "size": 500,
+        #             "encoding": "utf-8",
+        #             "lines": 6
+        #         }
+        #     ),
+        #     FileEmbedding(
+        #         # session_id=1,  # DISABLED - ChatSession model commented out
+        #         repository_id=1,
+        #         file_path="requirements.txt",
+        #         file_name="requirements.txt",
+        #         file_type="text",
+        #         file_content="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
+        #         chunk_index=0,
+        #         chunk_text="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
+        #         tokens=15,
+        #         file_metadata={
+        #             "size": 200,
+        #             "encoding": "utf-8",
+        #             "lines": 3
+        #         }
+        #     )
+        # ]
+        # 
+        # for file_embedding in sample_file_embeddings:
+        #     db.add(file_embedding)
+        # db.commit()
         
         print("✓ Sample data created successfully")
         
