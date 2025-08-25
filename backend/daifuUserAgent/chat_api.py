@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import time
+import uuid
+from typing import List, Tuple
 
 from auth.github_oauth import get_current_user
 from db.database import get_db
@@ -20,7 +22,6 @@ from github.github_api import (
     get_repository_issues,
     get_repository_pulls,
 )
-from issueChatServices.issue_service import IssueService
 from models import (
     ChatRequest,
     User,
@@ -28,7 +29,6 @@ from models import (
 from sqlalchemy.orm import Session
 
 from .llm_service import LLMService
-from .message_service import MessageService
 
 
 async def get_github_context(owner: str, repo: str, current_user: User, db: Session) -> str:
@@ -89,7 +89,26 @@ async def get_github_context_data(owner: str, repo: str, current_user: User, db:
                      "forks_count": 0, "open_issues_count": 0, "html_url": ""}
         return empty_repo, [], [], []
 
+
+# In-memory storage for conversation history (temporary solution)
+# In a production environment, this should be replaced with proper database storage
+conversation_history: dict[str, List[Tuple[str, str]]] = {}
+
+
+def get_conversation_history(session_id: str, limit: int = 50) -> List[Tuple[str, str]]:
+    """Get conversation history for a session"""
+    return conversation_history.get(session_id, [])[-limit:]
+
+
+def add_to_conversation_history(session_id: str, sender: str, message: str):
+    """Add a message to conversation history"""
+    if session_id not in conversation_history:
+        conversation_history[session_id] = []
+    conversation_history[session_id].append((sender, message))
+
+
 router = APIRouter()
+
 @router.post("/chat")
 async def chat_daifu(
     request: ChatRequest,
@@ -141,28 +160,12 @@ async def chat_daifu(
                 db
             )
 
-        # Create user message request
-        user_message_request = MessageService.create_user_message_request(
-            session_id=session_id,
-            content=request.message.content,
-            is_code=request.message.is_code,
-            context_cards=request.context_cards
-        )
+        # Add user message to conversation history
+        user_message = request.message.content
+        add_to_conversation_history(session_id, "User", user_message)
         
-        # Store user message using session_components_CRUD
-        from stateManagement.session_components_CRUD import add_chat_message
-        user_message_db = await add_chat_message(session_id, user_message_request, db, current_user)
-        
-        # Synchronous mode: Process immediately and return response
-        # Get conversation history using session_components_CRUD
-        from stateManagement.session_components_CRUD import get_chat_messages
-        history_messages = await get_chat_messages(session_id, 50, db, current_user)
-        
-        # Convert to format expected by prompt builder
-        history = []
-        for msg in history_messages:
-            sender = "User" if msg.sender_type == "user" else "DAifu"
-            history.append((sender, msg.message_text))
+        # Get conversation history for context
+        history = get_conversation_history(session_id, 50)
         
         # Generate AI response
         reply = await LLMService.generate_response_with_history(
@@ -171,21 +174,19 @@ async def chat_daifu(
             github_data=github_data
         )
         
+        # Add assistant response to conversation history
+        add_to_conversation_history(session_id, "DAifu", reply)
+        
         # Calculate processing time
         processing_time = (time.time() - start_time) * 1000
         
-        # Create and store assistant response using session_components_CRUD
-        assistant_message_request = MessageService.create_assistant_message_request(
-            session_id=session_id,
-            content=reply,
-            processing_time=processing_time
-        )
-        await add_chat_message(session_id, assistant_message_request, db, current_user)
+        # Generate a unique message ID
+        message_id = str(uuid.uuid4())
         
         return {
             "reply": reply,
-            "conversation": history + [("User", request.message.content), ("DAifu", reply)],
-            "message_id": user_message_db.message_id,
+            "conversation": history + [("User", user_message), ("DAifu", reply)],
+            "message_id": message_id,
             "processing_time": processing_time,
             "session_id": session_id,
         }
@@ -193,38 +194,7 @@ async def chat_daifu(
     except HTTPException:
         raise
     except Exception as e:
-        # Create and store error message using session_components_CRUD
-        error_message_request = MessageService.create_error_message_request(
-            session_id=session_id,
-            error_message=str(e),
-            error_type="system"
-        )
-        await add_chat_message(session_id, error_message_request, db, current_user)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat processing failed: {str(e)}",
-        )
-
-
-@router.post("/create-issue")
-async def create_issue_from_chat(
-    request: ChatRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Create an issue from a chat conversation."""
-    try:
-        # Create the issue from the chat request
-        issue = IssueService.create_issue_from_chat(db, current_user.id, request)
-
-        return {
-            "success": True,
-            "issue": issue,
-            "message": f"Issue created with ID: {issue.issue_id}",
-        }
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create issue: {str(e)}",
         )
