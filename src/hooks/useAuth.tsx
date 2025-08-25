@@ -29,13 +29,7 @@ export const useAuth = () => {
     });
   }, [isAuthenticated, isLoading, user, sessionToken, authError]);
 
-  // Handle /auth/success route for post-auth redirect
-  useEffect(() => {
-    if (window.location.pathname === '/auth/success') {
-      console.log('[useAuth] Detected /auth/success, refreshing auth...');
-      refreshAuth();
-    }
-  }, [refreshAuth]);
+  // Note: /auth/success route is now handled by the AuthSuccess component with React Router
 
   return {
     user,

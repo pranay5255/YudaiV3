@@ -47,6 +47,7 @@ interface SessionState {
   login: () => Promise<void>;
   logout: () => Promise<void>;
   refreshAuth: () => Promise<void>;
+  setAuthFromCallback: (authData: { user: User; sessionToken: string; githubToken: string }) => Promise<void>;
   setAuthLoading: (loading: boolean) => void;
   setAuthError: (error: string | null) => void;
   
@@ -130,68 +131,16 @@ export const useSessionStore = create<SessionState>()(
         initializeAuth: async () => {
           try {
             console.log('[SessionStore] Starting authentication initialization');
-            console.log('[SessionStore] Current URL:', window.location.href);
-            console.log('[SessionStore] Current pathname:', window.location.pathname);
-            console.log('[SessionStore] Current search:', window.location.search);
             set({ authLoading: true, authError: null });
 
-            // Check for session token in URL parameters (OAuth callback)
-            const urlParams = new URLSearchParams(window.location.search);
-            const sessionToken = urlParams.get('session_token');
-            // const githubToken = urlParams.get('github_token');
-            const userId = urlParams.get('user_id');
-            const username = urlParams.get('username');
-            const code = urlParams.get('code');
-
-            if (sessionToken && userId && username) {
-              // We have session token from OAuth callback, use the data directly from URL
-              console.log('[SessionStore] Found session token in URL parameters, using callback data directly');
-              
-              // Extract user data from URL parameters (already provided by OAuth callback)
-              const name = urlParams.get('name') || username;
-              const email = urlParams.get('email') || '';
-              const avatar = urlParams.get('avatar') || '';
-              const githubId = urlParams.get('github_id') || '';
-              
-              // Create user object from callback data
-              const user: User = {
-                id: parseInt(userId),
-                github_username: username,
-                github_user_id: githubId,
-                email: email,
-                display_name: name,
-                avatar_url: avatar,
-                created_at: new Date().toISOString(),
-                last_login: new Date().toISOString(),
-              };
-              
-              console.log('[SessionStore] User data from callback:', user);
-              
-              set({
-                user: user,
-                sessionToken: sessionToken,
-                githubToken: sessionToken, // No github_token in URL, but we have github_id
-                isAuthenticated: true,
-                authLoading: false,
-                authError: null,
-              });
-
-              // Store session token in localStorage for persistence
-              localStorage.setItem('session_token', sessionToken);
-              
-              // Clear any old persisted session that might be invalid
-              get().clearSession();
-              
-              // Clear URL parameters after successful auth
-              const newUrl = new URL(window.location.href);
-              newUrl.search = '';
-              window.history.replaceState({}, '', newUrl.toString());
-              
-              console.log('[SessionStore] Authentication completed successfully from callback');
-            } else if (code) {
-              // We have authorization code but no session token yet, redirect to login
-              window.location.href = '/auth/login';
-            } else {
+            // Check for stored session token in localStorage
+            console.log('[SessionStore] Checking localStorage for stored tokens');
+            const storedSessionToken = localStorage.getItem('session_token');
+            const storedGithubToken = localStorage.getItem('github_token');
+            console.log('[SessionStore] Stored session token:', storedSessionToken ? 'Found' : 'Not found');
+            console.log('[SessionStore] Stored GitHub token:', storedGithubToken ? 'Found' : 'Not found');
+            
+            if (storedSessionToken) {
               // No auth data in URL, check for stored session token
               console.log('[SessionStore] No auth data in URL, checking localStorage for stored tokens');
               const storedSessionToken = localStorage.getItem('session_token');
@@ -247,30 +196,20 @@ export const useSessionStore = create<SessionState>()(
                   });
                 }
               } else {
-                // No stored token, check if we're on a protected route
-                console.log('[SessionStore] No stored session token found');
-                const currentPath = window.location.pathname;
-                console.log('[SessionStore] Current path:', currentPath);
-                if (currentPath.startsWith('/auth/callback') || currentPath.startsWith('/auth/success')) {
-                  // We're on callback page but no auth data, redirect to login
-                  console.log('[SessionStore] On callback page without auth data, redirecting to login');
-                  window.location.href = '/auth/login';
-                } else {
-                  // Not on callback page, explicitly set as not authenticated
-                  console.log('[SessionStore] Setting user as not authenticated');
-                  
-                  // Clear any persisted session state since not authenticated
-                  get().clearSession();
-                  
-                  set({
-                    user: null,
-                    sessionToken: null,
-                    githubToken: null,
-                    isAuthenticated: false,
-                    authLoading: false,
-                    authError: null,
-                  });
-                }
+                // No stored token, user is not authenticated
+                console.log('[SessionStore] No stored session token found, user not authenticated');
+                
+                // Clear any persisted session state since not authenticated
+                get().clearSession();
+                
+                set({
+                  user: null,
+                  sessionToken: null,
+                  githubToken: null,
+                  isAuthenticated: false,
+                  authLoading: false,
+                  authError: null,
+                });
               }
             }
             console.log('[SessionStore] Authentication initialization completed');
@@ -339,13 +278,44 @@ export const useSessionStore = create<SessionState>()(
               }
             });
             
-            // Redirect to login page
+            // Redirect to login page using React Router
+            // Note: Since this is called from a store, we need to use window.location
+            // React Router navigation should be handled in components
             window.location.href = '/auth/login';
           }
         },
 
         refreshAuth: async () => {
           await get().initializeAuth();
+        },
+
+        setAuthFromCallback: async (authData: { user: User; sessionToken: string; githubToken: string }) => {
+          try {
+            console.log('[SessionStore] Setting auth from callback:', authData);
+            
+            // Store session token in localStorage for persistence
+            localStorage.setItem('session_token', authData.sessionToken);
+            localStorage.setItem('github_token', authData.githubToken);
+            
+            // Set the auth state
+            set({
+              user: authData.user,
+              sessionToken: authData.sessionToken,
+              githubToken: authData.githubToken,
+              isAuthenticated: true,
+              authLoading: false,
+              authError: null,
+            });
+            
+            // Clear any old persisted session that might be invalid
+            get().clearSession();
+            
+            console.log('[SessionStore] Auth from callback completed successfully');
+          } catch (error) {
+            console.error('[SessionStore] Error setting auth from callback:', error);
+            set({ authError: 'Failed to set auth from callback' });
+            throw error;
+          }
         },
 
         setAuthLoading: (loading: boolean) =>
