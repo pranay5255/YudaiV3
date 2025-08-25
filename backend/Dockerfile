@@ -29,7 +29,6 @@ COPY . .
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 RUN chown -R appuser:appuser /app
 RUN chmod +x /app/start.sh
-RUN chmod +x /app/test_db.py
 USER appuser
 
 # Expose port

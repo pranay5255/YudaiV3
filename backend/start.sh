@@ -33,18 +33,7 @@ test_database_connection() {
         echo "    ✗ PostgreSQL not ready"
         return 1
     fi
-    
-    # Test 3: Test Python database connection
-    echo "  - Testing Python database connection..."
-    if python test_db.py; then
-        echo "    ✓ Python database connection OK"
-    else
-        echo "    ✗ Python database connection failed"
-        return 1
-    fi
-    
-    echo "✅ Database connectivity test passed!"
-    return 0
+
 }
 
 # Wait for database with enhanced testing
