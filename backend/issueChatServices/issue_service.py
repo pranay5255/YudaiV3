@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional
 
 import requests
 from auth.github_oauth import get_current_user
-from daifuUserAgent.architectAgent.promptTemplate import build_architect_prompt
 from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from github.github_api import GitHubAPIError
@@ -28,7 +27,7 @@ from models import (
 
 # Add new imports at the top
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, desc, func
+from sqlalchemy import and_, desc
 from sqlalchemy.orm import Session
 
 from utils import utc_now
@@ -409,33 +408,7 @@ class IssueService:
                 }
             )
         
-        # Enhanced context gathering with session information
-        conversation_context = ""
-        file_dependencies_context = ""
-        code_aware_context = ""
-        
-        # Prepare conversation context
-        if request.chat_messages:
-            conversation_context = "\n".join(
-                f"{'Code' if m.isCode else 'User'}: {m.content}" for m in request.chat_messages
-            )
-        
-        # Prepare file dependencies context
-        if request.file_context:
-            file_dependencies_context = "\n".join(
-                f"{f.name} ({f.type}, {f.tokens} tokens): {f.category}" for f in request.file_context
-            )
-        
-        # Enhanced context gathering from session if available
-        # Session management is not implemented, so we skip session context enhancement
-        
-        # Build architect prompt
-        prompt = build_architect_prompt(
-            conversation_context=conversation_context,
-            file_dependencies_context=file_dependencies_context,
-            code_aware_context=code_aware_context,
-        )
-        
+ 
         # Make LLM call to architect agent
         api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
@@ -448,7 +421,7 @@ class IssueService:
         
         body = {
             "model": "deepseek/deepseek-r1-0528:free",
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": "prompt"}],
             "temperature": 0.7,
             "max_tokens": 4000
         }
