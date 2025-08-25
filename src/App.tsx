@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { Chat } from './components/Chat';
@@ -11,6 +12,9 @@ import { ToastContainer } from './components/Toast';
 import { RepositorySelectionToast } from './components/RepositorySelectionToast';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { SessionErrorBoundary } from './components/SessionErrorBoundary';
+import { AuthSuccess } from './components/AuthSuccess';
+import { AuthCallback } from './components/AuthCallback';
+import { LoginPage } from './components/LoginPage';
 import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository, FileItem } from './types';
 import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
@@ -323,9 +327,22 @@ function App() {
       onSessionError={handleSessionError}
       onRetry={handleRetry}
     >
-      <ProtectedRoute>
-        <AppContent />
-      </ProtectedRoute>
+      <Routes>
+        {/* Public routes */}
+        <Route path="/auth/login" element={<LoginPage />} />
+        <Route path="/auth/success" element={<AuthSuccess />} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
+        
+        {/* Protected routes */}
+        <Route path="/" element={
+          <ProtectedRoute>
+            <AppContent />
+          </ProtectedRoute>
+        } />
+        
+        {/* Catch all route - redirect to home */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </SessionErrorBoundary>
   );
 }
