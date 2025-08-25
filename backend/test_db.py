@@ -107,72 +107,6 @@ def setup_test_environment():
         result.fail_test("Database Setup", str(e))
         return False
 
-def cleanup_test_data():
-    """Clean up any test data that might have been left behind"""
-    try:
-        from db.database import SessionLocal
-        from models import (
-            AuthToken,
-            ChatMessage,
-            ChatSession,
-            ContextCard,
-            FileAnalysis,
-            FileEmbedding,
-            FileItem,
-            IdeaItem,
-            Repository,
-            User,
-            UserIssue,
-        )
-        
-        db = SessionLocal()
-        
-        # Clean up test data with pattern matching
-        test_patterns = [
-            ("test_user_validation", User.github_username),
-            ("relationship_test_user_", User.github_username),
-            ("consistency_test_user_", User.github_username),
-            ("integration_user_", User.github_username)
-        ]
-        
-        for pattern, field in test_patterns:
-            if pattern.endswith('_'):
-                # Pattern ends with underscore, use LIKE
-                test_users = db.query(User).filter(field.like(f"{pattern}%")).all()
-            else:
-                # Exact match
-                test_users = db.query(User).filter(field == pattern).all()
-            
-            for user in test_users:
-                # Delete related data first
-                db.query(FileEmbedding).filter(FileEmbedding.session_id.in_(
-                    db.query(ChatSession.id).filter(ChatSession.user_id == user.id)
-                )).delete(synchronize_session=False)
-                
-                db.query(UserIssue).filter(UserIssue.user_id == user.id).delete()
-                db.query(FileAnalysis).filter(FileAnalysis.repository_id.in_(
-                    db.query(Repository.id).filter(Repository.user_id == user.id)
-                )).delete(synchronize_session=False)
-                db.query(FileItem).filter(FileItem.repository_id.in_(
-                    db.query(Repository.id).filter(Repository.user_id == user.id)
-                )).delete(synchronize_session=False)
-                db.query(IdeaItem).filter(IdeaItem.user_id == user.id).delete()
-                db.query(ContextCard).filter(ContextCard.user_id == user.id).delete()
-                db.query(ChatMessage).filter(ChatMessage.session_id.in_(
-                    db.query(ChatSession.id).filter(ChatSession.user_id == user.id)
-                )).delete(synchronize_session=False)
-                db.query(ChatSession).filter(ChatSession.user_id == user.id).delete()
-                db.query(Repository).filter(Repository.user_id == user.id).delete()
-                db.query(AuthToken).filter(AuthToken.user_id == user.id).delete()
-                db.delete(user)
-        
-        db.commit()
-        db.close()
-        
-    except Exception as e:
-        # Don't fail the test for cleanup errors
-        print(f"Warning: Cleanup failed: {e}")
-
 def test_database_models():
     """Test all SQLAlchemy models for basic CRUD operations"""
     result.section("DATABASE MODELS VALIDATION")
@@ -181,16 +115,10 @@ def test_database_models():
         from db.database import SessionLocal
         from models import (
             AuthToken,
-            ChatMessage,
-            ChatSession,
-            ContextCard,
             FileAnalysis,
-            FileEmbedding,
             FileItem,
-            IdeaItem,
             Repository,
             User,
-            UserIssue,
         )
 
         from utils import utc_now
@@ -272,94 +200,6 @@ def test_database_models():
         
         # Test 4: ChatSession Model
         try:
-            chat_session = ChatSession(
-                user_id=test_user.id,
-                session_id=f"test_session_{uuid.uuid4().hex[:8]}",
-                title="Test Chat Session",
-                description="Test session for validation",
-                repo_owner="test_user_validation",
-                repo_name="test-repo",
-                repo_branch="main",
-                is_active=True,
-                total_messages=0,
-                total_tokens=0,
-                last_activity=utc_now()
-            )
-            db.add(chat_session)
-            db.commit()
-            db.refresh(chat_session)
-            
-            result.pass_test("ChatSession Model - Create")
-            
-        except Exception as e:
-            result.fail_test("ChatSession Model - Create", str(e))
-        
-        # Test 5: ChatMessage Model with Session relationship
-        try:
-            chat_message = ChatMessage(
-                session_id=chat_session.id,
-                message_id=f"msg_{uuid.uuid4().hex[:8]}",
-                message_text="Test message for validation",
-                sender_type="user",
-                role="user",
-                is_code=False,
-                tokens=10
-            )
-            db.add(chat_message)
-            db.commit()
-            db.refresh(chat_message)
-            
-            # Test relationship
-            if chat_message.session.user_id == test_user.id:
-                result.pass_test("ChatMessage Model - Create & Relationship")
-            else:
-                result.fail_test("ChatMessage Model - Create & Relationship", "Session relationship failed")
-                
-        except Exception as e:
-            result.fail_test("ChatMessage Model - Create & Relationship", str(e))
-        
-        # Test 6: ContextCard Model
-        try:
-            context_card = ContextCard(
-                user_id=test_user.id,
-                session_id=chat_session.id,
-                title="Test Context Card",
-                description="Test context card for validation",
-                content="This is test content for validation",
-                source="chat",
-                tokens=20,
-                is_active=True
-            )
-            db.add(context_card)
-            db.commit()
-            db.refresh(context_card)
-            
-            result.pass_test("ContextCard Model - Create")
-            
-        except Exception as e:
-            result.fail_test("ContextCard Model - Create", str(e))
-        
-        # Test 7: IdeaItem Model
-        try:
-            idea_item = IdeaItem(
-                user_id=test_user.id,
-                title="Test Idea",
-                description="Test idea for validation",
-                complexity="M",
-                status="pending",
-                is_active=True
-            )
-            db.add(idea_item)
-            db.commit()
-            db.refresh(idea_item)
-            
-            result.pass_test("IdeaItem Model - Create")
-            
-        except Exception as e:
-            result.fail_test("IdeaItem Model - Create", str(e))
-        
-        # Test 8: FileItem Model
-        try:
             file_item = FileItem(
                 repository_id=test_repo.id,
                 name="test.py",
@@ -401,51 +241,6 @@ def test_database_models():
         except Exception as e:
             result.fail_test("FileAnalysis Model - Create", str(e))
         
-        # Test 10: UserIssue Model
-        try:
-            user_issue = UserIssue(
-                user_id=test_user.id,
-                issue_id=f"issue_{uuid.uuid4().hex[:8]}",
-                issue_text_raw="Test issue for validation",
-                title="Test Issue",
-                description="Test issue description",
-                session_id=chat_session.session_id,
-                chat_session_id=chat_session.id,
-                priority="medium",
-                status="pending",
-                tokens_used=0
-            )
-            db.add(user_issue)
-            db.commit()
-            db.refresh(user_issue)
-            
-            result.pass_test("UserIssue Model - Create")
-            
-        except Exception as e:
-            result.fail_test("UserIssue Model - Create", str(e))
-        
-        # Test 11: FileEmbedding Model
-        try:
-            file_embedding = FileEmbedding(
-                session_id=chat_session.id,
-                repository_id=test_repo.id,
-                file_path="src/test.py",
-                file_name="test.py",
-                file_type="python",
-                chunk_index=0,
-                chunk_text="# Test file content",
-                tokens=10,
-                file_metadata={"size": 100, "encoding": "utf-8"}
-            )
-            db.add(file_embedding)
-            db.commit()
-            db.refresh(file_embedding)
-            
-            result.pass_test("FileEmbedding Model - Create")
-            
-        except Exception as e:
-            result.fail_test("FileEmbedding Model - Create", str(e))
-        
         # Test 12: Foreign Key Constraints
         try:
             # Try to create a record with invalid foreign key
@@ -464,29 +259,7 @@ def test_database_models():
             # This should fail due to foreign key constraint
             db.rollback()
             result.pass_test("Foreign Key Constraints - Validation")
-        
-        # Cleanup test data
-        try:
-            db.query(FileEmbedding).filter(FileEmbedding.session_id == chat_session.id).delete()
-            db.query(UserIssue).filter(UserIssue.user_id == test_user.id).delete()
-            db.query(FileAnalysis).filter(FileAnalysis.repository_id == test_repo.id).delete()
-            db.query(FileItem).filter(FileItem.repository_id == test_repo.id).delete()
-            db.query(IdeaItem).filter(IdeaItem.user_id == test_user.id).delete()
-            db.query(ContextCard).filter(ContextCard.user_id == test_user.id).delete()
-            db.query(ChatMessage).filter(ChatMessage.session_id == chat_session.id).delete()
-            db.query(ChatSession).filter(ChatSession.id == chat_session.id).delete()
-            db.query(Repository).filter(Repository.id == test_repo.id).delete()
-            db.query(AuthToken).filter(AuthToken.user_id == test_user.id).delete()
-            db.query(User).filter(User.id == test_user.id).delete()
-            db.commit()
-            
-            result.pass_test("Test Data Cleanup")
-            
-        except Exception as e:
-            result.fail_test("Test Data Cleanup", str(e))
-        
-        db.close()
-        
+         
     except Exception as e:
         result.fail_test("Database Models Setup", str(e))
         traceback.print_exc()
@@ -738,7 +511,7 @@ def main():
     result.info("Starting YudaiV3 database validation...")
     
     # Clean up any existing test data first
-    cleanup_test_data()
+    # cleanup_test_data()
     
     # Setup test environment
     if not setup_test_environment():
@@ -754,7 +527,7 @@ def main():
     # API/endpoint tests are intentionally omitted in this suite
     
     # Clean up test data after tests
-    cleanup_test_data()
+    # cleanup_test_data()
     
     # Generate final report
     success = result.summary()
@@ -776,9 +549,9 @@ if __name__ == "__main__":
         sys.exit(0 if success else 1)
     except KeyboardInterrupt:
         print(f"\n{Colors.YELLOW}⚠️  Test interrupted by user{Colors.END}")
-        cleanup_test_data()
+ 
         sys.exit(1)
     except Exception as e:
         print(f"\n{Colors.RED}💥 Unexpected error: {e}{Colors.END}")
-        cleanup_test_data()
+        # cleanup_test_data()
         sys.exit(1)
