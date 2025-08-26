@@ -101,6 +101,13 @@ def create_sample_data():
                 email="charlie@example.com",
                 display_name="Charlie Architect",
                 avatar_url="https://avatars.githubusercontent.com/u/11111?v=4"
+            ),
+            User(
+                github_username="demo_user",
+                github_user_id="19365600",
+                email="demo@yudai.app",
+                display_name="Demo User",
+                avatar_url="https://avatars.githubusercontent.com/u/19365600?v=4"
             )
         ]
         
@@ -121,6 +128,15 @@ def create_sample_data():
             ),
             AuthToken(
                 user_id=2,
+                access_token=f"ghp_{uuid.uuid4().hex[:40]}",
+                refresh_token=f"ghr_{uuid.uuid4().hex[:40]}",
+                token_type="bearer",
+                scope="repo user",
+                expires_at=utc_now() + timedelta(days=30),
+                is_active=True
+            ),
+            AuthToken(
+                user_id=4,  # demo_user
                 access_token=f"ghp_{uuid.uuid4().hex[:40]}",
                 refresh_token=f"ghr_{uuid.uuid4().hex[:40]}",
                 token_type="bearer",
@@ -322,15 +338,15 @@ def create_sample_data():
             UserIssue(
                 user_id=1,
                 issue_id="issue_001",
-                context_card_id=1,
+                # context_card_id=1,
                 issue_text_raw="Need help implementing OAuth2 authentication",
                 issue_steps='["Set up OAuth2 provider", "Implement callback handler", "Add JWT token validation"]',
                 title="OAuth2 Authentication Implementation",
                 description="Help needed to implement OAuth2 authentication flow",
                 session_id="session_001",
                 # chat_session_id=1,  # DISABLED - ChatSession model commented out
-                context_cards='["card_001", "card_002"]',
-                ideas='["idea_001"]',
+                # context_cards='["card_001", "card_002"]',
+                # ideas='["idea_001"]',
                 repo_owner="alice_dev",
                 repo_name="awesome-project",
                 priority="high",
