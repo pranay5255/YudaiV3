@@ -6,7 +6,6 @@ import type {
   ChatMessageResponse,
   ContextCardResponse,
   CreateContextCardRequest,
-  CreateFileEmbeddingRequest,
   FileEmbeddingResponse,
   ExtractFileDependenciesResponse,
   ExtractFileDependenciesRequest,
@@ -56,30 +55,11 @@ export const sessionApi = {
     return handleResponse<SessionContextResponse>(response);
   },
 
-  async getUserSessions(sessionToken?: string): Promise<SessionResponse[]> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions`, {
-      method: 'GET',
-      headers: getAuthHeaders(sessionToken),
-    });
-    return handleResponse<SessionResponse[]>(response);
-  },
 
-  async updateSession(sessionId: string, updates: Partial<SessionResponse>, sessionToken?: string): Promise<SessionResponse> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(sessionToken),
-      body: JSON.stringify(updates),
-    });
-    return handleResponse<SessionResponse>(response);
-  },
 
-  async deleteSession(sessionId: string, sessionToken?: string): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(sessionToken),
-    });
-    return handleResponse<{ success: boolean; message: string }>(response);
-  },
+
+
+
 
   // Chat messages
   async addChatMessage(sessionId: string, request: CreateChatMessageRequest, sessionToken?: string): Promise<ChatMessageResponse> {
@@ -99,27 +79,9 @@ export const sessionApi = {
     return handleResponse<ChatMessageResponse[]>(response);
   },
 
-  async updateChatMessage(
-    sessionId: string,
-    messageId: string,
-    updates: Partial<ChatMessageResponse>,
-    sessionToken?: string
-  ): Promise<ChatMessageResponse> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/messages/${messageId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(sessionToken),
-      body: JSON.stringify(updates),
-    });
-    return handleResponse<ChatMessageResponse>(response);
-  },
 
-  async deleteChatMessage(sessionId: string, messageId: string, sessionToken?: string): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/messages/${messageId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(sessionToken),
-    });
-    return handleResponse<{ success: boolean; message: string }>(response);
-  },
+
+
 
   // Context cards
   async addContextCard(sessionId: string, request: CreateContextCardRequest, sessionToken?: string): Promise<ContextCardResponse> {
@@ -148,14 +110,7 @@ export const sessionApi = {
   },
 
   // File dependencies
-  async addFileDependency(sessionId: string, request: CreateFileEmbeddingRequest, sessionToken?: string): Promise<FileEmbeddingResponse> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-deps`, {
-      method: 'POST',
-      headers: getAuthHeaders(sessionToken),
-      body: JSON.stringify(request),
-    });
-    return handleResponse<FileEmbeddingResponse>(response);
-  },
+
 
   async getFileDependenciesSession(sessionId: string, sessionToken?: string): Promise<FileEmbeddingResponse[]> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-deps/session`, {
@@ -174,13 +129,7 @@ export const sessionApi = {
     return handleResponse<ExtractFileDependenciesResponse>(response);
   },
 
-  async deleteFileDependency(sessionId: string, fileId: number, sessionToken?: string): Promise<{ success: boolean; message: string }> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-deps/${fileId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(sessionToken),
-    });
-    return handleResponse<{ success: boolean; message: string }>(response);
-  },
+
 };
 
 export type {
@@ -191,7 +140,6 @@ export type {
   FileEmbeddingResponse,
   CreateChatMessageRequest,
   CreateContextCardRequest,
-  CreateFileEmbeddingRequest,
 };
 
 export default sessionApi;

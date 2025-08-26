@@ -9,16 +9,12 @@ import type {
   LoginUrlResponse,
   ChatRequest,
   ChatResponse,
-  CreateIssueFromChatResponse,
-  FileContextItem,
   CreateIssueWithContextRequest,
   IssueCreationResponse,
   CreateGitHubIssueResponse,
   GitHubRepositoryAPI,
   GitHubBranchAPI,
   RepositoryResponse,
-  RepositoryDetailsResponse,
-  FileAnalysisResponse,
   ExtractFileDependenciesRequest,
   ExtractFileDependenciesResponse,
   CreateSessionRequest,
@@ -182,14 +178,7 @@ export class ApiService {
     return ApiService.handleResponse<ChatResponse>(response);
   }
 
-  static async createIssueFromChat(request: ChatRequest, sessionToken?: string): Promise<CreateIssueFromChatResponse> {
-    const response = await fetch(`${API_BASE_URL}/daifu/create-issue`, {
-      method: 'POST',
-      headers: ApiService.getAuthHeaders(sessionToken),   
-      body: JSON.stringify(request),
-    });
-    return ApiService.handleResponse<CreateIssueFromChatResponse>(response);
-  }
+
 
   // Issue Management API Methods (backend/issueChatServices/issue_service.py)
   static async createIssueWithContext(request: CreateIssueWithContextRequest, githubToken?: string): Promise<IssueCreationResponse> {
@@ -219,67 +208,16 @@ export class ApiService {
     return ApiService.handleResponse<UserIssueResponse[]>(response);
   }
 
-  static async getIssue(issueId: string, githubToken?: string): Promise<UserIssueResponse> {
-    const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
-      method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
-    });
-    return ApiService.handleResponse<UserIssueResponse>(response);
-  }
 
-  static async updateIssue(issueId: string, updates: Partial<UserIssueResponse>, githubToken?: string): Promise<UserIssueResponse> {
-    const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
-      method: 'PUT',
-      headers: ApiService.getAuthHeaders(githubToken),
-      body: JSON.stringify(updates),
-    });
-    return ApiService.handleResponse<UserIssueResponse>(response);
-  }
 
-  static async deleteIssue(issueId: string, githubToken?: string): Promise<{message: string}> {
-    const response = await fetch(`${API_BASE_URL}/issues/${issueId}`, {
-      method: 'DELETE',
-      headers: ApiService.getAuthHeaders(githubToken),
-    });
-    return ApiService.handleResponse<{message: string}>(response);
-  }
+
+
+
 
   // File Dependencies API Methods (backend/repo_processorGitIngest/filedeps.py)
-  static async analyzeFileDependencies(files: File[], githubToken?: string): Promise<FileAnalysisResponse> {
-    const formData = new FormData();
-    files.forEach(file => formData.append('files', file));
 
-    const headers: HeadersInit = {};
-    
-    // Get token for authorization
-    let tokenToUse = githubToken;
-    if (!tokenToUse) {
-      const githubTokenFromStorage = localStorage.getItem('github_token');
-      const urlParams = new URLSearchParams(window.location.search);
-      const tokenFromUrl = urlParams.get('github_token');
-      
-      tokenToUse = githubTokenFromStorage || tokenFromUrl || undefined;
-    }
-    
-    if (tokenToUse) {
-      headers['Authorization'] = `Bearer ${tokenToUse}`;
-    }
 
-    const response = await fetch(`${API_BASE_URL}/file-dependencies/analyze`, {
-      method: 'POST',
-      headers,
-      body: formData,
-    });
-    return ApiService.handleResponse<FileAnalysisResponse>(response);
-  }
 
-  static async getFileDependencies(fileId: string, githubToken?: string): Promise<FileContextItem[]> {
-    const response = await fetch(`${API_BASE_URL}/file-dependencies/${fileId}`, {
-      method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
-    });
-    return ApiService.handleResponse<FileContextItem[]>(response);
-  }
 
   // Repository Management API Methods (backend/github/github_routes.py)
   static async getRepositories(githubToken?: string): Promise<RepositoryResponse> {
@@ -290,13 +228,7 @@ export class ApiService {
     return ApiService.handleResponse<RepositoryResponse>(response);
   }
 
-  static async getRepository(owner: string, name: string, githubToken?: string): Promise<RepositoryDetailsResponse> {
-    const response = await fetch(`${API_BASE_URL}/repositories/${owner}/${name}`, {
-      method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
-    });
-    return ApiService.handleResponse<RepositoryDetailsResponse>(response);
-  }
+
 
   static async createGitHubIssueFromUserIssue(issueId: string, githubToken?: string): Promise<CreateGitHubIssueResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/${issueId}/create-github-issue`, {

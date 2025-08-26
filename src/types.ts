@@ -361,20 +361,10 @@ export interface SessionContextValue extends UnifiedSessionState {
 
   // Chat message management methods
   addChatMessage: (message: ChatMessageAPI) => Promise<void>;
-  updateChatMessage: (messageId: string, updates: Partial<ChatMessageAPI>) => void;
   clearChatMessages: () => void;
   loadChatMessages: (sessionId: string) => Promise<void>;
-  deleteChatMessage: (messageId: string) => Promise<void>;
 
   // File dependency management methods
-  addFileDependency: (fileDependency: {
-    file_path: string;
-    file_name: string;
-    file_type: string;
-    chunk_index: number;
-    tokens: number;
-    file_metadata?: Record<string, unknown>;
-  }) => Promise<void>;
   addMultipleFileDependencies: (fileDependencies: Array<{
     file_path: string;
     file_name: string;
@@ -384,7 +374,6 @@ export interface SessionContextValue extends UnifiedSessionState {
     file_metadata?: Record<string, unknown>;
   }>) => Promise<void>;
   loadFileDependencies: () => Promise<void>;
-  deleteFileDependency: (fileId: string) => Promise<void>;
   extractFileDependenciesForSession: (repoUrl: string) => Promise<void>;
 
   // Context card management methods
