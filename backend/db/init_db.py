@@ -54,10 +54,10 @@ def create_tables_with_models(engine):
         return False
 
 def create_tables_standalone(engine):
-    """Create all tables using raw SQL (fallback method)"""
+    """Create all tables using raw SQL (fallback method) - matches models.py exactly"""
     print("Creating tables using standalone SQL...")
     
-    # SQL statements to create tables
+    # SQL statements to create tables - EXACTLY matching models.py schema
     create_tables_sql = [
         """
         CREATE TABLE IF NOT EXISTS users (
@@ -100,8 +100,8 @@ def create_tables_standalone(engine):
         """
         CREATE TABLE IF NOT EXISTS repositories (
             id SERIAL PRIMARY KEY,
-            github_repo_id INTEGER UNIQUE,
             user_id INTEGER REFERENCES users(id),
+            github_repo_id INTEGER,
             name VARCHAR(255) NOT NULL,
             owner VARCHAR(255) NOT NULL,
             full_name VARCHAR(512) NOT NULL,
@@ -114,6 +114,7 @@ def create_tables_standalone(engine):
             stargazers_count INTEGER DEFAULT 0,
             forks_count INTEGER DEFAULT 0,
             open_issues_count INTEGER DEFAULT 0,
+            default_branch VARCHAR(100),
             github_created_at TIMESTAMP WITH TIME ZONE,
             github_updated_at TIMESTAMP WITH TIME ZONE,
             pushed_at TIMESTAMP WITH TIME ZONE,
@@ -200,82 +201,16 @@ def create_tables_standalone(engine):
         )
         """,
         """
-        CREATE TABLE IF NOT EXISTS context_cards (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id),
-            title VARCHAR(255) NOT NULL,
-            description TEXT NOT NULL,
-            content TEXT NOT NULL,
-            source VARCHAR(50) NOT NULL,
-            tokens INTEGER DEFAULT 0,
-            is_active BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS idea_items (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id),
-            title VARCHAR(255) NOT NULL,
-            description TEXT NOT NULL,
-            complexity VARCHAR(10) NOT NULL,
-            status VARCHAR(50) DEFAULT 'pending',
-            is_active BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS chat_sessions (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id),
-            session_id VARCHAR(255) UNIQUE NOT NULL,
-            title VARCHAR(255),
-            description TEXT,
-            repo_owner VARCHAR(255),
-            repo_name VARCHAR(255),
-            repo_branch VARCHAR(255) DEFAULT 'main',
-            repo_context JSON,
-            is_active BOOLEAN DEFAULT TRUE,
-            total_messages INTEGER DEFAULT 0,
-            total_tokens INTEGER DEFAULT 0,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE,
-            last_activity TIMESTAMP WITH TIME ZONE
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS chat_messages (
-            id SERIAL PRIMARY KEY,
-            session_id INTEGER REFERENCES chat_sessions(id),
-            message_id VARCHAR(255) UNIQUE NOT NULL,
-            message_text TEXT NOT NULL,
-            sender_type VARCHAR(50) NOT NULL,
-            role VARCHAR(50) NOT NULL,
-            is_code BOOLEAN DEFAULT FALSE,
-            tokens INTEGER DEFAULT 0,
-            model_used VARCHAR(100),
-            processing_time FLOAT,
-            context_cards JSON,
-            referenced_files JSON,
-            error_message TEXT,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE
-        )
-        """,
-        """
         CREATE TABLE IF NOT EXISTS user_issues (
             id SERIAL PRIMARY KEY,
             user_id INTEGER REFERENCES users(id),
             issue_id VARCHAR(255) UNIQUE NOT NULL,
-            context_card_id INTEGER REFERENCES context_cards(id),
+            context_card_id INTEGER,
             issue_text_raw TEXT NOT NULL,
             issue_steps JSON,
             title VARCHAR(255) NOT NULL,
             description TEXT,
             session_id VARCHAR(255),
-            chat_session_id INTEGER REFERENCES chat_sessions(id),
             context_cards JSON,
             ideas JSON,
             repo_owner VARCHAR(255),
@@ -295,7 +230,6 @@ def create_tables_standalone(engine):
         """
         CREATE TABLE IF NOT EXISTS file_embeddings (
             id SERIAL PRIMARY KEY,
-            session_id INTEGER REFERENCES chat_sessions(id),
             repository_id INTEGER REFERENCES repositories(id),
             file_path VARCHAR(1000) NOT NULL,
             file_name VARCHAR(500) NOT NULL,
@@ -309,23 +243,75 @@ def create_tables_standalone(engine):
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             updated_at TIMESTAMP WITH TIME ZONE
         )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS oauth_states (
+            state VARCHAR(255) PRIMARY KEY,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            is_used BOOLEAN DEFAULT FALSE
+        )
         """
     ]
     
-    # Basic indexes for performance
+    # Indexes matching models.py relationships and performance requirements
     create_indexes_sql = [
-        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_active ON chat_sessions(user_id, is_active)",
-        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_session_id ON chat_sessions(session_id)",
-        "CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id)",
-        "CREATE INDEX IF NOT EXISTS idx_context_cards_user_active ON context_cards(user_id, is_active)",
-        "CREATE INDEX IF NOT EXISTS idx_users_github_id ON users(github_user_id)",
-        "CREATE INDEX IF NOT EXISTS idx_repositories_user_name ON repositories(user_id, name)",
-        "CREATE INDEX IF NOT EXISTS idx_file_items_repo_path ON file_items(repository_id, path)",
-        # Session token indexes for performance
+        # User indexes
+        "CREATE INDEX IF NOT EXISTS idx_users_github_username ON users(github_username)",
+        "CREATE INDEX IF NOT EXISTS idx_users_github_user_id ON users(github_user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)",
+        
+        # Auth token indexes
+        "CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_id ON auth_tokens(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_auth_tokens_is_active ON auth_tokens(is_active)",
+        
+        # Session token indexes
         "CREATE INDEX IF NOT EXISTS idx_session_tokens_session_token ON session_tokens(session_token)",
         "CREATE INDEX IF NOT EXISTS idx_session_tokens_user_id ON session_tokens(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_session_tokens_is_active ON session_tokens(is_active)",
-        "CREATE INDEX IF NOT EXISTS idx_session_tokens_expires_at ON session_tokens(expires_at)"
+        "CREATE INDEX IF NOT EXISTS idx_session_tokens_expires_at ON session_tokens(expires_at)",
+        
+        # Repository indexes
+        "CREATE INDEX IF NOT EXISTS idx_repositories_user_id ON repositories(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_repositories_github_repo_id ON repositories(github_repo_id)",
+        "CREATE INDEX IF NOT EXISTS idx_repositories_owner ON repositories(owner)",
+        "CREATE INDEX IF NOT EXISTS idx_repositories_full_name ON repositories(full_name)",
+        "CREATE INDEX IF NOT EXISTS idx_repositories_repo_url ON repositories(repo_url)",
+        
+        # Issue indexes
+        "CREATE INDEX IF NOT EXISTS idx_issues_github_issue_id ON issues(github_issue_id)",
+        "CREATE INDEX IF NOT EXISTS idx_issues_repository_id ON issues(repository_id)",
+        
+        # Pull request indexes
+        "CREATE INDEX IF NOT EXISTS idx_pull_requests_github_pr_id ON pull_requests(github_pr_id)",
+        "CREATE INDEX IF NOT EXISTS idx_pull_requests_repository_id ON pull_requests(repository_id)",
+        
+        # Commit indexes
+        "CREATE INDEX IF NOT EXISTS idx_commits_sha ON commits(sha)",
+        "CREATE INDEX IF NOT EXISTS idx_commits_repository_id ON commits(repository_id)",
+        
+        # File item indexes
+        "CREATE INDEX IF NOT EXISTS idx_file_items_repository_id ON file_items(repository_id)",
+        "CREATE INDEX IF NOT EXISTS idx_file_items_path ON file_items(path)",
+        "CREATE INDEX IF NOT EXISTS idx_file_items_parent_id ON file_items(parent_id)",
+        
+        # File analysis indexes
+        "CREATE INDEX IF NOT EXISTS idx_file_analyses_repository_id ON file_analyses(repository_id)",
+        "CREATE INDEX IF NOT EXISTS idx_file_analyses_status ON file_analyses(status)",
+        
+        # User issue indexes
+        "CREATE INDEX IF NOT EXISTS idx_user_issues_user_id ON user_issues(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_user_issues_issue_id ON user_issues(issue_id)",
+        "CREATE INDEX IF NOT EXISTS idx_user_issues_session_id ON user_issues(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_user_issues_status ON user_issues(status)",
+        
+        # File embedding indexes
+        "CREATE INDEX IF NOT EXISTS idx_file_embeddings_repository_id ON file_embeddings(repository_id)",
+        "CREATE INDEX IF NOT EXISTS idx_file_embeddings_file_path ON file_embeddings(file_path)",
+        
+        # OAuth state indexes
+        "CREATE INDEX IF NOT EXISTS idx_oauth_states_expires_at ON oauth_states(expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_oauth_states_is_used ON oauth_states(is_used)"
     ]
     
     with engine.connect() as conn:
@@ -373,31 +359,32 @@ def create_sample_data_standalone(engine):
         
         # Sample Repositories
         db.execute(text("""
-            INSERT INTO repositories (github_repo_id, user_id, name, owner, full_name, repo_url, description, private, html_url, clone_url, language, stargazers_count, forks_count, open_issues_count, github_created_at, github_updated_at, pushed_at, created_at, updated_at) VALUES
-            (123456789, 1, 'awesome-project', 'alice_dev', 'alice_dev/awesome-project', 'https://github.com/alice_dev/awesome-project', 'An awesome project for demonstrating features', false, 'https://github.com/alice_dev/awesome-project', 'https://github.com/alice_dev/awesome-project.git', 'Python', 42, 5, 3, NOW() - INTERVAL '100 days', NOW() - INTERVAL '5 days', NOW() - INTERVAL '1 day', NOW(), NOW())
+            INSERT INTO repositories (user_id, github_repo_id, name, owner, full_name, repo_url, description, private, html_url, clone_url, language, stargazers_count, forks_count, open_issues_count, github_created_at, github_updated_at, pushed_at, created_at, updated_at) VALUES
+            (1, 123456789, 'awesome-project', 'alice_dev', 'alice_dev/awesome-project', 'https://github.com/alice_dev/awesome-project', 'An awesome project for demonstrating features', false, 'https://github.com/alice_dev/awesome-project', 'https://github.com/alice_dev/awesome-project.git', 'Python', 42, 5, 3, NOW() - INTERVAL '100 days', NOW() - INTERVAL '5 days', NOW() - INTERVAL '1 day', NOW(), NOW())
             ON CONFLICT (github_repo_id) DO NOTHING
         """))
         
-        # Sample ContextCards
+        # Sample File Items
         db.execute(text("""
-            INSERT INTO context_cards (user_id, title, description, content, source, tokens, is_active, created_at, updated_at) VALUES
-            (1, 'Authentication System Design', 'Design patterns for implementing OAuth2 authentication', 'The authentication system should use OAuth2 with JWT tokens...', 'chat', 800, true, NOW(), NOW())
+            INSERT INTO file_items (repository_id, name, path, file_type, category, tokens, is_directory, content_size, created_at, updated_at) VALUES
+            (1, 'main.py', 'src/main.py', 'INTERNAL', 'Source Code', 1500, false, 5000, NOW(), NOW()),
+            (1, 'requirements.txt', 'requirements.txt', 'INTERNAL', 'Dependencies', 200, false, 500, NOW(), NOW()),
+            (1, 'src', 'src', 'INTERNAL', 'Directory', 0, true, 0, NOW(), NOW())
             ON CONFLICT DO NOTHING
         """))
         
-        # Sample ChatSessions
+        # Sample File Analysis
         db.execute(text("""
-            INSERT INTO chat_sessions (user_id, session_id, title, description, repo_owner, repo_name, repo_branch, repo_context, is_active, total_messages, total_tokens, created_at, updated_at, last_activity) VALUES
-            (1, 'session_001', 'Authentication Discussion', 'Discussion about implementing OAuth2 authentication', 'alice_dev', 'awesome-project', 'main', '{"owner": "alice_dev", "name": "awesome-project", "branch": "main", "full_name": "alice_dev/awesome-project", "html_url": "https://github.com/alice_dev/awesome-project"}', true, 5, 1200, NOW(), NOW(), NOW() - INTERVAL '2 hours')
-            ON CONFLICT (session_id) DO NOTHING
+            INSERT INTO file_analyses (repository_id, raw_data, processed_data, total_files, total_tokens, max_file_size, status, processed_at, created_at, updated_at) VALUES
+            (1, '{"total_files": 15, "languages": {"Python": 10, "JavaScript": 5}}', '{"analysis": "complete", "complexity": "medium"}', 15, 25000, 10000, 'completed', NOW() - INTERVAL '1 day', NOW(), NOW())
+            ON CONFLICT DO NOTHING
         """))
         
-        # Sample ChatMessages
+        # Sample User Issues
         db.execute(text("""
-            INSERT INTO chat_messages (session_id, message_id, message_text, sender_type, role, is_code, tokens, model_used, processing_time, context_cards, referenced_files, error_message, created_at, updated_at) VALUES
-            (1, 'msg_001', 'How should we implement OAuth2 authentication?', 'user', 'user', false, 15, 'gpt-4', 1.2, NULL, NULL, NULL, NOW(), NOW()),
-            (1, 'msg_002', 'I recommend using the OAuth2 authorization code flow with PKCE for security...', 'assistant', 'assistant', false, 45, 'gpt-4', 2.1, NULL, NULL, NULL, NOW(), NOW())
-            ON CONFLICT (message_id) DO NOTHING
+            INSERT INTO user_issues (user_id, issue_id, title, description, issue_text_raw, priority, status, tokens_used, created_at, updated_at) VALUES
+            (1, 'issue_001', 'Implement OAuth2 Authentication', 'Need to implement secure OAuth2 authentication flow', 'Please implement OAuth2 authentication for our application', 'medium', 'pending', 0, NOW(), NOW())
+            ON CONFLICT (issue_id) DO NOTHING
         """))
         
         db.commit()
@@ -495,11 +482,15 @@ def check_database_health():
             # Check if we can connect
             conn.execute(text("SELECT 1"))
             
-            # Check if tables exist
+            # Check if tables exist - updated to match models.py
             inspector = inspect(engine)
             tables = inspector.get_table_names()
             
-            expected_tables = ['users', 'auth_tokens', 'repositories', 'file_items', 'file_analyses', 'context_cards', 'idea_items', 'chat_sessions', 'chat_messages', 'user_issues', 'issues', 'pull_requests', 'commits', 'file_embeddings']
+            expected_tables = [
+                'users', 'auth_tokens', 'session_tokens', 'repositories', 
+                'issues', 'pull_requests', 'commits', 'file_items', 
+                'file_analyses', 'user_issues', 'file_embeddings', 'oauth_states'
+            ]
             missing_tables = [table for table in expected_tables if table not in tables]
             
             if missing_tables:

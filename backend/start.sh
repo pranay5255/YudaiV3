@@ -3,12 +3,36 @@ set -e
 
 echo "🚀 Starting YudaiV3 Backend..."
 
-# 🆕 ADD THIS SECTION: Initialize database tables
+# Wait for database to be fully ready before initialization
+echo "⏳ Waiting for database to be fully ready..."
+max_attempts=60
+attempt=0
+
+while [ $attempt -lt $max_attempts ]; do
+    attempt=$((attempt + 1))
+    echo "  Attempt $attempt/$max_attempts..."
+    
+    # Test database connectivity and readiness
+    if pg_isready -h db -p 5432 -U yudai_user -d yudai_db >/dev/null 2>&1; then
+        echo "🎉 Database is ready!"
+        break
+    else
+        if [ $attempt -eq $max_attempts ]; then
+            echo "❌ Failed to connect to database after $max_attempts attempts"
+            exit 1
+        fi
+        echo "  ⏳ Waiting 5 seconds before retry..."
+        sleep 5
+    fi
+done
+
+# Initialize database tables
 echo "🏗️  Initializing database tables..."
 if python db/init_db.py --full-init; then
     echo "✅ Database tables initialized successfully!"
 else
     echo "❌ Failed to initialize database tables"
+    echo " This is a critical error. Application cannot start without database tables."
     exit 1
 fi
 

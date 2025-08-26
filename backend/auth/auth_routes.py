@@ -25,12 +25,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPBearer
 from models import (
-    CreateSessionTokenRequest,
+    # CreateSessionTokenRequest,
     SessionTokenRequest,
-    SessionTokenResponse,
+    # SessionTokenResponse,
 )
 from sqlalchemy.orm import Session
-
 
 # Configure logger for this module
 logger = logging.getLogger(__name__)
