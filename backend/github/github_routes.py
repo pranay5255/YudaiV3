@@ -10,29 +10,19 @@ from typing import List
 
 from auth.github_oauth import get_current_user
 from db.database import get_db
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from models import (
-    CreateIssueRequest,
     GitHubBranch,
-    GitHubCommit,
-    GitHubIssue,
-    GitHubPullRequest,
     GitHubRepo,
-    GitHubSearchResponse,
     User,
 )
 from sqlalchemy.orm import Session
 
 from .github_api import (
     GitHubAPIError,
-    create_issue,
     get_repository_branches,
-    get_repository_commits,
     get_repository_details,
-    get_repository_issues,
-    get_repository_pulls,
     get_user_repositories,
-    search_repositories,
 )
 
 router = APIRouter(tags=["github"])
@@ -156,23 +146,23 @@ async def get_repository_info(
 #             detail=str(e)
 #         )
 
-# @router.get("/repositories/{owner}/{repo}/branches", response_model=List[GitHubBranch])
-# async def get_repository_branches_list(
-#     owner: str,
-#     repo: str,
-#     current_user: User = Depends(get_current_user),
-#     db: Session = Depends(get_db)
-# ):
-#     """
-#     Get branches for a repository
-#     """
-#     try:
-#         return await get_repository_branches(owner, repo, current_user, db)
-#     except GitHubAPIError as e:
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail=str(e)
-#         )
+@router.get("/repositories/{owner}/{repo}/branches", response_model=List[GitHubBranch])
+async def get_repository_branches_list(
+    owner: str,
+    repo: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get branches for a repository
+    """
+    try:
+        return await get_repository_branches(owner, repo, current_user, db)
+    except GitHubAPIError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 # @router.get("/search/repositories", response_model=GitHubSearchResponse)
 # async def search_github_repositories(
