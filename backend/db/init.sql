@@ -237,9 +237,63 @@ CREATE TABLE IF NOT EXISTS user_issues (
     processed_at TIMESTAMP WITH TIME ZONE
 );
 
--- File embeddings table
+-- Chat sessions table (MISSING FROM ORIGINAL)
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    session_id VARCHAR(255) UNIQUE NOT NULL,
+    title VARCHAR(255),
+    description TEXT,
+    repo_owner VARCHAR(255),
+    repo_name VARCHAR(255),
+    repo_branch VARCHAR(255) DEFAULT 'main',
+    repo_context JSON,
+    is_active BOOLEAN DEFAULT TRUE,
+    total_messages INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE,
+    last_activity TIMESTAMP WITH TIME ZONE
+);
+
+-- Chat messages table (MISSING FROM ORIGINAL)
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id SERIAL PRIMARY KEY,
+    session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    message_id VARCHAR(255) NOT NULL,
+    message_text TEXT NOT NULL,
+    sender_type VARCHAR(50) NOT NULL,
+    role VARCHAR(50) NOT NULL,
+    is_code BOOLEAN DEFAULT FALSE,
+    tokens INTEGER DEFAULT 0,
+    model_used VARCHAR(100),
+    processing_time FLOAT,
+    context_cards JSON,
+    referenced_files JSON,
+    error_message TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Context cards table (MISSING FROM ORIGINAL)
+CREATE TABLE IF NOT EXISTS context_cards (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    content TEXT NOT NULL,
+    source VARCHAR(50) NOT NULL,
+    tokens INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE
+);
+
+-- File embeddings table (FIXED - ADDED session_id COLUMN)
 CREATE TABLE IF NOT EXISTS file_embeddings (
     id SERIAL PRIMARY KEY,
+    session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
     repository_id INTEGER REFERENCES repositories(id),
     file_path VARCHAR(1000) NOT NULL,
     file_name VARCHAR(500) NOT NULL,
@@ -315,7 +369,28 @@ CREATE INDEX IF NOT EXISTS idx_user_issues_issue_id ON user_issues(issue_id);
 CREATE INDEX IF NOT EXISTS idx_user_issues_session_id ON user_issues(session_id);
 CREATE INDEX IF NOT EXISTS idx_user_issues_status ON user_issues(status);
 
--- File embedding indexes
+-- Chat session indexes (NEW)
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_session_id ON chat_sessions(session_id);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_repo_owner ON chat_sessions(repo_owner);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_repo_name ON chat_sessions(repo_name);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_is_active ON chat_sessions(is_active);
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_last_activity ON chat_sessions(last_activity);
+
+-- Chat message indexes (NEW)
+CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_message_id ON chat_messages(message_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_sender_type ON chat_messages(sender_type);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
+
+-- Context card indexes (NEW)
+CREATE INDEX IF NOT EXISTS idx_context_cards_user_id ON context_cards(user_id);
+CREATE INDEX IF NOT EXISTS idx_context_cards_session_id ON context_cards(session_id);
+CREATE INDEX IF NOT EXISTS idx_context_cards_source ON context_cards(source);
+CREATE INDEX IF NOT EXISTS idx_context_cards_is_active ON context_cards(is_active);
+
+-- File embedding indexes (UPDATED - ADDED session_id INDEX)
+CREATE INDEX IF NOT EXISTS idx_file_embeddings_session_id ON file_embeddings(session_id);
 CREATE INDEX IF NOT EXISTS idx_file_embeddings_repository_id ON file_embeddings(repository_id);
 CREATE INDEX IF NOT EXISTS idx_file_embeddings_file_path ON file_embeddings(file_path);
 
@@ -347,6 +422,15 @@ CREATE TRIGGER update_file_analyses_updated_at BEFORE UPDATE ON file_analyses
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_user_issues_updated_at BEFORE UPDATE ON user_issues
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_chat_sessions_updated_at BEFORE UPDATE ON chat_sessions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_chat_messages_updated_at BEFORE UPDATE ON chat_messages
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_context_cards_updated_at BEFORE UPDATE ON context_cards
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_file_embeddings_updated_at BEFORE UPDATE ON file_embeddings

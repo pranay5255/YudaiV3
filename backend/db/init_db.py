@@ -228,24 +228,6 @@ def create_tables_standalone(engine):
         )
         """,
         """
-        CREATE TABLE IF NOT EXISTS file_embeddings (
-            id SERIAL PRIMARY KEY,
-            session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
-            repository_id INTEGER REFERENCES repositories(id),
-            file_path VARCHAR(1000) NOT NULL,
-            file_name VARCHAR(500) NOT NULL,
-            file_type VARCHAR(100) NOT NULL,
-            file_content TEXT,
-            embedding TEXT,
-            chunk_index INTEGER DEFAULT 0,
-            chunk_text TEXT NOT NULL,
-            tokens INTEGER DEFAULT 0,
-            file_metadata JSON,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE
-        )
-        """,
-        """
         CREATE TABLE IF NOT EXISTS oauth_states (
             state VARCHAR(255) PRIMARY KEY,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -270,6 +252,24 @@ def create_tables_standalone(engine):
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             updated_at TIMESTAMP WITH TIME ZONE,
             last_activity TIMESTAMP WITH TIME ZONE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS file_embeddings (
+            id SERIAL PRIMARY KEY,
+            session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
+            repository_id INTEGER REFERENCES repositories(id),
+            file_path VARCHAR(1000) NOT NULL,
+            file_name VARCHAR(500) NOT NULL,
+            file_type VARCHAR(100) NOT NULL,
+            file_content TEXT,
+            embedding TEXT,
+            chunk_index INTEGER DEFAULT 0,
+            chunk_text TEXT NOT NULL,
+            tokens INTEGER DEFAULT 0,
+            file_metadata JSON,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE
         )
         """,
         """
