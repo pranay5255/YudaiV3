@@ -83,6 +83,18 @@ def create_sample_data():
     
     db = SessionLocal()
     try:
+        # Check if sample data already exists
+        existing_users = db.query(User).filter(
+            User.github_username.in_(["alice_dev", "bob_coder", "charlie_architect", "demo_user"])
+        ).all()
+        
+        if existing_users:
+            print("✓ Sample data already exists, skipping creation")
+            print(f"Found {len(existing_users)} existing users: {[u.github_username for u in existing_users]}")
+            return True
+        
+        print("📊 Creating sample data...")
+        
         # Sample data for Users
         sample_users = [
             User(
@@ -513,6 +525,43 @@ def create_sample_data():
         
     except Exception as e:
         print(f"✗ Error creating sample data: {e}")
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+def reset_sample_data():
+    """
+    Reset sample data by removing existing sample users and recreating them
+    """
+    from models import User
+    
+    db = SessionLocal()
+    try:
+        print("🗑️  Resetting sample data...")
+        
+        # Delete sample data in reverse dependency order
+        sample_usernames = ["alice_dev", "bob_coder", "charlie_architect", "demo_user"]
+        
+        # Find and delete sample users
+        sample_users = db.query(User).filter(
+            User.github_username.in_(sample_usernames)
+        ).all()
+        
+        if sample_users:
+            print(f"Found {len(sample_users)} sample users to delete")
+            for user in sample_users:
+                db.delete(user)
+            db.commit()
+            print("✓ Sample users deleted")
+        else:
+            print("No sample users found to delete")
+        
+        # Create fresh sample data
+        return create_sample_data()
+        
+    except Exception as e:
+        print(f"✗ Error resetting sample data: {e}")
         db.rollback()
         raise
     finally:
