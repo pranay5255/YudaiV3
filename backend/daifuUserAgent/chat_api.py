@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from datetime import datetime
 from typing import List, Tuple
 
 from auth.github_oauth import get_current_user
@@ -23,7 +24,9 @@ from github.github_api import (
     get_repository_pulls,
 )
 from models import (
+    ChatMessage,
     ChatRequest,
+    ChatSession,
     User,
 )
 from sqlalchemy.orm import Session
@@ -90,21 +93,76 @@ async def get_github_context_data(owner: str, repo: str, current_user: User, db:
         return empty_repo, [], [], []
 
 
-# In-memory storage for conversation history (temporary solution)
-# In a production environment, this should be replaced with proper database storage
-conversation_history: dict[str, List[Tuple[str, str]]] = {}
+def get_conversation_history(session_id: str, limit: int = 50, db: Session = None) -> List[Tuple[str, str]]:
+    """Get conversation history for a session from database"""
+    if not db:
+        return []
+    
+    try:
+        # Get the session from database
+        db_session = db.query(ChatSession).filter(
+            ChatSession.session_id == session_id
+        ).first()
+        
+        if not db_session:
+            return []
+        
+        # Get messages for this session
+        messages = db.query(ChatMessage).filter(
+            ChatMessage.session_id == db_session.id
+        ).order_by(ChatMessage.created_at.asc()).limit(limit).all()
+        
+        # Convert to tuple format for compatibility
+        history = []
+        for msg in messages:
+            sender = "User" if msg.sender_type == "user" else "DAifu"
+            history.append((sender, msg.message_text))
+        
+        return history
+    except Exception as e:
+        print(f"Error getting conversation history: {e}")
+        return []
 
 
-def get_conversation_history(session_id: str, limit: int = 50) -> List[Tuple[str, str]]:
-    """Get conversation history for a session"""
-    return conversation_history.get(session_id, [])[-limit:]
-
-
-def add_to_conversation_history(session_id: str, sender: str, message: str):
-    """Add a message to conversation history"""
-    if session_id not in conversation_history:
-        conversation_history[session_id] = []
-    conversation_history[session_id].append((sender, message))
+def add_to_conversation_history(session_id: str, sender: str, message: str, db: Session = None, current_user: User = None):
+    """Add a message to conversation history in database"""
+    if not db or not current_user:
+        return
+    
+    try:
+        # Get the session from database
+        db_session = db.query(ChatSession).filter(
+            ChatSession.session_id == session_id,
+            ChatSession.user_id == current_user.id
+        ).first()
+        
+        if not db_session:
+            print(f"Session {session_id} not found for user {current_user.id}")
+            return
+        
+        # Create message record
+        sender_type = "user" if sender == "User" else "assistant"
+        message_obj = ChatMessage(
+            session_id=db_session.id,
+            message_id=f"msg_{uuid.uuid4().hex[:8]}",
+            message_text=message,
+            sender_type=sender_type,
+            role=sender_type,
+            is_code=False,
+            tokens=len(message.split())  # Rough estimation
+        )
+        
+        db.add(message_obj)
+        
+        # Update session statistics
+        db_session.total_messages += 1
+        db_session.total_tokens += message_obj.tokens
+        db_session.last_activity = datetime.utcnow()
+        
+        db.commit()
+    except Exception as e:
+        print(f"Error adding to conversation history: {e}")
+        db.rollback()
 
 
 router = APIRouter()
@@ -162,10 +220,10 @@ async def chat_daifu(
 
         # Add user message to conversation history
         user_message = request.message.content
-        add_to_conversation_history(session_id, "User", user_message)
+        add_to_conversation_history(session_id, "User", user_message, db, current_user)
         
         # Get conversation history for context
-        history = get_conversation_history(session_id, 50)
+        history = get_conversation_history(session_id, 50, db)
         
         # Generate AI response
         reply = await LLMService.generate_response_with_history(
@@ -175,7 +233,7 @@ async def chat_daifu(
         )
         
         # Add assistant response to conversation history
-        add_to_conversation_history(session_id, "DAifu", reply)
+        add_to_conversation_history(session_id, "DAifu", reply, db, current_user)
         
         # Calculate processing time
         processing_time = (time.time() - start_time) * 1000

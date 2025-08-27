@@ -7,7 +7,7 @@ from datetime import timedelta
 
 # Import Base from unified models
 from models import Base
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from utils import utc_now
@@ -67,8 +67,12 @@ def create_sample_data():
     """
     from models import (
         AuthToken,
+        ChatMessage,
+        ChatSession,
         Commit,
+        ContextCard,
         FileAnalysis,
+        FileEmbedding,
         FileItem,
         Issue,
         PullRequest,
@@ -359,45 +363,151 @@ def create_sample_data():
             db.add(user_issue)
         db.commit()
         
-        # Sample FileEmbeddings for session context (DISABLED - ChatSession model commented out)
-        # sample_file_embeddings = [
-        #     FileEmbedding(
-        #         # session_id=1,  # DISABLED - ChatSession model commented out
-        #         repository_id=1,
-        #         file_path="src/main.py",
-        #         file_name="main.py",
-        #         file_type="python",
-        #         file_content="# Main application file\n\ndef main():\n    print('Hello, World!')\n\nif __name__ == '__main__':\n    main()",
-        #         chunk_index=0,
-        #         chunk_text="# Main application file\n\ndef main():\n    print('Hello, World!')",
-        #         tokens=25,
-        #         file_metadata={
-        #             "size": 500,
-        #             "encoding": "utf-8",
-        #             "lines": 6
-        #         }
-        #     ),
-        #     FileEmbedding(
-        #         # session_id=1,  # DISABLED - ChatSession model commented out
-        #         repository_id=1,
-        #         file_path="requirements.txt",
-        #         file_name="requirements.txt",
-        #         file_type="text",
-        #         file_content="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
-        #         chunk_index=0,
-        #         chunk_text="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
-        #         tokens=15,
-        #         file_metadata={
-        #             "size": 200,
-        #             "encoding": "utf-8",
-        #             "lines": 3
-        #         }
-        #     )
-        # ]
-        # 
-        # for file_embedding in sample_file_embeddings:
-        #     db.add(file_embedding)
-        # db.commit()
+        # Sample Chat Sessions
+        sample_sessions = [
+            ChatSession(
+                user_id=1,
+                session_id="session_001",
+                title="Awesome Project Development",
+                description="Working on OAuth2 authentication feature",
+                repo_owner="alice_dev",
+                repo_name="awesome-project",
+                repo_branch="main",
+                repo_context='{"language": "Python", "framework": "Flask"}',
+                is_active=True,
+                total_messages=0,
+                total_tokens=0,
+                last_activity=utc_now() - timedelta(hours=2)
+            ),
+            ChatSession(
+                user_id=2,
+                session_id="session_002",
+                title="Cool App Enhancement",
+                description="Adding new features to TypeScript application",
+                repo_owner="bob_coder",
+                repo_name="cool-app",
+                repo_branch="main",
+                repo_context='{"language": "TypeScript", "framework": "React"}',
+                is_active=True,
+                total_messages=0,
+                total_tokens=0,
+                last_activity=utc_now() - timedelta(minutes=30)
+            )
+        ]
+        
+        for session in sample_sessions:
+            db.add(session)
+        db.commit()
+        
+        # Sample Chat Messages
+        sample_messages = [
+            ChatMessage(
+                session_id=1,
+                message_id="msg_001",
+                message_text="Hello! I need help implementing OAuth2 authentication for my Flask application.",
+                sender_type="user",
+                role="user",
+                is_code=False,
+                tokens=20
+            ),
+            ChatMessage(
+                session_id=1,
+                message_id="msg_002",
+                message_text="I'd be happy to help you implement OAuth2 authentication! Let's start by setting up the OAuth2 provider configuration. What provider are you planning to use?",
+                sender_type="assistant",
+                role="assistant",
+                is_code=False,
+                tokens=35,
+                model_used="gpt-4",
+                processing_time=1200.5
+            ),
+            ChatMessage(
+                session_id=2,
+                message_id="msg_003",
+                message_text="Can you help me optimize my React components for better performance?",
+                sender_type="user",
+                role="user",
+                is_code=False,
+                tokens=15
+            )
+        ]
+        
+        for message in sample_messages:
+            db.add(message)
+        db.commit()
+        
+        # Update session statistics
+        db.execute(text("UPDATE chat_sessions SET total_messages = 2, total_tokens = 55 WHERE id = 1"))
+        db.execute(text("UPDATE chat_sessions SET total_messages = 1, total_tokens = 15 WHERE id = 2"))
+        db.commit()
+        
+        # Sample Context Cards
+        sample_context_cards = [
+            ContextCard(
+                user_id=1,
+                session_id=1,
+                title="OAuth2 Flow Documentation",
+                description="Essential OAuth2 implementation guide",
+                content="OAuth2 is an authorization framework that enables applications to obtain limited access to user accounts...",
+                source="upload",
+                tokens=150
+            ),
+            ContextCard(
+                user_id=1,
+                session_id=1,
+                title="Flask-OAuthlib Example",
+                description="Code example for Flask OAuth integration",
+                content="```python\nfrom flask_oauthlib.client import OAuth\n\noauth = OAuth(app)\n```",
+                source="chat",
+                tokens=75,
+                is_active=True
+            ),
+            ContextCard(
+                user_id=2,
+                session_id=2,
+                title="React Performance Tips",
+                description="Best practices for React optimization",
+                content="1. Use React.memo for functional components\n2. Implement useMemo for expensive calculations\n3. Use useCallback for function references",
+                source="chat",
+                tokens=120
+            )
+        ]
+        
+        for context_card in sample_context_cards:
+            db.add(context_card)
+        db.commit()
+        
+        # Sample File Embeddings for session context
+        sample_file_embeddings = [
+            FileEmbedding(
+                session_id=1,
+                repository_id=1,
+                file_path="src/main.py",
+                file_name="main.py",
+                file_type="python",
+                file_content="# Main application file\n\ndef main():\n    print('Hello, World!')\n\nif __name__ == '__main__':\n    main()",
+                chunk_index=0,
+                chunk_text="# Main application file\n\ndef main():\n    print('Hello, World!')",
+                tokens=25,
+                file_metadata='{"size": 500, "encoding": "utf-8", "lines": 6}'
+            ),
+            FileEmbedding(
+                session_id=1,
+                repository_id=1,
+                file_path="requirements.txt",
+                file_name="requirements.txt",
+                file_type="text",
+                file_content="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
+                chunk_index=0,
+                chunk_text="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
+                tokens=15,
+                file_metadata='{"size": 200, "encoding": "utf-8", "lines": 3}'
+            )
+        ]
+        
+        for file_embedding in sample_file_embeddings:
+            db.add(file_embedding)
+        db.commit()
         
         print("✓ Sample data created successfully")
         

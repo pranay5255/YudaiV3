@@ -65,21 +65,6 @@ export interface ChatRequest {
   };
 }
 
-export interface CreateChatMessageRequest {
-  session_id: string;
-  message_id: string;
-  message_text: string;
-  sender_type: 'user' | 'assistant' | 'system';
-  role: 'user' | 'assistant' | 'system';
-  is_code?: boolean;
-  tokens?: number;
-  model_used?: string;
-  processing_time?: number;
-  context_cards?: string[];
-  referenced_files?: string[];
-  error_message?: string;
-}
-
 export interface ChatResponse {
   reply: string;
   conversation: [string, string][];

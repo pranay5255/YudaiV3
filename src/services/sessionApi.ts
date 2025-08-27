@@ -2,7 +2,6 @@ import type {
   CreateSessionDaifuRequest,
   SessionResponse,
   SessionContextResponse,
-  CreateChatMessageRequest,
   ChatMessageResponse,
   ContextCardResponse,
   CreateContextCardRequest,
@@ -60,16 +59,6 @@ export const sessionApi = {
 
 
 
-
-  // Chat messages
-  async addChatMessage(sessionId: string, request: CreateChatMessageRequest, sessionToken?: string): Promise<ChatMessageResponse> {
-    const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/messages`, {
-      method: 'POST',
-      headers: getAuthHeaders(sessionToken),
-      body: JSON.stringify(request),
-    });
-    return handleResponse<ChatMessageResponse>(response);
-  },
 
   async getChatMessages(sessionId: string, limit = 100, sessionToken?: string): Promise<ChatMessageResponse[]> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/messages?limit=${limit}`, {
@@ -138,7 +127,6 @@ export type {
   ChatMessageResponse,
   ContextCardResponse,
   FileEmbeddingResponse,
-  CreateChatMessageRequest,
   CreateContextCardRequest,
 };
 

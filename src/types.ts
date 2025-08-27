@@ -360,7 +360,6 @@ export interface SessionContextValue extends UnifiedSessionState {
   loadRepositories: () => Promise<void>;
 
   // Chat message management methods
-  addChatMessage: (message: ChatMessageAPI) => Promise<void>;
   clearChatMessages: () => void;
   loadChatMessages: (sessionId: string) => Promise<void>;
 
@@ -417,11 +416,6 @@ export interface CreateSessionMutationData {
   repoBranch?: string;
 }
 
-export interface AddMessageMutationData {
-  sessionId: string;
-  message: ChatMessageAPI;
-}
-
 export interface UpdateMessageMutationData {
   sessionId: string;
   messageId: string;
@@ -459,11 +453,6 @@ export interface AddFileDependencyMutationData {
 }
 
 // Mutation context types for optimistic updates
-export interface MessageMutationContext {
-  previousMessages: ChatMessageAPI[];
-  optimisticMessage: ChatMessageAPI;
-}
-
 export interface ContextCardMutationContext {
   previousCards: ContextCard[];
   optimisticCard?: ContextCard;

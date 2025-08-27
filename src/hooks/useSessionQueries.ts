@@ -9,10 +9,8 @@ import {
   ContextCard,
   FileItem,
   CreateSessionMutationData,
-  AddMessageMutationData,
   AddContextCardMutationData,
   RemoveContextCardMutationData,
-  MessageMutationContext,
   ContextCardMutationContext,
   SelectedRepository,
 } from '../types';
@@ -20,7 +18,6 @@ import {
   sessionApi,
   type ChatMessageResponse,
   type ContextCardResponse,
-  type CreateChatMessageRequest,
   type SessionResponse,
 } from '../services/sessionApi';
 
@@ -171,70 +168,6 @@ export const useChatMessages = (sessionId: string) => {
   });
 };
 
-export const useAddMessage = () => {
-  const queryClient = useQueryClient();
-  const { addMessage, sessionToken } = useSessionStore();
-  
-  return useMutation({
-    mutationFn: async ({ sessionId, message }: AddMessageMutationData) => {
-      // Transform ChatMessageAPI to CreateChatMessageRequest
-      const createRequest: CreateChatMessageRequest = {
-        session_id: sessionId,
-        message_id: message.message_id,
-        message_text: message.message_text,
-        sender_type: message.sender_type,
-        role: message.role,
-        is_code: false, // Default value
-        tokens: message.tokens,
-        model_used: message.model_used,
-        processing_time: message.processing_time,
-        context_cards: message.context_cards || [],
-        referenced_files: message.referenced_files || [],
-        error_message: message.error_message
-      };
-      
-      return await sessionApi.addChatMessage(sessionId, createRequest, sessionToken || undefined);
-    },
-    onMutate: async ({ sessionId, message }): Promise<MessageMutationContext> => {
-      // Cancel any outgoing refetches
-      await queryClient.cancelQueries({ queryKey: QueryKeys.messages(sessionId) });
-      
-      // Snapshot the previous value
-      const previousMessages = queryClient.getQueryData<ChatMessageAPI[]>(QueryKeys.messages(sessionId)) || [];
-      
-      // Optimistically update the cache
-      const optimisticMessage: ChatMessageAPI = {
-        id: Date.now(),
-        message_id: message.message_id || Date.now().toString(),
-        message_text: message.message_text,
-        sender_type: message.sender_type,
-        role: message.role,
-        tokens: message.tokens || 0,
-        created_at: new Date().toISOString(),
-      };
-      
-      queryClient.setQueryData(QueryKeys.messages(sessionId), (old: ChatMessageAPI[] = []) => [
-        ...old,
-        optimisticMessage,
-      ]);
-      
-      // Update Zustand store optimistically
-      addMessage(optimisticMessage);
-      
-      return { previousMessages, optimisticMessage };
-    },
-    onError: (_err: Error, { sessionId }: AddMessageMutationData, context?: MessageMutationContext) => {
-      // If the mutation fails, use the context returned from onMutate to roll back
-      if (context?.previousMessages) {
-        queryClient.setQueryData(QueryKeys.messages(sessionId), context.previousMessages);
-      }
-    },
-    onSettled: (_data: ChatMessageResponse | undefined, _error: Error | null, { sessionId }: AddMessageMutationData) => {
-      // Always refetch after error or success
-      queryClient.invalidateQueries({ queryKey: QueryKeys.messages(sessionId) });
-    },
-  });
-};
 
 
 

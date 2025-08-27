@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Send, Plus } from 'lucide-react';
-import { Message, ChatMessageAPI } from '../types';
+import { Message } from '../types';
 import type {
   CreateIssueWithContextRequest,
   ChatContextMessage,
@@ -13,7 +13,6 @@ import { useApi } from '../hooks/useApi';
 import { useSessionManagement } from '../hooks/useSessionManagement';
 import {
   useChatMessages,
-  useAddMessage,
   useCreateSession,
   useContextCards,
   useFileDependencies,
@@ -49,7 +48,6 @@ export const Chat: React.FC<ChatProps> = ({
   const { data: chatMessages = [] } = useChatMessages(activeSessionId || '');
   const { data: contextCards = [] } = useContextCards(activeSessionId || '');
   const { data: fileContext = [] } = useFileDependencies(activeSessionId || '');
-  const addMessageMutation = useAddMessage();
   const createSessionMutation = useCreateSession();
   const addContextCardMutation = useAddContextCard();
   
@@ -124,21 +122,8 @@ export const Chat: React.FC<ChatProps> = ({
       }, {
         onSuccess: async (sessionData) => {
           
-          const welcomeMessageAPI: ChatMessageAPI = {
-            id: Date.now(),
-            message_id: `welcome-${Date.now()}`,
-            message_text: `Welcome to your new chat session with repository **${repoOwner}/${repoName}**!\n\nI'm ready to help you with:\n• Creating GitHub issues from our conversations\n• Analyzing code and dependencies\n• Planning development tasks\n• Providing technical guidance\n\nWhat would you like to work on today?`,
-            sender_type: 'assistant',
-            role: 'assistant',
-            tokens: 0,
-            created_at: new Date().toISOString(),
-          };
-          
-          // Add welcome message after session creation
-          addMessageMutation.mutate({
-            sessionId: sessionData.session_id,
-            message: welcomeMessageAPI,
-          });
+          // Welcome message would be handled by backend session creation
+          console.log('[Chat] Session created successfully:', sessionData.session_id);
         },
         onError: (error) => {
           console.error('[Chat] Failed to create session:', error);
@@ -149,7 +134,7 @@ export const Chat: React.FC<ChatProps> = ({
         }
       });
     }
-  }, [isAuthenticated, user, selectedRepository, activeSessionId, createSessionMutation, addMessageMutation, showError]);
+  }, [isAuthenticated, user, selectedRepository, activeSessionId, createSessionMutation, showError]);
 
   const handleAddToContext = useCallback(async (content: string) => {
     if (!activeSessionId) {
@@ -180,25 +165,8 @@ export const Chat: React.FC<ChatProps> = ({
     setInput('');
     setIsLoading(true);
 
-    // Create user message
-    const userMessage: ChatMessageAPI = {
-      id: Date.now(),
-      message_id: Date.now().toString(),
-      message_text: currentInput,
-      sender_type: 'user',
-      role: 'user',
-      tokens: Math.ceil(currentInput.length / 4),
-      created_at: new Date().toISOString(),
-    };
-    
     try {
-      // Add user message with optimistic update
-      await addMessageMutation.mutateAsync({
-        sessionId: activeSessionId,
-        message: userMessage,
-      });
-
-      // Send to chat API for AI response
+      // Send to chat API for AI response (messages are handled by backend)
       const response = await api.sendChatMessage({
         session_id: activeSessionId,
         message: { message_text: currentInput },
@@ -210,21 +178,8 @@ export const Chat: React.FC<ChatProps> = ({
         } : undefined,
       });
 
-      // Add assistant response
-      const assistantMessage: ChatMessageAPI = {
-        id: Date.now() + 1,
-        message_id: response.message_id,
-        message_text: response.reply,
-        sender_type: 'assistant',
-        role: 'assistant',
-        tokens: Math.ceil(response.reply.length / 4), // Calculate tokens based on response length
-        created_at: new Date().toISOString(),
-      };
-      
-      await addMessageMutation.mutateAsync({
-        sessionId: activeSessionId,
-        message: assistantMessage,
-      });
+      // Chat messages are now handled by the backend through the existing chat endpoint
+      console.log('[Chat] Message sent successfully:', response.message_id);
       
     } catch (error) {
       console.error('[Chat] Message sending failed:', error);
@@ -232,7 +187,7 @@ export const Chat: React.FC<ChatProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, activeSessionId, contextCards, selectedRepository, api, showError, addMessageMutation]);
+  }, [input, isLoading, activeSessionId, contextCards, selectedRepository, api, showError]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

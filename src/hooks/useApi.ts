@@ -47,8 +47,6 @@ export const useApi = () => {
         ApiService.getRepositoryBranches(owner, repo, sessionToken || undefined),
 
       // Chat Messages CRUD methods
-      addChatMessage: (sessionId: string, request: Parameters<typeof sessionApi.addChatMessage>[1]) =>
-        sessionApi.addChatMessage(sessionId, request, sessionToken || undefined),
       getChatMessages: (sessionId: string, limit?: number) =>
         sessionApi.getChatMessages(sessionId, limit, sessionToken || undefined),
 

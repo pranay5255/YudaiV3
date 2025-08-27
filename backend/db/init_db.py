@@ -230,6 +230,7 @@ def create_tables_standalone(engine):
         """
         CREATE TABLE IF NOT EXISTS file_embeddings (
             id SERIAL PRIMARY KEY,
+            session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
             repository_id INTEGER REFERENCES repositories(id),
             file_path VARCHAR(1000) NOT NULL,
             file_name VARCHAR(500) NOT NULL,
@@ -250,6 +251,59 @@ def create_tables_standalone(engine):
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
             is_used BOOLEAN DEFAULT FALSE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            session_id VARCHAR(255) UNIQUE NOT NULL,
+            title VARCHAR(255),
+            description TEXT,
+            repo_owner VARCHAR(255),
+            repo_name VARCHAR(255),
+            repo_branch VARCHAR(255) DEFAULT 'main',
+            repo_context JSON,
+            is_active BOOLEAN DEFAULT TRUE,
+            total_messages INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE,
+            last_activity TIMESTAMP WITH TIME ZONE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id SERIAL PRIMARY KEY,
+            session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
+            message_id VARCHAR(255) NOT NULL,
+            message_text TEXT NOT NULL,
+            sender_type VARCHAR(50) NOT NULL,
+            role VARCHAR(50) NOT NULL,
+            is_code BOOLEAN DEFAULT FALSE,
+            tokens INTEGER DEFAULT 0,
+            model_used VARCHAR(100),
+            processing_time FLOAT,
+            context_cards JSON,
+            referenced_files JSON,
+            error_message TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS context_cards (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
+            title VARCHAR(255) NOT NULL,
+            description TEXT NOT NULL,
+            content TEXT NOT NULL,
+            source VARCHAR(50) NOT NULL,
+            tokens INTEGER DEFAULT 0,
+            is_active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE
         )
         """
     ]
@@ -306,8 +360,29 @@ def create_tables_standalone(engine):
         "CREATE INDEX IF NOT EXISTS idx_user_issues_status ON user_issues(status)",
         
         # File embedding indexes
+        "CREATE INDEX IF NOT EXISTS idx_file_embeddings_session_id ON file_embeddings(session_id)",
         "CREATE INDEX IF NOT EXISTS idx_file_embeddings_repository_id ON file_embeddings(repository_id)",
         "CREATE INDEX IF NOT EXISTS idx_file_embeddings_file_path ON file_embeddings(file_path)",
+        
+        # Chat session indexes
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_session_id ON chat_sessions(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_repo_owner ON chat_sessions(repo_owner)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_repo_name ON chat_sessions(repo_name)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_is_active ON chat_sessions(is_active)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_sessions_last_activity ON chat_sessions(last_activity)",
+        
+        # Chat message indexes
+        "CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_messages_message_id ON chat_messages(message_id)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_messages_sender_type ON chat_messages(sender_type)",
+        "CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at)",
+        
+        # Context card indexes
+        "CREATE INDEX IF NOT EXISTS idx_context_cards_user_id ON context_cards(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_context_cards_session_id ON context_cards(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_context_cards_source ON context_cards(source)",
+        "CREATE INDEX IF NOT EXISTS idx_context_cards_is_active ON context_cards(is_active)",
         
         # OAuth state indexes
         "CREATE INDEX IF NOT EXISTS idx_oauth_states_expires_at ON oauth_states(expires_at)",
@@ -489,7 +564,8 @@ def check_database_health():
             expected_tables = [
                 'users', 'auth_tokens', 'session_tokens', 'repositories', 
                 'issues', 'pull_requests', 'commits', 'file_items', 
-                'file_analyses', 'user_issues', 'file_embeddings', 'oauth_states'
+                'file_analyses', 'user_issues', 'file_embeddings', 'oauth_states',
+                'chat_sessions', 'chat_messages', 'context_cards'
             ]
             missing_tables = [table for table in expected_tables if table not in tables]
             
