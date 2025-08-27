@@ -367,7 +367,7 @@ export const useFileDependencies = (sessionId: string) => {
           path: dep.file_path,
           type: 'INTERNAL' as const,
           tokens: dep.tokens,
-          category: dep.file_type,
+          category: dep.category || dep.file_type,
           created_at: dep.created_at,
         }));
         

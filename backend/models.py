@@ -639,6 +639,18 @@ class FileItemResponse(BaseModel):
 # Allow recursive FileItem definition
 FileItemResponse.model_rebuild()
 
+# Session File Dependencies Response (for frontend display)
+class SessionFileDependencyResponse(BaseModel):
+    id: int
+    file_name: str
+    file_path: str
+    file_type: str
+    tokens: int
+    category: Optional[str] = None
+    created_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+
 class RepositoryRequest(BaseModel):
     repo_url: str = Field(..., min_length=1)
     max_file_size: Optional[int] = Field(None, ge=1)

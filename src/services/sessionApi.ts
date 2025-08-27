@@ -5,7 +5,7 @@ import type {
   ChatMessageResponse,
   ContextCardResponse,
   CreateContextCardRequest,
-  FileEmbeddingResponse,
+  SessionFileDependencyResponse,
   ExtractFileDependenciesResponse,
   ExtractFileDependenciesRequest,
 } from '../types/api';
@@ -101,12 +101,12 @@ export const sessionApi = {
   // File dependencies
 
 
-  async getFileDependenciesSession(sessionId: string, sessionToken?: string): Promise<FileEmbeddingResponse[]> {
+  async getFileDependenciesSession(sessionId: string, sessionToken?: string): Promise<SessionFileDependencyResponse[]> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-deps/session`, {
       method: 'GET',
       headers: getAuthHeaders(sessionToken),
     });
-    return handleResponse<FileEmbeddingResponse[]>(response);
+    return handleResponse<SessionFileDependencyResponse[]>(response);
   },
 
   async extractFileDependenciesForSession(sessionId: string, repoUrl: string, sessionToken?: string): Promise<ExtractFileDependenciesResponse> {
@@ -126,7 +126,7 @@ export type {
   SessionContextResponse,
   ChatMessageResponse,
   ContextCardResponse,
-  FileEmbeddingResponse,
+  SessionFileDependencyResponse,
   CreateContextCardRequest,
 };
 

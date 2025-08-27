@@ -68,6 +68,7 @@ export const Chat: React.FC<ChatProps> = ({
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isCreatingIssue, setIsCreatingIssue] = useState(false);
+  const [isExtractingFiles, setIsExtractingFiles] = useState(false);
 
   // Count user messages (messages that are not the initial system messages)
   const userMessageCount = messages.filter(msg =>
@@ -288,6 +289,46 @@ export const Chat: React.FC<ChatProps> = ({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* File Dependencies Extraction Prompt */}
+      {selectedRepository && fileContext.length === 0 && (
+        <div className="bg-blue-600/20 border border-blue-600/30 rounded-lg p-4 mx-4 mb-4">
+          <div className="text-blue-400 font-medium mb-2">📁 No File Dependencies Found</div>
+          <div className="text-blue-300 text-sm mb-3">
+            Extract file dependencies from the repository to enable file context in your conversations.
+          </div>
+          <button
+            onClick={async () => {
+              if (!selectedRepository || isExtractingFiles) return;
+              setIsExtractingFiles(true);
+              try {
+                const repoUrl = `https://github.com/${selectedRepository.repository.full_name}`;
+                await api.extractFileDependenciesForSession(activeSessionId || '', repoUrl);
+                // Refetch file dependencies after extraction
+                await queryClient.invalidateQueries({ 
+                  queryKey: ['file-deps', activeSessionId] 
+                });
+              } catch (error) {
+                console.error('[Chat] Error extracting file dependencies:', error);
+                showError('Failed to extract file dependencies. Please try again.');
+              } finally {
+                setIsExtractingFiles(false);
+              }
+            }}
+            disabled={isExtractingFiles}
+            className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed text-white px-3 py-1 rounded text-sm flex items-center gap-2"
+          >
+            {isExtractingFiles ? (
+              <>
+                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white" />
+                Extracting...
+              </>
+            ) : (
+              'Extract File Dependencies'
+            )}
+          </button>
         </div>
       )}
 

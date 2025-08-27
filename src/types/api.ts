@@ -247,7 +247,6 @@ export interface SessionContextResponse {
     file_embeddings_count?: number;
   };
   user_issues?: UserIssueResponse[];
-  file_embeddings?: FileEmbeddingResponse[];
 }
 
 export interface ChatMessageResponse {
@@ -360,16 +359,15 @@ export interface UserIssueResponse {
   processed_at?: string;
 }
 
-export interface FileEmbeddingResponse {
+
+
+export interface SessionFileDependencyResponse {
   id: number;
-  session_id: number;
-  repository_id?: number;
-  file_path: string;
   file_name: string;
+  file_path: string;
   file_type: string;
-  chunk_index: number;
   tokens: number;
-  file_metadata?: Record<string, unknown>;
+  category?: string;
   created_at: string;
 }
 
@@ -397,27 +395,7 @@ export interface ContextCardResponse {
   updated_at?: string;
 }
 
-export interface CreateFileEmbeddingRequest {
-  file_path: string;
-  file_name: string;
-  file_type: string;
-  chunk_index: number;
-  tokens: number;
-  file_metadata?: Record<string, unknown>;
-}
 
-export interface FileEmbeddingResponse {
-  id: number;
-  session_id: number;
-  repository_id?: number;
-  file_path: string;
-  file_name: string;
-  file_type: string;
-  chunk_index: number;
-  tokens: number;
-  file_metadata?: Record<string, unknown>;
-  created_at: string;
-}
 
 // ============================================================================
 // COMMON TYPES

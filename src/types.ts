@@ -221,22 +221,9 @@ export interface SessionContextResponse {
     file_embeddings_count?: number;
   };
   user_issues?: UserIssueResponse[];
-  file_embeddings?: FileEmbeddingResponse[];
 }
 
-// File embedding response interface to match backend
-export interface FileEmbeddingResponse {
-  id: number;
-  session_id: number;
-  repository_id?: number;
-  file_path: string;
-  file_name: string;
-  file_type: string;
-  chunk_index: number;
-  tokens: number;
-  file_metadata?: Record<string, unknown>;
-  created_at: string;
-}
+
 
 // User issue response interface to match backend
 export interface UserIssueResponse {
@@ -363,17 +350,7 @@ export interface SessionContextValue extends UnifiedSessionState {
   clearChatMessages: () => void;
   loadChatMessages: (sessionId: string) => Promise<void>;
 
-  // File dependency management methods
-  addMultipleFileDependencies: (fileDependencies: Array<{
-    file_path: string;
-    file_name: string;
-    file_type: string;
-    chunk_index: number;
-    tokens: number;
-    file_metadata?: Record<string, unknown>;
-  }>) => Promise<void>;
-  loadFileDependencies: () => Promise<void>;
-  extractFileDependenciesForSession: (repoUrl: string) => Promise<void>;
+  // File dependency management is now handled by React Query hooks
 
   // Context card management methods
   addContextCard: (card: {
@@ -488,11 +465,5 @@ export interface UseContextCardsQueryResult {
   refetch: () => void;
 }
 
-export interface UseFileDependenciesQueryResult {
-  data: FileItem[];
-  isLoading: boolean;
-  isError: boolean;
-  error: Error | null;
-  refetch: () => void;
-}
+
 

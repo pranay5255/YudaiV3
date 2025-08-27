@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import { ChevronRight, ChevronDown, Plus, Folder, File, RefreshCw } from 'lucide-react';
+import React, { useState, useCallback } from 'react';
+import { Plus, File, RefreshCw } from 'lucide-react';
 import { FileItem } from '../types';
 import { useSessionStore } from '../stores/sessionStore';
 import { useRepository } from '../hooks/useRepository';
@@ -8,23 +8,16 @@ import {
   useAddContextCard
 } from '../hooks/useSessionQueries';
 import { useApi } from '../hooks/useApi';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface FileDependenciesProps {
   onShowDetails: (file: FileItem) => void;
   onShowError?: (error: string) => void;
-  repoUrl?: string; // Optional repository URL to analyze
-}
-
-// Extended FileItem type with frontend-specific properties
-interface ExtendedFileItem extends FileItem {
-  children: ExtendedFileItem[];
-  expanded: boolean;
 }
 
 export const FileDependencies: React.FC<FileDependenciesProps> = ({
   onShowDetails,
-  onShowError,
-  repoUrl
+  onShowError
 }) => {
   // Zustand store for session ID, repository hook for repository state
   const { activeSessionId } = useSessionStore();
@@ -35,8 +28,9 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
   const addContextCardMutation = useAddContextCard();
   
   const api = useApi();
-  const [files, setFiles] = useState<ExtendedFileItem[]>([]);
+  const queryClient = useQueryClient();
   const [loadingStates, setLoadingStates] = useState<{[key: string]: boolean}>({});
+  const [isExtracting, setIsExtracting] = useState(false);
 
   const showError = useCallback((message: string) => {
     if (onShowError) {
@@ -44,66 +38,38 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     }
   }, [onShowError]);
 
-  const toggleExpanded = useCallback((targetId: string) => {
-    const toggleInTree = (items: ExtendedFileItem[]): ExtendedFileItem[] => {
-      return items.map(item => {
-        if (item.id === targetId) {
-          return { ...item, expanded: !item.expanded };
-        }
-        if (item.children) {
-          return { ...item, children: toggleInTree(item.children) };
-        }
-        return item;
-      });
-    };
-    setFiles(toggleInTree(files));
-  }, [files]);
-
-  // Convert file context to extended file items when data changes
-  useEffect(() => {
-    if (fileContext && fileContext.length > 0) {
-      const converted: ExtendedFileItem[] = fileContext.map(dep => ({
-        id: dep.id.toString(),
-        name: dep.name || dep.file_name || '',
-        path: dep.path || dep.file_path,
-        type: dep.type || 'INTERNAL',
-        tokens: dep.tokens,
-        category: dep.category || dep.file_type || 'unknown',
-        isDirectory: false,
-        children: [],
-        expanded: false,
-      }));
-      setFiles(converted);
-    } else {
-      setFiles([]);
-    }
-  }, [fileContext]);
-
   const handleRefresh = async () => {
     console.log('[FileDependencies] Refreshing file dependencies...');
     refetch();
   };
 
-  const handleForceExtract = async () => {
-    if (!repoUrl || !activeSessionId) {
-      console.log('[FileDependencies] Cannot force extract: no repository URL or session');
+  const handleExtractFiles = async () => {
+    if (!selectedRepository || !activeSessionId) {
+      console.log('[FileDependencies] Cannot extract: no repository or session');
+      showError('No repository selected or active session');
       return;
     }
 
-    console.log('[FileDependencies] Force extracting file dependencies from repository:', repoUrl);
+    const repoUrl = `https://github.com/${selectedRepository.repository.full_name}`;
+    console.log('[FileDependencies] Extracting file dependencies from repository:', repoUrl);
 
+    setIsExtracting(true);
     try {
       // Call API to extract file dependencies for the session
       await api.extractFileDependenciesForSession(activeSessionId, repoUrl);
       // Refetch the file dependencies after extraction
-      refetch();
+      await queryClient.invalidateQueries({ 
+        queryKey: ['file-deps', activeSessionId] 
+      });
     } catch (error) {
-      console.error('[FileDependencies] Error force extracting file dependencies:', error);
+      console.error('[FileDependencies] Error extracting file dependencies:', error);
       showError('Failed to extract file dependencies from repository');
+    } finally {
+      setIsExtracting(false);
     }
   };
 
-  const handleAddToContext = useCallback(async (item: ExtendedFileItem) => {
+  const handleAddToContext = useCallback(async (item: FileItem) => {
     if (!activeSessionId) {
       showError?.('No active session to add context to');
       return;
@@ -114,7 +80,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     addContextCardMutation.mutate({
       sessionId: activeSessionId,
       card: {
-        title: item.name || item.file_name || 'File',
+        title: item.name,
         description: item.path || '',
         source: 'file-deps',
         tokens: item.tokens,
@@ -125,78 +91,54 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     });
   }, [activeSessionId, showError, addContextCardMutation]);
 
-  // Optimized file tree rendering with proper TypeScript types
-  const renderFileTree = useCallback((items: ExtendedFileItem[], depth = 0) => {
-    return items.map((item) => {
-      const hasChildren = item.children && item.children.length > 0;
-      const isDirectory = item.isDirectory || hasChildren;
-      
-      return (
-        <div key={item.id} className="select-none">
-          <div
-            className="flex items-center py-1 px-2 hover:bg-gray-100 cursor-pointer text-sm group"
-            style={{ paddingLeft: `${depth * 20 + 8}px` }}
-          >
-            {hasChildren ? (
-              <button
-                onClick={() => toggleExpanded(item.id)}
-                className="flex items-center justify-center w-4 h-4 mr-1 text-gray-400 hover:text-gray-600"
-              >
-                {item.expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              </button>
-            ) : (
-              <div className="w-4 h-4 mr-1" />
-            )}
-            
-            <div className="flex items-center mr-2">
-              {isDirectory ? (
-                <Folder size={16} className="text-blue-500" />
-              ) : (
-                <File size={16} className="text-gray-500" />
-              )}
-            </div>
-            
-            <span
-              className="flex-1 truncate"
-              onClick={() => !isDirectory && onShowDetails(item)}
-            >
-              {item.name || item.file_name}
-            </span>
-            
-            <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {!isDirectory && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleAddToContext(item);
-                  }}
-                  className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded"
-                  title="Add to context"
-                  disabled={loadingStates[item.id]}
-                >
-                  {loadingStates[item.id] ? (
-                    <RefreshCw size={12} className="animate-spin" />
-                  ) : (
-                    <Plus size={12} />
-                  )}
-                </button>
-              )}
-              
-              <span className="text-xs text-gray-400 min-w-[3rem] text-right">
-                {item.tokens}
-              </span>
-            </div>
+  // Simple file list rendering
+  const renderFileList = useCallback((items: FileItem[]) => {
+    return items.map((item) => (
+      <div key={item.id} className="select-none">
+        <div className="flex items-center py-2 px-3 hover:bg-gray-100 cursor-pointer text-sm group border-b border-gray-100">
+          <div className="flex items-center mr-3">
+            <File size={16} className="text-gray-500" />
           </div>
           
-          {hasChildren && item.expanded && (
-            <div>
-              {renderFileTree(item.children, depth + 1)}
-            </div>
-          )}
+          <div className="flex-1 min-w-0">
+            <span
+              className="block text-gray-900 truncate hover:text-blue-600"
+              onClick={() => onShowDetails(item)}
+              title={item.name}
+            >
+              {item.name}
+            </span>
+            {item.path && (
+              <span className="text-xs text-gray-500 truncate block" title={item.path}>
+                {item.path}
+              </span>
+            )}
+          </div>
+          
+          <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <span className="text-xs text-gray-400 font-mono">
+              {item.tokens} tokens
+            </span>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleAddToContext(item);
+              }}
+              className="p-1 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded"
+              title="Add to context"
+              disabled={loadingStates[item.id]}
+            >
+              {loadingStates[item.id] ? (
+                <RefreshCw size={12} className="animate-spin" />
+              ) : (
+                <Plus size={12} />
+              )}
+            </button>
+          </div>
         </div>
-      );
-    });
-  }, [handleAddToContext, onShowDetails, toggleExpanded, loadingStates]);
+      </div>
+    ));
+  }, [handleAddToContext, onShowDetails, loadingStates]);
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -216,56 +158,83 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
-          {repoUrl && selectedRepository && (
+          {selectedRepository && (
             <button
-              onClick={handleForceExtract}
-              disabled={isLoading}
+              onClick={handleExtractFiles}
+              disabled={isLoading || isExtracting}
               className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-md disabled:opacity-50"
-              title="Force extract from repository"
+              title="Extract files from repository"
             >
-              <Plus className="w-4 h-4" />
+              {isExtracting ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : (
+                <Plus className="w-4 h-4" />
+              )}
             </button>
           )}
         </div>
       </div>
 
       <div className="flex-1 overflow-auto">
-        {isLoading ? (
+        {isLoading || isExtracting ? (
           <div className="flex items-center justify-center h-40">
             <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
             <span className="ml-2 text-gray-600">
-              {fileContext.length === 0 ? 'Extracting file dependencies...' : 'Analyzing repository...'}
+              {isExtracting ? 'Extracting file dependencies...' : 'Loading...'}
             </span>
           </div>
-        ) : files.length === 0 ? (
+        ) : fileContext.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
-            <File className="w-12 h-12 mx-auto mb-2 text-gray-300" />
-            <p>No files found</p>
-            <p className="text-sm">
-              {selectedRepository ?
-                'Try refreshing or use the extract button to analyze the repository' :
-                'Select a repository to analyze file dependencies'
-              }
-            </p>
+            <File className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+            <div className="space-y-2">
+              <p className="font-medium">No file dependencies found</p>
+              <p className="text-sm">
+                {selectedRepository 
+                  ? 'Extract file dependencies from the repository to enable file context in conversations.'
+                  : 'Select a repository to analyze file dependencies'
+                }
+              </p>
+              {selectedRepository && (
+                <button
+                  onClick={handleExtractFiles}
+                  disabled={isExtracting}
+                  className="mt-4 inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm"
+                >
+                  {isExtracting ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Extracting...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-4 h-4" />
+                      Extract File Dependencies
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
         ) : (
-          <div className="p-2">
-            {renderFileTree(files)}
+          <div>
+            {renderFileList(fileContext)}
           </div>
         )}
       </div>
 
-      <div className="p-2 border-t bg-gray-50 text-xs text-gray-500">
-        <div className="flex justify-between items-center">
-          <span>Files: {files.length} | Total tokens: {files.reduce((sum, file) => sum + (file.tokens || 0), 0)}</span>
-          <span>Session files: {fileContext.length}</span>
-        </div>
-        {fileContext.length > 0 && (
-          <div className="mt-1 text-xs text-blue-600">
-            💡 Tip: Files are automatically included in chat context and GitHub issue creation
+      {fileContext.length > 0 && (
+        <div className="p-3 border-t bg-gray-50 text-xs text-gray-500">
+          <div className="flex justify-between items-center">
+            <span>
+              Files: {fileContext.length} | Total tokens: {fileContext.reduce((sum, file) => sum + (file.tokens || 0), 0)}
+            </span>
+            <span>Session: {activeSessionId?.slice(-8) || 'None'}</span>
           </div>
-        )}
-      </div>
+          <div className="mt-1 text-xs text-blue-600">
+            💡 Files are automatically included in chat context and GitHub issue creation
+          </div>
+        </div>
+      )}
     </div>
   );
 };

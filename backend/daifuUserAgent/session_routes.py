@@ -24,6 +24,7 @@ from models import (
     FileEmbedding,
     FileEmbeddingResponse,
     SessionContextResponse,
+    SessionFileDependencyResponse,
     SessionResponse,
     User,
 )
@@ -518,14 +519,14 @@ async def delete_context_card(
             detail=f"Failed to delete context card: {str(e)}"
         )
 
-@router.get("/sessions/{session_id}/file-deps/session", response_model=List[FileEmbeddingResponse])
+@router.get("/sessions/{session_id}/file-deps/session", response_model=List[SessionFileDependencyResponse])
 async def get_file_dependencies_for_session(
     session_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Get file dependencies/embeddings for a session.
+    Get file dependencies for a session (file metadata only, no embeddings).
     This is a MEDIUM priority endpoint for file context display.
     """
     try:
@@ -541,24 +542,32 @@ async def get_file_dependencies_for_session(
                 detail="Session not found"
             )
         
-        # Get file embeddings for this session
+        # Get file embeddings for this session and aggregate by file
         file_embeddings = db.query(FileEmbedding).filter(
             FileEmbedding.session_id == db_session.id
         ).order_by(FileEmbedding.created_at.desc()).all()
         
+        # Aggregate file data by file_path to avoid duplicates
+        file_data = {}
+        for fe in file_embeddings:
+            if fe.file_path not in file_data:
+                file_data[fe.file_path] = {
+                    'id': fe.id,
+                    'file_name': fe.file_name,
+                    'file_path': fe.file_path,
+                    'file_type': fe.file_type,
+                    'tokens': fe.tokens,
+                    'category': fe.file_metadata.get('category') if fe.file_metadata else None,
+                    'created_at': fe.created_at
+                }
+            else:
+                # Sum tokens for chunks of the same file
+                file_data[fe.file_path]['tokens'] += fe.tokens
+        
+        # Convert to response format
         return [
-            FileEmbeddingResponse(
-                id=fe.id,
-                session_id=fe.session_id,
-                repository_id=fe.repository_id,
-                file_path=fe.file_path,
-                file_name=fe.file_name,
-                file_type=fe.file_type,
-                chunk_index=fe.chunk_index,
-                tokens=fe.tokens,
-                file_metadata=fe.file_metadata,
-                created_at=fe.created_at
-            ) for fe in file_embeddings
+            SessionFileDependencyResponse(**file_info) 
+            for file_info in file_data.values()
         ]
         
     except Exception as e:
