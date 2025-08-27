@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { Send, Plus } from 'lucide-react';
 import { Message } from '../types';
 import type {
@@ -13,11 +13,11 @@ import { useApi } from '../hooks/useApi';
 import { useSessionManagement } from '../hooks/useSessionManagement';
 import {
   useChatMessages,
-  useCreateSession,
   useContextCards,
   useFileDependencies,
   useAddContextCard
 } from '../hooks/useSessionQueries';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -41,18 +41,17 @@ export const Chat: React.FC<ChatProps> = ({
   onShowError
 }) => {
   // Session management hook for state management
-  const { activeSessionId, isAuthenticated, user } = useSessionManagement();
+  const { activeSessionId } = useSessionManagement();
   const { selectedRepository } = useRepository();
   
   // React Query hooks for data and mutations
   const { data: chatMessages = [] } = useChatMessages(activeSessionId || '');
   const { data: contextCards = [] } = useContextCards(activeSessionId || '');
   const { data: fileContext = [] } = useFileDependencies(activeSessionId || '');
-  const createSessionMutation = useCreateSession();
   const addContextCardMutation = useAddContextCard();
   
   const api = useApi();
-  const sessionInitRef = useRef(false);
+  const queryClient = useQueryClient();
   
   // Convert API messages to Message format for display
   const messages: Message[] = chatMessages.map(msg => ({
@@ -107,34 +106,8 @@ export const Chat: React.FC<ChatProps> = ({
     }
   }, [onShowError]);
 
-  // Auto-create session when repository is selected and user is authenticated
-  useEffect(() => {
-    if (isAuthenticated && user && selectedRepository && !activeSessionId && !sessionInitRef.current) {
-      sessionInitRef.current = true;
-
-      const repoOwner = selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0];
-      const repoName = selectedRepository.repository.name;
-
-      createSessionMutation.mutate({
-        repoOwner,
-        repoName,
-        repoBranch: selectedRepository.branch,
-      }, {
-        onSuccess: async (sessionData) => {
-          
-          // Welcome message would be handled by backend session creation
-          console.log('[Chat] Session created successfully:', sessionData.session_id);
-        },
-        onError: (error) => {
-          console.error('[Chat] Failed to create session:', error);
-          showError('Failed to create session. Please try again.');
-        },
-        onSettled: () => {
-          sessionInitRef.current = false;
-        }
-      });
-    }
-  }, [isAuthenticated, user, selectedRepository, activeSessionId, createSessionMutation, showError]);
+  // Session creation is now handled by useSessionManagement hook
+  // This component no longer needs to create sessions directly
 
   const handleAddToContext = useCallback(async (content: string) => {
     if (!activeSessionId) {
@@ -181,13 +154,18 @@ export const Chat: React.FC<ChatProps> = ({
       // Chat messages are now handled by the backend through the existing chat endpoint
       console.log('[Chat] Message sent successfully:', response.message_id);
       
+      // Invalidate and refetch the messages to show the updated conversation
+      await queryClient.invalidateQueries({ 
+        queryKey: ['messages', activeSessionId] 
+      });
+      
     } catch (error) {
       console.error('[Chat] Message sending failed:', error);
       showError('Failed to send message. Please try again.');
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, activeSessionId, contextCards, selectedRepository, api, showError]);
+  }, [input, isLoading, activeSessionId, contextCards, selectedRepository, api, showError, queryClient]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

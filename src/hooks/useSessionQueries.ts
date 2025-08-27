@@ -41,6 +41,24 @@ const handleSessionError = (error: unknown, sessionId: string, clearSession: () 
   return false; // Other type of error
 };
 
+// Rate limiting for session requests
+const SESSION_REQUEST_COOLDOWN = 2000; // 2 seconds
+const lastSessionRequestTimes = new Map<string, number>();
+
+const shouldAllowSessionRequest = (sessionId: string): boolean => {
+  const lastRequestTime = lastSessionRequestTimes.get(sessionId) || 0;
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+  
+  if (timeSinceLastRequest < SESSION_REQUEST_COOLDOWN) {
+    console.log(`[SessionQueries] Rate limiting session request for ${sessionId}, last request was ${timeSinceLastRequest}ms ago`);
+    return false;
+  }
+  
+  lastSessionRequestTimes.set(sessionId, now);
+  return true;
+};
+
 // Exponential backoff retry configuration
 const getRetryDelay = (attemptIndex: number): number => {
   // Base delay of 1 second, exponentially increasing: 1s, 2s, 4s
@@ -59,7 +77,12 @@ const retryWithBackoff = (failureCount: number, error: unknown) => {
     return false;
   }
   
-  // Retry up to 3 times for other errors (network issues, server errors, etc.)
+  // Don't retry too many times for 500 errors to prevent spam
+  if (error instanceof Error && error.message.includes('500')) {
+    return failureCount < 2; // Only retry once for server errors
+  }
+  
+  // Retry up to 3 times for other errors (network issues, etc.)
   return failureCount < 3;
 };
 
@@ -81,6 +104,10 @@ export const useSession = (sessionId: string) => {
   return useQuery({
     queryKey: QueryKeys.session(sessionId),
     queryFn: async () => {
+      if (!shouldAllowSessionRequest(sessionId)) {
+        throw new Error('Rate limited: too many session requests');
+      }
+      
       try {
         const context = await sessionApi.getSessionContext(sessionId, sessionToken || undefined);
         
@@ -116,8 +143,10 @@ export const useSession = (sessionId: string) => {
     enabled: !!sessionId && !!sessionToken,
     retry: retryWithBackoff,
     retryDelay: getRetryDelay,
-    staleTime: 2 * 60 * 1000, // 2 minutes
-    gcTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 5 * 60 * 1000, // 5 minutes (increased from 2)
+    gcTime: 10 * 60 * 1000, // 10 minutes (increased from 5)
+    refetchOnWindowFocus: false, // Disable automatic refetch on window focus
+    refetchOnMount: false, // Only fetch if data is stale
   });
 };
 
@@ -128,6 +157,10 @@ export const useChatMessages = (sessionId: string) => {
   return useQuery({
     queryKey: QueryKeys.messages(sessionId),
     queryFn: async (): Promise<ChatMessageAPI[]> => {
+      if (!shouldAllowSessionRequest(`messages-${sessionId}`)) {
+        throw new Error('Rate limited: too many message requests');
+      }
+      
       try {
         const messages = await sessionApi.getChatMessages(sessionId, 100, sessionToken || undefined);
         
@@ -163,8 +196,9 @@ export const useChatMessages = (sessionId: string) => {
     enabled: !!sessionId && !!sessionToken,
     retry: retryWithBackoff,
     retryDelay: getRetryDelay,
-    staleTime: 30 * 1000, // 30 seconds
-    gcTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 2 * 60 * 1000, // 2 minutes (increased from 30 seconds)
+    gcTime: 10 * 60 * 1000, // 10 minutes (increased from 5)
+    refetchOnWindowFocus: false, // Disable automatic refetch on window focus
   });
 };
 

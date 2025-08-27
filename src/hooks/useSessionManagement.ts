@@ -35,12 +35,15 @@ export const useSessionManagement = () => {
 
   // Auto-create session when repository is selected and user is authenticated
   useEffect(() => {
-    if (isAuthenticated && user && selectedRepository && !activeSessionId && !sessionInitialized && !isLoading && !authLoading) {
+    if (isAuthenticated && user && selectedRepository && !activeSessionId && !sessionInitialized && !isLoading && !authLoading && !createSessionMutation.isPending) {
+      console.log('[SessionManagement] Auto-creating session for repository:', selectedRepository.repository.name);
       createSessionMutation.mutate(selectedRepository, {
         onSuccess: (sessionId) => {
           if (!sessionId) {
             console.error('[SessionManagement] Failed to create session');
             setError('Failed to create session');
+          } else {
+            console.log('[SessionManagement] Session created successfully:', sessionId);
           }
         },
         onError: (error) => {
@@ -51,15 +54,18 @@ export const useSessionManagement = () => {
     }
   }, [isAuthenticated, user, selectedRepository, activeSessionId, sessionInitialized, isLoading, authLoading, createSessionMutation, setError]);
 
-  // Validate session exists when activeSessionId changes
+  // Validate session exists when activeSessionId changes (but not during creation)
   useEffect(() => {
-    if (isAuthenticated && user && activeSessionId && !sessionInitialized) {
+    if (isAuthenticated && user && activeSessionId && !sessionInitialized && !createSessionMutation.isPending && !ensureSessionMutation.isPending) {
+      console.log('[SessionManagement] Validating existing session:', activeSessionId);
       ensureSessionMutation.mutate(activeSessionId, {
         onSuccess: (exists) => {
           if (!exists) {
             console.warn('[SessionManagement] Session does not exist:', activeSessionId);
             clearSession();
             setError('Session not found');
+          } else {
+            console.log('[SessionManagement] Session validation successful:', activeSessionId);
           }
         },
         onError: (error) => {
@@ -69,7 +75,7 @@ export const useSessionManagement = () => {
         },
       });
     }
-  }, [isAuthenticated, user, activeSessionId, sessionInitialized, ensureSessionMutation, clearSession, setError]);
+  }, [isAuthenticated, user, activeSessionId, sessionInitialized, ensureSessionMutation, clearSession, setError, createSessionMutation.isPending]);
 
   // Manual session creation
   const createSession = useCallback(async (repository: SelectedRepository) => {
