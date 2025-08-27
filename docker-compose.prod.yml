@@ -105,6 +105,13 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - JWT_SECRET=${JWT_SECRET}
       - NODE_ENV=production
+      # SWE-agent Configuration
+      - SWEAGENT_CONFIG_PATH=/app/solver/config.yaml
+      - SWEAGENT_DATA_PATH=/data/swe_runs
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - MAX_SOLVE_TIME_MINUTES=30
+      - MAX_CONCURRENT_SOLVES=3
+      - SOLVER_TIMEOUT_SECONDS=1800
     ports:
       - "8000:8000"
     depends_on:
@@ -115,6 +122,10 @@ services:
       - /app/__pycache__
       - app_logs:/app/logs
       - ./backend/yudaiv3.2025-08-02.private-key.pem:/app/yudaiv3.2025-08-02.private-key.pem:ro
+      # SWE-agent volumes
+      - /var/run/docker.sock:/var/run/docker.sock
+      - swe_runs:/data/swe_runs
+      - ./backend/solver:/app/solver
     networks:
       - yudai-network
     # Enhanced health check
@@ -238,6 +249,12 @@ volumes:
       type: local
       o: bind
       device: ./logs
+  swe_runs:
+    driver: local
+    driver_opts:
+      type: local
+      o: bind
+      device: ./data/swe_runs
 
 networks:
   yudai-network:
