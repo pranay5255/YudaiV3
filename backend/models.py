@@ -566,7 +566,7 @@ class PromptContext(BaseModel):
 
 # Core User Input Models
 class ChatMessageInput(BaseModel):
-    content: str = Field(..., min_length=1, max_length=10000)
+    content: str = Field(..., min_length=1, max_length=10000, alias="message_text")
     is_code: bool = Field(default=False)
     
     @validator('content')
@@ -574,6 +574,8 @@ class ChatMessageInput(BaseModel):
         if not v.strip():
             raise ValueError('Message content cannot be empty')
         return v
+    
+    model_config = ConfigDict(populate_by_name=True)
 
 class ContextCardInput(BaseModel):
     title: str = Field(..., min_length=1, max_length=100)
@@ -858,7 +860,7 @@ class ChatRequest(BaseModel):
     session_id: str = Field(..., alias="sessionId")
     message: ChatMessageInput
     context_cards: Optional[List[str]] = Field(default_factory=list)
-    repository: Optional[Dict[str, str]] = None  # Add this field
+    repository: Optional[Dict[str, Any]] = None
     model_config = ConfigDict(populate_by_name=True)
 
 class CreateIssueRequest(BaseModel):
