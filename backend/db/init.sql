@@ -7,7 +7,7 @@
 -- But we can add any additional setup here
 
 -- Grant necessary permissions
-GRANT ALL PRIVILEGES ON DATABASE yudai_${POSTGRES_DB} TO yudai_user;
+GRANT ALL PRIVILEGES ON DATABASE yudai_db TO yudai_user;
 
 -- Create extensions for enhanced functionality
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
