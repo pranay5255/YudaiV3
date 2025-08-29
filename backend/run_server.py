@@ -18,6 +18,7 @@ import uvicorn
 from auth import auth_router
 from daifuUserAgent.chat_api import router as daifu_router
 from daifuUserAgent.session_routes import router as session_router
+from routers.solve_router import router as solve_router
 
 # Import database initialization
 from db.database import init_db
@@ -69,6 +70,7 @@ app.include_router(session_router, prefix="/daifu", tags=["sessions"])
 app.include_router(daifu_router, prefix="/daifu", tags=["chat"])
 app.include_router(issue_router, prefix="/issues", tags=["issues"])
 app.include_router(filedeps_router, prefix="/filedeps", tags=["file-dependencies"])
+app.include_router(solve_router, prefix="/api/v1", tags=["ai-solver"])
 
 # Add a unified root endpoint
 @app.get("/")
@@ -79,10 +81,11 @@ async def api_root():
         "version": "1.0.0",
         "services": {
             "authentication": "/auth",
-            "github": "/github", 
+            "github": "/github",
             "chat": "/daifu",
             "issues": "/issues",
-            "file-dependencies": "/filedeps"
+            "file-dependencies": "/filedeps",
+            "ai-solver": "/api/v1"
         },
         "documentation": {
             "swagger": "/docs",

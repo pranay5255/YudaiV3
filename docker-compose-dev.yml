@@ -1,0 +1,213 @@
+# ===========================================
+# DEVELOPMENT DOCKER COMPOSE CONFIGURATION
+# Version: v1.0.0 (Development Setup)
+# Last Updated: 2025-01-27
+#
+# Based on: docker-compose.prod.yml v1.5.0
+# Purpose: Local development and testing
+# ===========================================
+
+services:
+  # PostgreSQL Database (Development)
+  db:
+    build:
+      context: ./backend/db
+      dockerfile: Dockerfile
+    container_name: yudai-db-dev
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=yudai_dev
+      - POSTGRES_USER=yudai_user
+      - POSTGRES_PASSWORD=yudai_password
+      # PostgreSQL tuning for development (lighter than production)
+      - POSTGRES_MAX_CONNECTIONS=50
+      - POSTGRES_SHARED_BUFFERS=128MB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=512MB
+      - POSTGRES_WORK_MEM=2MB
+      - POSTGRES_MAINTENANCE_WORK_MEM=32MB
+      - POSTGRES_WAL_BUFFERS=8MB
+      - POSTGRES_CHECKPOINT_COMPLETION_TARGET=0.9
+      - POSTGRES_DEFAULT_STATISTICS_TARGET=50
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+      - postgres_backups_dev:/var/lib/postgresql/backups
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - yudai-dev-network
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yudai_user -d yudai_dev -h localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Backend API Service (Development)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: yudai-be-dev
+    restart: unless-stopped
+    # Development environment files (create .env.dev and .env.dev.secrets)
+    env_file:
+      - .env.dev
+      - .env.dev.secrets
+    environment:
+      - DATABASE_URL=postgresql://yudai_user:yudai_password@db:5432/yudai_dev
+      - DB_ECHO=true
+      - PYTHONPATH=/app
+      - DOCKER_COMPOSE=true
+      # Development-specific settings
+      - NODE_ENV=development
+      - DEBUG=true
+      # API Configuration for development
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - GITHUB_APP_ID=${GITHUB_APP_ID}
+      - GITHUB_APP_CLIENT_ID=${GITHUB_APP_CLIENT_ID}
+      - GITHUB_APP_CLIENT_SECRET=${GITHUB_APP_CLIENT_SECRET}
+      - GITHUB_APP_INSTALLATION_ID=${GITHUB_APP_INSTALLATION_ID}
+      - GITHUB_APP_PRIVATE_KEY_PATH=/app/yudaiv3.2025-08-02.private-key.pem
+      - FRONTEND_BASE_URL=http://localhost:3000
+      - GITHUB_REDIRECT_URI=http://localhost:3000/auth/callback
+      - API_DOMAIN=localhost:8001
+      - DEV_DOMAIN=localhost:3000
+      - SECRET_KEY=dev-secret-key-change-in-production
+      - JWT_SECRET=dev-jwt-secret-change-in-production
+      # SWE-agent Configuration (Development)
+      - SWEAGENT_CONFIG_PATH=/app/solver/config.yaml
+      - SWEAGENT_DATA_PATH=/data/swe_runs
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - MAX_SOLVE_TIME_MINUTES=10
+      - MAX_CONCURRENT_SOLVES=1
+      - SOLVER_TIMEOUT_SECONDS=600
+    ports:
+      - "8001:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - /app/__pycache__
+      - app_logs_dev:/app/logs
+      - ./backend/yudaiv3.2025-08-02.private-key.pem:/app/yudaiv3.2025-08-02.private-key.pem:ro
+      # SWE-agent volumes
+      - /var/run/docker.sock:/var/run/docker.sock
+      - swe_runs_dev:/data/swe_runs
+      - ./backend/solver:/app/solver
+    networks:
+      - yudai-dev-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    # Development-friendly settings
+    stdin_open: true
+    tty: true
+
+  # Frontend Service (Development with hot reload)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      args:
+        - VITE_API_BASE_URL=http://localhost:8001
+    container_name: yudai-fe-dev
+    restart: unless-stopped
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8001
+      - NODE_ENV=development
+      - NGINX_WORKER_PROCESSES=auto
+      - NGINX_WORKER_CONNECTIONS=1024
+    ports:
+      - "3000:80"
+      # Development: no SSL needed, only HTTP
+    volumes:
+      - ./src:/app/src
+      - ./public:/app/public
+      - ./package.json:/app/package.json
+      - ./vite.config.ts:/app/vite.config.ts
+      - app_logs_dev:/var/log/nginx
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - yudai-dev-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  postgres_data_dev:
+    driver: local
+  postgres_backups_dev:
+    driver: local
+    driver_opts:
+      type: local
+      o: bind
+      device: ./backups/postgres/dev
+  app_logs_dev:
+    driver: local
+    driver_opts:
+      type: local
+      o: bind
+      device: ./logs/dev
+  swe_runs_dev:
+    driver: local
+    driver_opts:
+      type: local
+      o: bind
+      device: ./data/swe_runs_dev
+
+networks:
+  yudai-dev-network:
+    driver: bridge
+
+# ===========================================
+# DEVELOPMENT SETUP NOTES
+# ===========================================
+#
+# SETUP REQUIRED:
+# 1. Create .env.dev file with development environment variables
+# 2. Create .env.dev.secrets file with API keys and secrets
+# 3. Ensure private key file exists: ./backend/yudaiv3.2025-08-02.private-key.pem
+#
+# Quick Start Commands:
+# 1. Start all services: docker compose -f docker-compose-dev.yml up -d
+# 2. View logs: docker compose -f docker-compose-dev.yml logs -f
+# 3. Stop all services: docker compose -f docker-compose-dev.yml down
+# 4. Rebuild and start: docker compose -f docker-compose-dev.yml up --build
+#
+# Development Features (Mirrors Production):
+# ✅ Full PostgreSQL with development tuning
+# ✅ Backend API with FastAPI and all dependencies
+# ✅ Frontend with React/Vite and nginx
+# ✅ Health checks and service dependencies
+# ✅ Volume management and backups
+# ✅ Network isolation and security
+# ✅ Environment file management
+# ✅ Hot reload for frontend changes
+# ✅ Debug logging enabled
+# ✅ Local file mounting for development
+#
+# Access Points:
+# - Frontend: http://localhost:3000
+# - Backend API: http://localhost:8000
+# - Database: localhost:5432 (yudai_dev, yudai_user, yudai_password)
+#
+# Differences from Production:
+# - No resource limits (unlimited for development)
+# - No security hardening (easier debugging)
+# - Debug logging enabled
+# - Development database credentials
+# - No SSL/HTTPS (HTTP only for dev)
+# - Exposed database port for direct access
+# - Hot reload enabled for frontend
+#
+# ===========================================

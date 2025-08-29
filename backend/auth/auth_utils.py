@@ -7,9 +7,10 @@ import string
 from datetime import timedelta
 from typing import Optional
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends, Header
 from models import SessionToken, User
 from sqlalchemy.orm import Session
+from db.database import get_db
 
 from utils import utc_now
 
@@ -119,3 +120,58 @@ def deactivate_session_token(db: Session, session_token: str) -> bool:
         logger.error(f"Error deactivating session token: {str(e)}", exc_info=True)
         db.rollback()
         return False
+
+
+def get_current_user(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    FastAPI dependency to get the current authenticated user
+    
+    Extracts the session token from the Authorization header and validates it.
+    Expected format: "Bearer <session_token>"
+    
+    Args:
+        authorization: Authorization header value
+        db: Database session
+        
+    Returns:
+        User: The authenticated user
+        
+    Raises:
+        HTTPException: If authentication fails
+    """
+    if not authorization:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Extract token from "Bearer <token>" format
+    try:
+        scheme, token = authorization.split()
+        if scheme.lower() != "bearer":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication scheme. Expected 'Bearer'",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authorization header format. Expected 'Bearer <token>'",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Validate the session token
+    user = validate_session_token(db, token)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    return user

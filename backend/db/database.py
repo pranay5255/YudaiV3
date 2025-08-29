@@ -79,6 +79,11 @@ def create_sample_data():
         Repository,
         User,
         UserIssue,
+        # AI Solver models
+        AIModel,
+        SWEAgentConfig,
+        AISolveSession,
+        AISolveEdit,
     )
     
     db = SessionLocal()
@@ -519,6 +524,224 @@ def create_sample_data():
         
         for file_embedding in sample_file_embeddings:
             db.add(file_embedding)
+        db.commit()
+        
+        # Sample AI Models
+        sample_ai_models = [
+            AIModel(
+                name="Claude 3.5 Sonnet",
+                provider="openrouter",
+                model_id="anthropic/claude-3.5-sonnet",
+                config={
+                    "temperature": 0.1,
+                    "max_tokens": 4000,
+                    "top_p": 0.9
+                },
+                is_active=True
+            ),
+            AIModel(
+                name="GPT-4 Turbo",
+                provider="openrouter",
+                model_id="openai/gpt-4-turbo",
+                config={
+                    "temperature": 0.2,
+                    "max_tokens": 4000,
+                    "top_p": 0.95
+                },
+                is_active=True
+            ),
+            AIModel(
+                name="DeepSeek Coder",
+                provider="openrouter",
+                model_id="deepseek/deepseek-coder",
+                config={
+                    "temperature": 0.1,
+                    "max_tokens": 8000,
+                    "top_p": 0.9
+                },
+                is_active=False
+            )
+        ]
+        
+        for ai_model in sample_ai_models:
+            db.add(ai_model)
+        db.commit()
+        
+        # Sample SWE-agent Configurations
+        sample_swe_configs = [
+            SWEAgentConfig(
+                name="Default Config",
+                config_path="/app/solver/config.yaml",
+                parameters={
+                    "max_iterations": 50,
+                    "max_time_seconds": 1800,
+                    "max_cost": 10.0,
+                    "environment": {
+                        "image": "sweagent/swe-agent:latest",
+                        "data_path": "/data/swe_runs"
+                    }
+                },
+                is_default=True
+            ),
+            SWEAgentConfig(
+                name="Fast Config",
+                config_path="/app/solver/config-fast.yaml",
+                parameters={
+                    "max_iterations": 25,
+                    "max_time_seconds": 900,
+                    "max_cost": 5.0,
+                    "environment": {
+                        "image": "sweagent/swe-agent:latest",
+                        "data_path": "/data/swe_runs"
+                    }
+                },
+                is_default=False
+            ),
+            SWEAgentConfig(
+                name="Extended Config",
+                config_path="/app/solver/config-extended.yaml",
+                parameters={
+                    "max_iterations": 100,
+                    "max_time_seconds": 3600,
+                    "max_cost": 20.0,
+                    "environment": {
+                        "image": "sweagent/swe-agent:latest",
+                        "data_path": "/data/swe_runs"
+                    }
+                },
+                is_default=False
+            )
+        ]
+        
+        for swe_config in sample_swe_configs:
+            db.add(swe_config)
+        db.commit()
+        
+        # Sample AI Solve Sessions
+        sample_solve_sessions = [
+            AISolveSession(
+                user_id=1,
+                issue_id=1,  # "Add user authentication feature"
+                ai_model_id=1,  # Claude 3.5 Sonnet
+                swe_config_id=1,  # Default Config
+                status="completed",
+                repo_url="https://github.com/alice_dev/awesome-project.git",
+                branch_name="main",
+                trajectory_data={
+                    "steps": [
+                        {"step_index": 1, "action": "explore_repository", "timestamp": "2024-01-15T10:00:00Z"},
+                        {"step_index": 2, "action": "analyze_issue", "timestamp": "2024-01-15T10:05:00Z"},
+                        {"step_index": 3, "action": "create_auth_module", "timestamp": "2024-01-15T10:15:00Z"},
+                        {"step_index": 4, "action": "implement_oauth", "timestamp": "2024-01-15T10:30:00Z"},
+                        {"step_index": 5, "action": "add_tests", "timestamp": "2024-01-15T10:45:00Z"}
+                    ],
+                    "final_state": "completed",
+                    "total_steps": 5
+                },
+                started_at=utc_now() - timedelta(days=5),
+                completed_at=utc_now() - timedelta(days=5, hours=-1)
+            ),
+            AISolveSession(
+                user_id=2,
+                issue_id=2,  # "Fix database connection issue"
+                ai_model_id=2,  # GPT-4 Turbo
+                swe_config_id=2,  # Fast Config
+                status="failed",
+                repo_url="https://github.com/alice_dev/awesome-project.git",
+                branch_name="main",
+                trajectory_data={
+                    "steps": [
+                        {"step_index": 1, "action": "explore_repository", "timestamp": "2024-01-10T14:00:00Z"},
+                        {"step_index": 2, "action": "analyze_database_config", "timestamp": "2024-01-10T14:10:00Z"}
+                    ],
+                    "final_state": "failed",
+                    "total_steps": 2
+                },
+                error_message="Failed to connect to database during analysis phase",
+                started_at=utc_now() - timedelta(days=10),
+                completed_at=utc_now() - timedelta(days=10, hours=-1)
+            ),
+            AISolveSession(
+                user_id=1,
+                issue_id=1,  # Another attempt at the same issue
+                ai_model_id=1,  # Claude 3.5 Sonnet
+                swe_config_id=1,  # Default Config
+                status="running",
+                repo_url="https://github.com/alice_dev/awesome-project.git",
+                branch_name="feature/auth-v2",
+                trajectory_data={
+                    "steps": [
+                        {"step_index": 1, "action": "explore_repository", "timestamp": "2024-01-20T09:00:00Z"},
+                        {"step_index": 2, "action": "create_branch", "timestamp": "2024-01-20T09:05:00Z"},
+                        {"step_index": 3, "action": "analyze_requirements", "timestamp": "2024-01-20T09:10:00Z"}
+                    ],
+                    "final_state": "running",
+                    "total_steps": 3
+                },
+                started_at=utc_now() - timedelta(hours=2)
+            )
+        ]
+        
+        for solve_session in sample_solve_sessions:
+            db.add(solve_session)
+        db.commit()
+        
+        # Sample AI Solve Edits
+        sample_solve_edits = [
+            AISolveEdit(
+                session_id=1,  # First completed session
+                file_path="src/auth/__init__.py",
+                edit_type="create",
+                original_content=None,
+                new_content="# Authentication module\n\nfrom .oauth import OAuth2Handler\nfrom .middleware import AuthMiddleware\n\n__all__ = ['OAuth2Handler', 'AuthMiddleware']",
+                metadata={
+                    "step_index": 3,
+                    "timestamp": "2024-01-15T10:15:00Z",
+                    "command": "create_file"
+                }
+            ),
+            AISolveEdit(
+                session_id=1,
+                file_path="src/auth/oauth.py",
+                edit_type="create",
+                original_content=None,
+                new_content="import requests\nfrom flask import session, redirect, url_for\n\nclass OAuth2Handler:\n    def __init__(self, client_id, client_secret):\n        self.client_id = client_id\n        self.client_secret = client_secret\n    \n    def get_auth_url(self):\n        # OAuth2 implementation\n        pass",
+                metadata={
+                    "step_index": 4,
+                    "timestamp": "2024-01-15T10:30:00Z",
+                    "command": "create_file"
+                }
+            ),
+            AISolveEdit(
+                session_id=1,
+                file_path="requirements.txt",
+                edit_type="modify",
+                original_content="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
+                new_content="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0\nflask-oauthlib==0.9.6\npyjwt==2.4.0",
+                line_start=1,
+                line_end=3,
+                metadata={
+                    "step_index": 4,
+                    "timestamp": "2024-01-15T10:32:00Z",
+                    "command": "str_replace_editor"
+                }
+            ),
+            AISolveEdit(
+                session_id=1,
+                file_path="tests/test_auth.py",
+                edit_type="create",
+                original_content=None,
+                new_content="import unittest\nfrom src.auth import OAuth2Handler\n\nclass TestOAuth2Handler(unittest.TestCase):\n    def setUp(self):\n        self.handler = OAuth2Handler('test_id', 'test_secret')\n    \n    def test_initialization(self):\n        self.assertEqual(self.handler.client_id, 'test_id')\n        self.assertEqual(self.handler.client_secret, 'test_secret')",
+                metadata={
+                    "step_index": 5,
+                    "timestamp": "2024-01-15T10:45:00Z",
+                    "command": "create_file"
+                }
+            )
+        ]
+        
+        for solve_edit in sample_solve_edits:
+            db.add(solve_edit)
         db.commit()
         
         print("✓ Sample data created successfully")

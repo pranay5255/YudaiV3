@@ -47,6 +47,19 @@ class FileType(str, Enum):
     INTERNAL = "internal"
     EXTERNAL = "external"
 
+# AI Solver Enums
+class SolveStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+class EditType(str, Enum):
+    CREATE = "create"
+    MODIFY = "modify"
+    DELETE = "delete"
+
 # ============================================================================
 # SQLALCHEMY MODELS (Database Schema)
 # ============================================================================
@@ -74,6 +87,7 @@ class User(Base):
     repositories: Mapped[List["Repository"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     session_tokens: Mapped[List["SessionToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     chat_sessions: Mapped[List["ChatSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    ai_solve_sessions: Mapped[List["AISolveSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class AuthToken(Base):
@@ -187,6 +201,7 @@ class Issue(Base):
     github_closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     
     repository: Mapped["Repository"] = relationship(back_populates="issues")
+    ai_solve_sessions: Mapped[List["AISolveSession"]] = relationship(back_populates="issue", cascade="all, delete-orphan")
 
 class PullRequest(Base):
     """Pull Requests from a repository"""
@@ -544,6 +559,97 @@ class OAuthState(Base):
     
     def __repr__(self):
         return f"<OAuthState(state={self.state}, expires_at={self.expires_at})>"
+
+# ============================================================================
+# AI SOLVER MODELS
+# ============================================================================
+
+class AIModel(Base):
+    """AI model configurations for the solver"""
+    __tablename__ = "ai_models"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    config: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    solve_sessions: Mapped[List["AISolveSession"]] = relationship(back_populates="ai_model", cascade="all, delete-orphan")
+
+class SWEAgentConfig(Base):
+    """SWE-agent configuration settings"""
+    __tablename__ = "swe_agent_configs"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    config_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    parameters: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    solve_sessions: Mapped[List["AISolveSession"]] = relationship(back_populates="swe_config", cascade="all, delete-orphan")
+
+class AISolveSession(Base):
+    """AI solve sessions tracking solver progress"""
+    __tablename__ = "ai_solve_sessions"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    issue_id: Mapped[int] = mapped_column(ForeignKey("issues.id"), nullable=False)
+    ai_model_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ai_models.id"), nullable=True)
+    swe_config_id: Mapped[Optional[int]] = mapped_column(ForeignKey("swe_agent_configs.id"), nullable=True)
+    
+    # Session status and metadata
+    status: Mapped[str] = mapped_column(String(50), default="pending", index=True)  # SolveStatus enum values
+    repo_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    branch_name: Mapped[str] = mapped_column(String(255), default="main")
+    trajectory_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Timestamps
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    user: Mapped["User"] = relationship()
+    issue: Mapped["Issue"] = relationship()
+    ai_model: Mapped[Optional["AIModel"]] = relationship(back_populates="solve_sessions")
+    swe_config: Mapped[Optional["SWEAgentConfig"]] = relationship(back_populates="solve_sessions")
+    edits: Mapped[List["AISolveEdit"]] = relationship(back_populates="session", cascade="all, delete-orphan")
+
+class AISolveEdit(Base):
+    """Individual edits made by the AI solver"""
+    __tablename__ = "ai_solve_edits"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("ai_solve_sessions.id"), nullable=False)
+    
+    # Edit details
+    file_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    edit_type: Mapped[str] = mapped_column(String(50), nullable=False)  # EditType enum values
+    original_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    new_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    line_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    line_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    edit_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationships
+    session: Mapped["AISolveSession"] = relationship(back_populates="edits")
 
 # ============================================================================
 # PYDANTIC MODELS (API Request/Response)
