@@ -94,21 +94,30 @@ services:
       - DOCKER_COMPOSE=true
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - GITHUB_APP_ID=${GITHUB_APP_ID}
-      - GITHUB_APP_CLIENT_ID=${GITHUB_APP_CLIENT_ID}
-      - GITHUB_APP_CLIENT_SECRET=${GITHUB_APP_CLIENT_SECRET}
+      # Map CLIENT_ID/CLIENT_SECRET from .env.secrets to expected names
+      - GITHUB_APP_CLIENT_ID=${CLIENT_ID}
+      - GITHUB_APP_CLIENT_SECRET=${CLIENT_SECRET}
       - GITHUB_APP_INSTALLATION_ID=${GITHUB_APP_INSTALLATION_ID}
       - GITHUB_APP_PRIVATE_KEY_PATH=/app/yudaiv3.2025-08-02.private-key.pem
-      - FRONTEND_BASE_URL=${FRONTEND_BASE_URL}
+      - FRONTEND_BASE_URL=${FRONTEND_URL}
       - GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI}
-      - API_DOMAIN=api.yudai.app
-      - DEV_DOMAIN=dev.yudai.app
+      - API_DOMAIN=${DOMAIN}
+      - DEV_DOMAIN=${DOMAIN}
       - SECRET_KEY=${SECRET_KEY}
       - JWT_SECRET=${JWT_SECRET}
       - NODE_ENV=production
+      # Your additional variables from .env.prod
+      - DOMAIN=${DOMAIN}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - BACKEND_URL=${BACKEND_URL}
+      - HOST=${HOST}
+      - PORT=${PORT}
+      - SALT=${SALT}
+      - PYTHONUNBUFFERED=${PYTHONUNBUFFERED}
+      - PYTHONDONTWRITEBYTECODE=${PYTHONDONTWRITEBYTECODE}
       # SWE-agent Configuration
       - SWEAGENT_CONFIG_PATH=/app/solver/config.yaml
       - SWEAGENT_DATA_PATH=/data/swe_runs
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - MAX_SOLVE_TIME_MINUTES=30
       - MAX_CONCURRENT_SOLVES=3
       - SOLVER_TIMEOUT_SECONDS=1800
@@ -175,11 +184,11 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE_URL=${VITE_API_BASE_URL}
+        - VITE_API_BASE_URL=${VITE_API_URL}
     container_name: yudai-fe
     restart: unless-stopped
     environment:
-      - VITE_API_BASE_URL=${VITE_API_BASE_URL}
+      - VITE_API_BASE_URL=${VITE_API_URL}
       - NGINX_WORKER_PROCESSES=auto
       - NGINX_WORKER_CONNECTIONS=1024
     ports:
