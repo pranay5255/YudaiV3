@@ -7,7 +7,7 @@
 -- But we can add any additional setup here
 
 -- Grant necessary permissions
-GRANT ALL PRIVILEGES ON DATABASE yudai_dev TO yudai_user;
+GRANT ALL PRIVILEGES ON DATABASE yudai_${POSTGRES_DB} TO yudai_user;
 
 -- Create extensions for enhanced functionality
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -37,7 +37,7 @@ ALTER SYSTEM SET statement_timeout = '30s';
 
 -- Set timezone globally
 SET timezone = 'UTC';
-ALTER DATABASE yudai_dev SET timezone = 'UTC';
+ALTER DATABASE yudai_db SET timezone = 'UTC';
 
 -- Create custom functions for session management
 CREATE OR REPLACE FUNCTION update_updated_at_column()
