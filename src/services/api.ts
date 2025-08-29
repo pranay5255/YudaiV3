@@ -102,7 +102,7 @@ export class ApiService {
     if (sessionLoadingEnabled === false) {
       // ...existing code...
     }
-    const response = await fetch(`/auth/api/create-session`, {
+    const response = await fetch(`${API_BASE_URL}/auth/api/create-session`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -115,10 +115,10 @@ export class ApiService {
   // Authentication API Methods (backend/auth/auth_routes.py)
   static async validateSessionToken(sessionToken: string): Promise<ValidateSessionResponse> {
     console.log('[ApiService] Validating session token:', sessionToken ? 'Token provided' : 'No token');
-    console.log('[ApiService] Making request to:', `/auth/api/user`);
+    console.log('[ApiService] Making request to:', `${API_BASE_URL}/auth/api/user`);
     
     try {
-      const response = await fetch(`/auth/api/user`, {
+      const response = await fetch(`${API_BASE_URL}/auth/api/user`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -143,7 +143,7 @@ export class ApiService {
   }
 
   static async logout(sessionToken: string): Promise<LogoutResponse> {
-    const response = await fetch(`/auth/api/logout`, {
+    const response = await fetch(`${API_BASE_URL}/auth/api/logout`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -154,7 +154,7 @@ export class ApiService {
   }
 
   static async getLoginUrl(): Promise<LoginUrlResponse> {
-    const response = await fetch(`/auth/api/login`, {
+    const response = await fetch(`${API_BASE_URL}/auth/api/login`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

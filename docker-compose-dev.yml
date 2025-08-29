@@ -47,7 +47,7 @@ services:
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     container_name: yudai-be-dev
     restart: unless-stopped
     # Development environment files (create .env.dev and .env.dev.secrets)
