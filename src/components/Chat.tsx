@@ -131,41 +131,41 @@ export const Chat: React.FC<ChatProps> = ({
   }, [activeSessionId, addContextCardMutation, showError]);
 
   const handleSend = useCallback(async () => {
-    if (!input.trim() || isLoading || !activeSessionId) {
-      return;
-    }
-    
-    const currentInput = input;
-    setInput('');
-    setIsLoading(true);
-
-    try {
-      // Send to chat API for AI response (messages are handled by backend)
-      const response = await api.sendChatMessage({
-        session_id: activeSessionId,
-        message: { message_text: currentInput },
-        context_cards: contextCards.map(card => card.id),
-        repository: selectedRepository ? {
-          owner: selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0],
-          name: selectedRepository.repository.name,
-          branch: selectedRepository.branch
-        } : undefined,
-      });
-
-      // Chat messages are now handled by the backend through the existing chat endpoint
-      console.log('[Chat] Message sent successfully:', response.message_id);
+      if (!input.trim() || isLoading || !activeSessionId) {
+          return;
+      }
       
-      // Invalidate and refetch the messages to show the updated conversation
-      await queryClient.invalidateQueries({ 
-        queryKey: ['messages', activeSessionId] 
-      });
-      
-    } catch (error) {
-      console.error('[Chat] Message sending failed:', error);
-      showError('Failed to send message. Please try again.');
-    } finally {
-      setIsLoading(false);
-    }
+      const currentInput = input;
+      setInput('');
+      setIsLoading(true);
+  
+      try {
+          // Align with backend ChatRequest format
+          const response = await api.sendChatMessage({
+              session_id: activeSessionId,
+              message: { content: currentInput, is_code: false },  // Match backend structure
+              context_cards: contextCards.map(card => card.id),
+              repository: selectedRepository ? {
+                  owner: selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0],
+                  name: selectedRepository.repository.name,
+                  branch: selectedRepository.branch
+              } : undefined,
+          });
+  
+          // Chat messages are now handled by the backend through the existing chat endpoint
+          console.log('[Chat] Message sent successfully:', response.message_id);
+          
+          // Invalidate and refetch the messages to show the updated conversation
+          await queryClient.invalidateQueries({ 
+            queryKey: ['messages', activeSessionId] 
+          });
+          
+      } catch (error) {
+          console.error('[Chat] Message sending failed:', error);
+          showError('Failed to send message. Please try again.');
+      } finally {
+          setIsLoading(false);
+      }
   }, [input, isLoading, activeSessionId, contextCards, selectedRepository, api, showError, queryClient]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {

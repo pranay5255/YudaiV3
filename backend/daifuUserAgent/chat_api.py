@@ -219,7 +219,11 @@ async def chat_daifu(
             )
 
         # Add user message to conversation history
-        user_message = request.message.content
+        # Handle both content and message_text formats flexibly
+        user_message = getattr(request.message, 'content', None)
+        if user_message is None:
+            # Try to get message_text if content is not available
+            user_message = getattr(request.message, 'message_text', '')
         add_to_conversation_history(session_id, "User", user_message, db, current_user)
         
         # Get conversation history for context

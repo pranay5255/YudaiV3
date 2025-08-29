@@ -49,6 +49,8 @@ export const useSessionManagement = () => {
         onError: (error) => {
           console.error('[SessionManagement] Session creation error:', error);
           setError(error instanceof Error ? error.message : 'Failed to create session');
+          // Add retry logic
+          setTimeout(() => createSessionMutation.mutate(selectedRepository), 2000);  // Retry after 2s
         },
       });
     }
