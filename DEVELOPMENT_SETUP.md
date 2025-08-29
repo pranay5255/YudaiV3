@@ -40,7 +40,7 @@ Create and configure your development environment files:
 #### `.env.dev` (Development Environment Variables)
 ```bash
 # Database Configuration
-POSTGRES_DB=yudai_dev
+POSTGRES_DB=your_dev_db
 POSTGRES_USER=yudai_user
 POSTGRES_PASSWORD=yudai_password
 
@@ -98,7 +98,7 @@ ls -la ./backend/yudaiv3.2025-08-02.private-key.pem
 |---------|-----|---------|
 | **Frontend** | http://localhost:3000 | React application with hot reload |
 | **Backend API** | http://localhost:8001 | FastAPI backend with debug logging |
-| **Database** | localhost:5433 | PostgreSQL (yudai_dev, yudai_user, yudai_password) |
+| **Database** | localhost:5433 | PostgreSQL (${POSTGRES_DB}, yudai_user, yudai_password) |
 | **Health Check** | http://localhost:3000/health | Frontend health endpoint |
 
 ## 🐳 Development Docker Configuration
@@ -157,8 +157,8 @@ docker compose -f docker-compose.prod.yml logs -f
 # ===========================================
 
 # Database Configuration
-POSTGRES_DB=yudai_prod
-POSTGRES_USER=yudai_prod_user
+POSTGRES_DB=your_prod_db
+POSTGRES_USER=your_prod_user
 POSTGRES_PASSWORD=your_secure_prod_password
 
 # API Configuration
@@ -278,7 +278,7 @@ dev.yudai.app  -> YOUR_SERVER_IP
 
 | Variable | Development | Production | Purpose |
 |----------|-------------|------------|---------|
-| `POSTGRES_DB` | yudai_dev | ${POSTGRES_DB} | Database name |
+| `POSTGRES_DB` | your_dev_db | ${POSTGRES_DB} | Database name |
 | `DEBUG` | true | false | Debug logging |
 | `DB_ECHO` | true | false | SQL query logging |
 | `VITE_API_BASE_URL` | http://localhost:8001 | https://api.yudai.app | Frontend API URL |
@@ -365,7 +365,7 @@ lsof -i :5433
 #### Database Connection Issues
 ```bash
 # Connect directly to database
-docker compose -f docker-compose-dev.yml exec db psql -U yudai_user -d yudai_dev
+docker compose -f docker-compose-dev.yml exec db psql -U yudai_user -d $POSTGRES_DB
 
 # Reset database
 docker compose -f docker-compose-dev.yml down -v

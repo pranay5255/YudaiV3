@@ -17,42 +17,21 @@ import type {
   RepositoryResponse,
   ExtractFileDependenciesRequest,
   ExtractFileDependenciesResponse,
-  CreateSessionRequest,
-  CreateSessionResponse,
 } from '../types/api';
 
 // API base URL from environment or fallback to relative path
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
 export class ApiService {
-  private static getAuthHeaders(sessionToken?: string, githubToken?: string): HeadersInit {
+  private static getAuthHeaders(sessionToken?: string): HeadersInit {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
-    
-    // Use tokens from parameters or try to get from localStorage
-    let tokenToUse = sessionToken;
-    
-    if (githubToken) {
-      // If GitHub token is provided, use it
-      tokenToUse = githubToken;
-    } else if (sessionToken) {
-      // Use session token if provided
-      tokenToUse = sessionToken;
-    } else {
-      // Try to get tokens from localStorage, prioritize GitHub token for API calls
-      const githubTokenFromStorage = localStorage.getItem('github_token');
-      const sessionTokenFromStorage = localStorage.getItem('session_token');
-      
-      if (githubTokenFromStorage) {
-        tokenToUse = githubTokenFromStorage;
-      } else if (sessionTokenFromStorage) {
-        tokenToUse = sessionTokenFromStorage;
-      }
-    }
-    
-    if (tokenToUse) {
-      headers['Authorization'] = `Bearer ${tokenToUse}`;
+
+    // Use token from parameter or localStorage
+    const token = sessionToken || localStorage.getItem('session_token');
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
     }
     
     return headers;
@@ -94,22 +73,6 @@ export class ApiService {
       console.error('[ApiService] Failed to parse response JSON:', parseError);
       throw new Error('Failed to parse response');
     }
-  }
-
-  // Authentication API Methods
-  static async createAuthSession(request: CreateSessionRequest, sessionLoadingEnabled?: boolean): Promise<CreateSessionResponse> {
-    // If session loading is disabled, always create a new session
-    if (sessionLoadingEnabled === false) {
-      // ...existing code...
-    }
-    const response = await fetch(`${API_BASE_URL}/auth/api/create-session`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(request),
-    });
-    return ApiService.handleResponse<CreateSessionResponse>(response);
   }
 
   // Authentication API Methods (backend/auth/auth_routes.py)
@@ -181,10 +144,10 @@ export class ApiService {
 
 
   // Issue Management API Methods (backend/issueChatServices/issue_service.py)
-  static async createIssueWithContext(request: CreateIssueWithContextRequest, githubToken?: string): Promise<IssueCreationResponse> {
+  static async createIssueWithContext(request: CreateIssueWithContextRequest, sessionToken?: string): Promise<IssueCreationResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/from-session-enhanced`, {
       method: 'POST',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
     return ApiService.handleResponse<IssueCreationResponse>(response);
@@ -194,7 +157,7 @@ export class ApiService {
     repoOwner?: string,
     repoName?: string,
     limit: number = 50,
-    githubToken?: string
+    sessionToken?: string
   ): Promise<UserIssueResponse[]> {
     const params = new URLSearchParams();
     if (repoOwner) params.append('repo_owner', repoOwner);
@@ -203,7 +166,7 @@ export class ApiService {
 
     const response = await fetch(`${API_BASE_URL}/issues?${params}`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<UserIssueResponse[]>(response);
   }
@@ -220,45 +183,45 @@ export class ApiService {
 
 
   // Repository Management API Methods (backend/github/github_routes.py)
-  static async getRepositories(githubToken?: string): Promise<RepositoryResponse> {
+  static async getRepositories(sessionToken?: string): Promise<RepositoryResponse> {
     const response = await fetch(`${API_BASE_URL}/repositories`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<RepositoryResponse>(response);
   }
 
 
 
-  static async createGitHubIssueFromUserIssue(issueId: string, githubToken?: string): Promise<CreateGitHubIssueResponse> {
+  static async createGitHubIssueFromUserIssue(issueId: string, sessionToken?: string): Promise<CreateGitHubIssueResponse> {
     const response = await fetch(`${API_BASE_URL}/issues/${issueId}/create-github-issue`, {
       method: 'POST',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<CreateGitHubIssueResponse>(response);
   }
 
-  static async extractFileDependencies(repoUrl: string, githubToken?: string): Promise<ExtractFileDependenciesResponse> {
+  static async extractFileDependencies(repoUrl: string, sessionToken?: string): Promise<ExtractFileDependenciesResponse> {
     const response = await fetch(`${API_BASE_URL}/filedeps/extract`, {
       method: 'POST',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify({ repo_url: repoUrl } as ExtractFileDependenciesRequest),
     });
     return ApiService.handleResponse<ExtractFileDependenciesResponse>(response);
   }
 
-  static async getRepositoryBranches(owner: string, repo: string, githubToken?: string): Promise<GitHubBranchAPI[]> {
+  static async getRepositoryBranches(owner: string, repo: string, sessionToken?: string): Promise<GitHubBranchAPI[]> {
     const response = await fetch(`${API_BASE_URL}/github/repositories/${owner}/${repo}/branches`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<GitHubBranchAPI[]>(response);
   }
 
-  static async getUserRepositories(githubToken?: string): Promise<GitHubRepositoryAPI[]> {
+  static async getUserRepositories(sessionToken?: string): Promise<GitHubRepositoryAPI[]> {
     const response = await fetch(`${API_BASE_URL}/github/repositories`, {
       method: 'GET',
-      headers: ApiService.getAuthHeaders(githubToken),
+      headers: ApiService.getAuthHeaders(sessionToken),
     });
     return ApiService.handleResponse<GitHubRepositoryAPI[]>(response);
   }

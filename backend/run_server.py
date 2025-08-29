@@ -11,6 +11,7 @@ This server combines all the backend services:
 """
 
 from contextlib import asynccontextmanager
+import os
 
 import uvicorn
 
@@ -51,13 +52,14 @@ app = FastAPI(
 )
 
 # Add CORS middleware for frontend integration
+allow_origins = os.getenv(
+    "ALLOW_ORIGINS",
+    "http://localhost:3000,http://localhost:5173,https://yudai.app"
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000", 
-        "http://localhost:5173",  # React dev servers
-        "https://yudai.app",      # Production domain
-    ],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -49,7 +49,6 @@ export const AuthSuccess: React.FC = () => {
         await setAuthFromCallback({
           user,
           sessionToken,
-          githubToken: sessionToken, // Using session token as GitHub token for compatibility
         });
 
         console.log('[AuthSuccess] Authentication successful, redirecting to main app');

@@ -1,11 +1,7 @@
 FROM postgres:15-alpine
 
-# Set environment variables for database
-ENV POSTGRES_DB=yudai_db
-ENV POSTGRES_USER=yudai_user
-ENV POSTGRES_PASSWORD=yudai_password
-
-# Set PostgreSQL configuration
+# Set environment variables for database (provided at runtime)
+# Postgres configuration
 ENV POSTGRES_INITDB_ARGS="--encoding=UTF8 --locale=C"
 ENV POSTGRES_HOST_AUTH_METHOD=trust
 

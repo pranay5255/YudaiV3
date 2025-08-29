@@ -7,25 +7,6 @@
 // AUTH API TYPES
 // ============================================================================
 
-export interface CreateSessionRequest {
-  github_token: string;
-}
-
-export interface CreateSessionResponse {
-  session_token: string;
-  expires_at: string;
-  user: {
-    id: number;
-    github_username: string;
-    github_user_id: string;
-    email: string;
-    display_name: string;
-    avatar_url: string;
-    created_at: string;
-    last_login: string;
-  };
-}
-
 export interface ValidateSessionResponse {
   id: number;
   github_username: string;

@@ -12,7 +12,6 @@ interface SessionState {
   // Auth state
   user: User | null;
   sessionToken: string | null;
-  githubToken: string | null;
   isAuthenticated: boolean;
   authLoading: boolean;
   authError: string | null;
@@ -47,7 +46,7 @@ interface SessionState {
   login: () => Promise<void>;
   logout: () => Promise<void>;
   refreshAuth: () => Promise<void>;
-  setAuthFromCallback: (authData: { user: User; sessionToken: string; githubToken: string }) => Promise<void>;
+  setAuthFromCallback: (authData: { user: User; sessionToken: string }) => Promise<void>;
   setAuthLoading: (loading: boolean) => void;
   setAuthError: (error: string | null) => void;
   
@@ -97,7 +96,6 @@ export const useSessionStore = create<SessionState>()(
         // Auth state
         user: null,
         sessionToken: null,
-        githubToken: null,
         isAuthenticated: false,
         authLoading: true,
         authError: null,
@@ -134,19 +132,15 @@ export const useSessionStore = create<SessionState>()(
             set({ authLoading: true, authError: null });
 
             // Check for stored session token in localStorage
-            console.log('[SessionStore] Checking localStorage for stored tokens');
+            console.log('[SessionStore] Checking localStorage for stored token');
             const storedSessionToken = localStorage.getItem('session_token');
-            const storedGithubToken = localStorage.getItem('github_token');
             console.log('[SessionStore] Stored session token:', storedSessionToken ? 'Found' : 'Not found');
-            console.log('[SessionStore] Stored GitHub token:', storedGithubToken ? 'Found' : 'Not found');
             
             if (storedSessionToken) {
               // No auth data in URL, check for stored session token
-              console.log('[SessionStore] No auth data in URL, checking localStorage for stored tokens');
+              console.log('[SessionStore] No auth data in URL, checking localStorage for stored token');
               const storedSessionToken = localStorage.getItem('session_token');
-              const storedGithubToken = localStorage.getItem('github_token');
               console.log('[SessionStore] Stored session token:', storedSessionToken ? 'Found' : 'Not found');
-              console.log('[SessionStore] Stored GitHub token:', storedGithubToken ? 'Found' : 'Not found');
               
               if (storedSessionToken) {
                 console.log('[SessionStore] Found stored session token, validating...');
@@ -166,7 +160,6 @@ export const useSessionStore = create<SessionState>()(
                   set({
                     user: user,
                     sessionToken: storedSessionToken,
-                    githubToken: storedGithubToken,
                     isAuthenticated: true,
                     authLoading: false,
                     authError: null,
@@ -181,7 +174,6 @@ export const useSessionStore = create<SessionState>()(
                     stack: error instanceof Error ? error.stack : undefined
                   });
                   localStorage.removeItem('session_token');
-                  localStorage.removeItem('github_token');
                   
                   // Clear any persisted session state since auth failed
                   get().clearSession();
@@ -189,7 +181,6 @@ export const useSessionStore = create<SessionState>()(
                   set({
                     user: null,
                     sessionToken: null,
-                    githubToken: null,
                     isAuthenticated: false,
                     authLoading: false,
                     authError: 'Stored session validation failed',
@@ -205,7 +196,6 @@ export const useSessionStore = create<SessionState>()(
                 set({
                   user: null,
                   sessionToken: null,
-                  githubToken: null,
                   isAuthenticated: false,
                   authLoading: false,
                   authError: null,
@@ -226,7 +216,6 @@ export const useSessionStore = create<SessionState>()(
             set({
               user: null,
               sessionToken: null,
-              githubToken: null,
               isAuthenticated: false,
               authLoading: false,
               authError: 'Auth initialization failed',
@@ -258,11 +247,9 @@ export const useSessionStore = create<SessionState>()(
           } finally {
             // Always clear local state and storage
             localStorage.removeItem('session_token');
-            localStorage.removeItem('github_token');
             set({
               user: null,
               sessionToken: null,
-              githubToken: null,
               isAuthenticated: false,
               authLoading: false,
               authError: null,
@@ -289,19 +276,17 @@ export const useSessionStore = create<SessionState>()(
           await get().initializeAuth();
         },
 
-        setAuthFromCallback: async (authData: { user: User; sessionToken: string; githubToken: string }) => {
+        setAuthFromCallback: async (authData: { user: User; sessionToken: string }) => {
           try {
             console.log('[SessionStore] Setting auth from callback:', authData);
             
             // Store session token in localStorage for persistence
-            localStorage.setItem('session_token', authData.sessionToken);
-            localStorage.setItem('github_token', authData.githubToken);
+              localStorage.setItem('session_token', authData.sessionToken);
             
             // Set the auth state
             set({
               user: authData.user,
               sessionToken: authData.sessionToken,
-              githubToken: authData.githubToken,
               isAuthenticated: true,
               authLoading: false,
               authError: null,
