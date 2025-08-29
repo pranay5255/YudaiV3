@@ -95,26 +95,26 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - GITHUB_APP_ID=${GITHUB_APP_ID}
       # Map CLIENT_ID/CLIENT_SECRET from .env.secrets to expected names
-      - GITHUB_APP_CLIENT_ID=${CLIENT_ID}
-      - GITHUB_APP_CLIENT_SECRET=${CLIENT_SECRET}
+      - GITHUB_APP_CLIENT_ID=${CLIENT_ID:-Iv23liZoGcNL17JZl8Iq}
+      - GITHUB_APP_CLIENT_SECRET=${CLIENT_SECRET:-1ad5ba7739306069b87557fab6a38c8aaa6eb809}
       - GITHUB_APP_INSTALLATION_ID=${GITHUB_APP_INSTALLATION_ID}
       - GITHUB_APP_PRIVATE_KEY_PATH=/app/yudaiv3.2025-08-02.private-key.pem
       - FRONTEND_BASE_URL=${FRONTEND_URL}
       - GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI}
-      - API_DOMAIN=${DOMAIN}
-      - DEV_DOMAIN=${DOMAIN}
+      - API_DOMAIN=${DOMAIN:-yudai.app}
+      - DEV_DOMAIN=${DOMAIN:-yudai.app}
       - SECRET_KEY=${SECRET_KEY}
       - JWT_SECRET=${JWT_SECRET}
       - NODE_ENV=production
-      # Your additional variables from .env.prod
-      - DOMAIN=${DOMAIN}
-      - FRONTEND_URL=${FRONTEND_URL}
-      - BACKEND_URL=${BACKEND_URL}
-      - HOST=${HOST}
-      - PORT=${PORT}
-      - SALT=${SALT}
-      - PYTHONUNBUFFERED=${PYTHONUNBUFFERED}
-      - PYTHONDONTWRITEBYTECODE=${PYTHONDONTWRITEBYTECODE}
+      # Your additional variables from .env.prod with defaults
+      - DOMAIN=${DOMAIN:-yudai.app}
+      - FRONTEND_URL=${FRONTEND_URL:-https://yudai.app}
+      - BACKEND_URL=${BACKEND_URL:-https://yudai.app/api}
+      - HOST=${HOST:-0.0.0.0}
+      - PORT=${PORT:-8000}
+      - SALT=${SALT:-yudai-salt}
+      - PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
+      - PYTHONDONTWRITEBYTECODE=${PYTHONDONTWRITEBYTECODE:-1}
       # SWE-agent Configuration
       - SWEAGENT_CONFIG_PATH=/app/solver/config.yaml
       - SWEAGENT_DATA_PATH=/data/swe_runs
@@ -184,11 +184,11 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE_URL=${VITE_API_URL}
+        - VITE_API_BASE_URL=${VITE_API_URL:-https://yudai.app}
     container_name: yudai-fe
     restart: unless-stopped
     environment:
-      - VITE_API_BASE_URL=${VITE_API_URL}
+      - VITE_API_BASE_URL=${VITE_API_URL:-https://yudai.app}
       - NGINX_WORKER_PROCESSES=auto
       - NGINX_WORKER_CONNECTIONS=1024
     ports:
