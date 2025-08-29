@@ -375,7 +375,7 @@ class AISolverAdapter:
             edit_type=edit_type,
             original_content=original_content,
             new_content=new_content,
-            metadata={
+            edit_metadata={
                 "step_index": step.get("step_index"),
                 "timestamp": step.get("timestamp"),
                 "command": args.get("command"),
@@ -396,7 +396,7 @@ class AISolverAdapter:
             edit_type=EditType.CREATE,
             original_content=None,
             new_content=args.get("file_text", ""),
-            metadata={
+            edit_metadata={
                 "step_index": step.get("step_index"),
                 "timestamp": step.get("timestamp"),
                 "command": "create_file",
@@ -419,7 +419,7 @@ class AISolverAdapter:
             new_content=args.get("new_content"),
             line_start=args.get("line_start"),
             line_end=args.get("line_end"),
-            metadata={
+            edit_metadata={
                 "step_index": step.get("step_index"),
                 "timestamp": step.get("timestamp"),
                 "command": args.get("command"),

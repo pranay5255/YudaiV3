@@ -643,7 +643,7 @@ class AISolveEdit(Base):
     new_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     line_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     line_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    edit_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -55,7 +55,7 @@ class SolveEditOut(BaseModel):
     new_content: Optional[str] = None
     line_start: Optional[int] = None
     line_end: Optional[int] = None
-    metadata: Optional[Dict[str, Any]] = None
+    edit_metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
     
     model_config = ConfigDict(from_attributes=True)

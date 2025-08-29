@@ -1,4 +1,4 @@
-# Multi-stage build for React frontend
+# Multi-stage build for React frontend (DEVELOPMENT VERSION)
 FROM node:18-alpine AS builder
 
 # Install pnpm
@@ -32,9 +32,9 @@ FROM nginx:alpine
 # Copy built app from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copy the nginx configuration (supports dev/prod configs)
+# Copy the DEVELOPMENT nginx configuration (NO SSL)
 RUN rm -f /etc/nginx/nginx.conf
-COPY nginx.prod.conf /etc/nginx/nginx.conf
+COPY nginx.dev.conf /etc/nginx/nginx.conf
 
 # Create health endpoint
 RUN echo "healthy" > /usr/share/nginx/html/health
@@ -42,12 +42,12 @@ RUN echo "healthy" > /usr/share/nginx/html/health
 # Set proper permissions
 RUN chmod -R 755 /usr/share/nginx/html
 
-# Expose ports (HTTP and HTTPS for production)
-EXPOSE 80 443
+# Expose port
+EXPOSE 80
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
   CMD curl -f http://localhost/health || exit 1
 
 # Start nginx
-CMD ["nginx", "-g", "daemon off;"] 
+CMD ["nginx", "-g", "daemon off;"]
