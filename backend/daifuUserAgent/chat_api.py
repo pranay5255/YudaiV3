@@ -26,6 +26,7 @@ from github.github_api import (
 from models import (
     ChatMessage,
     ChatRequest,
+    ChatResponse,
     ChatSession,
     User,
 )
@@ -167,7 +168,7 @@ def add_to_conversation_history(session_id: str, sender: str, message: str, db: 
 
 router = APIRouter()
 
-@router.post("/chat")
+@router.post("/chat", response_model=ChatResponse)
 async def chat_daifu(
     request: ChatRequest,
     background_tasks: BackgroundTasks,
@@ -219,11 +220,7 @@ async def chat_daifu(
             )
 
         # Add user message to conversation history
-        # Handle both content and message_text formats flexibly
-        user_message = getattr(request.message, 'content', None)
-        if user_message is None:
-            # Try to get message_text if content is not available
-            user_message = getattr(request.message, 'message_text', '')
+        user_message = request.message.message_text  # Use correct field name
         add_to_conversation_history(session_id, "User", user_message, db, current_user)
         
         # Get conversation history for context
@@ -245,13 +242,13 @@ async def chat_daifu(
         # Generate a unique message ID
         message_id = str(uuid.uuid4())
         
-        return {
-            "reply": reply,
-            "conversation": history + [("User", user_message), ("DAifu", reply)],
-            "message_id": message_id,
-            "processing_time": processing_time,
-            "session_id": session_id,
-        }
+        return ChatResponse(
+            reply=reply,
+            conversation=history + [("User", user_message), ("DAifu", reply)],
+            message_id=message_id,
+            processing_time=processing_time,
+            session_id=session_id,
+        )
     
     except HTTPException:
         raise

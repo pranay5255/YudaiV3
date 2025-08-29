@@ -3,7 +3,7 @@ Unified models for YudaiV3 - SQLAlchemy and Pydantic models in one place
 """
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, validator
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
@@ -672,10 +672,10 @@ class PromptContext(BaseModel):
 
 # Core User Input Models
 class ChatMessageInput(BaseModel):
-    content: str = Field(..., min_length=1, max_length=10000, alias="message_text")
+    message_text: str = Field(..., min_length=1, max_length=10000)  # Match frontend field name
     is_code: bool = Field(default=False)
     
-    @validator('content')
+    @validator('message_text')
     def validate_content(cls, v):
         if not v.strip():
             raise ValueError('Message content cannot be empty')
@@ -975,10 +975,18 @@ class UserIssueResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     
 class ChatRequest(BaseModel):
-    session_id: str = Field(..., alias="sessionId")
+    session_id: str = Field(...)  # Remove alias to match frontend
     message: ChatMessageInput
     context_cards: Optional[List[str]] = Field(default_factory=list)
     repository: Optional[Dict[str, Any]] = None
+    model_config = ConfigDict(populate_by_name=True)
+
+class ChatResponse(BaseModel):
+    reply: str = Field(...)
+    conversation: List[Tuple[str, str]] = Field(...)
+    message_id: str = Field(...)
+    processing_time: float = Field(...)
+    session_id: str = Field(...)
     model_config = ConfigDict(populate_by_name=True)
 
 class CreateIssueRequest(BaseModel):
