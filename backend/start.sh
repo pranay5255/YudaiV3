@@ -8,6 +8,19 @@ echo "⏳ Waiting for database to be fully ready..."
 max_attempts=60
 attempt=0
 
+# Extract database name from DATABASE_URL if POSTGRES_DB is not set
+if [ -z "$POSTGRES_DB" ] && [ -n "$DATABASE_URL" ]; then
+    # Extract database name from DATABASE_URL (format: postgresql://user:pass@host:port/dbname)
+    POSTGRES_DB=$(echo $DATABASE_URL | sed -E 's/.*\/([^\/\?]+)(\?.*)?$/\1/')
+    echo "ℹ️ Extracted database name from DATABASE_URL: $POSTGRES_DB"
+fi
+
+# Default to 'postgres' if still not set
+if [ -z "$POSTGRES_DB" ]; then
+    POSTGRES_DB="postgres"
+    echo "ℹ️ Using default database name: $POSTGRES_DB"
+fi
+
 while [ $attempt -lt $max_attempts ]; do
     attempt=$((attempt + 1))
     echo "  Attempt $attempt/$max_attempts..."
@@ -51,7 +64,7 @@ test_database_connection() {
     
     # Test 2: Check if PostgreSQL is ready
     echo "  - Testing PostgreSQL readiness..."
-    if pg_isready -h db -p 5432 -U yudai_user >/dev/null 2>&1; then
+    if pg_isready -h db -p 5432 -U yudai_user -d "$POSTGRES_DB" >/dev/null 2>&1; then
         echo "    ✓ PostgreSQL is ready"
     else
         echo "    ✗ PostgreSQL not ready"
@@ -77,10 +90,11 @@ while [ $attempt -lt $max_attempts ]; do
             echo "❌ Failed to connect to database after $max_attempts attempts"
             echo "🔍 Debugging information:"
             echo "  - DATABASE_URL: $DATABASE_URL"
+            echo "  - POSTGRES_DB: $POSTGRES_DB"
             echo "  - Network connectivity:"
             nc -zv db 5432 || echo "    Cannot reach db:5432"
             echo "  - PostgreSQL status:"
-            pg_isready -h db -p 5432 -U yudai_user || echo "    PostgreSQL not ready"
+            pg_isready -h db -p 5432 -U yudai_user -d "$POSTGRES_DB" || echo "    PostgreSQL not ready"
             exit 1
         fi
         echo "  ⏳ Waiting 5 seconds before retry..."
