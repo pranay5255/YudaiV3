@@ -42,27 +42,43 @@ router = APIRouter()
 
 @router.get("/callback")
 async def auth_callback(
-    code: str,
+    code: str = None,
+    error: str = None,
+    error_description: str = None,
     db: Session = Depends(get_db)
 ):
     """
     Handle GitHub OAuth callback - redirect to frontend with auth data
-    
+
     Args:
         code: Authorization code from GitHub
+        error: OAuth error from GitHub
+        error_description: Detailed error description
         db: Database session
-        
+
     Returns:
-        Redirect response to frontend with auth data
+        Redirect response to frontend with auth data or error
     """
     try:
         logger.info("Processing GitHub OAuth callback")
-        
+        logger.info(f"Callback params - code: {code[:10] if code else None}, error: {error}, error_description: {error_description}")
+
+        # Check for OAuth errors from GitHub
+        if error:
+            error_msg = f"GitHub OAuth error: {error}"
+            if error_description:
+                error_msg += f" - {error_description}"
+            logger.error(f"OAuth callback received error from GitHub: {error_msg}")
+            return RedirectResponse(
+                url=f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/auth/login?error={error_msg}",
+                status_code=302
+            )
+
         if not code:
-            error_msg = "Authorized, but no code provided."
+            error_msg = "No authorization code received from GitHub"
             logger.warning("OAuth callback received without authorization code")
             return RedirectResponse(
-                url=f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/?error={error_msg}",
+                url=f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/auth/login?error={error_msg}",
                 status_code=302
             )
         

@@ -55,22 +55,30 @@ def get_github_oauth_url() -> str:
     """
     Generate GitHub OAuth authorization URL
     Simplified version without state parameter like Ruby
-    
+
     Returns:
         GitHub OAuth authorization URL
     """
     if not CLIENT_ID:
         raise GitHubOAuthError("GitHub Client ID not configured")
-    
-    # Use production redirect URI
+
+    # Use production redirect URI - ensure it matches GitHub OAuth app exactly
     redirect_uri = os.getenv("GITHUB_REDIRECT_URI", "https://yudai.app/auth/callback")
-    
+
+    # Log the redirect URI being used for debugging
+    print(f"[GitHub OAuth] Using redirect URI: {redirect_uri}")
+    print(f"[GitHub OAuth] Client ID: {CLIENT_ID[:8]}...")
+
     params = {
         "client_id": CLIENT_ID,
         "redirect_uri": redirect_uri,
+        "scope": "repo user:email",  # Explicitly set scope
     }
-    
-    return f"{GITHUB_AUTH_URL}?{urlencode(params)}"
+
+    auth_url = f"{GITHUB_AUTH_URL}?{urlencode(params)}"
+    print(f"[GitHub OAuth] Generated auth URL: {auth_url}")
+
+    return auth_url
 
 
 async def exchange_code(code: str) -> Dict[str, Any]:
