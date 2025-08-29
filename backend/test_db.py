@@ -15,10 +15,15 @@ from models import ChatSession, FileEmbedding, User
 from sqlalchemy import create_engine, inspect, text
 
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is required for tests")
+
+
 def test_database_connection():
     """Test basic database connection"""
     try:
-        engine = create_engine(os.getenv("DATABASE_URL", "postgresql://yudai_user:yudai_password@db:5432/yudai_db"))
+        engine = create_engine(DATABASE_URL)
         with engine.connect() as conn:
             result = conn.execute(text("SELECT 1"))
             print("✓ Database connection successful")
@@ -30,7 +35,7 @@ def test_database_connection():
 def test_table_structure():
     """Test that all required tables exist with correct structure"""
     try:
-        engine = create_engine(os.getenv("DATABASE_URL", "postgresql://yudai_user:yudai_password@db:5432/yudai_db"))
+        engine = create_engine(DATABASE_URL)
         inspector = inspect(engine)
         tables = inspector.get_table_names()
         
@@ -56,7 +61,7 @@ def test_table_structure():
 def test_file_embeddings_session_id():
     """Test that file_embeddings table has session_id column"""
     try:
-        engine = create_engine(os.getenv("DATABASE_URL", "postgresql://yudai_user:yudai_password@db:5432/yudai_db"))
+        engine = create_engine(DATABASE_URL)
         inspector = inspect(engine)
         
         # Get columns for file_embeddings table

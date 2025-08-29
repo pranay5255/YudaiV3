@@ -70,10 +70,7 @@ export const SessionErrorTests = {
     
     // Check localStorage
     const sessionToken = localStorage.getItem('session_token');
-    const githubToken = localStorage.getItem('github_token');
-    
     console.log('- Session token in localStorage:', sessionToken ? 'Found' : 'Not found');
-    console.log('- GitHub token in localStorage:', githubToken ? 'Found' : 'Not found');
     
     // Check if there's persisted Zustand state
     const persistedState = localStorage.getItem('session-storage');
@@ -101,7 +98,6 @@ export const SessionErrorTests = {
     console.log('🧪 [SessionTest] Clearing all session data');
     
     localStorage.removeItem('session_token');
-    localStorage.removeItem('github_token');
     localStorage.removeItem('session-storage');
     
     console.log('- All session data cleared');

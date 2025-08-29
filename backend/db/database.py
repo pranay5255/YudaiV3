@@ -13,10 +13,9 @@ from sqlalchemy.orm import sessionmaker
 from utils import utc_now
 
 # Database URL from environment variables
-DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
-    "postgresql://yudai_user:yudai_password@db:5432/yudai_db"
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is required")
 
 # Create engine with standard configuration
 engine = create_engine(

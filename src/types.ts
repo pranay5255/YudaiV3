@@ -73,7 +73,6 @@ export interface User {
 export interface AuthState {
   user: User | null;
   sessionToken: string | null; // Changed from token to sessionToken
-  githubToken: string | null; // GitHub OAuth access token
   isAuthenticated: boolean;
   isLoading: boolean;
 }

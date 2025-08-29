@@ -13,7 +13,7 @@ while [ $attempt -lt $max_attempts ]; do
     echo "  Attempt $attempt/$max_attempts..."
     
     # Test database connectivity and readiness
-    if pg_isready -h db -p 5432 -U yudai_user -d yudai_db >/dev/null 2>&1; then
+    if pg_isready -h db -p 5432 -U yudai_user -d "$POSTGRES_DB" >/dev/null 2>&1; then
         echo "🎉 Database is ready!"
         break
     else

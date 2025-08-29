@@ -71,6 +71,7 @@ services:
       - GITHUB_APP_PRIVATE_KEY_PATH=/app/yudaiv3.2025-08-02.private-key.pem
       - FRONTEND_BASE_URL=http://localhost:3000
       - GITHUB_REDIRECT_URI=http://localhost:3000/auth/callback
+      - ALLOW_ORIGINS=http://localhost:3000,http://localhost:5173
       - API_DOMAIN=localhost:8001
       - DEV_DOMAIN=localhost:3000
       - SECRET_KEY=dev-secret-key-change-in-production
