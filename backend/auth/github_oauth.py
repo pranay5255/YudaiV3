@@ -19,8 +19,8 @@ from sqlalchemy.orm import Session
 from utils import utc_now
 
 # GitHub OAuth Configuration - matching Ruby implementation
-CLIENT_ID = os.getenv("CLIENT_ID")
-CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
+GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
 
 # GitHub OAuth URLs
 GITHUB_AUTH_URL = "https://github.com/login/oauth/authorize"
@@ -59,11 +59,11 @@ def get_github_oauth_url() -> str:
     Returns:
         GitHub OAuth authorization URL
     """
-    if not CLIENT_ID:
+    if not GITHUB_CLIENT_ID:
         raise GitHubOAuthError("GitHub Client ID not configured")
 
-    # Use production redirect URI - ensure it matches GitHub OAuth app exactly
-    redirect_uri = os.getenv("GITHUB_REDIRECT_URI", "https://yudai.app/auth/callback")
+    # Use environment variable for redirect URI, default to dev
+    redirect_uri = os.getenv("GITHUB_REDIRECT_URI", "http://localhost:3000/auth/callback")
 
     # Log the redirect URI being used for debugging
     print(f"[GitHub OAuth] Using redirect URI: {redirect_uri}")
@@ -92,14 +92,14 @@ async def exchange_code(code: str) -> Dict[str, Any]:
     Returns:
         Token response from GitHub
     """
-    if not CLIENT_SECRET:
+    if not GITHUB_CLIENT_SECRET:
         raise GitHubOAuthError("GitHub Client Secret not configured")
     
     # Match Ruby implementation exactly
     headers = {"Accept": "application/json"}
     data = {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
+        "client_id": GITHUB_CLIENT_ID,
+        "client_secret": GITHUB_CLIENT_SECRET,
         "code": code,
     }
     
