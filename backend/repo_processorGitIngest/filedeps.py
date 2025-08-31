@@ -30,6 +30,7 @@ from models import (
     User,
 )
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 # Import chunking utility
 from utils.chunking import create_file_chunker
@@ -207,37 +208,97 @@ def save_file_embeddings_to_db(
     db: Session,
     session_id: int,
     repository_id: int,
-    file_chunks: List[Dict[str, Any]]
+    file_chunks: List[Dict[str, Any]],
+    batch_size: int = 100,
+    max_tokens_per_session: int = 100000,
+    embedding_provider: str = "openai"
 ) -> List[FileEmbedding]:
-    """Save file embeddings to database using the chunking system."""
+    """Save file embeddings to database using the chunking system with batch processing and token quotas.
     
-    # Clear existing file embeddings for this session
-    db.query(FileEmbedding).filter(FileEmbedding.session_id == session_id).delete()
+    Args:
+        db: Database session
+        session_id: Chat session ID
+        repository_id: Repository ID
+        file_chunks: List of file chunk data
+        batch_size: Number of chunks to process at once (default: 100)
+        max_tokens_per_session: Maximum tokens allowed per session (default: 100000)
+        embedding_provider: Provider for generating embeddings (default: "openai")
+    
+    Returns:
+        List of saved FileEmbedding objects
+    
+    Raises:
+        ValueError: If token quota would be exceeded
+    """
+    
+    # Calculate total tokens for new chunks
+    total_new_tokens = sum(chunk.get('tokens', 0) for chunk in file_chunks)
+    
+    # Get current session token usage
+    current_usage = db.query(func.sum(FileEmbedding.tokens)).filter(
+        FileEmbedding.session_id == session_id
+    ).scalar() or 0
+    
+    # Check if adding new chunks would exceed quota
+    if current_usage + total_new_tokens > max_tokens_per_session:
+        raise ValueError(
+            f"Adding {total_new_tokens} tokens would exceed session quota of {max_tokens_per_session}. "
+            f"Current usage: {current_usage} tokens"
+        )
+    
+    # Clear existing file embeddings for this session if requested
+    # Note: This is optional - caller can decide whether to append or replace
+    # db.query(FileEmbedding).filter(FileEmbedding.session_id == session_id).delete()
     
     saved_embeddings = []
     
-    for chunk_data in file_chunks:
-        # Create file embedding record
-        file_embedding = FileEmbedding(
-            session_id=session_id,
-            repository_id=repository_id,
-            file_path=chunk_data['file_path'],
-            file_name=chunk_data['file_name'],
-            file_type=chunk_data['file_type'],
-            chunk_index=chunk_data['chunk_index'],
-            chunk_text=chunk_data['chunk_text'],
-            tokens=chunk_data['tokens'],
-            file_metadata={
-                'chunk_size': chunk_data['chunk_size'],
-                'is_complete': chunk_data['is_complete'],
-                'file_type': chunk_data['file_type']
-            }
-        )
+    # Process chunks in batches
+    for i in range(0, len(file_chunks), batch_size):
+        batch_chunks = file_chunks[i:i + batch_size]
         
-        db.add(file_embedding)
-        saved_embeddings.append(file_embedding)
+        batch_embeddings = []
+        for chunk_data in batch_chunks:
+            # Generate embedding vector if provided
+            embedding_vector = None
+            if 'embedding_vector' in chunk_data:
+                embedding_vector = chunk_data['embedding_vector']
+            elif embedding_provider == "openai" and 'chunk_text' in chunk_data:
+                # In real implementation, call OpenAI API here
+                # For now, we'll use a placeholder
+                embedding_vector = [0.0] * 1536  # Placeholder vector
+            
+            # Create file embedding record
+            file_embedding = FileEmbedding(
+                session_id=session_id,
+                repository_id=repository_id,
+                file_path=chunk_data['file_path'],
+                file_name=chunk_data['file_name'],
+                file_type=chunk_data['file_type'],
+                chunk_index=chunk_data['chunk_index'],
+                chunk_text=chunk_data['chunk_text'],
+                tokens=chunk_data['tokens'],
+                embedding=embedding_vector,
+                session_tokens_used=current_usage + chunk_data.get('tokens', 0),
+                file_metadata={
+                    'chunk_size': chunk_data['chunk_size'],
+                    'is_complete': chunk_data['is_complete'],
+                    'file_type': chunk_data['file_type'],
+                    'batch_index': i // batch_size,
+                    'embedding_provider': embedding_provider
+                }
+            )
+            
+            db.add(file_embedding)
+            batch_embeddings.append(file_embedding)
+            saved_embeddings.append(file_embedding)
+        
+        # Commit batch
+        db.commit()
+        
+        # Refresh objects to get IDs
+        for emb in batch_embeddings:
+            db.refresh(emb)
     
-    db.commit()
     return saved_embeddings
 
 
@@ -548,6 +609,137 @@ async def extract_file_dependencies(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+def search_similar_chunks(
+    db: Session,
+    session_id: int,
+    query_embedding: List[float],
+    limit: int = 10,
+    similarity_threshold: float = 0.7
+) -> List[Dict[str, Any]]:
+    """Search for similar chunks using vector similarity.
+    
+    Args:
+        db: Database session
+        session_id: Chat session ID to search within
+        query_embedding: Query vector (1536 dimensions for OpenAI)
+        limit: Maximum number of results to return
+        similarity_threshold: Minimum similarity score (0.0-1.0)
+    
+    Returns:
+        List of similar chunks with similarity scores
+    """
+    
+    # Use pgvector's cosine similarity operator <=>
+    results = db.query(
+        FileEmbedding,
+        (1 - FileEmbedding.embedding.cosine_distance(query_embedding)).label('similarity')
+    ).filter(
+        FileEmbedding.session_id == session_id,
+        (1 - FileEmbedding.embedding.cosine_distance(query_embedding)) >= similarity_threshold
+    ).order_by(
+        (1 - FileEmbedding.embedding.cosine_distance(query_embedding)).desc()
+    ).limit(limit).all()
+    
+    return [
+        {
+            'id': result.FileEmbedding.id,
+            'file_path': result.FileEmbedding.file_path,
+            'file_name': result.FileEmbedding.file_name,
+            'chunk_text': result.FileEmbedding.chunk_text,
+            'chunk_index': result.FileEmbedding.chunk_index,
+            'tokens': result.FileEmbedding.tokens,
+            'similarity': float(result.similarity),
+            'file_metadata': result.FileEmbedding.file_metadata
+        }
+        for result in results
+    ]
+
+
+def search_similar_chunks_by_text(
+    db: Session,
+    session_id: int,
+    query_text: str,
+    embedding_provider: str = "openai",
+    limit: int = 10,
+    similarity_threshold: float = 0.7
+) -> List[Dict[str, Any]]:
+    """Search for similar chunks using text query.
+    
+    Args:
+        db: Database session
+        session_id: Chat session ID to search within
+        query_text: Text to search for
+        embedding_provider: Provider for generating embeddings (default: "openai")
+        limit: Maximum number of results to return
+        similarity_threshold: Minimum similarity score (0.0-1.0)
+    
+    Returns:
+        List of similar chunks with similarity scores
+    """
+    
+    # In real implementation, generate embedding from query_text
+    # For now, use a placeholder vector
+    query_embedding = [0.0] * 1536  # Placeholder
+    
+    return search_similar_chunks(
+        db=db,
+        session_id=session_id,
+        query_embedding=query_embedding,
+        limit=limit,
+        similarity_threshold=similarity_threshold
+    )
+
+
+def get_session_token_usage(db: Session, session_id: int) -> Dict[str, Any]:
+    """Get token usage statistics for a session.
+    
+    Args:
+        db: Database session
+        session_id: Chat session ID
+    
+    Returns:
+        Dictionary with token usage statistics
+    """
+    
+    stats = db.query(
+        func.count(FileEmbedding.id).label('total_chunks'),
+        func.sum(FileEmbedding.tokens).label('total_tokens'),
+        func.avg(FileEmbedding.tokens).label('avg_tokens_per_chunk'),
+        func.min(FileEmbedding.tokens).label('min_tokens'),
+        func.max(FileEmbedding.tokens).label('max_tokens')
+    ).filter(
+        FileEmbedding.session_id == session_id
+    ).first()
+    
+    return {
+        'session_id': session_id,
+        'total_chunks': stats.total_chunks or 0,
+        'total_tokens': stats.total_tokens or 0,
+        'avg_tokens_per_chunk': float(stats.avg_tokens_per_chunk) if stats.avg_tokens_per_chunk else 0.0,
+        'min_tokens': stats.min_tokens or 0,
+        'max_tokens': stats.max_tokens or 0
+    }
+
+
+def delete_session_embeddings(db: Session, session_id: int) -> int:
+    """Delete all embeddings for a session.
+    
+    Args:
+        db: Database session
+        session_id: Chat session ID
+    
+    Returns:
+        Number of deleted embeddings
+    """
+    
+    deleted_count = db.query(FileEmbedding).filter(
+        FileEmbedding.session_id == session_id
+    ).delete()
+    
+    db.commit()
+    return deleted_count
 
 
 @router.post("/sessions/{session_id}/extract", response_model=FileItemResponse)

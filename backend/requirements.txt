@@ -39,5 +39,7 @@ httpx==0.28.1
 PyJWT==2.8.0
 cryptography==41.0.7  # For JWT signing with RSA keys
 
+# Vector database support
+pgvector==0.2.5
 
 httpx

@@ -27,7 +27,16 @@ engine = create_engine(
     pool_timeout=30,
     echo=bool(os.getenv("DB_ECHO", "false").lower() == "true")
 )
-#TODO: Add pgvector (very important vector db)
+# Enable pgvector extension for vector similarity search
+from sqlalchemy import event
+
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    """Enable pgvector extension when connecting to PostgreSQL"""
+    if DATABASE_URL.startswith("postgresql"):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        cursor.close()
 
 # Create session maker
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -48,6 +57,16 @@ def init_db():
     """
     try:
         print("Initializing database with SQLAlchemy models...")
+        
+        # Create pgvector extension for PostgreSQL
+        if DATABASE_URL.startswith("postgresql"):
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                    conn.commit()
+                    print("✓ pgvector extension enabled")
+            except Exception as e:
+                print(f"⚠ Warning: Could not enable pgvector extension: {e}")
         
         # Import all models here to ensure they are registered with SQLAlchemy
         
@@ -787,4 +806,4 @@ def reset_sample_data():
         db.rollback()
         raise
     finally:
-        db.close() 
+        db.close()

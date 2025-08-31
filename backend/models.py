@@ -10,6 +10,7 @@ from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Tex
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+from pgvector.sqlalchemy import Vector
 
 # ============================================================================
 # ENUMS
@@ -531,11 +532,14 @@ class FileEmbedding(Base):
     file_type: Mapped[str] = mapped_column(String(100), nullable=False)
     file_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    # Embedding data
-    embedding: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Store as JSON for now
+    # Embedding data - using pgvector for efficient similarity search
+    embedding: Mapped[Optional[Vector]] = mapped_column(Vector(1536), nullable=True)  # OpenAI ada-002 dimensions
     chunk_index: Mapped[int] = mapped_column(Integer, default=0)
     chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
     tokens: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Token tracking for quota management
+    session_tokens_used: Mapped[int] = mapped_column(Integer, default=0)  # Track tokens used for this session
     
     # Metadata (renamed to avoid SQLAlchemy conflict)
     file_metadata: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
