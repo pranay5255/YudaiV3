@@ -215,7 +215,6 @@ export const useSessionStore = create<SessionState>()(
                   authError: null,
                 });
               }
-            }
             console.log('[SessionStore] Authentication initialization completed');
           } catch (error) {
             console.error('[SessionStore] Auth initialization failed:', error);
