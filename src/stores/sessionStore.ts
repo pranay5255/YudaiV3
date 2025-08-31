@@ -4,6 +4,16 @@ import { SelectedRepository, TabType, ContextCard, FileItem, ChatMessageAPI, Git
 import { ApiService } from '../services/api';
 import { sessionApi } from '../services/sessionApi';
 
+// Helper function to safely retrieve session token from localStorage
+const getStoredSessionToken = (): string | null => {
+  try {
+    return localStorage.getItem('session_token');
+  } catch (error) {
+    console.warn('Failed to access localStorage:', error);
+    return null;
+  }
+};
+
 // Enhanced types for the session store with auth state
 interface SessionState {
   // Controls whether session loading is enabled
@@ -126,23 +136,27 @@ export const useSessionStore = create<SessionState>()(
         },
         
         // Auth actions
+        /**
+         * Initialize authentication state by validating stored session token.
+         * 
+         * This method performs the following sequence:
+         * 1. Retrieves session token from localStorage using safe retrieval
+         * 2. Validates token with backend API if present
+         * 3. Updates auth state based on validation result
+         * 4. Clears invalid tokens and session state on failure
+         * 5. Validates any persisted session after successful auth
+         */
         initializeAuth: async () => {
           try {
             console.log('[SessionStore] Starting authentication initialization');
             set({ authLoading: true, authError: null });
 
-            // Check for stored session token in localStorage
-            console.log('[SessionStore] Checking localStorage for stored token');
-            const storedSessionToken = localStorage.getItem('session_token');
+            // Step 1: Retrieve stored session token using null-safe helper
+            const storedSessionToken = getStoredSessionToken();
             console.log('[SessionStore] Stored session token:', storedSessionToken ? 'Found' : 'Not found');
             
+            // Step 2: Validate token if present, otherwise mark as unauthenticated
             if (storedSessionToken) {
-              // No auth data in URL, check for stored session token
-              console.log('[SessionStore] No auth data in URL, checking localStorage for stored token');
-              const storedSessionToken = localStorage.getItem('session_token');
-              console.log('[SessionStore] Stored session token:', storedSessionToken ? 'Found' : 'Not found');
-              
-              if (storedSessionToken) {
                 console.log('[SessionStore] Found stored session token, validating...');
                 try {
                   const userData = await ApiService.validateSessionToken(storedSessionToken);
