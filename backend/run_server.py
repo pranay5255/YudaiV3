@@ -10,8 +10,8 @@ This server combines all the backend services:
 - Issue management services
 """
 
-from contextlib import asynccontextmanager
 import os
+from contextlib import asynccontextmanager
 
 import uvicorn
 
@@ -19,7 +19,6 @@ import uvicorn
 from auth import auth_router
 from daifuUserAgent.chat_api import router as daifu_router
 from daifuUserAgent.session_routes import router as session_router
-from routers.solve_router import router as solve_router
 
 # Import database initialization
 from db.database import init_db
@@ -28,6 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from github import github_router
 from issueChatServices import issue_router
 from repo_processorGitIngest.filedeps import router as filedeps_router
+from routers.solve_router import router as solve_router
 
 
 @asynccontextmanager
@@ -41,6 +41,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     print("Shutting down...")
 
+
 # Create the main FastAPI application
 app = FastAPI(
     title="YudaiV3 Backend API",
@@ -48,13 +49,13 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Add CORS middleware for frontend integration
 allow_origins = os.getenv(
     "ALLOW_ORIGINS",
-    "http://localhost:3000,http://localhost:5173,https://yudai.app"
+    "http://localhost:3000,http://localhost:5173,https://yudai.app,https://www.yudai.app",
 ).split(",")
 
 app.add_middleware(
@@ -74,6 +75,7 @@ app.include_router(issue_router, prefix="/issues", tags=["issues"])
 app.include_router(filedeps_router, prefix="/filedeps", tags=["file-dependencies"])
 app.include_router(solve_router, prefix="/api/v1", tags=["ai-solver"])
 
+
 # Add a unified root endpoint
 @app.get("/")
 async def api_root():
@@ -87,13 +89,11 @@ async def api_root():
             "chat": "/daifu",
             "issues": "/issues",
             "file-dependencies": "/filedeps",
-            "ai-solver": "/api/v1"
+            "ai-solver": "/api/v1",
         },
-        "documentation": {
-            "swagger": "/docs",
-            "redoc": "/redoc"
-        }
+        "documentation": {"swagger": "/docs", "redoc": "/redoc"},
     }
+
 
 # Add health check endpoint
 @app.get("/health")
@@ -101,10 +101,11 @@ async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "service": "yudai-v3-backend"}
 
+
 if __name__ == "__main__":
     print("Starting YudaiV3 Backend API server...")
     print("Server will be available at: http://localhost:8000")
     print("API documentation at: http://localhost:8000/docs")
     print("ReDoc documentation at: http://localhost:8000/redoc")
-    
+
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)

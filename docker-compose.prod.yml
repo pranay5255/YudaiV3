@@ -101,7 +101,7 @@ services:
       - GITHUB_APP_PRIVATE_KEY_PATH=/app/yudaiv3.2025-08-02.private-key.pem
       - FRONTEND_BASE_URL=${FRONTEND_URL}
       - GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI}
-      - ALLOW_ORIGINS=${FRONTEND_URL}
+      - ALLOW_ORIGINS=${FRONTEND_URL},https://www.yudai.app,https://yudai.app
       - API_DOMAIN=${DOMAIN:-yudai.app}
       - DEV_DOMAIN=${DOMAIN:-yudai.app}
       - SECRET_KEY=${SECRET_KEY}

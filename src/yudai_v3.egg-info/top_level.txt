@@ -1,8 +1,6 @@
 components
-constants
-contexts
-examples
 hooks
 services
+stores
 types
 utils

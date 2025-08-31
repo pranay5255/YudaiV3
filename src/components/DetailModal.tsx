@@ -1,6 +1,6 @@
 import React from 'react';
 import { X, FileText, Plus } from 'lucide-react';
-import { FileItem } from '../types/fileDependencies';
+import { FileItem } from '../types';
 
 interface DetailModalProps {
   isOpen: boolean;
