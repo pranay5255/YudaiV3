@@ -1408,11 +1408,6 @@ class ProcessUploadRequest(BaseModel):
 
 
 # Response Models
-class APIResponse(BaseModel):
-    success: bool = Field(...)
-    message: str = Field(...)
-    data: Optional[Dict[str, Any]] = Field(None)
-    error: Optional[str] = Field(None)
 
 
 class ContextCardResponse(BaseModel):

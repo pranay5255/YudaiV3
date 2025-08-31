@@ -166,7 +166,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, repositoryInfo, selectedRepository, cards, api, onShowIssuePreview, showError]);
+  }, [isLoading, repositoryInfo, selectedRepository, cards, onShowIssuePreview, showError, createIssueWithContext]);
 
   return (
     <div className="h-full flex flex-col">

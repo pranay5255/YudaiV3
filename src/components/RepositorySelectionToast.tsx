@@ -29,8 +29,7 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
     availableRepositories,
     isLoadingRepositories,
     repositoryError,
-    setRepositoryLoading,
-    setAvailableRepositories
+    setRepositoryLoading
   } = useSessionStore();
 
   const loadRepositories = useCallback(async () => {
@@ -95,7 +94,7 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
     } finally {
       setLoadingBranches(false);
     }
-  }, [selectedRepository, api]);
+  }, [selectedRepository, loadRepositoryBranches]);
 
   // Load repositories when toast opens
   useEffect(() => {

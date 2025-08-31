@@ -52,7 +52,7 @@ export const Chat: React.FC<ChatProps> = ({
   const addContextCardMutation = useAddContextCard();
   
   const queryClient = useQueryClient();
-  const { addMessage, sendChatMessage, createIssueWithContext, extractFileDependenciesForSession } = useSessionStore();
+  const { sendChatMessage, createIssueWithContext, extractFileDependenciesForSession } = useSessionStore();
   
   // Convert API messages to Message format for display
   const messages: Message[] = chatMessages.map(msg => ({
@@ -245,7 +245,7 @@ export const Chat: React.FC<ChatProps> = ({
     } finally {
       setIsCreatingIssue(false);
     }
-  }, [isCreatingIssue, selectedRepository, messages, fileContext, onShowIssuePreview, showError]);
+  }, [isCreatingIssue, selectedRepository, messages, fileContext, onShowIssuePreview, showError, createIssueWithContext]);
 
 
 
