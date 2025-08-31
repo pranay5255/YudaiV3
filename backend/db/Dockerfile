@@ -1,5 +1,14 @@
 FROM postgres:15-alpine
 
+# Install pgvector extension
+RUN apk add --no-cache git build-base postgresql-dev && \
+    cd /tmp && \
+    git clone https://github.com/pgvector/pgvector.git && \
+    cd pgvector && \
+    make && \
+    make install && \
+    cd / && rm -rf /tmp/pgvector
+
 # Set environment variables for database (provided at runtime)
 # Postgres configuration
 ENV POSTGRES_INITDB_ARGS="--encoding=UTF8 --locale=C"

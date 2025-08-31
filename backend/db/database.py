@@ -32,7 +32,7 @@ engine = create_engine(
 
 # Enable pgvector extension for vector similarity search
 @event.listens_for(engine, "connect")
-def set_sqlite_pragma(dbapi_connection, connection_record):
+def set_postgres_pragma(dbapi_connection, connection_record):
     """Enable pgvector extension when connecting to PostgreSQL"""
     if DATABASE_URL.startswith("postgresql"):
         cursor = dbapi_connection.cursor()

@@ -11,7 +11,8 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
 CREATE EXTENSION IF NOT EXISTS "btree_gin";
--- Note: pgvector extension will be added when needed for embeddings
+-- Enable pgvector extension for vector embeddings
+CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Configure PostgreSQL for SSE and real-time features
 ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements';
@@ -287,7 +288,7 @@ CREATE TABLE IF NOT EXISTS context_cards (
     updated_at TIMESTAMP WITH TIME ZONE
 );
 
--- File embeddings table (FIXED - ADDED session_id COLUMN)
+-- File embeddings table (UPDATED - USING VECTOR TYPE FOR EMBEDDINGS)
 CREATE TABLE IF NOT EXISTS file_embeddings (
     id SERIAL PRIMARY KEY,
     session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
@@ -296,10 +297,11 @@ CREATE TABLE IF NOT EXISTS file_embeddings (
     file_name VARCHAR(500) NOT NULL,
     file_type VARCHAR(100) NOT NULL,
     file_content TEXT,
-    embedding TEXT,
+    embedding VECTOR(1536),  -- OpenAI ada-002 dimensions
     chunk_index INTEGER DEFAULT 0,
     chunk_text TEXT NOT NULL,
     tokens INTEGER DEFAULT 0,
+    session_tokens_used INTEGER DEFAULT 0,  -- Track tokens used for this session
     file_metadata JSON,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE
@@ -386,10 +388,12 @@ CREATE INDEX IF NOT EXISTS idx_context_cards_session_id ON context_cards(session
 CREATE INDEX IF NOT EXISTS idx_context_cards_source ON context_cards(source);
 CREATE INDEX IF NOT EXISTS idx_context_cards_is_active ON context_cards(is_active);
 
--- File embedding indexes (UPDATED - ADDED session_id INDEX)
+-- File embedding indexes (UPDATED - ADDED vector operations and session_id INDEX)
 CREATE INDEX IF NOT EXISTS idx_file_embeddings_session_id ON file_embeddings(session_id);
 CREATE INDEX IF NOT EXISTS idx_file_embeddings_repository_id ON file_embeddings(repository_id);
 CREATE INDEX IF NOT EXISTS idx_file_embeddings_file_path ON file_embeddings(file_path);
+-- Vector index for similarity search (using IVFFlat for cosine distance)
+CREATE INDEX IF NOT EXISTS idx_file_embeddings_embedding ON file_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
 -- OAuth state indexes
 CREATE INDEX IF NOT EXISTS idx_oauth_states_expires_at ON oauth_states(expires_at);
