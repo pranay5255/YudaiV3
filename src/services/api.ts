@@ -1,26 +1,38 @@
-// API service for communicating with the backend
-// This service provides complete coverage of all backend endpoints documented in context/APIDOCS.md
-// State flow from frontend calls to database operations is documented in context/dbSchema.md
-import { UserIssueResponse } from '../types';
+// DEPRECATED: This service is being phased out in favor of unified sessionStore + useSessionQueries
+// All operations should now go through the session context via Zustand store
+// This file will be removed once all components migrate to the unified state management
+//
+// Migration Guide:
+// - Auth operations: Use useAuth() hook from sessionStore
+// - Chat operations: Use useChatMessages() and related hooks
+// - Session operations: Use useSession() and session management hooks
+// - Repository operations: Use useRepository() hook
+// - All other operations: Use appropriate hooks from useSessionQueries.ts
+
+// UserIssue import removed - no longer used in this deprecated file
+import type {
+  ChatRequest,
+  ChatResponse,
+  CreateIssueWithContextRequest,
+  IssueCreationResponse,
+  GitHubRepository,
+  GitHubBranch,
+  ExtractFileDependenciesRequest,
+  ExtractFileDependenciesResponse,
+} from '../types/sessionTypes';
+
+// Keep legacy types for backward compatibility
 import type {
   ValidateSessionResponse,
   LogoutRequest,
   LogoutResponse,
   LoginUrlResponse,
-  ChatRequest,
-  ChatResponse,
-  CreateIssueWithContextRequest,
-  IssueCreationResponse,
   CreateGitHubIssueResponse,
-  GitHubRepositoryAPI,
-  GitHubBranchAPI,
   RepositoryResponse,
-  ExtractFileDependenciesRequest,
-  ExtractFileDependenciesResponse,
 } from '../types/api';
 
-// API base URL from environment or fallback to relative path
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+// Import centralized API configuration
+import { API_CONFIG, buildApiUrl, API_REQUEST_CONFIG } from '../config/api';
 
 export class ApiService {
   private static getAuthHeaders(sessionToken?: string): HeadersInit {
@@ -75,29 +87,32 @@ export class ApiService {
     }
   }
 
+  // DEPRECATED: Use useAuth() hook from sessionStore instead
   // Authentication API Methods (backend/auth/auth_routes.py)
   static async validateSessionToken(sessionToken: string): Promise<ValidateSessionResponse> {
+    console.warn('[ApiService] DEPRECATED: validateSessionToken should be replaced with useAuth() hook');
     console.log('[ApiService] Validating session token:', sessionToken ? 'Token provided' : 'No token');
-    console.log('[ApiService] Making request to:', `${API_BASE_URL}/auth/api/user`);
-    
+    const url = buildApiUrl(API_CONFIG.AUTH.USER);
+    console.log('[ApiService] Making request to:', url);
+
     try {
-      const response = await fetch(`${API_BASE_URL}/auth/api/user`, {
+      const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'Content-Type': 'application/json',
+          ...API_REQUEST_CONFIG.DEFAULT_HEADERS,
           'Authorization': `Bearer ${sessionToken}`,
         },
       });
-      
+
       console.log('[ApiService] Response status:', response.status);
       console.log('[ApiService] Response ok:', response.ok);
-      
+
       if (!response.ok) {
         console.error('[ApiService] Validation failed with status:', response.status);
         const errorText = await response.text();
         console.error('[ApiService] Error response body:', errorText);
       }
-      
+
       return ApiService.handleResponse<ValidateSessionResponse>(response);
     } catch (error) {
       console.error('[ApiService] Exception during session validation:', error);
@@ -106,34 +121,35 @@ export class ApiService {
   }
 
   static async logout(sessionToken: string): Promise<LogoutResponse> {
-    const response = await fetch(`${API_BASE_URL}/auth/api/logout`, {
+    const url = buildApiUrl(API_CONFIG.AUTH.LOGOUT);
+    const response = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: API_REQUEST_CONFIG.DEFAULT_HEADERS,
       body: JSON.stringify({ session_token: sessionToken } as LogoutRequest),
     });
     return ApiService.handleResponse<LogoutResponse>(response);
   }
 
   static async getLoginUrl(): Promise<LoginUrlResponse> {
-    const response = await fetch(`${API_BASE_URL}/auth/api/login`, {
+    const url = buildApiUrl(API_CONFIG.AUTH.LOGIN);
+    const response = await fetch(url, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: API_REQUEST_CONFIG.DEFAULT_HEADERS,
     });
     return ApiService.handleResponse<LoginUrlResponse>(response);
   }
 
+  // DEPRECATED: Use useChatMessages() hook and related mutations from useSessionQueries instead
   // Chat API Methods (backend/daifuUserAgent/chat_api.py)
   static async sendChatMessage(request: ChatRequest, sessionToken?: string): Promise<ChatResponse> {
+    console.warn('[ApiService] DEPRECATED: sendChatMessage should be replaced with useChatMessages() hook');
     // Validate session_id is required
     if (!request.session_id?.trim()) {
       throw new Error('session_id is required and cannot be empty');
     }
 
-    const response = await fetch(`${API_BASE_URL}/daifu/chat`, {
+    const url = buildApiUrl(API_CONFIG.DAIFU.CHAT);
+    const response = await fetch(url, {
       method: 'POST',
       headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
@@ -145,7 +161,8 @@ export class ApiService {
 
   // Issue Management API Methods (backend/issueChatServices/issue_service.py)
   static async createIssueWithContext(request: CreateIssueWithContextRequest, sessionToken?: string): Promise<IssueCreationResponse> {
-    const response = await fetch(`${API_BASE_URL}/issues/from-session-enhanced`, {
+    const url = buildApiUrl(API_CONFIG.ISSUES.CREATE_WITH_CONTEXT);
+    const response = await fetch(url, {
       method: 'POST',
       headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
@@ -153,24 +170,8 @@ export class ApiService {
     return ApiService.handleResponse<IssueCreationResponse>(response);
   }
 
-  static async getIssues(
-    repoOwner?: string,
-    repoName?: string,
-    limit: number = 50,
-    sessionToken?: string
-  ): Promise<UserIssueResponse[]> {
-    const params = new URLSearchParams();
-    if (repoOwner) params.append('repo_owner', repoOwner);
-    if (repoName) params.append('repo_name', repoName);
-    params.append('limit', limit.toString());
 
-    const response = await fetch(`${API_BASE_URL}/issues?${params}`, {
-      method: 'GET',
-      headers: ApiService.getAuthHeaders(sessionToken),
-    });
-    return ApiService.handleResponse<UserIssueResponse[]>(response);
-  }
-
+  
 
 
 
@@ -182,9 +183,13 @@ export class ApiService {
 
 
 
+  // DEPRECATED: Use useRepository() hook from sessionStore instead
   // Repository Management API Methods (backend/github/github_routes.py)
   static async getRepositories(sessionToken?: string): Promise<RepositoryResponse> {
-    const response = await fetch(`${API_BASE_URL}/repositories`, {
+    console.warn('[ApiService] DEPRECATED: getRepositories should be replaced with useRepository() hook');
+    // Note: This endpoint might need to be clarified - could be GitHub repos or general repos
+    const url = buildApiUrl(API_CONFIG.GITHUB.REPOS);
+    const response = await fetch(url, {
       method: 'GET',
       headers: ApiService.getAuthHeaders(sessionToken),
     });
@@ -194,7 +199,8 @@ export class ApiService {
 
 
   static async createGitHubIssueFromUserIssue(issueId: string, sessionToken?: string): Promise<CreateGitHubIssueResponse> {
-    const response = await fetch(`${API_BASE_URL}/issues/${issueId}/create-github-issue`, {
+    const url = buildApiUrl(API_CONFIG.ISSUES.CREATE_GITHUB_ISSUE, { issueId });
+    const response = await fetch(url, {
       method: 'POST',
       headers: ApiService.getAuthHeaders(sessionToken),
     });
@@ -202,7 +208,8 @@ export class ApiService {
   }
 
   static async extractFileDependencies(repoUrl: string, sessionToken?: string): Promise<ExtractFileDependenciesResponse> {
-    const response = await fetch(`${API_BASE_URL}/filedeps/extract`, {
+    const url = buildApiUrl(API_CONFIG.FILEDEPS.EXTRACT);
+    const response = await fetch(url, {
       method: 'POST',
       headers: ApiService.getAuthHeaders(sessionToken),
       body: JSON.stringify({ repo_url: repoUrl } as ExtractFileDependenciesRequest),
@@ -210,19 +217,21 @@ export class ApiService {
     return ApiService.handleResponse<ExtractFileDependenciesResponse>(response);
   }
 
-  static async getRepositoryBranches(owner: string, repo: string, sessionToken?: string): Promise<GitHubBranchAPI[]> {
-    const response = await fetch(`${API_BASE_URL}/github/repositories/${owner}/${repo}/branches`, {
+  static async getRepositoryBranches(owner: string, repo: string, sessionToken?: string): Promise<GitHubBranch[]> {
+    const url = buildApiUrl(API_CONFIG.GITHUB.REPO_BRANCHES, { owner, repo });
+    const response = await fetch(url, {
       method: 'GET',
       headers: ApiService.getAuthHeaders(sessionToken),
     });
-    return ApiService.handleResponse<GitHubBranchAPI[]>(response);
+    return ApiService.handleResponse<GitHubBranch[]>(response);
   }
 
-  static async getUserRepositories(sessionToken?: string): Promise<GitHubRepositoryAPI[]> {
-    const response = await fetch(`${API_BASE_URL}/github/repositories`, {
+  static async getUserRepositories(sessionToken?: string): Promise<GitHubRepository[]> {
+    const url = buildApiUrl(API_CONFIG.GITHUB.USER_REPOS);
+    const response = await fetch(url, {
       method: 'GET',
       headers: ApiService.getAuthHeaders(sessionToken),
     });
-    return ApiService.handleResponse<GitHubRepositoryAPI[]>(response);
+    return ApiService.handleResponse<GitHubRepository[]>(response);
   }
 }

@@ -9,7 +9,6 @@ import type {
 } from '../types/api';
 import { UserIssueResponse } from '../types';
 import { useRepository } from '../hooks/useRepository';
-import { useApi } from '../hooks/useApi';
 import { useSessionManagement } from '../hooks/useSessionManagement';
 import {
   useChatMessages,
@@ -18,6 +17,8 @@ import {
   useAddContextCard
 } from '../hooks/useSessionQueries';
 import { useQueryClient } from '@tanstack/react-query';
+import { useSessionStore } from '../stores/sessionStore';
+import { CreateIssueWithContextRequest } from '../types/sessionTypes';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -50,8 +51,8 @@ export const Chat: React.FC<ChatProps> = ({
   const { data: fileContext = [] } = useFileDependencies(activeSessionId || '');
   const addContextCardMutation = useAddContextCard();
   
-  const api = useApi();
   const queryClient = useQueryClient();
+  const { addMessage, sendChatMessage, createIssueWithContext, extractFileDependenciesForSession } = useSessionStore();
   
   // Convert API messages to Message format for display
   const messages: Message[] = chatMessages.map(msg => ({
@@ -140,25 +141,27 @@ export const Chat: React.FC<ChatProps> = ({
       setIsLoading(true);
   
       try {
-          // Align with backend ChatRequest format
-          const response = await api.sendChatMessage({
-              session_id: activeSessionId,
-              message: { content: currentInput, is_code: false },  // Match backend structure
-              context_cards: contextCards.map(card => card.id),
-              repository: selectedRepository ? {
-                  owner: selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0],
-                  name: selectedRepository.repository.name,
-                  branch: selectedRepository.branch
-              } : undefined,
-          });
-  
-          // Chat messages are now handled by the backend through the existing chat endpoint
-          console.log('[Chat] Message sent successfully:', response.message_id);
-          
-          // Invalidate and refetch the messages to show the updated conversation
-          await queryClient.invalidateQueries({ 
-            queryKey: ['messages', activeSessionId] 
-          });
+          // Use unified sessionStore method for sending chat messages
+          const repository = selectedRepository ? {
+              owner: selectedRepository.repository.owner?.login || selectedRepository.repository.full_name.split('/')[0],
+              name: selectedRepository.repository.name,
+              branch: selectedRepository.branch
+          } : undefined;
+
+          const response = await sendChatMessage(
+              currentInput,
+              contextCards.map(card => card.id),
+              repository
+          );
+
+          if (response) {
+              console.log('[Chat] Message sent successfully:', response.message_id);
+
+              // Invalidate and refetch the messages to show the updated conversation
+              await queryClient.invalidateQueries({
+                queryKey: ['messages', activeSessionId]
+              });
+          }
           
       } catch (error) {
           console.error('[Chat] Message sending failed:', error);
@@ -166,7 +169,7 @@ export const Chat: React.FC<ChatProps> = ({
       } finally {
           setIsLoading(false);
       }
-  }, [input, isLoading, activeSessionId, contextCards, selectedRepository, api, showError, queryClient]);
+  }, [input, isLoading, activeSessionId, contextCards, selectedRepository, sendChatMessage, showError, queryClient]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -189,6 +192,7 @@ export const Chat: React.FC<ChatProps> = ({
         .map(msg => ({
           id: msg.id,
           content: msg.content,
+          isCode: false, // Default to false for chat messages
           timestamp: msg.timestamp.toISOString()
         }));
 
@@ -218,10 +222,10 @@ export const Chat: React.FC<ChatProps> = ({
         priority: 'medium'
       };
 
-      // Use the proper API method for creating issues with context
-      const response = await api.createIssueWithContext(request);
+      // Use the unified sessionStore method for creating issues with context
+      const response = await createIssueWithContext(request);
 
-      if (response.success && onShowIssuePreview) {
+      if (response && response.success && onShowIssuePreview) {
         const issuePreview: IssuePreviewData = {
           ...response.github_preview,
           userIssue: response.user_issue as UserIssueResponse,
@@ -230,7 +234,7 @@ export const Chat: React.FC<ChatProps> = ({
           canCreateGitHubIssue: true,
           repositoryInfo: request.repository_info
         };
-        
+
         onShowIssuePreview(issuePreview);
       }
       
@@ -241,7 +245,7 @@ export const Chat: React.FC<ChatProps> = ({
     } finally {
       setIsCreatingIssue(false);
     }
-  }, [isCreatingIssue, selectedRepository, messages, fileContext, api, onShowIssuePreview, showError]);
+  }, [isCreatingIssue, selectedRepository, messages, fileContext, onShowIssuePreview, showError]);
 
 
 
@@ -305,7 +309,7 @@ export const Chat: React.FC<ChatProps> = ({
               setIsExtractingFiles(true);
               try {
                 const repoUrl = `https://github.com/${selectedRepository.repository.full_name}`;
-                await api.extractFileDependenciesForSession(activeSessionId || '', repoUrl);
+                await extractFileDependenciesForSession(activeSessionId || '', repoUrl);
                 // Refetch file dependencies after extraction
                 await queryClient.invalidateQueries({ 
                   queryKey: ['file-deps', activeSessionId] 

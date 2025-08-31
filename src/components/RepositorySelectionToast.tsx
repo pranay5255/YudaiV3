@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, Github, GitBranch, Check, X, Loader2 } from 'lucide-react';
 import { GitHubRepository, GitHubBranch, SelectedRepository } from '../types';
-import { useApi } from '../hooks/useApi';
 import { useSessionStore } from '../stores/sessionStore';
 
 interface RepositorySelectionToastProps {
@@ -23,7 +22,7 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  const api = useApi();
+  const { loadRepositoryBranches } = useSessionStore();
   
   // Use session store for repository state
   const {
@@ -38,34 +37,22 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
     console.log('Loading repositories...');
     setRepositoryLoading(true);
     setError(null);
-    
+
     try {
-      const repos = await api.getUserRepositories();
-      console.log('Loaded repositories:', repos);
-      
-      // Transform API response to match frontend GitHubRepository type
-      const transformedRepos: GitHubRepository[] = repos.map(repo => ({
-        id: repo.id,
-        name: repo.name,
-        full_name: repo.full_name,
-        description: repo.description,
-        private: repo.private,
-        html_url: repo.html_url,
-        default_branch: repo.default_branch,
-        language: undefined, // API doesn't provide this
-        stargazers_count: undefined, // API doesn't provide this
-        forks_count: undefined, // API doesn't provide this
-        updated_at: new Date().toISOString(), // API doesn't provide this
-      }));
-      
-      setAvailableRepositories(transformedRepos);
+      // Use unified sessionStore method to load repositories
+      // The loadRepositories method in sessionStore will handle the API call
+      // and update the availableRepositories state automatically
+      const { loadRepositories: loadReposFromStore } = useSessionStore.getState();
+      await loadReposFromStore();
+
+      console.log('Repositories loaded successfully via sessionStore');
     } catch (error) {
       console.error('Failed to load repositories:', error);
       setError('Failed to load repositories. Please try again.');
     } finally {
       setRepositoryLoading(false);
     }
-  }, [api, setRepositoryLoading, setAvailableRepositories]);
+  }, [setRepositoryLoading]);
 
   const loadBranches = useCallback(async () => {
     if (!selectedRepository) return;
@@ -78,7 +65,7 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
     try {
       const [owner, repo] = selectedRepository.full_name.split('/');
       console.log('Fetching branches for:', { owner, repo });
-      const branchList = await api.getRepositoryBranches(owner, repo);
+      const branchList = await loadRepositoryBranches(owner, repo);
       console.log('Received branch list:', branchList);
       
       // Transform API response to match frontend GitHubBranch type

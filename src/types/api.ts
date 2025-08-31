@@ -1,6 +1,16 @@
+// DEPRECATED: This file is being phased out in favor of unified sessionTypes.ts
+// All API types have been moved to src/types/sessionTypes.ts
+//
+// Migration Guide:
+// - All types from this file are now available in src/types/sessionTypes.ts
+// - Update your imports to use: import { TypeName } from '../types/sessionTypes'
+//
+// This file will be removed once all components migrate to the unified types
+
 /**
- * Unified API Types
+ * DEPRECATED: Unified API Types
  * All request/response interfaces for API communication
+ * @deprecated Use types from src/types/sessionTypes.ts instead
  */
 
 // ============================================================================
@@ -57,6 +67,7 @@ export interface ChatResponse {
 export interface ChatContextMessage {
   id: string;
   content: string;
+  isCode: boolean;
   timestamp: string;
 }
 
@@ -103,18 +114,6 @@ export interface FileContextItem {
   path?: string;
 }
 
-export interface CreateIssueWithContextRequest {
-  title: string;
-  description?: string;
-  chat_messages: ChatContextMessage[];
-  file_context: FileContextItem[];
-  repository_info?: {
-    owner: string;
-    name: string;
-    branch?: string;
-  };
-  priority?: string;
-}
 
 export interface GitHubIssuePreview {
   title: string;

@@ -6,14 +6,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from unittest.mock import Mock, patch, AsyncMock
-import json
-from datetime import datetime, timedelta
+from unittest.mock import patch, AsyncMock
+from datetime import datetime
 
 # Import the main app and dependencies
 from run_server import app
 from db.database import get_db, Base
-from models import User, Issue, Repository, AISolveSession, SessionToken
+from models import User, Issue, Repository, AISolveSession
 from auth.auth_utils import get_current_user
 from schemas.ai_solver import SolveStatus
 

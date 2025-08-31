@@ -5,7 +5,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSessionStore } from '../stores/sessionStore';
 import {
-  ChatMessageAPI,
+  ChatMessage,
   ContextCard,
   FileItem,
   CreateSessionMutationData,
@@ -13,13 +13,8 @@ import {
   RemoveContextCardMutationData,
   ContextCardMutationContext,
   SelectedRepository,
-} from '../types';
-import {
-  sessionApi,
-  type ChatMessageResponse,
-  type ContextCardResponse,
-  type SessionResponse,
-} from '../services/sessionApi';
+  SessionContext,
+} from '../types/sessionTypes';
 
 // Helper function to check if error is a session not found error
 const isSessionNotFoundError = (error: unknown): boolean => {
@@ -98,141 +93,126 @@ export const QueryKeys = {
 
 
 
+// ============================================================================
+// SESSION QUERIES - Unified with Zustand Store
+// ============================================================================
+
 export const useSession = (sessionId: string) => {
-  const { setMessages, sessionToken, clearSession } = useSessionStore();
-  
+  const {
+    sessionToken,
+    clearSession,
+    loadSession
+  } = useSessionStore();
+
   return useQuery({
     queryKey: QueryKeys.session(sessionId),
-    queryFn: async () => {
+    queryFn: async (): Promise<SessionContext> => {
       if (!shouldAllowSessionRequest(sessionId)) {
         throw new Error('Rate limited: too many session requests');
       }
-      
+
       try {
-        const context = await sessionApi.getSessionContext(sessionId, sessionToken || undefined);
-        
-        // Transform messages to frontend format
-        const transformedMessages: ChatMessageAPI[] = context.messages?.map((msg: ChatMessageResponse) => ({
-          id: msg.id,
-          message_id: msg.message_id,
-          message_text: msg.message_text,
-          sender_type: msg.sender_type as 'user' | 'assistant' | 'system',
-          role: msg.role as 'user' | 'assistant' | 'system',
-          tokens: msg.tokens,
-          model_used: msg.model_used,
-          processing_time: msg.processing_time,
-          context_cards: msg.context_cards,
-          referenced_files: msg.referenced_files,
-          error_message: msg.error_message,
-          created_at: msg.created_at,
-          updated_at: msg.updated_at,
-        })) || [];
-        
-        // Update Zustand store with transformed data
-        setMessages(transformedMessages);
-        
-        return context;
+        // Use the unified sessionStore method instead of direct API call
+        const success = await loadSession(sessionId);
+        if (!success) {
+          throw new Error('Failed to load session');
+        }
+
+        // Get the updated session context from store
+        const { sessionContext } = useSessionStore.getState();
+        if (!sessionContext) {
+          throw new Error('Session context not available');
+        }
+
+        return sessionContext;
       } catch (error) {
         if (handleSessionError(error, sessionId, clearSession)) {
           // Session was cleared, return empty state to prevent further queries
-          return { messages: [], context_cards: [], file_dependencies: [] };
+          return {
+            session: null,
+            messages: [],
+            context_cards: [],
+            file_embeddings_count: 0,
+            user_issues: []
+          };
         }
-        throw error; // Re-throw non-session errors
+        throw error;
       }
     },
     enabled: !!sessionId && !!sessionToken,
     retry: retryWithBackoff,
     retryDelay: getRetryDelay,
-    staleTime: 5 * 60 * 1000, // 5 minutes (increased from 2)
-    gcTime: 10 * 60 * 1000, // 10 minutes (increased from 5)
-    refetchOnWindowFocus: false, // Disable automatic refetch on window focus
-    refetchOnMount: false, // Only fetch if data is stale
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
   });
 };
 
-// Chat message queries
+// ============================================================================
+// CHAT MESSAGE QUERIES - Unified with Zustand Store
+// ============================================================================
+
 export const useChatMessages = (sessionId: string) => {
-  const { setMessages, sessionToken, clearSession } = useSessionStore();
-  
+  const { sessionToken, clearSession, loadMessages } = useSessionStore();
+
   return useQuery({
     queryKey: QueryKeys.messages(sessionId),
-    queryFn: async (): Promise<ChatMessageAPI[]> => {
+    queryFn: async (): Promise<ChatMessage[]> => {
       if (!shouldAllowSessionRequest(`messages-${sessionId}`)) {
         throw new Error('Rate limited: too many message requests');
       }
-      
+
       try {
-        const messages = await sessionApi.getChatMessages(sessionId, 100, sessionToken || undefined);
-        
-        // Transform messages to frontend format
-        const transformedMessages: ChatMessageAPI[] = messages.map((msg: ChatMessageResponse) => ({
-          id: msg.id,
-          message_id: msg.message_id,
-          message_text: msg.message_text,
-          sender_type: msg.sender_type as 'user' | 'assistant' | 'system',
-          role: msg.role as 'user' | 'assistant' | 'system',
-          tokens: msg.tokens,
-          model_used: msg.model_used,
-          processing_time: msg.processing_time,
-          context_cards: msg.context_cards,
-          referenced_files: msg.referenced_files,
-          error_message: msg.error_message,
-          created_at: msg.created_at,
-          updated_at: msg.updated_at,
-        }));
-        
-        // Update Zustand store
-        setMessages(transformedMessages);
-        
-        return transformedMessages;
+        // Use the unified sessionStore method
+        await loadMessages(sessionId);
+
+        // Get messages from store
+        const { messages } = useSessionStore.getState();
+        return messages;
       } catch (error) {
         if (handleSessionError(error, sessionId, clearSession)) {
           // Session was cleared, return empty messages
           return [];
         }
-        throw error; // Re-throw non-session errors
+        throw error;
       }
     },
     enabled: !!sessionId && !!sessionToken,
     retry: retryWithBackoff,
     retryDelay: getRetryDelay,
-    staleTime: 2 * 60 * 1000, // 2 minutes (increased from 30 seconds)
-    gcTime: 10 * 60 * 1000, // 10 minutes (increased from 5)
-    refetchOnWindowFocus: false, // Disable automatic refetch on window focus
+    staleTime: 2 * 60 * 1000, // 2 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
+    refetchOnWindowFocus: false,
   });
 };
 
 
 
 
-// Context card queries
+// ============================================================================
+// CONTEXT CARD QUERIES - Unified with Zustand Store
+// ============================================================================
+
 export const useContextCards = (sessionId: string) => {
-  const { setContextCards, sessionToken, clearSession } = useSessionStore();
-  
+  const { sessionToken, clearSession, loadContextCards } = useSessionStore();
+
   return useQuery({
     queryKey: QueryKeys.contextCards(sessionId),
     queryFn: async (): Promise<ContextCard[]> => {
       try {
-        const cards = await sessionApi.getContextCards(sessionId, sessionToken || undefined);
-        
-        // Transform and update Zustand store
-        const transformedCards: ContextCard[] = cards.map(card => ({
-          id: card.id.toString(),
-          title: card.title,
-          description: card.description,
-          tokens: card.tokens,
-          source: card.source as 'chat' | 'file-deps' | 'upload',
-        }));
-        
-        setContextCards(transformedCards);
-        
-        return transformedCards;
+        // Use the unified sessionStore method
+        await loadContextCards(sessionId);
+
+        // Get context cards from store
+        const { contextCards } = useSessionStore.getState();
+        return contextCards;
       } catch (error) {
         if (handleSessionError(error, sessionId, clearSession)) {
           // Session was cleared, return empty context cards
           return [];
         }
-        throw error; // Re-throw non-session errors
+        throw error;
       }
     },
     enabled: !!sessionId && !!sessionToken,
@@ -242,22 +222,26 @@ export const useContextCards = (sessionId: string) => {
   });
 };
 
+// ============================================================================
+// CONTEXT CARD MUTATIONS - Unified with Zustand Store
+// ============================================================================
+
 export const useAddContextCard = () => {
   const queryClient = useQueryClient();
-  const { addContextCard, sessionToken } = useSessionStore();
-  
+  const { createContextCard } = useSessionStore();
+
   return useMutation({
-    mutationFn: async ({ sessionId, card }: AddContextCardMutationData) => {
-      return await sessionApi.addContextCard(sessionId, card, sessionToken || undefined);
+    mutationFn: async ({ sessionId: _sessionId, card }: AddContextCardMutationData) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+      return await createContextCard(card);
     },
     onMutate: async ({ sessionId, card }): Promise<ContextCardMutationContext> => {
       // Cancel any outgoing refetches
       await queryClient.cancelQueries({ queryKey: QueryKeys.contextCards(sessionId) });
-      
+
       // Snapshot the previous value
       const previousCards = queryClient.getQueryData<ContextCard[]>(QueryKeys.contextCards(sessionId)) || [];
-      
-      // Optimistically update the cache
+
+      // Optimistic update will be handled by Zustand store
       const optimisticCard: ContextCard = {
         id: Date.now().toString(),
         title: card.title,
@@ -265,48 +249,17 @@ export const useAddContextCard = () => {
         tokens: card.tokens,
         source: card.source,
       };
-      
-      queryClient.setQueryData(QueryKeys.contextCards(sessionId), (old: ContextCard[] = []) => [
-        ...old,
-        optimisticCard,
-      ]);
-      
-      // Update Zustand store optimistically
-      addContextCard(optimisticCard);
-      
+
       return { previousCards, optimisticCard };
     },
     onError: (_err: Error, { sessionId }: AddContextCardMutationData, context?: ContextCardMutationContext) => {
-      // If the mutation fails, use the context returned from onMutate to roll back
+      // Rollback handled by Zustand store
       if (context?.previousCards) {
         queryClient.setQueryData(QueryKeys.contextCards(sessionId), context.previousCards);
       }
     },
-    onSuccess: (data: ContextCardResponse, { sessionId }: AddContextCardMutationData) => {
-      // Transform the response and update stores with real data
-      const newCard: ContextCard = {
-        id: data.id.toString(),
-        title: data.title,
-        description: data.description,
-        tokens: data.tokens,
-        source: data.source as 'chat' | 'file-deps' | 'upload',
-      };
-      
-      // Update cache with real data
-      queryClient.setQueryData(QueryKeys.contextCards(sessionId), (old: ContextCard[] = []) => {
-        // Replace optimistic entry with real data
-        return old.map(card => 
-          card.id === data.id.toString() ? newCard : card
-        ).filter((card, index, self) => 
-          self.findIndex(c => c.title === card.title && c.description === card.description) === index
-        );
-      });
-      
-      // Update Zustand store with real data
-      addContextCard(newCard);
-    },
-    onSettled: (_data: ContextCardResponse | undefined, _error: Error | null, { sessionId }: AddContextCardMutationData) => {
-      // Always refetch after error or success
+    onSettled: (_data: boolean | undefined, _error: Error | null, { sessionId }: AddContextCardMutationData) => {
+      // Invalidate to sync with server state
       queryClient.invalidateQueries({ queryKey: QueryKeys.contextCards(sessionId) });
     },
   });
@@ -314,72 +267,57 @@ export const useAddContextCard = () => {
 
 export const useRemoveContextCard = () => {
   const queryClient = useQueryClient();
-  const { removeContextCard, sessionToken } = useSessionStore();
-  
+  const { deleteContextCard } = useSessionStore();
+
   return useMutation({
-    mutationFn: async ({ sessionId, cardId }: RemoveContextCardMutationData) => {
-      return await sessionApi.deleteContextCard(sessionId, parseInt(cardId), sessionToken || undefined);
+    mutationFn: async ({ sessionId: _sessionId, cardId }: RemoveContextCardMutationData) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+      return await deleteContextCard(cardId);
     },
-    onMutate: async ({ sessionId, cardId }): Promise<ContextCardMutationContext> => {
+    onMutate: async ({ sessionId, cardId: _cardId }): Promise<ContextCardMutationContext> => { // eslint-disable-line @typescript-eslint/no-unused-vars
       // Cancel any outgoing refetches
       await queryClient.cancelQueries({ queryKey: QueryKeys.contextCards(sessionId) });
-      
+
       // Snapshot the previous value
       const previousCards = queryClient.getQueryData<ContextCard[]>(QueryKeys.contextCards(sessionId)) || [];
-      
-      // Optimistically update the cache
-      queryClient.setQueryData(QueryKeys.contextCards(sessionId), (old: ContextCard[] = []) =>
-        old.filter(card => card.id !== cardId)
-      );
-      
-      // Update Zustand store optimistically
-      removeContextCard(cardId);
-      
+
       return { previousCards };
     },
     onError: (_err: Error, { sessionId }: RemoveContextCardMutationData, context?: ContextCardMutationContext) => {
-      // If the mutation fails, use the context returned from onMutate to roll back
+      // Rollback handled by Zustand store
       if (context?.previousCards) {
         queryClient.setQueryData(QueryKeys.contextCards(sessionId), context.previousCards);
       }
     },
-    onSettled: (_data: { success: boolean; message: string } | undefined, _error: Error | null, { sessionId }: RemoveContextCardMutationData) => {
-      // Always refetch after error or success
+    onSettled: (_data: boolean | undefined, _error: Error | null, { sessionId }: RemoveContextCardMutationData) => {
+      // Invalidate to sync with server state
       queryClient.invalidateQueries({ queryKey: QueryKeys.contextCards(sessionId) });
     },
   });
 };
 
-// File dependency queries
+// ============================================================================
+// FILE DEPENDENCY QUERIES - Unified with Zustand Store
+// ============================================================================
+
 export const useFileDependencies = (sessionId: string) => {
-  const { setFileContext, sessionToken, clearSession } = useSessionStore();
-  
+  const { sessionToken, clearSession, loadFileDependencies } = useSessionStore();
+
   return useQuery({
     queryKey: QueryKeys.fileDependencies(sessionId),
     queryFn: async (): Promise<FileItem[]> => {
       try {
-        const deps = await sessionApi.getFileDependenciesSession(sessionId, sessionToken || undefined);
-        
-        // Transform and update Zustand store
-        const transformedFiles: FileItem[] = deps.map(dep => ({
-          id: dep.id.toString(),
-          name: dep.file_name,
-          path: dep.file_path,
-          type: 'INTERNAL' as const,
-          tokens: dep.tokens,
-          category: dep.category || dep.file_type,
-          created_at: dep.created_at,
-        }));
-        
-        setFileContext(transformedFiles);
-        
-        return transformedFiles;
+        // Use the unified sessionStore method
+        await loadFileDependencies(sessionId);
+
+        // Get file dependencies from store
+        const { fileContext } = useSessionStore.getState();
+        return fileContext;
       } catch (error) {
         if (handleSessionError(error, sessionId, clearSession)) {
           // Session was cleared, return empty file dependencies
           return [];
         }
-        throw error; // Re-throw non-session errors
+        throw error;
       }
     },
     enabled: !!sessionId && !!sessionToken,
@@ -391,44 +329,50 @@ export const useFileDependencies = (sessionId: string) => {
 
 
 
-// Session management mutations
+// ============================================================================
+// SESSION MANAGEMENT MUTATIONS - Unified with Zustand Store
+// ============================================================================
+
 export const useCreateSession = () => {
   const queryClient = useQueryClient();
-  const { setActiveSession, sessionToken } = useSessionStore();
-  
+  const { createSessionForRepository } = useSessionStore();
+
   return useMutation({
     mutationFn: async ({ repoOwner, repoName, repoBranch = 'main' }: CreateSessionMutationData) => {
-      return await sessionApi.createSession(
-        {
-          repo_owner: repoOwner,
-          repo_name: repoName,
-          repo_branch: repoBranch,
-          title: `Chat - ${repoOwner}/${repoName}`,
+      // Create a mock SelectedRepository for the sessionStore method
+      const mockRepository = {
+        repository: {
+          id: 0,
+          name: repoName,
+          full_name: `${repoOwner}/${repoName}`,
+          private: false,
+          html_url: `https://github.com/${repoOwner}/${repoName}`,
+          owner: { login: repoOwner, id: 0, avatar_url: '', html_url: `https://github.com/${repoOwner}` },
         },
-        sessionToken || undefined,
-      );
+        branch: repoBranch || 'main',
+      };
+
+      return await createSessionForRepository(mockRepository);
     },
-    onSuccess: (data: SessionResponse) => {
-      // Update Zustand store
-      setActiveSession(data.session_id);
-      
-      // Invalidate sessions list
-      queryClient.invalidateQueries({ queryKey: QueryKeys.sessions });
+    onSuccess: (sessionId: string | null) => {
+      if (sessionId) {
+        // Invalidate sessions list
+        queryClient.invalidateQueries({ queryKey: QueryKeys.sessions });
+      }
     },
   });
 };
 
-// New hook for creating session from repository selection
+// ============================================================================
+// REPOSITORY-BASED SESSION CREATION - Unified with Zustand Store
+// ============================================================================
+
 export const useCreateSessionFromRepository = () => {
-  const { createSessionForRepository, sessionLoadingEnabled, setSessionLoadingEnabled } = useSessionStore();
+  const { createSessionForRepository } = useSessionStore();
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: async (repository: SelectedRepository) => {
-      // Only load session if enabled, otherwise always create new
-      if (!sessionLoadingEnabled) {
-        setSessionLoadingEnabled(false);
-      }
       return await createSessionForRepository(repository);
     },
     onSuccess: (sessionId: string | null) => {
@@ -440,10 +384,13 @@ export const useCreateSessionFromRepository = () => {
   });
 };
 
-// New hook for ensuring session exists
+// ============================================================================
+// SESSION VALIDATION - Unified with Zustand Store
+// ============================================================================
+
 export const useEnsureSessionExists = () => {
   const { ensureSessionExists } = useSessionStore();
-  
+
   return useMutation({
     mutationFn: async (sessionId: string) => {
       return await ensureSessionExists(sessionId);

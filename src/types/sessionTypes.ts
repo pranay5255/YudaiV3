@@ -1,0 +1,479 @@
+/**
+ * Unified Session Types
+ * Consolidated type definitions for all session-related operations
+ */
+
+// ============================================================================
+// CORE SESSION TYPES
+// ============================================================================
+
+export interface Session {
+  id: number;
+  session_id: string;
+  title?: string;
+  description?: string;
+  repo_owner?: string;
+  repo_name?: string;
+  repo_branch?: string;
+  repo_context?: Record<string, unknown>;
+  is_active: boolean;
+  total_messages: number;
+  total_tokens: number;
+  created_at: string;
+  updated_at?: string;
+  last_activity?: string;
+}
+
+export interface SessionContext {
+  session: Session | null;
+  messages: ChatMessage[];
+  context_cards: string[];
+  repository_info?: RepositoryInfo;
+  file_embeddings_count: number;
+  statistics?: SessionStatistics;
+  user_issues?: UserIssue[];
+  file_embeddings?: FileItem[];
+}
+
+// ============================================================================
+// CHAT MESSAGE TYPES
+// ============================================================================
+
+export interface ChatMessage {
+  id: number;
+  message_id: string;
+  message_text: string;
+  sender_type: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system';
+  tokens: number;
+  model_used?: string;
+  processing_time?: number;
+  context_cards?: string[];
+  referenced_files?: string[];
+  error_message?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+// ============================================================================
+// CONTEXT CARD TYPES
+// ============================================================================
+
+export interface ContextCard {
+  id: string;
+  title: string;
+  description: string;
+  tokens: number;
+  source: 'chat' | 'file-deps' | 'upload';
+  content?: string;
+}
+
+// ============================================================================
+// FILE DEPENDENCY TYPES
+// ============================================================================
+
+export interface FileItem {
+  id: string;
+  name: string;
+  path?: string;
+  type: 'INTERNAL' | 'EXTERNAL';
+  tokens: number;
+  category: string;
+  isDirectory?: boolean;
+  children?: FileItem[];
+  expanded?: boolean;
+  content?: string;
+  content_size?: number;
+  created_at?: string;
+  file_name?: string;
+  file_path?: string;
+  file_type?: string;
+  content_summary?: string;
+}
+
+// ============================================================================
+// USER ISSUE TYPES
+// ============================================================================
+
+export interface UserIssue {
+  id: number;
+  issue_id: string;
+  user_id: number;
+  title: string;
+  description?: string;
+  issue_text_raw: string;
+  issue_steps?: string[];
+  session_id?: string;
+  context_card_id?: number;
+  context_cards?: string[];
+  ideas?: string[];
+  repo_owner?: string;
+  repo_name?: string;
+  priority: string;
+  status: string;
+  agent_response?: string;
+  processing_time?: number;
+  tokens_used: number;
+  github_issue_url?: string;
+  github_issue_number?: number;
+  created_at: string;
+  updated_at?: string;
+  processed_at?: string;
+}
+
+// ============================================================================
+// SUPPORTING TYPES
+// ============================================================================
+
+export interface RepositoryInfo {
+  owner: string;
+  name: string;
+  branch: string;
+  full_name: string;
+  html_url: string;
+}
+
+export interface SessionStatistics {
+  total_messages: number;
+  total_tokens: number;
+  total_cost: number;
+  session_duration: number;
+  user_issues_count?: number;
+  file_embeddings_count?: number;
+}
+
+export interface AgentStatus {
+  type: 'daifu' | 'architect' | 'coder' | 'tester';
+  status: 'idle' | 'processing' | 'completed' | 'error';
+  progress?: number;
+  message?: string;
+  started_at?: string;
+  completed_at?: string;
+}
+
+// ============================================================================
+// REQUEST TYPES
+// ============================================================================
+
+export interface CreateSessionRequest {
+  repo_owner: string;
+  repo_name: string;
+  repo_branch?: string;
+  title?: string;
+  description?: string;
+}
+
+export interface UpdateSessionRequest {
+  title?: string;
+  description?: string;
+  repo_branch?: string;
+}
+
+export interface CreateContextCardRequest {
+  title: string;
+  description: string;
+  source: 'chat' | 'file-deps' | 'upload';
+  tokens: number;
+  content?: string;
+}
+
+export interface UpdateContextCardRequest {
+  title?: string;
+  description?: string;
+  content?: string;
+}
+
+export interface CreateFileEmbeddingRequest {
+  file_path: string;
+  file_name: string;
+  file_type: string;
+  chunk_index: number;
+  tokens: number;
+  file_metadata?: Record<string, unknown>;
+}
+
+export interface UpdateFileEmbeddingRequest {
+  file_path?: string;
+  tokens?: number;
+  file_metadata?: Record<string, unknown>;
+}
+
+export interface ChatRequest {
+  session_id?: string;
+  message: {
+    message_text: string;
+  };
+  context_cards?: string[];
+  repository?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
+}
+
+export interface CreateIssueWithContextRequest {
+  title: string;
+  description?: string;
+  chat_messages: ChatContextMessage[];
+  file_context: FileContextItem[];
+  repository_info?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
+  priority?: string;
+}
+
+export interface ChatContextMessage {
+  id: string;
+  content: string;
+  isCode: boolean;
+  timestamp: string;
+}
+
+export interface FileContextItem {
+  id: string;
+  name: string;
+  type: string;
+  tokens: number;
+  category: string;
+  path?: string;
+}
+
+// ============================================================================
+// RESPONSE TYPES
+// ============================================================================
+
+export interface ChatResponse {
+  reply: string;
+  conversation: [string, string][];
+  message_id: string;
+  processing_time: number;
+  session_id?: string;
+}
+
+export interface IssueCreationResponse {
+  success: boolean;
+  preview_only: boolean;
+  github_preview: GitHubIssuePreview;
+  user_issue?: {
+    id: number;
+    issue_id: string;
+    title: string;
+    description?: string;
+    issue_text_raw: string;
+  };
+  message: string;
+}
+
+export interface GitHubIssuePreview {
+  title: string;
+  body: string;
+  labels: string[];
+  assignees: string[];
+  repository_info?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
+  metadata: {
+    chat_messages_count: number;
+    file_context_count: number;
+    total_tokens: number;
+    generated_at: string;
+    generation_method: string;
+  };
+}
+
+// ============================================================================
+// REPOSITORY TYPES
+// ============================================================================
+
+export interface GitHubRepository {
+  id: number;
+  name: string;
+  full_name: string;
+  private: boolean;
+  html_url: string;
+  description?: string;
+  clone_url?: string;
+  language?: string;
+  stargazers_count?: number;
+  forks_count?: number;
+  open_issues_count?: number;
+  updated_at?: string;
+  created_at?: string;
+  pushed_at?: string;
+  default_branch?: string;
+  owner?: {
+    login: string;
+    id: number;
+    avatar_url?: string;
+    html_url?: string;
+  };
+}
+
+export interface GitHubBranch {
+  name: string;
+  commit: {
+    sha: string;
+    url: string;
+  };
+  protected?: boolean;
+}
+
+export interface SelectedRepository {
+  repository: GitHubRepository;
+  branch: string;
+}
+
+// ============================================================================
+// AUTH TYPES
+// ============================================================================
+
+export interface User {
+  id: number;
+  github_username: string;
+  github_user_id: string;
+  email?: string;
+  display_name?: string;
+  avatar_url?: string;
+  created_at: string;
+  last_login?: string;
+}
+
+// ============================================================================
+// MUTATION TYPES FOR REACT QUERY
+// ============================================================================
+
+export interface CreateSessionMutationData {
+  repoOwner: string;
+  repoName: string;
+  repoBranch?: string;
+}
+
+export interface AddContextCardMutationData {
+  sessionId: string;
+  card: {
+    title: string;
+    description: string;
+    source: 'chat' | 'file-deps' | 'upload';
+    tokens: number;
+    content?: string;
+  };
+}
+
+export interface RemoveContextCardMutationData {
+  sessionId: string;
+  cardId: string;
+}
+
+export interface AddFileDependencyMutationData {
+  sessionId: string;
+  fileDependency: {
+    file_path: string;
+    file_name: string;
+    file_type: string;
+    chunk_index: number;
+    tokens: number;
+    file_metadata?: Record<string, unknown>;
+  };
+}
+
+export interface ContextCardMutationContext {
+  previousCards: ContextCard[];
+  optimisticCard?: ContextCard;
+}
+
+export interface FileDependencyMutationContext {
+  previousFiles: FileItem[];
+  optimisticFile?: FileItem;
+}
+
+// ============================================================================
+// UI & STATE TYPES
+// ============================================================================
+
+export type TabType = 'chat' | 'file-deps' | 'context' | 'ideas';
+
+export interface TabState {
+  activeTab: TabType;
+  refreshKeys: {
+    chat: number;
+    'file-deps': number;
+    context: number;
+    ideas: number;
+  };
+  tabHistory: TabType[];
+}
+
+// ============================================================================
+// API RESPONSE TYPES
+// ============================================================================
+
+export interface ValidateSessionResponse {
+  id: number;
+  github_username: string;
+  github_id: string;
+  display_name: string;
+  email: string;
+  avatar_url: string;
+}
+
+export interface LogoutRequest {
+  session_token: string;
+}
+
+export interface LogoutResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface LoginUrlResponse {
+  login_url: string;
+}
+
+export interface CreateGitHubIssueResponse {
+  success: boolean;
+  github_url: string;
+  message: string;
+}
+
+export interface RepositoryResponse {
+  repositories: GitHubRepository[];
+}
+
+export interface RepositoryDetailsResponse {
+  id: string;
+  name: string;
+  owner: string;
+  description?: string;
+  private: boolean;
+  default_branch: string;
+  branches: string[];
+}
+
+export interface FileAnalysisResponse {
+  dependencies: FileContextItem[];
+  total_tokens: number;
+}
+
+// ============================================================================
+// LEGACY TYPE ALIASES (for backward compatibility)
+// ============================================================================
+
+// These aliases help with migration from old type names
+export type SessionResponse = Session;
+export type SessionContextResponse = SessionContext;
+export type ChatMessageAPI = ChatMessage;
+export type ChatMessageResponse = ChatMessage;
+export type ContextCardResponse = ContextCard;
+export type UserIssueResponse = UserIssue;
+export type CreateSessionDaifuRequest = CreateSessionRequest;
+export type SessionFileDependencyResponse = FileItem;
+export type ExtractFileDependenciesRequest = {
+  repo_url: string;
+};
+export type ExtractFileDependenciesResponse = {
+  children: FileItem[];
+};

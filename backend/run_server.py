@@ -29,6 +29,9 @@ from issueChatServices import issue_router
 from repo_processorGitIngest.filedeps import router as filedeps_router
 from routers.solve_router import router as solve_router
 
+# Import centralized route configuration
+from config.routes import APIRoutes
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -66,37 +69,60 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount all service routers
-app.include_router(auth_router, prefix="/auth", tags=["authentication"])
-app.include_router(github_router, prefix="/github", tags=["github"])
-app.include_router(session_router, prefix="/daifu", tags=["sessions"])
-app.include_router(daifu_router, prefix="/daifu", tags=["chat"])
-app.include_router(issue_router, prefix="/issues", tags=["issues"])
-app.include_router(filedeps_router, prefix="/filedeps", tags=["file-dependencies"])
-app.include_router(solve_router, prefix="/api/v1", tags=["ai-solver"])
+# ============================================================================
+# ROUTER CONFIGURATION FOR UNIFIED STATE MANAGEMENT
+# ============================================================================
+#
+# ✅ ACTIVE ROUTERS (Unified State Management):
+# - auth_router: Login/logout operations only
+# - session_router: All session CRUD, messages, context cards, file dependencies
+# - github_router: Repository operations (used by unified repository state)
+#
+# 🔄 ROUTERS TO CONSOLIDATE:
+# - daifu_router: Move chat operations to session_router for unified session context
+# - filedeps_router: Move file operations to session_router for unified file state
+# - issue_router: Keep separate but ensure it integrates with session context
+# - solve_router: Keep separate for AI solver operations
+#
+# 📋 MIGRATION PLAN:
+# 1. Move all chat operations from daifu_router to session_router
+# 2. Move file dependency operations from filedeps_router to session_router
+# 3. Ensure all operations require session context
+# 4. Standardize error responses across all routers
+# ============================================================================
+
+app.include_router(auth_router, prefix=APIRoutes.AUTH_PREFIX, tags=["authentication"])
+app.include_router(github_router, prefix=APIRoutes.GITHUB_PREFIX, tags=["github"])
+app.include_router(session_router, prefix=APIRoutes.DAIFU_PREFIX, tags=["sessions"])
+app.include_router(daifu_router, prefix=APIRoutes.DAIFU_PREFIX, tags=["chat"])
+app.include_router(issue_router, prefix=APIRoutes.ISSUES_PREFIX, tags=["issues"])
+app.include_router(
+    filedeps_router, prefix=APIRoutes.FILEDEPS_PREFIX, tags=["file-dependencies"]
+)
+app.include_router(solve_router, prefix=APIRoutes.API_V1_PREFIX, tags=["ai-solver"])
 
 
 # Add a unified root endpoint
-@app.get("/")
+@app.get(APIRoutes.ROOT)
 async def api_root():
     """Root endpoint with API information."""
     return {
         "message": "YudaiV3 Backend API",
         "version": "1.0.0",
         "services": {
-            "authentication": "/auth",
-            "github": "/github",
-            "chat": "/daifu",
-            "issues": "/issues",
-            "file-dependencies": "/filedeps",
-            "ai-solver": "/api/v1",
+            "authentication": APIRoutes.AUTH_PREFIX,
+            "github": APIRoutes.GITHUB_PREFIX,
+            "chat": APIRoutes.DAIFU_PREFIX,
+            "issues": APIRoutes.ISSUES_PREFIX,
+            "file-dependencies": APIRoutes.FILEDEPS_PREFIX,
+            "ai-solver": APIRoutes.API_V1_PREFIX,
         },
         "documentation": {"swagger": "/docs", "redoc": "/redoc"},
     }
 
 
 # Add health check endpoint
-@app.get("/health")
+@app.get(APIRoutes.HEALTH)
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "service": "yudai-v3-backend"}

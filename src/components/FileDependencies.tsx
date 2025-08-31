@@ -7,7 +7,6 @@ import {
   useFileDependencies,
   useAddContextCard
 } from '../hooks/useSessionQueries';
-import { useApi } from '../hooks/useApi';
 import { useQueryClient } from '@tanstack/react-query';
 
 interface FileDependenciesProps {
@@ -27,8 +26,8 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
   const { data: fileContext = [], isLoading, refetch } = useFileDependencies(activeSessionId || '');
   const addContextCardMutation = useAddContextCard();
   
-  const api = useApi();
   const queryClient = useQueryClient();
+  const { extractFileDependenciesForSession } = useSessionStore();
   const [loadingStates, setLoadingStates] = useState<{[key: string]: boolean}>({});
   const [isExtracting, setIsExtracting] = useState(false);
 
@@ -55,8 +54,8 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
 
     setIsExtracting(true);
     try {
-      // Call API to extract file dependencies for the session
-      await api.extractFileDependenciesForSession(activeSessionId, repoUrl);
+      // Use unified sessionStore method to extract file dependencies
+      await extractFileDependenciesForSession(activeSessionId, repoUrl);
       // Refetch the file dependencies after extraction
       await queryClient.invalidateQueries({ 
         queryKey: ['file-deps', activeSessionId] 

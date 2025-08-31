@@ -1,13 +1,12 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Trash2, FileText, MessageCircle, Upload } from 'lucide-react';
 import type {
-  CreateIssueWithContextRequest,
   ChatContextMessage,
   FileContextItem,
   GitHubIssuePreview
 } from '../types/api';
+import type { CreateIssueWithContextRequest } from '../types/sessionTypes';
 import { UserIssueResponse, ContextCard } from '../types';
-import { useApi } from '../hooks/useApi';
 import { useSessionStore } from '../stores/sessionStore';
 import { useRepository } from '../hooks/useRepository';
 
@@ -47,7 +46,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   const { activeSessionId } = useSessionStore();
   const { selectedRepository } = useRepository();
   
-  const api = useApi();
+  const { deleteContextCard, createIssueWithContext } = useSessionStore();
   const [isLoading, setIsLoading] = useState(false);
 
   const showError = useCallback((message: string) => {
@@ -70,7 +69,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
     
     try {
       console.log('Removing context card:', cardId);
-      await api.deleteContextCard(activeSessionId, Number(cardId));
+      await deleteContextCard(cardId);
       console.log('Context card removed successfully');
       // Call the onRemoveCard callback to update the parent state
       onRemoveCard(cardId);
@@ -79,7 +78,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
       const errorMessage = error instanceof Error ? error.message : 'Failed to remove context card';
       showError(`Failed to remove context card: ${errorMessage}`);
     }
-  }, [activeSessionId, api, onRemoveCard, showError]);
+  }, [activeSessionId, deleteContextCard, onRemoveCard, showError]);
 
   const getSourceIcon = (source: ContextCard['source']) => {
     switch (source) {
@@ -146,7 +145,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
         priority: 'medium',
       };
 
-      const response = await api.createIssueWithContext(request);
+      const response = await createIssueWithContext(request);
       
       if (response.success && onShowIssuePreview) {
         const previewData: IssuePreviewData = {

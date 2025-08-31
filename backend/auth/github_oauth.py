@@ -31,10 +31,10 @@ GITHUB_USER_API_URL = "https://api.github.com/user"
 def parse_response(response) -> Dict[str, Any]:
     """
     Parse HTTP response exactly like Ruby implementation
-    
+
     Args:
         response: httpx.Response object
-        
+
     Returns:
         Parsed JSON response or empty dict on error
     """
@@ -48,6 +48,7 @@ def parse_response(response) -> Dict[str, Any]:
 
 class GitHubOAuthError(Exception):
     """Custom exception for GitHub OAuth errors"""
+
     pass
 
 
@@ -63,14 +64,16 @@ def get_github_oauth_url() -> str:
         raise GitHubOAuthError("GitHub Client ID not configured")
 
     # Use environment variable for redirect URI, default to dev
-    redirect_uri = os.getenv("GITHUB_REDIRECT_URI", "http://localhost:3000/auth/callback")
+    redirect_uri = os.getenv(
+        "GITHUB_REDIRECT_URI", "http://localhost:3000/auth/callback"
+    )
 
     # Log the redirect URI being used for debugging
     print(f"[GitHub OAuth] Using redirect URI: {redirect_uri}")
-    print(f"[GitHub OAuth] Client ID: {CLIENT_ID[:8]}...")
+    print(f"[GitHub OAuth] Client ID: {GITHUB_CLIENT_ID[:8]}...")
 
     params = {
-        "client_id": CLIENT_ID,
+        "client_id": GITHUB_CLIENT_ID,
         "redirect_uri": redirect_uri,
         "scope": "repo user:email",  # Explicitly set scope
     }
@@ -85,16 +88,16 @@ async def exchange_code(code: str) -> Dict[str, Any]:
     """
     Exchange authorization code for access token
     Matches Ruby implementation exactly
-    
+
     Args:
         code: Authorization code from GitHub
-        
+
     Returns:
         Token response from GitHub
     """
     if not GITHUB_CLIENT_SECRET:
         raise GitHubOAuthError("GitHub Client Secret not configured")
-    
+
     # Match Ruby implementation exactly
     headers = {"Accept": "application/json"}
     data = {
@@ -102,10 +105,10 @@ async def exchange_code(code: str) -> Dict[str, Any]:
         "client_secret": GITHUB_CLIENT_SECRET,
         "code": code,
     }
-    
+
     async with httpx.AsyncClient() as client:
         response = await client.post(GITHUB_TOKEN_URL, headers=headers, data=data)
-    
+
     return parse_response(response)
 
 
@@ -113,10 +116,10 @@ async def user_info(token: str) -> Dict[str, Any]:
     """
     Get GitHub user information using access token
     Matches Ruby implementation exactly
-    
+
     Args:
         token: GitHub access token
-        
+
     Returns:
         GitHub user information
     """
@@ -125,10 +128,10 @@ async def user_info(token: str) -> Dict[str, Any]:
         "Content-Type": "application/json",
         "Authorization": f"Bearer {token}",
     }
-    
+
     async with httpx.AsyncClient() as client:
         response = await client.get(GITHUB_USER_API_URL, headers=headers)
-    
+
     return parse_response(response)
 
 
@@ -138,25 +141,25 @@ async def create_or_update_user(
     """
     Create or update user in database from GitHub user info
     Simplified version
-    
+
     Args:
         db: Database session
         github_user: GitHub user information
         access_token: GitHub access token
-        
+
     Returns:
         User object
     """
     if not github_user or "id" not in github_user or "login" not in github_user:
         raise GitHubOAuthError("Invalid GitHub user information received")
-    
+
     github_id = str(github_user["id"])
     username = github_user["login"]
-    
+
     try:
         # Check if user exists
         user = db.query(User).filter(User.github_user_id == github_id).first()
-        
+
         if user:
             # Update existing user
             user.github_username = username
@@ -176,14 +179,14 @@ async def create_or_update_user(
                 last_login=utc_now(),
             )
             db.add(user)
-        
+
         db.flush()
-        
+
         # Deactivate any existing active tokens for this user
         db.query(AuthToken).filter(
             AuthToken.user_id == user.id, AuthToken.is_active
         ).update({"is_active": False})
-        
+
         # Create new token
         auth_token = AuthToken(
             user_id=user.id,
@@ -194,12 +197,12 @@ async def create_or_update_user(
             is_active=True,
         )
         db.add(auth_token)
-        
+
         db.commit()
         db.refresh(user)
-        
+
         return user
-        
+
     except Exception as e:
         db.rollback()
         raise GitHubOAuthError(f"Failed to create or update user: {str(e)}")
@@ -208,13 +211,13 @@ async def create_or_update_user(
 def validate_github_config():
     """Validate that GitHub OAuth configuration is complete"""
     missing_vars = []
-    
-    if not CLIENT_ID:
-        missing_vars.append("CLIENT_ID")
-    
-    if not CLIENT_SECRET:
-        missing_vars.append("CLIENT_SECRET")
-    
+
+    if not GITHUB_CLIENT_ID:
+        missing_vars.append("GITHUB_CLIENT_ID")
+
+    if not GITHUB_CLIENT_SECRET:
+        missing_vars.append("GITHUB_CLIENT_SECRET")
+
     if missing_vars:
         raise GitHubOAuthError(
             f"Missing required GitHub OAuth configuration: {', '.join(missing_vars)}"
@@ -227,26 +230,34 @@ security = HTTPBearer()
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ) -> User:
     token = credentials.credentials
-    
+
     # Always try session token first (frontend sends this)
-    session_token = db.query(SessionToken).filter(
-        SessionToken.session_token == token,
-        SessionToken.is_active,
-    ).first()
-    
+    session_token = (
+        db.query(SessionToken)
+        .filter(
+            SessionToken.session_token == token,
+            SessionToken.is_active,
+        )
+        .first()
+    )
+
     if session_token and session_token.expires_at > utc_now():
         user = db.query(User).filter(User.id == session_token.user_id).first()
         if user:
             return user
-    
+
     # Fallback to GitHub token only if needed
-    auth_token = db.query(AuthToken).filter(
-        AuthToken.access_token == token,
-        AuthToken.is_active,
-    ).first()
+    auth_token = (
+        db.query(AuthToken)
+        .filter(
+            AuthToken.access_token == token,
+            AuthToken.is_active,
+        )
+        .first()
+    )
 
     if auth_token:
         # Check expiry for auth token
@@ -280,29 +291,30 @@ async def get_current_user(
 def get_github_api(user_id: int, db: Session):
     """
     Get GitHub API client for authenticated user
-    
+
     Args:
         user_id: User ID
         db: Database session
-        
+
     Returns:
         GitHub API client instance
-        
+
     Raises:
         HTTPException: If user not found or no valid token
     """
     # Get user's active token
-    auth_token = db.query(AuthToken).filter(
-        AuthToken.user_id == user_id,
-        AuthToken.is_active
-    ).first()
-    
+    auth_token = (
+        db.query(AuthToken)
+        .filter(AuthToken.user_id == user_id, AuthToken.is_active)
+        .first()
+    )
+
     if not auth_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No valid authentication token found"
+            detail="No valid authentication token found",
         )
-    
+
     # Check if token is expired
     if auth_token.expires_at and auth_token.expires_at < utc_now():
         # Deactivate expired token
@@ -310,9 +322,9 @@ def get_github_api(user_id: int, db: Session):
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication token has expired"
+            detail="Authentication token has expired",
         )
-    
+
     # Check if ghapi is available
     try:
         from ghapi.all import GhApi
@@ -320,14 +332,14 @@ def get_github_api(user_id: int, db: Session):
         print(f"ImportError for ghapi: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="GitHub API library not available. Please install ghapi."
+            detail="GitHub API library not available. Please install ghapi.",
         )
-    
+
     try:
         return GhApi(token=auth_token.access_token)
     except Exception as e:
         print(f"Error initializing GhApi: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to initialize GitHub API client: {str(e)}"
+            detail=f"Failed to initialize GitHub API client: {str(e)}",
         )

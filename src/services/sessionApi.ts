@@ -1,14 +1,25 @@
+// DEPRECATED: This service is being phased out in favor of unified sessionStore + useSessionQueries
+// All session operations should now go through the session context via Zustand store
+//
+// Migration Guide:
+// - Session creation: Use useCreateSession() or useCreateSessionFromRepository()
+// - Session context: Use useSession() hook
+// - Messages: Use useChatMessages() hook
+// - Context cards: Use useContextCards() and related mutations
+// - File dependencies: Use useFileDependencies() hook
+// - All other operations: Use appropriate hooks from useSessionQueries.ts
+
 import type {
-  CreateSessionDaifuRequest,
-  SessionResponse,
-  SessionContextResponse,
-  ChatMessageResponse,
-  ContextCardResponse,
+  CreateSessionRequest,
+  Session,
+  SessionContext,
+  ChatMessage,
+  ContextCard,
   CreateContextCardRequest,
-  SessionFileDependencyResponse,
+  FileItem,
   ExtractFileDependenciesResponse,
   ExtractFileDependenciesRequest,
-} from '../types/api';
+} from '../types/sessionTypes';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -37,21 +48,21 @@ const handleResponse = async <T>(response: Response): Promise<T> => {
 
 export const sessionApi = {
   // Session management
-  async createSession(request: CreateSessionDaifuRequest, sessionToken?: string): Promise<SessionResponse> {
+  async createSession(request: CreateSessionRequest, sessionToken?: string): Promise<Session> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions`, {
       method: 'POST',
       headers: getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
-    return handleResponse<SessionResponse>(response);
+    return handleResponse<Session>(response);
   },
 
-  async getSessionContext(sessionId: string, sessionToken?: string): Promise<SessionContextResponse> {
+  async getSessionContext(sessionId: string, sessionToken?: string): Promise<SessionContext> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}`, {
       method: 'GET',
       headers: getAuthHeaders(sessionToken),
     });
-    return handleResponse<SessionContextResponse>(response);
+    return handleResponse<SessionContext>(response);
   },
 
 
@@ -60,12 +71,12 @@ export const sessionApi = {
 
 
 
-  async getChatMessages(sessionId: string, limit = 100, sessionToken?: string): Promise<ChatMessageResponse[]> {
+  async getChatMessages(sessionId: string, limit = 100, sessionToken?: string): Promise<ChatMessage[]> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/messages?limit=${limit}`, {
       method: 'GET',
       headers: getAuthHeaders(sessionToken),
     });
-    return handleResponse<ChatMessageResponse[]>(response);
+    return handleResponse<ChatMessage[]>(response);
   },
 
 
@@ -73,21 +84,21 @@ export const sessionApi = {
 
 
   // Context cards
-  async addContextCard(sessionId: string, request: CreateContextCardRequest, sessionToken?: string): Promise<ContextCardResponse> {
+  async addContextCard(sessionId: string, request: CreateContextCardRequest, sessionToken?: string): Promise<ContextCard> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/context-cards`, {
       method: 'POST',
       headers: getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
     });
-    return handleResponse<ContextCardResponse>(response);
+    return handleResponse<ContextCard>(response);
   },
 
-  async getContextCards(sessionId: string, sessionToken?: string): Promise<ContextCardResponse[]> {
+  async getContextCards(sessionId: string, sessionToken?: string): Promise<ContextCard[]> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/context-cards`, {
       method: 'GET',
       headers: getAuthHeaders(sessionToken),
     });
-    return handleResponse<ContextCardResponse[]>(response);
+    return handleResponse<ContextCard[]>(response);
   },
 
   async deleteContextCard(sessionId: string, cardId: number, sessionToken?: string): Promise<{ success: boolean; message: string }> {
@@ -101,12 +112,12 @@ export const sessionApi = {
   // File dependencies
 
 
-  async getFileDependenciesSession(sessionId: string, sessionToken?: string): Promise<SessionFileDependencyResponse[]> {
+  async getFileDependenciesSession(sessionId: string, sessionToken?: string): Promise<FileItem[]> {
     const response = await fetch(`${API_BASE_URL}/daifu/sessions/${sessionId}/file-deps/session`, {
       method: 'GET',
       headers: getAuthHeaders(sessionToken),
     });
-    return handleResponse<SessionFileDependencyResponse[]>(response);
+    return handleResponse<FileItem[]>(response);
   },
 
   async extractFileDependenciesForSession(sessionId: string, repoUrl: string, sessionToken?: string): Promise<ExtractFileDependenciesResponse> {
@@ -122,11 +133,11 @@ export const sessionApi = {
 };
 
 export type {
-  SessionResponse,
-  SessionContextResponse,
-  ChatMessageResponse,
-  ContextCardResponse,
-  SessionFileDependencyResponse,
+  Session,
+  SessionContext,
+  ChatMessage,
+  ContextCard,
+  FileItem,
   CreateContextCardRequest,
 };
 

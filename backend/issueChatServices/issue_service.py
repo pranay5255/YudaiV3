@@ -1,8 +1,8 @@
 """
 Unified Issue Service and API for User-Generated Issues
 
-This module provides both the service logic and FastAPI routes for handling 
-user-generated issues that are created from chat conversations and can be 
+This module provides both the service logic and FastAPI routes for handling
+user-generated issues that are created from chat conversations and can be
 processed by agents to create GitHub issues.
 """
 
@@ -26,11 +26,14 @@ from models import (
 )
 
 # Add new imports at the top
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from sqlalchemy import and_, desc
 from sqlalchemy.orm import Session
 
 from utils import utc_now
+
+# Global lock to prevent race conditions in issue creation
+_issue_creation_locks = {}
 
 
 # Use local unified data models for frontend-backend consistency
@@ -42,11 +45,13 @@ class FileContextItem(BaseModel):
     category: str
     path: Optional[str] = None
 
+
 class ChatContextMessage(BaseModel):
     id: str
     content: str
     isCode: bool
     timestamp: str
+
 
 class CreateIssueWithContextRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
@@ -54,7 +59,26 @@ class CreateIssueWithContextRequest(BaseModel):
     chat_messages: List[ChatContextMessage] = Field(default_factory=list)
     file_context: List[FileContextItem] = Field(default_factory=list)
     repository_info: Optional[Dict[str, str]] = Field(None)  # owner, name, branch
-    priority: str = Field(default="medium")
+    priority: str = Field(default="medium", pattern="^(low|medium|high)$")
+
+    @validator("title")
+    def validate_title(cls, v):
+        if not v.strip():
+            raise ValueError("Issue title cannot be empty")
+        return v.strip()
+
+    @validator("repository_info")
+    def validate_repository_info(cls, v):
+        if v:
+            required_fields = ["owner", "name"]
+            for field in required_fields:
+                if field not in v or not v[field] or not v[field].strip():
+                    raise ValueError(
+                        f"Repository {field} is required when repository_info is provided"
+                    )
+                v[field] = v[field].strip()
+        return v
+
 
 class GitHubIssuePreview(BaseModel):
     title: str
@@ -64,25 +88,22 @@ class GitHubIssuePreview(BaseModel):
     repository_info: Optional[Dict[str, str]] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+
 # Create FastAPI router
 router = APIRouter(tags=["issues"])
 
 
 class IssueService:
     """Service class for managing user issues"""
-    
+
     @staticmethod
     def create_user_issue(
-        db: Session,
-        user_id: int,
-        request: CreateUserIssueRequest
+        db: Session, user_id: int, request: CreateUserIssueRequest
     ) -> UserIssueResponse:
         """Create a new user issue from chat context"""
         # Generate unique issue ID
         issue_id = str(uuid.uuid4())
-        
 
-        
         # Create the issue
         issue = UserIssue(
             user_id=user_id,
@@ -99,34 +120,31 @@ class IssueService:
             repo_owner=request.repo_owner,
             repo_name=request.repo_name,
             priority=request.priority,
-            status="pending"
+            status="pending",
         )
-        
+
         db.add(issue)
         db.commit()
         db.refresh(issue)
-        
+
         return UserIssueResponse.model_validate(issue)
-    
+
     @staticmethod
     def get_user_issue(
-        db: Session,
-        user_id: int,
-        issue_id: str
+        db: Session, user_id: int, issue_id: str
     ) -> Optional[UserIssueResponse]:
         """Get a specific user issue by issue_id"""
-        issue = db.query(UserIssue).filter(
-            and_(
-                UserIssue.user_id == user_id,
-                UserIssue.issue_id == issue_id
-            )
-        ).first()
-        
+        issue = (
+            db.query(UserIssue)
+            .filter(and_(UserIssue.user_id == user_id, UserIssue.issue_id == issue_id))
+            .first()
+        )
+
         if not issue:
             return None
-        
+
         return UserIssueResponse.model_validate(issue)
-    
+
     @staticmethod
     def get_user_issues(
         db: Session,
@@ -135,11 +153,11 @@ class IssueService:
         priority: Optional[str] = None,
         repo_owner: Optional[str] = None,
         repo_name: Optional[str] = None,
-        limit: int = 50
+        limit: int = 50,
     ) -> List[UserIssueResponse]:
         """Get user issues with optional filtering"""
         query = db.query(UserIssue).filter(UserIssue.user_id == user_id)
-        
+
         if status:
             query = query.filter(UserIssue.status == status)
         if priority:
@@ -148,10 +166,10 @@ class IssueService:
             query = query.filter(UserIssue.repo_owner == repo_owner)
         if repo_name:
             query = query.filter(UserIssue.repo_name == repo_name)
-        
+
         issues = query.order_by(desc(UserIssue.created_at)).limit(limit).all()
         return [UserIssueResponse.model_validate(issue) for issue in issues]
-    
+
     @staticmethod
     def update_issue_status(
         db: Session,
@@ -160,19 +178,18 @@ class IssueService:
         status: str,
         agent_response: Optional[str] = None,
         processing_time: Optional[float] = None,
-        tokens_used: int = 0
+        tokens_used: int = 0,
     ) -> Optional[UserIssueResponse]:
         """Update issue status and processing metadata"""
-        issue = db.query(UserIssue).filter(
-            and_(
-                UserIssue.user_id == user_id,
-                UserIssue.issue_id == issue_id
-            )
-        ).first()
-        
+        issue = (
+            db.query(UserIssue)
+            .filter(and_(UserIssue.user_id == user_id, UserIssue.issue_id == issue_id))
+            .first()
+        )
+
         if not issue:
             return None
-        
+
         issue.status = status
         if agent_response:
             issue.agent_response = agent_response
@@ -180,22 +197,20 @@ class IssueService:
             issue.processing_time = processing_time
         if tokens_used > 0:
             issue.tokens_used = tokens_used
-        
+
         if status in ["completed", "failed"]:
             issue.processed_at = utc_now()
-        
+
         issue.updated_at = utc_now()
-        
+
         db.commit()
         db.refresh(issue)
-        
+
         return UserIssueResponse.model_validate(issue)
-    
+
     @staticmethod
     def create_issue_from_chat(
-        db: Session,
-        user_id: int,
-        chat_request: ChatRequest
+        db: Session, user_id: int, chat_request: ChatRequest
     ) -> UserIssueResponse:
         """
         Create an issue from a chat request with context
@@ -204,11 +219,11 @@ class IssueService:
         # Extract repository info from request
         repo_owner = chat_request.repo_owner
         repo_name = chat_request.repo_name
-        
+
         # Create comprehensive issue request
         title = f"Issue from chat: {chat_request.message.content[:50]}..."
         description = f"Generated from chat session: {chat_request.session_id}"
-        
+
         issue_request = CreateUserIssueRequest(
             title=title,
             issue_text_raw=chat_request.message.content,
@@ -216,47 +231,43 @@ class IssueService:
             session_id=chat_request.session_id,
             context_cards=chat_request.context_cards,
             repo_owner=repo_owner,
-            repo_name=repo_name
+            repo_name=repo_name,
         )
-        
+
         return IssueService.create_user_issue(db, user_id, issue_request)
-    
+
     @staticmethod
     async def create_github_issue_from_user_issue(
-        db: Session,
-        user_id: int,
-        issue_id: str,
-        current_user: User
+        db: Session, user_id: int, issue_id: str, current_user: User
     ) -> Optional[UserIssueResponse]:
         """Convert a user issue to a GitHub issue"""
         # Get the user issue
-        issue = db.query(UserIssue).filter(
-            and_(
-                UserIssue.user_id == user_id,
-                UserIssue.issue_id == issue_id
-            )
-        ).first()
-        
+        issue = (
+            db.query(UserIssue)
+            .filter(and_(UserIssue.user_id == user_id, UserIssue.issue_id == issue_id))
+            .first()
+        )
+
         if not issue or not issue.repo_owner or not issue.repo_name:
             return None
-        
+
         try:
             # Prepare GitHub issue content
             github_body = f"{issue.description or ''}\n\n"
             github_body += f"**Raw Issue Text:**\n{issue.issue_text_raw}\n\n"
-            
+
             if issue.issue_steps:
                 github_body += "**Steps:**\n"
                 for i, step in enumerate(issue.issue_steps, 1):
                     github_body += f"{i}. {step}\n"
                 github_body += "\n"
-            
+
             if issue.context_cards:
                 github_body += f"**Context Cards:** {', '.join(issue.context_cards)}\n"
-            
+
             if issue.session_id:
                 github_body += f"**Generated from session:** {issue.session_id}\n"
-            
+
             # Create GitHub issue
             github_issue = await create_github_issue(
                 owner=issue.repo_owner,
@@ -264,33 +275,33 @@ class IssueService:
                 title=issue.title,
                 body=github_body,
                 current_user=current_user,
-                db=db
+                db=db,
             )
-            
+
             # Update user issue with GitHub info
             issue.github_issue_url = github_issue.html_url
             issue.github_issue_number = github_issue.number
             issue.status = "completed"
             issue.processed_at = utc_now()
             issue.updated_at = utc_now()
-            
+
             db.commit()
             db.refresh(issue)
-            
+
             return UserIssueResponse.model_validate(issue)
-            
+
         except GitHubAPIError as e:
             # Update issue status to failed
             issue.status = "failed"
             issue.agent_response = f"Failed to create GitHub issue: {str(e)}"
             issue.processed_at = utc_now()
             issue.updated_at = utc_now()
-            
+
             db.commit()
             db.refresh(issue)
-            
+
             return UserIssueResponse.model_validate(issue)
-    
+
     # @staticmethod
     # def get_issue_statistics(
     #     db: Session,
@@ -298,28 +309,28 @@ class IssueService:
     # ) -> Dict[str, Any]:
     #     """Get comprehensive statistics for user issues with session context"""
     #     total_issues = db.query(UserIssue).filter(UserIssue.user_id == user_id).count()
-        
+
     #     pending_issues = db.query(UserIssue).filter(
     #         and_(
     #             UserIssue.user_id == user_id,
     #             UserIssue.status == "pending"
     #         )
     #     ).count()
-        
+
     #     completed_issues = db.query(UserIssue).filter(
     #         and_(
     #             UserIssue.user_id == user_id,
     #             UserIssue.status == "completed"
     #         )
     #     ).count()
-        
+
     #     failed_issues = db.query(UserIssue).filter(
     #         and_(
     #             UserIssue.user_id == user_id,
     #             UserIssue.status == "failed"
     #         )
     #     ).count()
-        
+
     #     # Get issues linked to sessions
     #     issues_with_sessions = db.query(UserIssue).filter(
     #         and_(
@@ -327,7 +338,7 @@ class IssueService:
     #             UserIssue.session_id.isnot(None)
     #         )
     #     ).count()
-        
+
     #     # Get average processing time
     #     avg_processing_time = db.query(func.avg(UserIssue.processing_time)).filter(
     #         and_(
@@ -335,7 +346,7 @@ class IssueService:
     #             UserIssue.processing_time.isnot(None)
     #         )
     #     ).scalar() or 0
-        
+
     #     return {
     #         "total_issues": total_issues,
     #         "pending_issues": pending_issues,
@@ -352,16 +363,16 @@ class IssueService:
         request: CreateIssueWithContextRequest,
         use_sample_data: bool = False,
         db: Optional[Session] = None,
-        user_id: Optional[int] = None
+        user_id: Optional[int] = None,
     ) -> GitHubIssuePreview:
         """Generate a GitHub issue preview using the architect agent with session context"""
-        
+
         if use_sample_data:
             # Generate sample data when LLM is not available
             return GitHubIssuePreview(
                 title=f"[Feature Request] {request.title}",
                 body=f"""## Description
-{request.description or 'Implement new functionality based on user requirements.'}
+{request.description or "Implement new functionality based on user requirements."}
 
 ## Context from Chat Conversation
 {len(request.chat_messages)} messages were analyzed to understand the requirements.
@@ -369,7 +380,7 @@ class IssueService:
 ## File Dependencies Analyzed
 - **Total files reviewed**: {len(request.file_context)}
 - **Total tokens**: {sum(f.tokens for f in request.file_context)}
-- **Key files**: {', '.join([f.name for f in request.file_context[:5]])}
+- **Key files**: {", ".join([f.name for f in request.file_context[:5]])}
 
 ## Implementation Steps
 1. **Analysis Phase**: Review existing codebase structure
@@ -396,7 +407,11 @@ class IssueService:
 ---
 *This issue was auto-generated from chat conversation and file dependency analysis.*
 """,
-                labels=["enhancement", "yudai-assistant", f"priority-{request.priority}"],
+                labels=[
+                    "enhancement",
+                    "yudai-assistant",
+                    f"priority-{request.priority}",
+                ],
                 assignees=[],
                 repository_info=request.repository_info,
                 metadata={
@@ -404,28 +419,57 @@ class IssueService:
                     "file_context_count": len(request.file_context),
                     "total_tokens": sum(f.tokens for f in request.file_context),
                     "generated_at": utc_now().isoformat(),
-                    "generation_method": "sample_data"
-                }
+                    "generation_method": "sample_data",
+                },
             )
-        
- 
+
         # Make LLM call to architect agent
         api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
             raise RuntimeError("OPENROUTER_API_KEY not configured")
-            
+
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
-        
+
+        # Create comprehensive prompt for architect agent
+        prompt = f"""
+You are an expert software architect. Based on the following context, create a detailed GitHub issue for implementing the requested feature.
+
+CONTEXT INFORMATION:
+- Title: {request.title}
+- Description: {request.description or "No description provided"}
+- Priority: {request.priority}
+
+CHAT CONVERSATION ({len(request.chat_messages)} messages):
+{chr(10).join([f"- {msg.content[:200]}..." for msg in request.chat_messages[-10:]])}
+
+FILE DEPENDENCIES ({len(request.file_context)} files, {sum(f.tokens for f in request.file_context)} tokens):
+{chr(10).join([f"- {f.name} ({f.type}, {f.tokens} tokens): {f.category}" for f in request.file_context[:20]])}
+
+REPOSITORY INFO:
+{request.repository_info or "No repository specified"}
+
+TASK:
+Create a comprehensive GitHub issue with:
+1. Clear, descriptive title
+2. Detailed body explaining the feature and implementation approach
+3. Appropriate labels (enhancement, bug, documentation, etc.)
+4. Implementation steps
+5. Acceptance criteria
+6. Technical considerations
+
+Format the response as a proper GitHub issue with markdown formatting.
+"""
+
         body = {
             "model": "deepseek/deepseek-r1-0528:free",
-            "messages": [{"role": "user", "content": "prompt"}],
+            "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7,
-            "max_tokens": 4000
+            "max_tokens": 4000,
         }
-        
+
         try:
             resp = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -435,38 +479,48 @@ class IssueService:
             )
             resp.raise_for_status()
             llm_reply = resp.json()["choices"][0]["message"]["content"].strip()
-            
+
             # Parse LLM output for GitHub issue fields
             title = request.title
             labels = ["yudai-assistant", "architect-agent"]
             assignees = []
             body_text = llm_reply
-            
+
             # Try to extract a markdown H1 or 'Title:'
             title_match = re.search(r"^# (.+)$", llm_reply, re.MULTILINE)
             if title_match:
                 title = title_match.group(1).strip()
-                body_text = llm_reply[title_match.end():].strip()
+                body_text = llm_reply[title_match.end() :].strip()
             else:
                 title_match = re.search(r"^Title:\s*(.+)$", llm_reply, re.MULTILINE)
                 if title_match:
                     title = title_match.group(1).strip()
-                    body_text = llm_reply[title_match.end():].strip()
-            
+                    body_text = llm_reply[title_match.end() :].strip()
+
             # Extract labels if present
             labels_match = re.search(r"Labels?:\s*\[(.*?)\]", llm_reply, re.IGNORECASE)
             if labels_match:
-                extracted_labels = [label.strip().strip('"') for label in labels_match.group(1).split(",") if label.strip()]
+                extracted_labels = [
+                    label.strip().strip('"')
+                    for label in labels_match.group(1).split(",")
+                    if label.strip()
+                ]
                 labels.extend(extracted_labels)
-            
+
             # Extract assignees if present
-            assignees_match = re.search(r"Assignees?:\s*\[(.*?)\]", llm_reply, re.IGNORECASE)
+            assignees_match = re.search(
+                r"Assignees?:\s*\[(.*?)\]", llm_reply, re.IGNORECASE
+            )
             if assignees_match:
-                assignees = [a.strip().strip('"') for a in assignees_match.group(1).split(",") if a.strip()]
-            
+                assignees = [
+                    a.strip().strip('"')
+                    for a in assignees_match.group(1).split(",")
+                    if a.strip()
+                ]
+
             # Add priority-based label
             labels.append(f"priority-{request.priority}")
-            
+
             return GitHubIssuePreview(
                 title=title,
                 body=body_text,
@@ -479,10 +533,10 @@ class IssueService:
                     "total_tokens": sum(f.tokens for f in request.file_context),
                     "generated_at": utc_now().isoformat(),
                     "generation_method": "architect_agent_llm",
-                    "enhanced_with_session": bool(db and user_id)
-                }
+                    "enhanced_with_session": bool(db and user_id),
+                },
             )
-            
+
         except Exception as e:
             print(f"LLM call failed, using fallback: {e}")
             # Fallback to context analysis
@@ -492,15 +546,15 @@ class IssueService:
                 for msg in request.chat_messages[-5:]:  # Last 5 messages
                     role = "User" if not msg.isCode else "Code"
                     context_summary += f"**{role}**: {msg.content[:100]}...\n\n"
-            
+
             if request.file_context:
                 context_summary += "## File Context\n"
                 for file in request.file_context[:10]:  # Top 10 files
                     context_summary += f"- **{file.name}** ({file.type}, {file.tokens} tokens): {file.category}\n"
-            
+
             return GitHubIssuePreview(
                 title=request.title,
-                body=f"""{request.description or ''}
+                body=f"""{request.description or ""}
 
 {context_summary}
 
@@ -515,7 +569,11 @@ Based on the analyzed context, this issue requires attention to the following fi
 
 *Generated from chat and file dependency analysis (LLM fallback)*
 """,
-                labels=["enhancement", "yudai-assistant", f"priority-{request.priority}"],
+                labels=[
+                    "enhancement",
+                    "yudai-assistant",
+                    f"priority-{request.priority}",
+                ],
                 assignees=[],
                 repository_info=request.repository_info,
                 metadata={
@@ -524,8 +582,8 @@ Based on the analyzed context, this issue requires attention to the following fi
                     "total_tokens": sum(f.tokens for f in request.file_context),
                     "generated_at": utc_now().isoformat(),
                     "generation_method": "context_analysis_fallback",
-                    "error": str(e)
-                }
+                    "error": str(e),
+                },
             )
 
 
@@ -534,7 +592,7 @@ Based on the analyzed context, this issue requires attention to the following fi
 async def create_issue(
     request: CreateUserIssueRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """Create a new user issue"""
     try:
@@ -542,7 +600,7 @@ async def create_issue(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create issue: {str(e)}"
+            detail=f"Failed to create issue: {str(e)}",
         )
 
 
@@ -554,7 +612,7 @@ async def get_issues(
     repo_name: Optional[str] = Query(None, description="Filter by repository name"),
     limit: int = Query(50, ge=1, le=100, description="Number of issues to return"),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """Get user issues with optional filtering"""
     try:
@@ -564,7 +622,7 @@ async def get_issues(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve issues: {str(e)}"
+            detail=f"Failed to retrieve issues: {str(e)}",
         )
 
 
@@ -572,79 +630,118 @@ async def get_issues(
 async def get_issue(
     issue_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """Get a specific user issue by ID"""
     issue = IssueService.get_user_issue(db, current_user.id, issue_id)
-    
+
     if not issue:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Issue not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found"
         )
-    
+
     return issue
 
 
 @router.post("/create-with-context", response_model=Dict[str, Any])
 async def create_issue_with_context(
     request: CreateIssueWithContextRequest,
-    preview_only: bool = Query(default=False, description="Only generate preview without saving"),
-    use_sample_data: bool = Query(default=True, description="Use sample data when LLM is unavailable"),
+    preview_only: bool = Query(
+        default=False, description="Only generate preview without saving"
+    ),
+    use_sample_data: bool = Query(
+        default=True, description="Use sample data when LLM is unavailable"
+    ),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """
     Create a user issue with comprehensive context from chat and file dependencies.
     Optionally generate a GitHub issue preview.
     """
+    # Create a unique lock key based on user and request content
+    lock_key = f"{current_user.id}_{hash(str(request.dict()))}"
+
+    # Prevent race conditions with multiple simultaneous requests
+    if lock_key in _issue_creation_locks:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Issue creation already in progress. Please wait.",
+        )
+
+    _issue_creation_locks[lock_key] = True
+
     try:
+        # Validate repository info if provided
+        if request.repository_info:
+            if not request.repository_info.get(
+                "owner"
+            ) or not request.repository_info.get("name"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Repository owner and name are required when repository_info is provided",
+                )
+
         # Generate GitHub issue preview
-        github_preview = IssueService.generate_github_issue_preview(request, use_sample_data, db, current_user.id)
-        
+        github_preview = IssueService.generate_github_issue_preview(
+            request, use_sample_data, db, current_user.id
+        )
+
         if preview_only:
             return {
                 "success": True,
                 "preview_only": True,
                 "github_preview": github_preview.dict(),
-                "message": "GitHub issue preview generated successfully"
+                "message": "GitHub issue preview generated successfully",
             }
-        
+
         # Create the user issue in database
         issue_request = CreateUserIssueRequest(
             title=request.title,
             issue_text_raw=github_preview.body,
             description=request.description,
-            context_cards=[f.id for f in request.file_context],  # Use file IDs as context cards
-            repo_owner=request.repository_info.get("owner") if request.repository_info else None,
-            repo_name=request.repository_info.get("name") if request.repository_info else None,
+            context_cards=[
+                f.id for f in request.file_context
+            ],  # Use file IDs as context cards
+            repo_owner=request.repository_info.get("owner")
+            if request.repository_info
+            else None,
+            repo_name=request.repository_info.get("name")
+            if request.repository_info
+            else None,
             priority=request.priority,
             issue_steps=[
                 "Analyze chat conversation context",
                 "Review file dependencies",
                 "Design implementation approach",
                 "Implement functionality",
-                "Add tests and documentation"
-            ]
+                "Add tests and documentation",
+            ],
         )
-        
+
         user_issue = IssueService.create_user_issue(db, current_user.id, issue_request)
-        
-        # Session management is not implemented, so we skip session linking
-        
+
         return {
             "success": True,
             "preview_only": False,
             "user_issue": user_issue.dict(),
             "github_preview": github_preview.dict(),
-            "message": f"Issue created successfully with ID: {user_issue.issue_id}"
+            "message": f"Issue created successfully with ID: {user_issue.issue_id}",
         }
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
+        # Log the error for debugging
+        print(f"[IssueService] Error creating issue with context: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create issue with context: {str(e)}"
+            detail=f"Failed to create issue with context: {str(e)}",
         )
+    finally:
+        # Always release the lock
+        if lock_key in _issue_creation_locks:
+            del _issue_creation_locks[lock_key]
 
 
 @router.put("/{issue_id}/status")
@@ -655,19 +752,24 @@ async def update_issue_status(
     processing_time: Optional[float] = None,
     tokens_used: int = 0,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """Update issue status and processing metadata"""
     issue = IssueService.update_issue_status(
-        db, current_user.id, issue_id, status, agent_response, processing_time, tokens_used
+        db,
+        current_user.id,
+        issue_id,
+        status,
+        agent_response,
+        processing_time,
+        tokens_used,
     )
-    
+
     if not issue:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Issue not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found"
         )
-    
+
     return issue
 
 
@@ -675,44 +777,42 @@ async def update_issue_status(
 async def create_github_issue_from_user_issue(
     issue_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """Convert a user issue to an actual GitHub issue"""
     try:
         result = await IssueService.create_github_issue_from_user_issue(
             db, current_user.id, issue_id, current_user
         )
-        
+
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Issue not found or missing repository information"
+                detail="Issue not found or missing repository information",
             )
-        
+
         return {
             "success": True,
             "issue": result.dict(),
             "github_url": result.github_issue_url,
-            "message": f"GitHub issue created successfully: {result.github_issue_url}"
+            "message": f"GitHub issue created successfully: {result.github_issue_url}",
         }
-        
+
     except GitHubAPIError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to create GitHub issue: {str(e)}"
+            detail=f"Failed to create GitHub issue: {str(e)}",
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create GitHub issue: {str(e)}"
+            detail=f"Failed to create GitHub issue: {str(e)}",
         )
-
 
 
 @router.get("/statistics", response_model=Dict[str, Any])
 async def get_issue_statistics(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
     """Get statistics for user issues"""
     try:
@@ -720,5 +820,5 @@ async def get_issue_statistics(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get statistics: {str(e)}"
-        ) 
+            detail=f"Failed to get statistics: {str(e)}",
+        )

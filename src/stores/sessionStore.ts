@@ -1,6 +1,27 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
-import { SelectedRepository, TabType, ContextCard, FileItem, ChatMessageAPI, GitHubRepository, User } from '../types';
+import {
+  SelectedRepository,
+  TabType,
+  ContextCard,
+  FileItem,
+  ChatMessage,
+  GitHubRepository,
+  User,
+  UserIssue,
+  Session,
+  SessionContext,
+  UpdateSessionRequest,
+  CreateContextCardRequest,
+  CreateFileEmbeddingRequest,
+  ChatRequest,
+  CreateIssueWithContextRequest,
+  IssueCreationResponse,
+  AgentStatus,
+  GitHubBranch,
+  ChatResponse,
+  CreateGitHubIssueResponse
+} from '../types/sessionTypes';
 import { ApiService } from '../services/api';
 import { sessionApi } from '../services/sessionApi';
 
@@ -14,44 +35,87 @@ const getStoredSessionToken = (): string | null => {
   }
 };
 
-// Enhanced types for the session store with auth state
+// Unified Session State Interface - matches backend models perfectly
 interface SessionState {
-  // Controls whether session loading is enabled
-  sessionLoadingEnabled: boolean;
-  setSessionLoadingEnabled: (enabled: boolean) => void;
-  // Auth state
+  // ============================================================================
+  // AUTH STATE (only for login/entry point)
+  // ============================================================================
   user: User | null;
   sessionToken: string | null;
   isAuthenticated: boolean;
   authLoading: boolean;
   authError: string | null;
-  
-  // Core session state
+
+  // ============================================================================
+  // SESSION STATE (core session management)
+  // ============================================================================
   activeSessionId: string | null;
+  currentSession: Session | null;
+  sessionContext: SessionContext | null;
   isLoading: boolean;
   error: string | null;
   sessionInitialized: boolean;
-  
-  // Repository state
+
+  // ============================================================================
+  // REPOSITORY STATE (GitHub integration)
+  // ============================================================================
   selectedRepository: SelectedRepository | null;
   availableRepositories: GitHubRepository[];
   isLoadingRepositories: boolean;
   repositoryError: string | null;
-  
-  // UI state
+
+  // ============================================================================
+  // CHAT & MESSAGES STATE (matches ChatMessage model)
+  // ============================================================================
+  messages: ChatMessage[];
+  isLoadingMessages: boolean;
+  messageError: string | null;
+
+  // ============================================================================
+  // CONTEXT MANAGEMENT STATE (matches ContextCard model)
+  // ============================================================================
+  contextCards: ContextCard[];
+  isLoadingContextCards: boolean;
+  contextCardError: string | null;
+
+  // ============================================================================
+  // FILE DEPENDENCIES STATE (matches FileEmbedding model)
+  // ============================================================================
+  fileContext: FileItem[];
+  isLoadingFileContext: boolean;
+  fileContextError: string | null;
+
+  // ============================================================================
+  // USER ISSUES STATE (matches UserIssue model)
+  // ============================================================================
+  userIssues: UserIssue[];
+  currentIssue: UserIssue | null;
+  isLoadingIssues: boolean;
+  issueError: string | null;
+
+  // ============================================================================
+  // AGENT ORCHESTRATION STATE (for AI solver integration)
+  // ============================================================================
+  agentStatus: AgentStatus | null;
+  agentHistory: AgentStatus[];
+
+  // ============================================================================
+  // UI STATE
+  // ============================================================================
   activeTab: TabType;
   sidebarCollapsed: boolean;
-  
-  // Session data (local cache)
-  sessionData: {
-    messages: ChatMessageAPI[];
-    contextCards: ContextCard[];
-    fileContext: FileItem[];
-    totalTokens: number;
-    lastUpdated: Date | null;
-  };
-  
-  // Auth actions
+  sessionLoadingEnabled: boolean;
+
+  // ============================================================================
+  // SESSION STATISTICS & METADATA
+  // ============================================================================
+  totalTokens: number;
+  lastActivity: Date | null;
+  connectionStatus: 'connected' | 'disconnected' | 'reconnecting';
+
+  // ============================================================================
+  // AUTH ACTIONS (only for login/logout)
+  // ============================================================================
   initializeAuth: () => Promise<void>;
   login: () => Promise<void>;
   logout: () => Promise<void>;
@@ -59,173 +123,254 @@ interface SessionState {
   setAuthFromCallback: (authData: { user: User; sessionToken: string }) => Promise<void>;
   setAuthLoading: (loading: boolean) => void;
   setAuthError: (error: string | null) => void;
-  
-  // Session creation actions
+
+  // ============================================================================
+  // SESSION MANAGEMENT ACTIONS (matches backend session APIs)
+  // ============================================================================
   createSessionForRepository: (repository: SelectedRepository) => Promise<string | null>;
+  loadSession: (sessionId: string) => Promise<boolean>;
+  updateSession: (sessionId: string, updates: UpdateSessionRequest) => Promise<boolean>;
+  deleteSession: (sessionId: string) => Promise<boolean>;
   ensureSessionExists: (sessionId: string) => Promise<boolean>;
   validatePersistedSession: () => Promise<void>;
-  
-  // Core actions
+
+  // ============================================================================
+  // REPOSITORY ACTIONS
+  // ============================================================================
+  loadRepositories: () => Promise<void>;
+  setSelectedRepository: (repository: SelectedRepository | null) => void;
+  setAvailableRepositories: (repositories: GitHubRepository[]) => void;
+  setRepositoryLoading: (loading: boolean) => void;
+  setRepositoryError: (error: string | null) => void;
+
+  // ============================================================================
+  // MESSAGE ACTIONS (matches ChatMessage APIs)
+  // ============================================================================
+  addMessage: (message: ChatMessage) => void;
+  updateMessage: (messageId: string, updates: Partial<ChatMessage>) => Promise<boolean>;
+  removeMessage: (messageId: string) => Promise<boolean>;
+  loadMessages: (sessionId: string) => Promise<void>;
+  setMessages: (messages: ChatMessage[]) => void;
+  setMessageLoading: (loading: boolean) => void;
+  setMessageError: (error: string | null) => void;
+
+  // ============================================================================
+  // CONTEXT CARD ACTIONS (matches ContextCard APIs)
+  // ============================================================================
+  createContextCard: (card: CreateContextCardRequest) => Promise<boolean>;
+  updateContextCard: (cardId: string, updates: Partial<CreateContextCardRequest>) => Promise<boolean>;
+  deleteContextCard: (cardId: string) => Promise<boolean>;
+  loadContextCards: (sessionId: string) => Promise<void>;
+  setContextCards: (cards: ContextCard[]) => void;
+  setContextCardLoading: (loading: boolean) => void;
+  setContextCardError: (error: string | null) => void;
+
+  // ============================================================================
+  // FILE DEPENDENCY ACTIONS (matches FileEmbedding APIs)
+  // ============================================================================
+  createFileEmbedding: (embedding: CreateFileEmbeddingRequest) => Promise<boolean>;
+  updateFileEmbedding: (fileId: string, updates: Partial<CreateFileEmbeddingRequest>) => Promise<boolean>;
+  deleteFileEmbedding: (fileId: string) => Promise<boolean>;
+  loadFileDependencies: (sessionId: string) => Promise<void>;
+  setFileContext: (files: FileItem[]) => void;
+  setFileContextLoading: (loading: boolean) => void;
+  setFileContextError: (error: string | null) => void;
+
+  // ============================================================================
+  // USER ISSUE ACTIONS (matches UserIssue APIs)
+  // ============================================================================
+  createUserIssue: (issue: UserIssue) => Promise<boolean>;
+  updateUserIssue: (issueId: string, updates: Partial<UserIssue>) => Promise<boolean>;
+  deleteUserIssue: (issueId: string) => Promise<boolean>;
+  loadUserIssues: (sessionId: string) => Promise<void>;
+  setUserIssues: (issues: UserIssue[]) => void;
+  setCurrentIssue: (issue: UserIssue | null) => void;
+  setIssueLoading: (loading: boolean) => void;
+  setIssueError: (error: string | null) => void;
+
+  // ============================================================================
+  // AGENT ACTIONS (for AI solver integration)
+  // ============================================================================
+  updateAgentStatus: (status: AgentStatus) => void;
+  addAgentHistoryEntry: (entry: AgentStatus) => void;
+  clearAgentHistory: () => void;
+
+  // ============================================================================
+  // CORE ACTIONS
+  // ============================================================================
   setActiveSession: (sessionId: string) => void;
   clearSession: () => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setSessionInitialized: (initialized: boolean) => void;
-  setSelectedRepository: (repository: SelectedRepository | null) => void;
-  setAvailableRepositories: (repositories: GitHubRepository[]) => void;
-  setRepositoryLoading: (loading: boolean) => void;
-  setRepositoryError: (error: string | null) => void;
   setActiveTab: (tab: TabType) => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
-  
-  // Session data actions
-  addMessage: (message: ChatMessageAPI) => void;
-  updateMessage: (messageId: string, updates: Partial<ChatMessageAPI>) => void;
-  removeMessage: (messageId: string) => void;
-  setMessages: (messages: ChatMessageAPI[]) => void;
-  
-  addContextCard: (card: ContextCard) => void;
-  removeContextCard: (cardId: string) => void;
-  setContextCards: (cards: ContextCard[]) => void;
-  
-  addFileItem: (file: FileItem) => void;
-  removeFileItem: (fileId: string) => void;
-  setFileContext: (files: FileItem[]) => void;
-  
-  updateSessionData: (data: Partial<SessionState['sessionData']>) => void;
+  setSessionLoadingEnabled: (enabled: boolean) => void;
+  updateSessionStats: (tokens: number) => void;
+  setConnectionStatus: (status: 'connected' | 'disconnected' | 'reconnecting') => void;
+
+  // ============================================================================
+  // CHAT MESSAGE SENDING (for sending messages through backend chat endpoint)
+  // ============================================================================
+
+  sendChatMessage: (message: string, contextCards?: string[], repository?: SelectedRepository) => Promise<ChatResponse | null>;
+
+  // ============================================================================
+  // USER ISSUE CREATION (for creating issues with context)
+  // ============================================================================
+
+  createIssueWithContext: (request: CreateIssueWithContextRequest) => Promise<IssueCreationResponse | null>;
+
+  // ============================================================================
+  // FILE DEPENDENCY EXTRACTION (for extracting file dependencies for session)
+  // ============================================================================
+
+  extractFileDependenciesForSession: (sessionId: string, repoUrl: string) => Promise<boolean>;
+
+  // ============================================================================
+  // REPOSITORY BRANCH LOADING (for loading repository branches)
+  // ============================================================================
+
+  loadRepositoryBranches: (owner: string, repo: string) => Promise<GitHubBranch[]>;
+
+  // ============================================================================
+  // GITHUB ISSUE CREATION (for creating GitHub issues from user issues)
+  // ============================================================================
+
+  createGitHubIssueFromUserIssue: (issueId: string) => Promise<CreateGitHubIssueResponse>;
 }
 
-// Create the session store with persistence
+// Create the unified session store with persistence
 export const useSessionStore = create<SessionState>()(
   devtools(
     persist(
       (set, get) => ({
-  // Controls whether session loading is enabled
-  sessionLoadingEnabled: false,
-  setSessionLoadingEnabled: (enabled: boolean) => set({ sessionLoadingEnabled: enabled }),
-        // Auth state
+        // ============================================================================
+        // INITIAL STATE - matches backend models perfectly
+        // ============================================================================
+
+        // Auth state (only for login/logout)
         user: null,
         sessionToken: null,
         isAuthenticated: false,
         authLoading: true,
         authError: null,
-        
-        // Initial state
+
+        // Session state
         activeSessionId: null,
+        currentSession: null,
+        sessionContext: null,
         isLoading: false,
         error: null,
         sessionInitialized: false,
-        
+
         // Repository state
         selectedRepository: null,
         availableRepositories: [],
         isLoadingRepositories: false,
         repositoryError: null,
-        
+
+        // Chat & messages state
+        messages: [],
+        isLoadingMessages: false,
+        messageError: null,
+
+        // Context management state
+        contextCards: [],
+        isLoadingContextCards: false,
+        contextCardError: null,
+
+        // File dependencies state
+        fileContext: [],
+        isLoadingFileContext: false,
+        fileContextError: null,
+
+        // User issues state
+        userIssues: [],
+        currentIssue: null,
+        isLoadingIssues: false,
+        issueError: null,
+
+        // Agent orchestration state
+        agentStatus: null,
+        agentHistory: [],
+
         // UI state
         activeTab: 'chat',
         sidebarCollapsed: false,
+        sessionLoadingEnabled: false,
+
+        // Session statistics
+        totalTokens: 0,
+        lastActivity: null,
+        connectionStatus: 'disconnected',
         
-        // Session data
-        sessionData: {
-          messages: [],
-          contextCards: [],
-          fileContext: [],
-          totalTokens: 0,
-          lastUpdated: null,
-        },
-        
-        // Auth actions
-        /**
-         * Initialize authentication state by validating stored session token.
-         * 
-         * This method performs the following sequence:
-         * 1. Retrieves session token from localStorage using safe retrieval
-         * 2. Validates token with backend API if present
-         * 3. Updates auth state based on validation result
-         * 4. Clears invalid tokens and session state on failure
-         * 5. Validates any persisted session after successful auth
-         */
+        // ============================================================================
+        // AUTH ACTIONS (only for login/logout - matches backend auth flow)
+        // ============================================================================
+
         initializeAuth: async () => {
           try {
             console.log('[SessionStore] Starting authentication initialization');
             set({ authLoading: true, authError: null });
 
-            // Step 1: Retrieve stored session token using null-safe helper
             const storedSessionToken = getStoredSessionToken();
-            console.log('[SessionStore] Stored session token:', storedSessionToken ? 'Found' : 'Not found');
-            
-            // Step 2: Validate token if present, otherwise mark as unauthenticated
-            if (storedSessionToken) {
-                console.log('[SessionStore] Found stored session token, validating...');
-                try {
-                  const userData = await ApiService.validateSessionToken(storedSessionToken);
-                  const user: User = {
-                    id: userData.id,
-                    github_username: userData.github_username,
-                    github_user_id: userData.github_id,
-                    email: userData.email,
-                    display_name: userData.display_name,
-                    avatar_url: userData.avatar_url,
-                    created_at: new Date().toISOString(),
-                    last_login: new Date().toISOString(),
-                  };
-                  
-                  set({
-                    user: user,
-                    sessionToken: storedSessionToken,
-                    isAuthenticated: true,
-                    authLoading: false,
-                    authError: null,
-                  });
 
-                  // After successful auth, validate any persisted session
-                  await get().validatePersistedSession();
-                } catch (error) {
-                  console.warn('[SessionStore] Stored session validation failed:', error);
-                  console.error('[SessionStore] Stored session validation error details:', {
-                    error: error instanceof Error ? error.message : error,
-                    stack: error instanceof Error ? error.stack : undefined
-                  });
-                  localStorage.removeItem('session_token');
-                  
-                  // Clear any persisted session state since auth failed
-                  get().clearSession();
-                  
-                  set({
-                    user: null,
-                    sessionToken: null,
-                    isAuthenticated: false,
-                    authLoading: false,
-                    authError: 'Stored session validation failed',
-                  });
-                }
-              } else {
-                // No stored token, user is not authenticated
-                console.log('[SessionStore] No stored session token found, user not authenticated');
-                
-                // Clear any persisted session state since not authenticated
+            if (storedSessionToken) {
+              console.log('[SessionStore] Found stored session token, validating...');
+              try {
+                const userData = await ApiService.validateSessionToken(storedSessionToken);
+                const user: User = {
+                  id: userData.id,
+                  github_username: userData.github_username,
+                  github_user_id: userData.github_id,
+                  email: userData.email,
+                  display_name: userData.display_name,
+                  avatar_url: userData.avatar_url,
+                  created_at: new Date().toISOString(),
+                  last_login: new Date().toISOString(),
+                };
+
+                set({
+                  user,
+                  sessionToken: storedSessionToken,
+                  isAuthenticated: true,
+                  authLoading: false,
+                  authError: null,
+                });
+
+                // After successful auth, validate any persisted session
+                await get().validatePersistedSession();
+              } catch (error) {
+                console.warn('[SessionStore] Stored session validation failed:', error);
+                localStorage.removeItem('session_token');
                 get().clearSession();
-                
+
                 set({
                   user: null,
                   sessionToken: null,
                   isAuthenticated: false,
                   authLoading: false,
-                  authError: null,
+                  authError: 'Stored session validation failed',
                 });
               }
+            } else {
+              console.log('[SessionStore] No stored session token found');
+              get().clearSession();
+
+              set({
+                user: null,
+                sessionToken: null,
+                isAuthenticated: false,
+                authLoading: false,
+                authError: null,
+              });
+            }
             console.log('[SessionStore] Authentication initialization completed');
           } catch (error) {
             console.error('[SessionStore] Auth initialization failed:', error);
-            console.error('[SessionStore] Auth initialization error details:', {
-              error: error instanceof Error ? error.message : error,
-              stack: error instanceof Error ? error.stack : undefined
-            });
-            
-            // Clear any persisted session state since auth initialization failed
             get().clearSession();
-            
+
             set({
               user: null,
               sessionToken: null,
@@ -239,7 +384,6 @@ export const useSessionStore = create<SessionState>()(
         login: async () => {
           try {
             set({ authLoading: true, authError: null });
-            // Get login URL from backend and redirect
             const { login_url } = await ApiService.getLoginUrl();
             window.location.href = login_url;
           } catch (error) {
@@ -258,7 +402,6 @@ export const useSessionStore = create<SessionState>()(
           } catch (error) {
             console.warn('Logout API call failed:', error);
           } finally {
-            // Always clear local state and storage
             localStorage.removeItem('session_token');
             set({
               user: null,
@@ -269,18 +412,14 @@ export const useSessionStore = create<SessionState>()(
               activeSessionId: null,
               error: null,
               sessionInitialized: false,
-              sessionData: {
-                messages: [],
-                contextCards: [],
-                fileContext: [],
-                totalTokens: 0,
-                lastUpdated: null,
-              }
+              messages: [],
+              contextCards: [],
+              fileContext: [],
+              userIssues: [],
+              currentIssue: null,
+              totalTokens: 0,
+              lastActivity: null,
             });
-            
-            // Redirect to login page using React Router
-            // Note: Since this is called from a store, we need to use window.location
-            // React Router navigation should be handled in components
             window.location.href = '/auth/login';
           }
         },
@@ -292,11 +431,9 @@ export const useSessionStore = create<SessionState>()(
         setAuthFromCallback: async (authData: { user: User; sessionToken: string }) => {
           try {
             console.log('[SessionStore] Setting auth from callback:', authData);
-            
-            // Store session token in localStorage for persistence
-              localStorage.setItem('session_token', authData.sessionToken);
-            
-            // Set the auth state
+
+            localStorage.setItem('session_token', authData.sessionToken);
+
             set({
               user: authData.user,
               sessionToken: authData.sessionToken,
@@ -304,10 +441,8 @@ export const useSessionStore = create<SessionState>()(
               authLoading: false,
               authError: null,
             });
-            
-            // Clear any old persisted session that might be invalid
+
             get().clearSession();
-            
             console.log('[SessionStore] Auth from callback completed successfully');
           } catch (error) {
             console.error('[SessionStore] Error setting auth from callback:', error);
@@ -316,30 +451,22 @@ export const useSessionStore = create<SessionState>()(
           }
         },
 
-        setAuthLoading: (loading: boolean) =>
-          set({ authLoading: loading }),
+        setAuthLoading: (loading: boolean) => set({ authLoading: loading }),
+        setAuthError: (error: string | null) => set({ authError: error }),
 
-        setAuthError: (error: string | null) =>
-          set({ authError: error }),
+        // ============================================================================
+        // SESSION MANAGEMENT ACTIONS (matches backend session APIs)
+        // ============================================================================
 
-        // Session creation actions
-          createSessionForRepository: async (repository: SelectedRepository) => {
-            const { sessionLoadingEnabled, activeSessionId } = get();
-            // If session loading is enabled and a session exists, try to load it
-            if (sessionLoadingEnabled && activeSessionId) {
-              const loaded = await get().ensureSessionExists(activeSessionId);
-              if (loaded) {
-                set({ isLoading: false });
-                return activeSessionId;
-              }
-            }
+        createSessionForRepository: async (repository: SelectedRepository) => {
+          const { sessionToken } = get();
+
+          if (!sessionToken) {
+            throw new Error('No session token available');
+          }
+
           try {
             set({ isLoading: true, error: null });
-            
-            const { sessionToken } = get();
-            if (!sessionToken) {
-              throw new Error('No session token available');
-            }
 
             const repoOwner = repository.repository.owner?.login || repository.repository.full_name.split('/')[0];
             const repoName = repository.repository.name;
@@ -351,288 +478,681 @@ export const useSessionStore = create<SessionState>()(
                 repo_branch: repository.branch,
                 title: `Chat - ${repoOwner}/${repoName}`,
               },
-              sessionToken,
+              sessionToken
             );
 
-            set({ 
+            set({
               activeSessionId: sessionData.session_id,
+              currentSession: sessionData,
               selectedRepository: repository,
               sessionInitialized: true,
               isLoading: false,
               error: null,
+              lastActivity: new Date(),
             });
 
             return sessionData.session_id;
           } catch (error) {
             console.error('Failed to create session:', error);
-            set({ 
-              isLoading: false, 
-              error: error instanceof Error ? error.message : 'Failed to create session' 
+            set({
+              isLoading: false,
+              error: error instanceof Error ? error.message : 'Failed to create session'
             });
             return null;
           }
         },
-  ensureSessionExists: async (sessionId: string) => {
-    const { sessionLoadingEnabled } = get();
-    if (!sessionLoadingEnabled) return false;
-    try {
-      const { sessionToken } = get();
-      if (!sessionToken) {
-        console.warn('[SessionStore] No session token available for session validation');
-        get().clearSession();
-        return false;
-      }
 
-      // Try to get session context to verify it exists
-      await sessionApi.getSessionContext(sessionId, sessionToken);
+        loadSession: async (sessionId: string) => {
+          const { sessionToken } = get();
 
-      set({
-        activeSessionId: sessionId,
-        sessionInitialized: true,
-        error: null,
-      });
+          if (!sessionToken) {
+            throw new Error('No session token available');
+          }
 
-      return true;
-    } catch (error) {
-      console.warn(`[SessionStore] Session ${sessionId} does not exist or is not accessible:`, error);
+          try {
+            set({ isLoading: true, error: null });
 
-      // Check if it's a session not found error
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const isSessionNotFound = errorMessage.includes('Session not found') ||
-                               errorMessage.includes('404') ||
-                               errorMessage.includes('Not Found');
+            const context = await sessionApi.getSessionContext(sessionId, sessionToken);
 
-      if (isSessionNotFound) {
-        console.log('[SessionStore] Session not found, clearing invalid session');
-        get().clearSession();
-        set({ error: 'Session not found - cleared invalid session' });
-      } else {
-        set({
-          activeSessionId: null,
-          sessionInitialized: false,
-          error: 'Session validation failed',
-        });
-      }
+            // Update all session state from context
+            set({
+              activeSessionId: sessionId,
+              currentSession: context.session,
+              sessionContext: context,
+              messages: context.messages || [],
+              contextCards: [],
+              fileContext: context.file_embeddings || [],
+              userIssues: context.user_issues || [],
+              totalTokens: context.statistics?.total_tokens || 0,
+              sessionInitialized: true,
+              isLoading: false,
+              error: null,
+              lastActivity: new Date(),
+            });
 
-      return false;
-    }
-  },
+            return true;
+          } catch (error) {
+            console.error('Failed to load session:', error);
+            set({
+              isLoading: false,
+              error: error instanceof Error ? error.message : 'Failed to load session'
+            });
+            return false;
+          }
+        },
+
+        updateSession: async (sessionId: string, updates: UpdateSessionRequest) => {
+          // TODO: Implement when backend API is available
+          console.log('Update session not yet implemented:', sessionId, updates);
+          return false;
+        },
+
+        deleteSession: async (sessionId: string) => {
+          // TODO: Implement when backend API is available
+          console.log('Delete session not yet implemented:', sessionId);
+          return false;
+        },
+
+        ensureSessionExists: async (sessionId: string) => {
+          try {
+            const { sessionToken } = get();
+            if (!sessionToken) {
+              console.warn('[SessionStore] No session token available for session validation');
+              get().clearSession();
+              return false;
+            }
+
+            await sessionApi.getSessionContext(sessionId, sessionToken);
+
+            set({
+              activeSessionId: sessionId,
+              sessionInitialized: true,
+              error: null,
+            });
+
+            return true;
+          } catch (error) {
+            console.warn(`[SessionStore] Session ${sessionId} does not exist or is not accessible:`, error);
+
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const isSessionNotFound = errorMessage.includes('Session not found') ||
+                                     errorMessage.includes('404') ||
+                                     errorMessage.includes('Not Found');
+
+            if (isSessionNotFound) {
+              console.log('[SessionStore] Session not found, clearing invalid session');
+              get().clearSession();
+              set({ error: 'Session not found - cleared invalid session' });
+            } else {
+              set({
+                activeSessionId: null,
+                sessionInitialized: false,
+                error: 'Session validation failed',
+              });
+            }
+
+            return false;
+          }
+        },
 
         validatePersistedSession: async () => {
           const { activeSessionId, sessionToken } = get();
-          
+
           if (!activeSessionId || !sessionToken) {
             console.log('[SessionStore] No persisted session to validate');
             return;
           }
 
           console.log(`[SessionStore] Validating persisted session: ${activeSessionId}`);
-          
+
           try {
-            // Try to validate the persisted session
             await sessionApi.getSessionContext(activeSessionId, sessionToken);
             console.log(`[SessionStore] Persisted session ${activeSessionId} is valid`);
-            
-            // Session is valid, mark as initialized
+
             set({
               sessionInitialized: true,
               error: null,
             });
           } catch (error) {
             console.warn(`[SessionStore] Persisted session ${activeSessionId} is invalid:`, error);
-            
-            // Check if it's a session not found error
+
             const errorMessage = error instanceof Error ? error.message : String(error);
             const isSessionNotFound = errorMessage.includes('Session not found') ||
                                      errorMessage.includes('404') ||
                                      errorMessage.includes('Not Found');
-            
+
             if (isSessionNotFound) {
               console.log('[SessionStore] Persisted session not found, clearing');
               get().clearSession();
             }
           }
         },
-        
-        // Core actions
+
+        // ============================================================================
+        // REPOSITORY ACTIONS
+        // ============================================================================
+
+        loadRepositories: async () => {
+          const { sessionToken } = get();
+
+          try {
+            set({ isLoadingRepositories: true, repositoryError: null });
+
+            const repositories = await ApiService.getUserRepositories(sessionToken || undefined);
+
+            set({
+              availableRepositories: repositories,
+              isLoadingRepositories: false,
+              repositoryError: null,
+            });
+          } catch (error) {
+            console.error('Failed to load repositories:', error);
+            set({
+              isLoadingRepositories: false,
+              repositoryError: error instanceof Error ? error.message : 'Failed to load repositories'
+            });
+          }
+        },
+
+        setSelectedRepository: (repository: SelectedRepository | null) =>
+          set({ selectedRepository: repository, repositoryError: null }),
+
+        setAvailableRepositories: (repositories: GitHubRepository[]) =>
+          set({ availableRepositories: repositories }),
+
+        setRepositoryLoading: (loading: boolean) =>
+          set({ isLoadingRepositories: loading }),
+
+        setRepositoryError: (error: string | null) =>
+          set({ repositoryError: error }),
+
+        // ============================================================================
+        // MESSAGE ACTIONS (matches ChatMessage APIs)
+        // ============================================================================
+
+        addMessage: (message: ChatMessage) => {
+          set((state) => ({
+            messages: [...state.messages, message],
+            totalTokens: state.totalTokens + (message.tokens || 0),
+            lastActivity: new Date(),
+          }));
+        },
+
+        updateMessage: async (messageId: string, updates: Partial<ChatMessage>) => {
+          // TODO: Implement when backend API is available
+          console.log('Update message not yet implemented:', messageId, updates);
+          return false;
+        },
+
+        removeMessage: async (messageId: string) => {
+          // TODO: Implement when backend API is available
+          console.log('Remove message not yet implemented:', messageId);
+          return false;
+        },
+
+        loadMessages: async (sessionId: string) => {
+          const { sessionToken } = get();
+
+          try {
+            set({ isLoadingMessages: true, messageError: null });
+
+            const messages = await sessionApi.getChatMessages(sessionId, 100, sessionToken || undefined);
+
+            set({
+              messages,
+              isLoadingMessages: false,
+              messageError: null,
+            });
+          } catch (error) {
+            console.error('Failed to load messages:', error);
+            set({
+              isLoadingMessages: false,
+              messageError: error instanceof Error ? error.message : 'Failed to load messages'
+            });
+          }
+        },
+
+        setMessages: (messages: ChatMessage[]) => {
+          const totalTokens = messages.reduce((sum, msg) => sum + (msg.tokens || 0), 0);
+          set({ messages, totalTokens, lastActivity: new Date() });
+        },
+
+        setMessageLoading: (loading: boolean) => set({ isLoadingMessages: loading }),
+        setMessageError: (error: string | null) => set({ messageError: error }),
+
+        // ============================================================================
+        // CONTEXT CARD ACTIONS (matches ContextCard APIs)
+        // ============================================================================
+
+        createContextCard: async (card: CreateContextCardRequest) => {
+          const { activeSessionId, sessionToken } = get();
+
+          if (!activeSessionId || !sessionToken) {
+            throw new Error('No active session or session token available');
+          }
+
+          try {
+            set({ isLoadingContextCards: true, contextCardError: null });
+
+            const newCard = await sessionApi.addContextCard(activeSessionId, card, sessionToken);
+
+            set((state) => ({
+              contextCards: [...state.contextCards, {
+                id: newCard.id.toString(),
+                title: newCard.title,
+                description: newCard.description,
+                tokens: newCard.tokens,
+                source: newCard.source as 'chat' | 'file-deps' | 'upload',
+              }],
+              isLoadingContextCards: false,
+              totalTokens: state.totalTokens + newCard.tokens,
+              lastActivity: new Date(),
+            }));
+
+            return true;
+          } catch (error) {
+            console.error('Failed to create context card:', error);
+            set({
+              isLoadingContextCards: false,
+              contextCardError: error instanceof Error ? error.message : 'Failed to create context card'
+            });
+            return false;
+          }
+        },
+
+        updateContextCard: async (cardId: string, updates: Partial<CreateContextCardRequest>) => {
+          // TODO: Implement when backend API is available
+          console.log('Update context card not yet implemented:', cardId, updates);
+          return false;
+        },
+
+        deleteContextCard: async (cardId: string) => {
+          const { activeSessionId, sessionToken } = get();
+
+          if (!activeSessionId || !sessionToken) {
+            throw new Error('No active session or session token available');
+          }
+
+          try {
+            set({ isLoadingContextCards: true, contextCardError: null });
+
+            await sessionApi.deleteContextCard(activeSessionId, parseInt(cardId), sessionToken);
+
+            set((state) => {
+              const cardToRemove = state.contextCards.find(c => c.id === cardId);
+              return {
+                contextCards: state.contextCards.filter(c => c.id !== cardId),
+                isLoadingContextCards: false,
+                totalTokens: state.totalTokens - (cardToRemove?.tokens || 0),
+                lastActivity: new Date(),
+              };
+            });
+
+            return true;
+          } catch (error) {
+            console.error('Failed to delete context card:', error);
+            set({
+              isLoadingContextCards: false,
+              contextCardError: error instanceof Error ? error.message : 'Failed to delete context card'
+            });
+            return false;
+          }
+        },
+
+        loadContextCards: async (sessionId: string) => {
+          const { sessionToken } = get();
+
+          try {
+            set({ isLoadingContextCards: true, contextCardError: null });
+
+            const cards = await sessionApi.getContextCards(sessionId, sessionToken || undefined);
+
+            const transformedCards: ContextCard[] = cards.map(card => ({
+              id: card.id.toString(),
+              title: card.title,
+              description: card.description,
+              tokens: card.tokens,
+              source: card.source as 'chat' | 'file-deps' | 'upload',
+            }));
+
+            set({
+              contextCards: transformedCards,
+              isLoadingContextCards: false,
+              contextCardError: null,
+            });
+          } catch (error) {
+            console.error('Failed to load context cards:', error);
+            set({
+              isLoadingContextCards: false,
+              contextCardError: error instanceof Error ? error.message : 'Failed to load context cards'
+            });
+          }
+        },
+
+        setContextCards: (cards: ContextCard[]) => {
+          const totalTokens = cards.reduce((sum, card) => sum + card.tokens, 0);
+          set((state) => ({
+            contextCards: cards,
+            totalTokens: state.messages.reduce((sum, msg) => sum + (msg.tokens || 0), 0) + totalTokens,
+            lastActivity: new Date(),
+          }));
+        },
+
+        setContextCardLoading: (loading: boolean) => set({ isLoadingContextCards: loading }),
+        setContextCardError: (error: string | null) => set({ contextCardError: error }),
+
+        // ============================================================================
+        // FILE DEPENDENCY ACTIONS (matches FileEmbedding APIs)
+        // ============================================================================
+
+        createFileEmbedding: async (embedding: CreateFileEmbeddingRequest) => {
+          // TODO: Implement when backend API is available
+          console.log('Create file embedding not yet implemented:', embedding);
+          return false;
+        },
+
+        updateFileEmbedding: async (fileId: string, updates: Partial<CreateFileEmbeddingRequest>) => {
+          // TODO: Implement when backend API is available
+          console.log('Update file embedding not yet implemented:', fileId, updates);
+          return false;
+        },
+
+        deleteFileEmbedding: async (fileId: string) => {
+          // TODO: Implement when backend API is available
+          console.log('Delete file embedding not yet implemented:', fileId);
+          return false;
+        },
+
+        loadFileDependencies: async (sessionId: string) => {
+          const { sessionToken } = get();
+
+          try {
+            set({ isLoadingFileContext: true, fileContextError: null });
+
+            const deps = await sessionApi.getFileDependenciesSession(sessionId, sessionToken || undefined);
+
+            const transformedFiles: FileItem[] = deps.map(dep => ({
+              id: dep.id.toString(),
+              name: dep.file_name || 'Unknown',
+              path: dep.file_path,
+              type: 'INTERNAL' as const,
+              tokens: dep.tokens,
+              category: dep.category || dep.file_type || 'unknown',
+              created_at: dep.created_at,
+            }));
+
+            set({
+              fileContext: transformedFiles,
+              isLoadingFileContext: false,
+              fileContextError: null,
+            });
+          } catch (error) {
+            console.error('Failed to load file dependencies:', error);
+            set({
+              isLoadingFileContext: false,
+              fileContextError: error instanceof Error ? error.message : 'Failed to load file dependencies'
+            });
+          }
+        },
+
+        setFileContext: (files: FileItem[]) => {
+          set({ fileContext: files, lastActivity: new Date() });
+        },
+
+        setFileContextLoading: (loading: boolean) => set({ isLoadingFileContext: loading }),
+        setFileContextError: (error: string | null) => set({ fileContextError: error }),
+
+        // ============================================================================
+        // USER ISSUE ACTIONS (matches UserIssue APIs)
+        // ============================================================================
+
+        createUserIssue: async (issue: UserIssue) => {
+          // TODO: Implement with proper typing when backend API is available
+          console.log('Create user issue not yet implemented:', issue);
+          return false;
+        },
+
+        updateUserIssue: async (issueId: string, updates: Partial<UserIssue>) => {
+          // TODO: Implement with proper typing when backend API is available
+          console.log('Update user issue not yet implemented:', issueId, updates);
+          return false;
+        },
+
+        deleteUserIssue: async (issueId: string) => {
+          // TODO: Implement when backend API is available
+          console.log('Delete user issue not yet implemented:', issueId);
+          return false;
+        },
+
+        loadUserIssues: async (sessionId: string) => {
+          // TODO: Implement when backend API is available
+          console.log('Load user issues not yet implemented:', sessionId);
+        },
+
+        setUserIssues: (issues: UserIssue[]) => set({ userIssues: issues }),
+        setCurrentIssue: (issue: UserIssue | null) => set({ currentIssue: issue }),
+        setIssueLoading: (loading: boolean) => set({ isLoadingIssues: loading }),
+        setIssueError: (error: string | null) => set({ issueError: error }),
+
+        // ============================================================================
+        // AGENT ACTIONS (for AI solver integration)
+        // ============================================================================
+
+        updateAgentStatus: (status: AgentStatus | null) => set({ agentStatus: status }),
+        addAgentHistoryEntry: (entry: AgentStatus) => {
+          set((state) => ({
+            agentHistory: [...state.agentHistory, entry]
+          }));
+        },
+        clearAgentHistory: () => set({ agentHistory: [] }),
+
+        // ============================================================================
+        // CORE ACTIONS
+        // ============================================================================
+
         setActiveSession: (sessionId: string) =>
           set({ activeSessionId: sessionId, error: null, sessionInitialized: true }),
-        
+
         clearSession: () => {
           console.log('[SessionStore] Clearing session state');
           set({
             activeSessionId: null,
+            currentSession: null,
+            sessionContext: null,
             error: null,
             sessionInitialized: false,
-            selectedRepository: null,
-            sessionData: {
-              messages: [],
-              contextCards: [],
-              fileContext: [],
-              totalTokens: 0,
-              lastUpdated: null,
-            }
+            messages: [],
+            contextCards: [],
+            fileContext: [],
+            userIssues: [],
+            currentIssue: null,
+            totalTokens: 0,
+            lastActivity: null,
+            agentStatus: null,
+            agentHistory: [],
           });
         },
-        
-        setLoading: (loading: boolean) =>
-          set({ isLoading: loading }),
-        
-        setError: (error: string | null) =>
-          set({ error }),
-        
-        setSessionInitialized: (initialized: boolean) =>
-          set({ sessionInitialized: initialized }),
-        
-        // Repository actions
-        setSelectedRepository: (repository: SelectedRepository | null) =>
-          set({ selectedRepository: repository, repositoryError: null }),
-        
-        setAvailableRepositories: (repositories: GitHubRepository[]) =>
-          set({ availableRepositories: repositories }),
-        
-        setRepositoryLoading: (loading: boolean) =>
-          set({ isLoadingRepositories: loading }),
-        
-        setRepositoryError: (error: string | null) =>
-          set({ repositoryError: error }),
-        
-        // UI actions
-        setActiveTab: (tab: TabType) =>
-          set({ activeTab: tab }),
-        
-        setSidebarCollapsed: (collapsed: boolean) =>
-          set({ sidebarCollapsed: collapsed }),
-        
-        // Message actions
-        addMessage: (message: ChatMessageAPI) =>
+
+        setLoading: (loading: boolean) => set({ isLoading: loading }),
+        setError: (error: string | null) => set({ error: error }),
+        setSessionInitialized: (initialized: boolean) => set({ sessionInitialized: initialized }),
+        setActiveTab: (tab: TabType) => set({ activeTab: tab }),
+        setSidebarCollapsed: (collapsed: boolean) => set({ sidebarCollapsed: collapsed }),
+        setSessionLoadingEnabled: (enabled: boolean) => set({ sessionLoadingEnabled: enabled }),
+        updateSessionStats: (tokens: number) => {
           set((state) => ({
-            sessionData: {
-              ...state.sessionData,
-              messages: [...state.sessionData.messages, message],
-              totalTokens: state.sessionData.totalTokens + (message.tokens || 0),
-              lastUpdated: new Date(),
-            }
-          })),
-        
-        updateMessage: (messageId: string, updates: Partial<ChatMessageAPI>) =>
-          set((state) => ({
-            sessionData: {
-              ...state.sessionData,
-              messages: state.sessionData.messages.map(msg => 
-                msg.message_id === messageId ? { ...msg, ...updates } : msg
-              ),
-              lastUpdated: new Date(),
-            }
-          })),
-        
-        removeMessage: (messageId: string) =>
-          set((state) => ({
-            sessionData: {
-              ...state.sessionData,
-              messages: state.sessionData.messages.filter(msg => msg.message_id !== messageId),
-              lastUpdated: new Date(),
-            }
-          })),
-        
-        setMessages: (messages: ChatMessageAPI[]) =>
-          set((state) => ({
-            sessionData: {
-              ...state.sessionData,
-              messages,
-              totalTokens: messages.reduce((sum, msg) => sum + (msg.tokens || 0), 0),
-              lastUpdated: new Date(),
-            }
-          })),
-        
-        // Context card actions
-        addContextCard: (card: ContextCard) =>
-          set((state) => ({
-            sessionData: {
-              ...state.sessionData,
-              contextCards: [...state.sessionData.contextCards, card],
-              totalTokens: state.sessionData.totalTokens + card.tokens,
-              lastUpdated: new Date(),
-            }
-          })),
-        
-        removeContextCard: (cardId: string) =>
-          set((state) => {
-            const removedCard = state.sessionData.contextCards.find(c => c.id === cardId);
-            return {
-              sessionData: {
-                ...state.sessionData,
-                contextCards: state.sessionData.contextCards.filter(c => c.id !== cardId),
-                totalTokens: state.sessionData.totalTokens - (removedCard?.tokens || 0),
-                lastUpdated: new Date(),
-              }
+            totalTokens: state.totalTokens + tokens,
+            lastActivity: new Date()
+          }));
+        },
+        setConnectionStatus: (status: 'connected' | 'disconnected' | 'reconnecting') =>
+          set({ connectionStatus: status }),
+
+        // ============================================================================
+        // CHAT MESSAGE SENDING IMPLEMENTATION
+        // ============================================================================
+
+        sendChatMessage: async (message: string, contextCards?: string[], repository?: SelectedRepository) => {
+          const { activeSessionId, sessionToken } = get();
+
+          if (!activeSessionId || !sessionToken) {
+            throw new Error('No active session or session token available');
+          }
+
+          try {
+            set({ isLoadingMessages: true, messageError: null });
+
+            const chatRequest: ChatRequest = {
+              session_id: activeSessionId,
+              message: {
+                message_text: message,
+              },
+              context_cards: contextCards,
+              repository: repository ? {
+                owner: repository.repository.owner?.login || repository.repository.full_name.split('/')[0],
+                name: repository.repository.name,
+                branch: repository.branch,
+              } : undefined,
             };
-          }),
-        
-        setContextCards: (cards: ContextCard[]) =>
-          set((state) => ({
-            sessionData: {
-              ...state.sessionData,
-              contextCards: cards,
-              lastUpdated: new Date(),
-            }
-          })),
-        
-        // File context actions
-        addFileItem: (file: FileItem) =>
-          set((state) => ({
-            sessionData: {
-              ...state.sessionData,
-              fileContext: [...state.sessionData.fileContext, file],
-              totalTokens: state.sessionData.totalTokens + file.tokens,
-              lastUpdated: new Date(),
-            }
-          })),
-        
-        removeFileItem: (fileId: string) =>
-          set((state) => {
-            const removedFile = state.sessionData.fileContext.find(f => f.id === fileId);
-            return {
-              sessionData: {
-                ...state.sessionData,
-                fileContext: state.sessionData.fileContext.filter(f => f.id !== fileId),
-                totalTokens: state.sessionData.totalTokens - (removedFile?.tokens || 0),
-                lastUpdated: new Date(),
-              }
+
+            const response = await ApiService.sendChatMessage(chatRequest, sessionToken);
+
+            // Add the message to local state immediately
+            const newMessage = {
+              id: response.message_id ? parseInt(response.message_id) : Date.now(),
+              message_id: response.message_id || `msg_${Date.now()}`,
+              message_text: message,
+              sender_type: 'user' as const,
+              role: 'user' as const,
+              tokens: 0, // Will be updated when message is processed
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
             };
-          }),
-        
-        setFileContext: (files: FileItem[]) =>
-          set((state) => ({
-            sessionData: {
-              ...state.sessionData,
-              fileContext: files,
-              lastUpdated: new Date(),
-            }
-          })),
-        
-        updateSessionData: (data: Partial<SessionState['sessionData']>) =>
-          set((state) => ({
-            sessionData: {
-              ...state.sessionData,
-              ...data,
-              lastUpdated: new Date(),
-            }
-          })),
+
+            get().addMessage(newMessage);
+
+            set({ isLoadingMessages: false });
+            return response;
+          } catch (error) {
+            console.error('Failed to send chat message:', error);
+            set({
+              isLoadingMessages: false,
+              messageError: error instanceof Error ? error.message : 'Failed to send message'
+            });
+            return null;
+          }
+        },
+
+        // ============================================================================
+        // USER ISSUE CREATION IMPLEMENTATION
+        // ============================================================================
+
+        createIssueWithContext: async (request: CreateIssueWithContextRequest) => {
+          const { sessionToken } = get();
+
+          try {
+            set({ isLoadingIssues: true, issueError: null });
+
+            const response = await ApiService.createIssueWithContext(request, sessionToken || undefined);
+
+            set({ isLoadingIssues: false });
+            return response;
+          } catch (error) {
+            console.error('Failed to create issue with context:', error);
+            set({
+              isLoadingIssues: false,
+              issueError: error instanceof Error ? error.message : 'Failed to create issue'
+            });
+            return null;
+          }
+        },
+
+        // ============================================================================
+        // FILE DEPENDENCY EXTRACTION IMPLEMENTATION
+        // ============================================================================
+
+        extractFileDependenciesForSession: async (sessionId: string, repoUrl: string) => {
+          const { sessionToken } = get();
+
+          try {
+            set({ isLoadingFileContext: true, fileContextError: null });
+
+            await sessionApi.extractFileDependenciesForSession(sessionId, repoUrl, sessionToken || undefined);
+
+            set({ isLoadingFileContext: false });
+            return true;
+          } catch (error) {
+            console.error('Failed to extract file dependencies:', error);
+            set({
+              isLoadingFileContext: false,
+              fileContextError: error instanceof Error ? error.message : 'Failed to extract file dependencies'
+            });
+            return false;
+          }
+        },
+
+        // ============================================================================
+        // REPOSITORY BRANCH LOADING IMPLEMENTATION
+        // ============================================================================
+
+        loadRepositoryBranches: async (owner: string, repo: string) => {
+          const { sessionToken } = get();
+
+          try {
+            const branches = await ApiService.getRepositoryBranches(owner, repo, sessionToken || undefined);
+
+            // Transform API response to match frontend GitHubBranch type
+            const transformedBranches: GitHubBranch[] = branches.map(branch => ({
+              name: branch.name,
+              commit: branch.commit,
+              protected: false // API doesn't provide this, set default
+            }));
+
+            return transformedBranches;
+          } catch (error) {
+            console.error('Failed to load repository branches:', error);
+            throw error;
+          }
+        },
+
+        // ============================================================================
+        // GITHUB ISSUE CREATION IMPLEMENTATION
+        // ============================================================================
+
+        createGitHubIssueFromUserIssue: async (issueId: string) => {
+          const { sessionToken } = get();
+
+          try {
+            const response = await ApiService.createGitHubIssueFromUserIssue(issueId, sessionToken || undefined);
+            return response;
+          } catch (error) {
+            console.error('Failed to create GitHub issue from user issue:', error);
+            throw error;
+          }
+        },
       }),
       {
         name: 'session-storage',
-        // Only persist certain parts of the state
+        // Only persist certain parts of the state for security and performance
         partialize: (state) => ({
-          activeSessionId: state.activeSessionId,
-          selectedRepository: state.selectedRepository,
-          activeTab: state.activeTab,
-          sidebarCollapsed: state.sidebarCollapsed,
-          sessionInitialized: state.sessionInitialized,
-          // persist auth state
+          // Auth state - persist session token and user info
           user: state.user,
           sessionToken: state.sessionToken,
           isAuthenticated: state.isAuthenticated,
+
+          // Session state - persist session info but not full data
+          activeSessionId: state.activeSessionId,
+          currentSession: state.currentSession,
+          selectedRepository: state.selectedRepository,
+          sessionInitialized: state.sessionInitialized,
+
+          // UI preferences
+          activeTab: state.activeTab,
+          sidebarCollapsed: state.sidebarCollapsed,
+          sessionLoadingEnabled: state.sessionLoadingEnabled,
+
+          // Connection status
+          connectionStatus: state.connectionStatus,
         }),
       }
     ),

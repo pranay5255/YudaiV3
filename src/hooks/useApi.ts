@@ -1,10 +1,20 @@
+// DEPRECATED: This hook is being phased out in favor of unified sessionStore + useSessionQueries
+// All operations should now go through the session context via Zustand store
+//
+// Migration Guide:
+// - Auth operations: Use useAuth() hook from sessionStore
+// - Chat operations: Use useChatMessages() and related hooks
+// - Session operations: Use useSession() and session management hooks
+// - Repository operations: Use useRepository() hook
+// - All other operations: Use appropriate hooks from useSessionQueries.ts
+
 import { useCallback, useMemo } from 'react';
 import { ApiService } from '../services/api';
 import { sessionApi } from '../services/sessionApi';
 import { useAuth } from './useAuth';
 
 /**
- * Centralized API hook for consistent service access across components
+ * DEPRECATED: Centralized API hook - migrate to unified sessionStore methods
  * Provides authenticated API calls with automatic token management
  */
 export const useApi = () => {

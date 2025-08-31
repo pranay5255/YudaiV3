@@ -9,7 +9,7 @@ from datetime import datetime
 
 from db.database import get_db
 from auth.auth_utils import get_current_user
-from models import User, Issue, Repository, AISolveSession
+from models import User, Issue, AISolveSession
 from solver.ai_solver import AISolverAdapter
 from schemas.ai_solver import (
     SolveSessionOut, 
