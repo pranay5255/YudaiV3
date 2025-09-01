@@ -105,7 +105,7 @@ def build_daifu_prompt(
     ).strip()
     return prompt
 
-
+# Removed deprecated get_github_context function and imports
 # def get_github_context(github_context: str) -> str:
 #     from github.github_api import (
 #         get_repository_details,

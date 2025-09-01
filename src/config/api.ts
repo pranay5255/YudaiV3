@@ -89,3 +89,11 @@ export const CORS_CONFIG = {
     'https://www.yudai.app',
   ],
 } as const;
+
+export const API = {
+  AUTH,
+  SESSIONS,
+  // GITHUB,  // Removed as deprecated
+  ISSUES,
+  SOLVE,
+};

@@ -23,7 +23,7 @@ from daifuUserAgent.session_routes import router as session_router
 from db.database import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from github import github_router
+# from github import github_router  # Removed as deprecated
 
 # DEPRECATED: issue_router and solve_router have been consolidated into session_router
 # from issueChatServices import issue_router
@@ -101,7 +101,7 @@ app.add_middleware(
 # ============================================================================
 
 app.include_router(auth_router, prefix=APIRoutes.AUTH_PREFIX, tags=["authentication"])
-app.include_router(github_router, prefix=APIRoutes.GITHUB_PREFIX, tags=["github"])
+# app.include_router(github_router, prefix=APIRoutes.GITHUB_PREFIX, tags=["github"])  # Deprecated and removed
 app.include_router(session_router, prefix=APIRoutes.DAIFU_PREFIX, tags=["sessions"])
 
 # DEPRECATED: issue_router and solve_router have been consolidated into session_router
@@ -122,10 +122,6 @@ async def api_root():
             "authentication": {
                 "prefix": APIRoutes.AUTH_PREFIX,
                 "description": "GitHub OAuth authentication and user management"
-            },
-            "github": {
-                "prefix": APIRoutes.GITHUB_PREFIX,
-                "description": "GitHub API integration for repository operations"
             },
             "sessions": {
                 "prefix": APIRoutes.DAIFU_PREFIX,
