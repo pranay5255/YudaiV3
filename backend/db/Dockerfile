@@ -5,7 +5,8 @@ RUN apk add --no-cache git build-base postgresql-dev && \
     cd /tmp && \
     git clone https://github.com/pgvector/pgvector.git && \
     cd pgvector && \
-    make && \
+    # Disable LLVM bitcode compilation by setting NO_LLVM=1
+    make NO_LLVM=1 && \
     make install && \
     cd / && rm -rf /tmp/pgvector
 
