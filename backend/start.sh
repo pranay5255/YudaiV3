@@ -49,6 +49,16 @@ else
     exit 1
 fi
 
+# Validate API routes consistency
+echo "🔍 Validating API route configuration..."
+if python -c "from config.routes import APIRoutes; APIRoutes.validate_routes_on_startup()"; then
+    echo "✅ API route validation passed!"
+else
+    echo "❌ API route validation failed"
+    echo " This is a critical error. Application cannot start with inconsistent routes."
+    exit 1
+fi
+
 # Function to test database connectivity
 test_database_connection() {
     echo "🔍 Testing database connectivity..."

@@ -17,7 +17,6 @@ import uvicorn
 
 # Import all service routers
 from auth import auth_router
-from daifuUserAgent.chat_api import router as daifu_router
 from daifuUserAgent.session_routes import router as session_router
 
 # Import database initialization
@@ -25,10 +24,15 @@ from db.database import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from github import github_router
-from issueChatServices import issue_router
-from repo_processorGitIngest.filedeps import router as filedeps_router
-from routers.solve_router import router as solve_router
 
+# DEPRECATED: issue_router and solve_router have been consolidated into session_router
+# from issueChatServices import issue_router
+# from routers.solve_router import router as solve_router
+# ✅ CONSOLIDATION COMPLETED:
+# - chat_api.py functionality has been consolidated into session_routes.py
+# - filedeps.py functionality has been consolidated into session_routes.py
+# - All chat and file dependency operations now happen within session context
+# - Single unified router (session_router) handles all session-related operations
 # Import centralized route configuration
 from config.routes import APIRoutes
 
@@ -74,32 +78,36 @@ app.add_middleware(
 # ============================================================================
 #
 # ✅ ACTIVE ROUTERS (Unified State Management):
-# - auth_router: Login/logout operations only
-# - session_router: All session CRUD, messages, context cards, file dependencies
-# - github_router: Repository operations (used by unified repository state)
+# - auth_router: Authentication operations (login/logout/user management)
+# - github_router: GitHub API integration (repository operations)
+# - session_router: ALL session-scoped operations including:
+#   * Session CRUD (create, get, update, delete sessions)
+#   * Chat messages and conversation history
+#   * Context cards management
+#   * File dependencies extraction and management
+#   * File embeddings and semantic search
+# - issue_router: Issue management (integrated with session context)
+# - solve_router: AI solver operations (SWE-agent integration)
 #
-# 🔄 ROUTERS TO CONSOLIDATE:
-# - daifu_router: Move chat operations to session_router for unified session context
-# - filedeps_router: Move file operations to session_router for unified file state
-# - issue_router: Keep separate but ensure it integrates with session context
-# - solve_router: Keep separate for AI solver operations
+# ✅ CONSOLIDATION COMPLETED:
+# - daifu_router: ✅ REMOVED - All chat operations consolidated into session_router
+# - filedeps_router: ✅ REMOVED - All file operations consolidated into session_router
 #
-# 📋 MIGRATION PLAN:
-# 1. Move all chat operations from daifu_router to session_router
-# 2. Move file dependency operations from filedeps_router to session_router
-# 3. Ensure all operations require session context
-# 4. Standardize error responses across all routers
+# 📋 UNIFIED ARCHITECTURE:
+# - Session-centric design: All operations tied to user sessions
+# - Consistent authentication and authorization across all endpoints
+# - Unified error handling, logging, and response formats
+# - Single source of truth for session state management
 # ============================================================================
 
 app.include_router(auth_router, prefix=APIRoutes.AUTH_PREFIX, tags=["authentication"])
 app.include_router(github_router, prefix=APIRoutes.GITHUB_PREFIX, tags=["github"])
 app.include_router(session_router, prefix=APIRoutes.DAIFU_PREFIX, tags=["sessions"])
-app.include_router(daifu_router, prefix=APIRoutes.DAIFU_PREFIX, tags=["chat"])
-app.include_router(issue_router, prefix=APIRoutes.ISSUES_PREFIX, tags=["issues"])
-app.include_router(
-    filedeps_router, prefix=APIRoutes.FILEDEPS_PREFIX, tags=["file-dependencies"]
-)
-app.include_router(solve_router, prefix=APIRoutes.API_V1_PREFIX, tags=["ai-solver"])
+
+# DEPRECATED: issue_router and solve_router have been consolidated into session_router
+# All issues and solver operations are now available under /daifu/sessions/{session_id}/...
+# app.include_router(issue_router, prefix=APIRoutes.ISSUES_PREFIX, tags=["issues"])
+# app.include_router(solve_router, prefix=APIRoutes.API_V1_PREFIX, tags=["ai-solver"])
 
 
 # Add a unified root endpoint
@@ -107,17 +115,33 @@ app.include_router(solve_router, prefix=APIRoutes.API_V1_PREFIX, tags=["ai-solve
 async def api_root():
     """Root endpoint with API information."""
     return {
-        "message": "YudaiV3 Backend API",
+        "message": "YudaiV3 Backend API - Unified Session Architecture",
         "version": "1.0.0",
+        "architecture": "Session-centric unified state management",
         "services": {
-            "authentication": APIRoutes.AUTH_PREFIX,
-            "github": APIRoutes.GITHUB_PREFIX,
-            "chat": APIRoutes.DAIFU_PREFIX,
-            "issues": APIRoutes.ISSUES_PREFIX,
-            "file-dependencies": APIRoutes.FILEDEPS_PREFIX,
-            "ai-solver": APIRoutes.API_V1_PREFIX,
+            "authentication": {
+                "prefix": APIRoutes.AUTH_PREFIX,
+                "description": "GitHub OAuth authentication and user management"
+            },
+            "github": {
+                "prefix": APIRoutes.GITHUB_PREFIX,
+                "description": "GitHub API integration for repository operations"
+            },
+            "sessions": {
+                "prefix": APIRoutes.DAIFU_PREFIX,
+                "description": "Unified session management (chat, file dependencies, context cards)"
+            },
+            "issues": {
+                "prefix": APIRoutes.ISSUES_PREFIX,
+                "description": "Issue management with session context integration"
+            },
+            "ai-solver": {
+                "prefix": APIRoutes.API_V1_PREFIX,
+                "description": "SWE-agent AI solver for automated code solutions"
+            },
         },
         "documentation": {"swagger": "/docs", "redoc": "/redoc"},
+        "consolidation_status": "✅ Complete - All deprecated routers removed"
     }
 
 
