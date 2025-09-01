@@ -24,6 +24,7 @@ dependencies = [
     "ruff>=0.12.7",
     "pyjwt>=2.10.1",
     "cryptography>=45.0.5",
+    "pgvector>=0.4.1",
 ]
 
 [project.optional-dependencies]

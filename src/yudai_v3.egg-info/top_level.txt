@@ -1,4 +1,5 @@
 components
+config
 hooks
 services
 stores
