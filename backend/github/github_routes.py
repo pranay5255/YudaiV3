@@ -1,4 +1,4 @@
- #!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 GitHub API Routes
 
@@ -27,39 +27,41 @@ from .github_api import (
 
 router = APIRouter(tags=["github"])
 
-@router.get("/repositories", response_model=List[GitHubRepo])
-async def get_my_repositories(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Get all repositories for the authenticated user from GitHub
-    """
-    try:
-        return await get_user_repositories(current_user, db)
-    except GitHubAPIError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+# Deprecated: Unused by frontend, to be migrated to /daifu session pattern
+# @router.get("/repositories", response_model=List[GitHubRepo])
+# async def get_my_repositories(
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Get all repositories for the authenticated user from GitHub
+#     """
+#     try:
+#         return await get_user_repositories(current_user, db)
+#     except GitHubAPIError as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail=str(e)
+#         )
 
-@router.get("/repositories/{owner}/{repo}", response_model=GitHubRepo)
-async def get_repository_info(
-    owner: str,
-    repo: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Get detailed information about a specific repository
-    """
-    try:
-        return await get_repository_details(owner, repo, current_user, db)
-    except GitHubAPIError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+# Deprecated: Unused by frontend, to be migrated to /daifu session pattern
+# @router.get("/repositories/{owner}/{repo}", response_model=GitHubRepo)
+# async def get_repository_info(
+#     owner: str,
+#     repo: str,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Get detailed information about a specific repository
+#     """
+#     try:
+#         return await get_repository_details(owner, repo, current_user, db)
+#     except GitHubAPIError as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail=str(e)
+#         )
 
 # @router.post("/repositories/{owner}/{repo}/issues", response_model=GitHubIssue)
 # async def create_repository_issue(
@@ -146,23 +148,24 @@ async def get_repository_info(
 #             detail=str(e)
 #         )
 
-@router.get("/repositories/{owner}/{repo}/branches", response_model=List[GitHubBranch])
-async def get_repository_branches_list(
-    owner: str,
-    repo: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Get branches for a repository
-    """
-    try:
-        return await get_repository_branches(owner, repo, current_user, db)
-    except GitHubAPIError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+# Deprecated: Unused by frontend, to be migrated to /daifu session pattern
+# @router.get("/repositories/{owner}/{repo}/branches", response_model=List[GitHubBranch])
+# async def get_repository_branches_list(
+#     owner: str,
+#     repo: str,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Get branches for a repository
+#     """
+#     try:
+#         return await get_repository_branches(owner, repo, current_user, db)
+#     except GitHubAPIError as e:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail=str(e)
+#         )
 
 # @router.get("/search/repositories", response_model=GitHubSearchResponse)
 # async def search_github_repositories(

@@ -14,7 +14,7 @@ class APIRoutes:
 
     # Base prefixes - These match nginx routing patterns
     AUTH_PREFIX = "/auth"
-    GITHUB_PREFIX = "/github"
+    # GITHUB_PREFIX = "/github"  # Removed as deprecated
     DAIFU_PREFIX = "/daifu"  # Unified: sessions, chat, file dependencies
     ISSUES_PREFIX = "/issues"
     # FILEDEPS_PREFIX = "/filedeps"  # DEPRECATED: moved to DAIFU_PREFIX
@@ -26,10 +26,10 @@ class APIRoutes:
     AUTH_USER = f"{AUTH_PREFIX}/api/user"
     AUTH_LOGOUT = f"{AUTH_PREFIX}/api/logout"
 
-    # GitHub integration routes
-    GITHUB_REPOS = f"{GITHUB_PREFIX}/repositories"
-    GITHUB_REPO_BRANCHES = f"{GITHUB_PREFIX}/repositories/{{owner}}/{{repo}}/branches"
-    GITHUB_USER_REPOS = f"{GITHUB_PREFIX}/repositories"
+    # GitHub integration routes - DEPRECATED and removed
+    # GITHUB_REPOS = f"{GITHUB_PREFIX}/repositories"
+    # GITHUB_REPO_BRANCHES = f"{GITHUB_PREFIX}/repositories/{{owner}}/{{repo}}/branches"
+    # GITHUB_USER_REPOS = f"{GITHUB_PREFIX}/repositories"
 
     # DAIFU (Chat) routes - UNIFIED SESSION ROUTES
     DAIFU_CHAT = f"{DAIFU_PREFIX}/chat"
@@ -65,7 +65,7 @@ class APIRoutes:
         """Get all router prefixes for mounting in FastAPI"""
         return {
             "auth": cls.AUTH_PREFIX,
-            "github": cls.GITHUB_PREFIX,
+            # "github": cls.GITHUB_PREFIX,  # Removed as deprecated
             "sessions": cls.DAIFU_PREFIX,  # UNIFIED: sessions, chat, file dependencies, issues, solver
             # DEPRECATED: Separate routers consolidated into sessions
             # "issues": cls.ISSUES_PREFIX,
@@ -94,9 +94,10 @@ class APIRoutes:
             (cls.AUTH_CALLBACK, cls.AUTH_PREFIX, "AUTH_CALLBACK"),
             (cls.AUTH_USER, cls.AUTH_PREFIX, "AUTH_USER"),
             (cls.AUTH_LOGOUT, cls.AUTH_PREFIX, "AUTH_LOGOUT"),
-            (cls.GITHUB_REPOS, cls.GITHUB_PREFIX, "GITHUB_REPOS"),
-            (cls.GITHUB_REPO_BRANCHES, cls.GITHUB_PREFIX, "GITHUB_REPO_BRANCHES"),
-            (cls.GITHUB_USER_REPOS, cls.GITHUB_PREFIX, "GITHUB_USER_REPOS"),
+            # Removed deprecated GitHub checks
+            # (cls.GITHUB_REPOS, cls.GITHUB_PREFIX, "GITHUB_REPOS"),
+            # (cls.GITHUB_REPO_BRANCHES, cls.GITHUB_PREFIX, "GITHUB_REPO_BRANCHES"),
+            # (cls.GITHUB_USER_REPOS, cls.GITHUB_PREFIX, "GITHUB_USER_REPOS"),
             (cls.DAIFU_CHAT, cls.DAIFU_PREFIX, "DAIFU_CHAT"),
             (cls.DAIFU_SESSIONS, cls.DAIFU_PREFIX, "DAIFU_SESSIONS"),
             # Session-based consolidated routes
@@ -167,11 +168,12 @@ AUTH_ROUTES = {
     "logout": APIRoutes.AUTH_LOGOUT,
 }
 
-GITHUB_ROUTES = {
-    "repos": APIRoutes.GITHUB_REPOS,
-    "repo_branches": APIRoutes.GITHUB_REPO_BRANCHES,
-    "user_repos": APIRoutes.GITHUB_USER_REPOS,
-}
+# Removed deprecated GITHUB_ROUTES
+# GITHUB_ROUTES = {  # DEPRECATED and removed
+#     "repos": APIRoutes.GITHUB_REPOS,
+#     "repo_branches": APIRoutes.GITHUB_REPO_BRANCHES,
+#     "user_repos": APIRoutes.GITHUB_USER_REPOS,
+# }
 
 DAIFU_ROUTES = {
     "chat": APIRoutes.DAIFU_CHAT,
