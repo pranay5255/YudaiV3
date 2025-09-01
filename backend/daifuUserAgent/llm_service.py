@@ -9,6 +9,10 @@ from typing import List, Tuple
 
 import requests
 from fastapi import HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from pgvector.sqlalchemy import Vector
+from .models import FileEmbedding
 
 
 class LLMService:
@@ -132,6 +136,41 @@ class LLMService:
             )
     
     @staticmethod
+    @staticmethod
+    async def get_relevant_file_contexts(
+        db: Session,
+        session_id: int,
+        query_text: str,
+        top_k: int = 5,
+        model: str = "openai/text-embedding-ada-002"
+    ) -> List[str]:
+        """
+        Retrieve relevant file chunk texts using embedding similarity search.
+        
+        Args:
+            db: Database session
+            session_id: Session ID to scope the search
+            query_text: Text to embed and search against
+            top_k: Number of top results to return
+            model: Embedding model to use
+        
+        Returns:
+            List of relevant chunk texts
+        """
+        # Generate embedding for query
+        query_embedding = await LLMService.embed_text(query_text, model=model)
+        
+        # Query for top similar embeddings
+        stmt = (
+            select(FileEmbedding.chunk_text)
+            .where(FileEmbedding.session_id == session_id)
+            .order_by(FileEmbedding.embedding.cosine_distance(Vector(query_embedding)))
+            .limit(top_k)
+        )
+        
+        results = db.execute(stmt).scalars().all()
+        return results
+
     async def generate_response_with_history(
         repo_context: str,
         conversation_history: List[Tuple[str, str]],
@@ -163,3 +202,62 @@ class LLMService:
             max_tokens=max_tokens,
             timeout=timeout
         ) 
+    
+    @staticmethod
+    async def embed_text(
+        text: str,
+        model: str = "openai/text-embedding-ada-002",
+        timeout: int = None
+    ) -> List[float]:
+        """
+        Generate embedding for text using OpenRouter embeddings API
+        
+        Args:
+            text: Text to embed
+            model: Embedding model to use (defaults to text-embedding-ada-002)
+            timeout: Request timeout in seconds
+        
+        Returns:
+            Embedding vector as list of floats
+        
+        Raises:
+            HTTPException: For API errors
+        """
+        timeout = timeout or LLMService.DEFAULT_TIMEOUT
+        
+        try:
+            api_key = LLMService.get_api_key()
+            
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            
+            body = {
+                "model": model,
+                "input": text,
+            }
+            
+            resp = requests.post(
+                "https://openrouter.ai/api/v1/embeddings",
+                headers=headers,
+                json=body,
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            
+            response_data = resp.json()
+            embedding = response_data["data"][0]["embedding"]
+            
+            return embedding
+            
+        except requests.RequestException as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Embedding service unavailable: {str(e)}",
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Embedding generation failed: {str(e)}",
+            )

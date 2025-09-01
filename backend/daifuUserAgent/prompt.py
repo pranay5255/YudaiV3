@@ -40,7 +40,8 @@ def build_daifu_prompt(
     commits: List[Dict[str, Any]],
     issues: List[Dict[str, Any]],
     pulls: List[Dict[str, Any]],
-    conversation: List[Tuple[str, str]]
+    conversation: List[Tuple[str, str]],
+    file_contexts: List[str] = None
 ) -> str:
     """Return the complete prompt string for DAifu."""
     # Format repository details
@@ -80,6 +81,11 @@ def build_daifu_prompt(
             f"- #{p['number']}: {p['title']} (by {p['user'].get('login','?')})\n"
         )
 
+    # Format file contexts if provided
+    file_contexts_str = ""
+    if file_contexts:
+        file_contexts_str = "Relevant File Contexts:\n" + "\n".join(file_contexts)
+
     # Format conversation
     convo_formatted = "\n".join(f"{speaker}: {utterance}" for speaker, utterance in conversation)
 
@@ -94,6 +100,10 @@ def build_daifu_prompt(
         {issues_str}
         {pulls_str}
         </GITHUB_CONTEXT_END>
+
+        <FILE_CONTEXTS_BEGIN>
+        {file_contexts_str}
+        </FILE_CONTEXTS_END>
 
         <CONVERSATION_BEGIN>
         {convo_formatted}

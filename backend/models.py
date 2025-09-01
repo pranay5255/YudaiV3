@@ -280,12 +280,7 @@ class Repository(Base):
     commits: Mapped[List["Commit"]] = relationship(
         back_populates="repository", cascade="all, delete-orphan"
     )
-    file_items: Mapped[List["FileItem"]] = relationship(
-        back_populates="repository", cascade="all, delete-orphan"
-    )
-    file_analyses: Mapped[List["FileAnalysis"]] = relationship(
-        back_populates="repository", cascade="all, delete-orphan"
-    )
+
 
 
 class Issue(Base):
@@ -382,95 +377,10 @@ class Commit(Base):
     repository: Mapped["Repository"] = relationship(back_populates="commits")
 
 
-# DEPRECATED: FileItem is being consolidated into FileEmbedding for unified file handling
-# FileItem is no longer used - all file operations now go through FileEmbedding
-# TODO: Remove this model after migration is complete
-class FileItem(Base):
-    """DEPRECATED: Individual file items from repository analysis - migrate to FileEmbedding"""
-
-    __tablename__ = "file_items"
-
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    repository_id: Mapped[int] = mapped_column(
-        ForeignKey("repositories.id"), nullable=False
-    )
-
-    # File metadata
-    name: Mapped[str] = mapped_column(String(500), nullable=False)
-    path: Mapped[str] = mapped_column(String(1000), nullable=False)
-    file_type: Mapped[str] = mapped_column(
-        String(50), nullable=False
-    )  # INTERNAL, EXTERNAL
-    category: Mapped[str] = mapped_column(String(100), nullable=False)
-    tokens: Mapped[int] = mapped_column(Integer, default=0)
-
-    # Tree structure
-    is_directory: Mapped[bool] = mapped_column(Boolean, default=False)
-    parent_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("file_items.id"), nullable=True
-    )
-
-    # File content (optional)
-    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    content_size: Mapped[int] = mapped_column(Integer, default=0)
-
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now()
-    )
-
-    # Relationships
-    repository: Mapped["Repository"] = relationship(back_populates="file_items")
-    children: Mapped[List["FileItem"]] = relationship(
-        back_populates="parent", cascade="all, delete-orphan"
-    )
-    parent: Mapped[Optional["FileItem"]] = relationship(
-        remote_side=[id], back_populates="children"
-    )
 
 
-# DEPRECATED: FileAnalysis is being consolidated into repository metadata
-# File analysis data should be stored in Repository model or removed
-# TODO: Remove this model after migration is complete
-class FileAnalysis(Base):
-    """DEPRECATED: File analysis results - migrate metadata to Repository model"""
 
-    __tablename__ = "file_analyses"
 
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    repository_id: Mapped[int] = mapped_column(
-        ForeignKey("repositories.id"), nullable=False
-    )
-
-    # Analysis data
-    raw_data: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
-    processed_data: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
-    total_files: Mapped[int] = mapped_column(Integer, default=0)
-    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    max_file_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-
-    # Status and metadata
-    status: Mapped[str] = mapped_column(
-        String(50), default="pending"
-    )  # pending, processing, completed, failed
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now()
-    )
-    processed_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-
-    # Relationships
-    repository: Mapped["Repository"] = relationship(back_populates="file_analyses")
 
 
 class ChatSession(Base):
@@ -1086,34 +996,6 @@ class CLICommandInput(BaseModel):
         return v.strip()
 
 
-# File Dependencies Models
-class FileItemResponse(BaseModel):
-    id: str = Field(...)
-    name: str = Field(...)
-    type: Literal["INTERNAL", "EXTERNAL"] = Field(...)
-    tokens: int = Field(..., ge=0)
-    Category: str = Field(...)
-    isDirectory: Optional[bool] = Field(default=False)
-    children: Optional[List["FileItemResponse"]] = Field(default=None)
-    expanded: Optional[bool] = Field(default=False)
-
-
-# Allow recursive FileItem definition
-FileItemResponse.model_rebuild()
-
-
-# Session File Dependencies Response (for frontend display)
-class SessionFileDependencyResponse(BaseModel):
-    id: int
-    file_name: str
-    file_path: str
-    file_type: str
-    tokens: int
-    category: Optional[str] = None
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
 
 class RepositoryRequest(BaseModel):
     repo_url: str = Field(..., min_length=1)
@@ -1444,32 +1326,6 @@ class RepositoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class FileAnalysisResponse(BaseModel):
-    id: int = Field(...)
-    repository_id: int = Field(..., alias="repositoryId")
-    total_files: int = Field(...)
-    total_tokens: int = Field(...)
-    max_file_size: Optional[int] = Field(None, alias="maxFileSize")
-    status: str = Field(...)
-    processed_at: datetime = Field(..., alias="processedAt")
-    created_at: datetime = Field(..., alias="createdAt")
-    updated_at: Optional[datetime] = Field(None, alias="updatedAt")
-
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-
-
-class FileItemDBResponse(BaseModel):
-    id: int = Field(...)
-    name: str = Field(...)
-    path: str = Field(...)
-    file_type: str = Field(...)
-    category: str = Field(...)
-    tokens: int = Field(...)
-    is_directory: bool = Field(...)
-    content_size: int = Field(...)
-    created_at: datetime = Field(...)
-
-    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================

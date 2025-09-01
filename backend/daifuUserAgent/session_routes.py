@@ -34,10 +34,8 @@ from models import (
     ContextCardResponse,
     CreateContextCardRequest,
     CreateSessionRequest,
-    FileAnalysis,
     FileEmbedding,
     FileEmbeddingResponse,
-    FileItem,
     FileItemResponse,
     Repository,
     RepositoryRequest,
@@ -51,6 +49,8 @@ from repo_processorGitIngest.scraper_script import (
     extract_repository_data,
 )
 from sqlalchemy.orm import Session
+import asyncio
+from pgvector.sqlalchemy import Vector
 
 router = APIRouter(tags=["sessions"])
 
@@ -677,11 +677,19 @@ async def chat_in_session(
         # Get conversation history for context
         history = _get_conversation_history(session_id, 50, db)
 
-        # Generate AI response
+        # Get relevant file contexts for the user message
+        file_contexts = await LLMService.get_relevant_file_contexts(
+            db=db,
+            session_id=db_session.id,
+            query_text=user_message
+        )
+
+        # Generate AI response with file contexts
         reply = await LLMService.generate_response_with_history(
             repo_context=github_context,
             conversation_history=history,
-            github_data=github_data
+            github_data=github_data,
+            file_contexts=file_contexts
         )
 
         # Add assistant response to conversation history
@@ -948,10 +956,10 @@ async def extract_file_dependencies_for_session(
             )
 
             # Save file items and create embeddings linked to session
-            saved_items = _save_file_items_to_db_with_session(
-                db, repository.id, file_tree, db_session.id
-            )
-            print(f"Saved {len(saved_items)} file items with embeddings")
+            saved_embeddings = _save_file_embeddings_to_db_with_session(
+        db, repository.id, file_tree, db_session.id
+    )
+            print(f"Saved {len(saved_embeddings)} file embeddings")
 
         except Exception as db_error:
             print(f"Database error during save: {db_error}")
@@ -1088,53 +1096,37 @@ def _save_file_analysis_to_db(
     return analysis
 
 
-def _save_file_items_to_db_with_session(
+def _save_file_embeddings_to_db_with_session(
     db: Session, repository_id: int, file_tree: List[Dict[str, Any]], session_id: int
-) -> List[FileItem]:
-    """Save file items to database and create embeddings linked to session."""
-    saved_items = []
+) -> List[FileEmbedding]:
+    """Create file embeddings in database linked to session, skipping deprecated FileItem."""
+    saved_embeddings = []
 
-    def save_recursive(items: List[Dict[str, Any]], parent_id: Optional[int] = None):
+    def save_recursive(items: List[Dict[str, Any]]):
         for item_data in items:
-            # Create FileItem
-            file_item = FileItem(
-                repository_id=repository_id,
-                name=item_data["name"],
-                path=item_data["path"],
-                file_type=item_data["type"],
-                category=item_data["Category"],
-                tokens=item_data["tokens"],
-                is_directory=item_data["isDirectory"],
-                parent_id=parent_id,
-                content=item_data.get("content", ""),
-                content_size=len(item_data.get("content", "")),
-            )
-            db.add(file_item)
-            db.flush()
-
-            saved_items.append(file_item)
-
             # If it's a file (not directory), create embeddings linked to session
             if not item_data["isDirectory"] and item_data.get("content"):
-                _create_file_embeddings_for_session(
-                    db, session_id, repository_id, file_item, item_data["content"]
+                embeddings = _create_file_embeddings_for_session(
+                    db, session_id, repository_id, item_data, item_data["content"]
                 )
+                saved_embeddings.extend(embeddings)
 
-            # Recursively save children if it's a directory
+            # Recursively process children if it's a directory
             if item_data["isDirectory"] and "children" in item_data:
-                save_recursive(item_data["children"], file_item.id)
+                save_recursive(item_data["children"])
 
     save_recursive(file_tree)
-    return saved_items
+    return saved_embeddings
 
 
 def _create_file_embeddings_for_session(
     db: Session,
     session_id: int,
     repository_id: int,
-    file_item: FileItem,
+    item_data: Dict[str, Any],
     content: str
-):
+) -> List[FileEmbedding]: 
+    saved_embeddings = []
     """Create file embeddings linked to session for semantic search."""
     from utils.chunking import create_file_chunker
 
@@ -1144,24 +1136,29 @@ def _create_file_embeddings_for_session(
         chunks = chunker.chunk_text(content, file_item.path)
 
         for i, chunk in enumerate(chunks):
+            embedding_vector = asyncio.run(LLMService.embed_text(chunk))
+
             # Create embedding for this chunk
             embedding = FileEmbedding(
                 session_id=session_id,
                 repository_id=repository_id,
-                file_path=file_item.path,
-                file_name=file_item.name,
-                file_type=file_item.file_type,
+                file_path=item_data["path"],
+                file_name=item_data["name"],
+                file_type=item_data["type"],
                 chunk_index=i,
                 chunk_text=chunk,
-                tokens=_estimate_tokens_for_file(file_item.path, len(chunk)),
+                embedding=Vector(embedding_vector),
+                tokens=_estimate_tokens_for_file(item_data["path"], len(chunk)),
                 file_metadata=json.dumps({
-                    "category": file_item.category,
-                    "content_size": file_item.content_size,
+                    "category": item_data["Category"],
+                    "content_size": len(content),
                 }),
             )
             db.add(embedding)
 
         db.flush()
+        saved_embeddings.append(embedding)
+    return saved_embeddings
     except Exception as e:
         print(f"Error creating embeddings for {file_item.path}: {e}")
         # Don't fail the entire operation if embedding creation fails
