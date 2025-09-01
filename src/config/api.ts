@@ -19,31 +19,54 @@ export const API_CONFIG = {
     REPO_BRANCHES: '/github/repositories/{owner}/{repo}/branches',
     USER_REPOS: '/github/repositories',
   },
-  DAIFU: {
-    CHAT: '/daifu/chat',
-    SESSIONS: '/daifu',
+  SESSIONS: {
+    BASE: '/daifu/sessions',
+    DETAIL: '/daifu/sessions/{sessionId}',
+    MESSAGES: '/daifu/sessions/{sessionId}/messages',
+    CHAT: '/daifu/sessions/{sessionId}/chat',
+    CONTEXT_CARDS: '/daifu/sessions/{sessionId}/context-cards',
+    CONTEXT_CARD_DETAIL: '/daifu/sessions/{sessionId}/context-cards/{cardId}',
+    FILE_DEPS_SESSION: '/daifu/sessions/{sessionId}/file-deps/session',
+    EXTRACT: '/daifu/sessions/{sessionId}/extract',
+    // Consolidated Issues endpoints within sessions context
+    ISSUES: {
+      CREATE_WITH_CONTEXT: '/daifu/sessions/{sessionId}/issues/create-with-context',
+      GET_ISSUES: '/daifu/sessions/{sessionId}/issues',
+      CREATE_GITHUB_ISSUE: '/daifu/sessions/{sessionId}/issues/{issueId}/create-github-issue',
+      ISSUE_DETAIL: '/daifu/sessions/{sessionId}/issues/{issueId}',
+      UPDATE_STATUS: '/daifu/sessions/{sessionId}/issues/{issueId}/status',
+    },
+    // Consolidated Solver endpoints within sessions context
+    SOLVER: {
+      START_SOLVE: '/daifu/sessions/{sessionId}/solve/start',
+      SOLVE_SESSION_DETAIL: '/daifu/sessions/{sessionId}/solve/sessions/{solveSessionId}',
+      SOLVE_SESSION_STATS: '/daifu/sessions/{sessionId}/solve/sessions/{solveSessionId}/stats',
+      CANCEL_SOLVE: '/daifu/sessions/{sessionId}/solve/sessions/{solveSessionId}/cancel',
+      LIST_SOLVE_SESSIONS: '/daifu/sessions/{sessionId}/solve/sessions',
+      SOLVER_HEALTH: '/daifu/sessions/{sessionId}/solve/health',
+    },
   },
-  ISSUES: {
-    CREATE_WITH_CONTEXT: '/issues/from-session-enhanced',
-    GET_ISSUES: '/issues',
-    CREATE_GITHUB_ISSUE: '/issues/{issueId}/create-github-issue',
-  },
-  FILEDEPS: {
-    EXTRACT: '/filedeps/extract',
-  },
-  SOLVER: {
-    SOLVE: '/api/v1/solve',
-  },
+  // ISSUES section removed - now consolidated under SESSIONS
+  // SOLVER section removed - now consolidated under SESSIONS
 } as const;
 
 // Type-safe API URL builder
-export const buildApiUrl = (endpoint: string, params?: Record<string, string>): string => {
+export const buildApiUrl = (endpoint: string, pathParams?: Record<string, string>, queryParams?: Record<string, string>): string => {
   let url = `${API_CONFIG.BASE_URL}${endpoint}`;
 
-  if (params) {
-    Object.entries(params).forEach(([key, value]) => {
+  // Replace path parameters
+  if (pathParams) {
+    Object.entries(pathParams).forEach(([key, value]) => {
       url = url.replace(`{${key}}`, value);
     });
+  }
+
+  // Add query parameters
+  if (queryParams) {
+    const queryString = new URLSearchParams(queryParams).toString();
+    if (queryString) {
+      url += `?${queryString}`;
+    }
   }
 
   return url;

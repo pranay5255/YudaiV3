@@ -22,8 +22,7 @@ import {
   ChatResponse,
   CreateGitHubIssueResponse
 } from '../types/sessionTypes';
-import { ApiService } from '../services/api';
-import { sessionApi } from '../services/sessionApi';
+import { API_CONFIG, buildApiUrl } from '../config/api';
 
 // Helper function to safely retrieve session token from localStorage
 const getStoredSessionToken = (): string | null => {
@@ -33,6 +32,31 @@ const getStoredSessionToken = (): string | null => {
     console.warn('Failed to access localStorage:', error);
     return null;
   }
+};
+
+// Helper function to get auth headers
+const getAuthHeaders = (sessionToken?: string): HeadersInit => {
+  const headers: HeadersInit = { 'Content-Type': 'application/json' };
+  const token = sessionToken || getStoredSessionToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+};
+
+// Helper function to handle API responses
+const handleApiResponse = async <T>(response: Response): Promise<T> => {
+  if (!response.ok) {
+    let errorMessage = `HTTP error! status: ${response.status}`;
+    try {
+      const errorData = await response.json();
+      errorMessage = errorData.detail || errorData.message || errorMessage;
+    } catch {
+      // ignore parse errors
+    }
+    throw new Error(errorMessage);
+  }
+  return response.json() as Promise<T>;
 };
 
 // Unified Session State Interface - matches backend models perfectly
@@ -319,9 +343,21 @@ export const useSessionStore = create<SessionState>()(
             if (storedSessionToken) {
               console.log('[SessionStore] Found stored session token, validating...');
               try {
-                const userData = await ApiService.validateSessionToken(storedSessionToken);
+                const userData = await handleApiResponse<{
+                  id: string;
+                  github_username: string;
+                  github_id: string;
+                  email: string;
+                  display_name: string;
+                  avatar_url: string;
+                }>(
+                  await fetch(buildApiUrl(API_CONFIG.AUTH.USER), {
+                    method: 'GET',
+                    headers: getAuthHeaders(storedSessionToken),
+                  })
+                );
                 const user: User = {
-                  id: userData.id,
+                  id: parseInt(userData.id),
                   github_username: userData.github_username,
                   github_user_id: userData.github_id,
                   email: userData.email,
@@ -384,7 +420,12 @@ export const useSessionStore = create<SessionState>()(
         login: async () => {
           try {
             set({ authLoading: true, authError: null });
-            const { login_url } = await ApiService.getLoginUrl();
+            const { login_url } = await handleApiResponse<{ login_url: string }>(
+              await fetch(buildApiUrl(API_CONFIG.AUTH.LOGIN), {
+                method: 'GET',
+                headers: getAuthHeaders(),
+              })
+            );
             window.location.href = login_url;
           } catch (error) {
             console.error('Login failed:', error);
@@ -397,7 +438,13 @@ export const useSessionStore = create<SessionState>()(
           try {
             const { sessionToken } = get();
             if (sessionToken) {
-              await ApiService.logout(sessionToken);
+              await handleApiResponse<{ success: boolean }>(
+                await fetch(buildApiUrl(API_CONFIG.AUTH.LOGOUT), {
+                  method: 'POST',
+                  headers: getAuthHeaders(sessionToken),
+                  body: JSON.stringify({ session_token: sessionToken }),
+                })
+              );
             }
           } catch (error) {
             console.warn('Logout API call failed:', error);
@@ -471,14 +518,17 @@ export const useSessionStore = create<SessionState>()(
             const repoOwner = repository.repository.owner?.login || repository.repository.full_name.split('/')[0];
             const repoName = repository.repository.name;
 
-            const sessionData = await sessionApi.createSession(
-              {
-                repo_owner: repoOwner,
-                repo_name: repoName,
-                repo_branch: repository.branch,
-                title: `Chat - ${repoOwner}/${repoName}`,
-              },
-              sessionToken
+            const sessionData = await handleApiResponse<Session>(
+              await fetch(buildApiUrl(API_CONFIG.SESSIONS.BASE), {
+                method: 'POST',
+                headers: getAuthHeaders(sessionToken),
+                body: JSON.stringify({
+                  repo_owner: repoOwner,
+                  repo_name: repoName,
+                  repo_branch: repository.branch,
+                  title: `Chat - ${repoOwner}/${repoName}`,
+                }),
+              })
             );
 
             set({
@@ -512,7 +562,12 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoading: true, error: null });
 
-            const context = await sessionApi.getSessionContext(sessionId, sessionToken);
+            const context = await handleApiResponse<SessionContext>(
+              await fetch(buildApiUrl(API_CONFIG.SESSIONS.DETAIL, { sessionId }), {
+                method: 'GET',
+                headers: getAuthHeaders(sessionToken),
+              })
+            );
 
             // Update all session state from context
             set({
@@ -562,7 +617,12 @@ export const useSessionStore = create<SessionState>()(
               return false;
             }
 
-            await sessionApi.getSessionContext(sessionId, sessionToken);
+            await handleApiResponse<SessionContext>(
+              await fetch(buildApiUrl(API_CONFIG.SESSIONS.DETAIL, { sessionId }), {
+                method: 'GET',
+                headers: getAuthHeaders(sessionToken),
+              })
+            );
 
             set({
               activeSessionId: sessionId,
@@ -606,7 +666,12 @@ export const useSessionStore = create<SessionState>()(
           console.log(`[SessionStore] Validating persisted session: ${activeSessionId}`);
 
           try {
-            await sessionApi.getSessionContext(activeSessionId, sessionToken);
+            await handleApiResponse<SessionContext>(
+              await fetch(buildApiUrl(API_CONFIG.SESSIONS.DETAIL, { sessionId: activeSessionId }), {
+                method: 'GET',
+                headers: getAuthHeaders(sessionToken),
+              })
+            );
             console.log(`[SessionStore] Persisted session ${activeSessionId} is valid`);
 
             set({
@@ -638,7 +703,12 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingRepositories: true, repositoryError: null });
 
-            const repositories = await ApiService.getUserRepositories(sessionToken || undefined);
+            const repositories = await handleApiResponse<GitHubRepository[]>(
+              await fetch(buildApiUrl(API_CONFIG.GITHUB.USER_REPOS), {
+                method: 'GET',
+                headers: getAuthHeaders(sessionToken || ''),
+              })
+            );
 
             set({
               availableRepositories: repositories,
@@ -696,7 +766,12 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingMessages: true, messageError: null });
 
-            const messages = await sessionApi.getChatMessages(sessionId, 100, sessionToken || undefined);
+            const messages = await handleApiResponse<ChatMessage[]>(
+              await fetch(buildApiUrl(API_CONFIG.SESSIONS.MESSAGES, { sessionId }, { limit: '100' }), {
+                method: 'GET',
+                headers: getAuthHeaders(sessionToken || ''),
+              })
+            );
 
             set({
               messages,
@@ -734,7 +809,13 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingContextCards: true, contextCardError: null });
 
-            const newCard = await sessionApi.addContextCard(activeSessionId, card, sessionToken);
+            const newCard = await handleApiResponse<ContextCard>(
+              await fetch(buildApiUrl(API_CONFIG.SESSIONS.CONTEXT_CARDS, { sessionId: activeSessionId }), {
+                method: 'POST',
+                headers: getAuthHeaders(sessionToken),
+                body: JSON.stringify(card),
+              })
+            );
 
             set((state) => ({
               contextCards: [...state.contextCards, {
@@ -776,7 +857,12 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingContextCards: true, contextCardError: null });
 
-            await sessionApi.deleteContextCard(activeSessionId, parseInt(cardId), sessionToken);
+            await handleApiResponse<{ success: boolean; message: string }>(
+              await fetch(buildApiUrl(API_CONFIG.SESSIONS.CONTEXT_CARD_DETAIL, { sessionId: activeSessionId, cardId }), {
+                method: 'DELETE',
+                headers: getAuthHeaders(sessionToken),
+              })
+            );
 
             set((state) => {
               const cardToRemove = state.contextCards.find(c => c.id === cardId);
@@ -805,7 +891,12 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingContextCards: true, contextCardError: null });
 
-            const cards = await sessionApi.getContextCards(sessionId, sessionToken || undefined);
+            const cards = await handleApiResponse<ContextCard[]>(
+              await fetch(buildApiUrl(API_CONFIG.SESSIONS.CONTEXT_CARDS, { sessionId }), {
+                method: 'GET',
+                headers: getAuthHeaders(sessionToken || ''),
+              })
+            );
 
             const transformedCards: ContextCard[] = cards.map(card => ({
               id: card.id.toString(),
@@ -869,7 +960,12 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingFileContext: true, fileContextError: null });
 
-            const deps = await sessionApi.getFileDependenciesSession(sessionId, sessionToken || undefined);
+            const deps = await handleApiResponse<FileItem[]>(
+              await fetch(buildApiUrl(API_CONFIG.SESSIONS.FILE_DEPS_SESSION, { sessionId }), {
+                method: 'GET',
+                headers: getAuthHeaders(sessionToken || ''),
+              })
+            );
 
             const transformedFiles: FileItem[] = deps.map(dep => ({
               id: dep.id.toString(),
@@ -1015,7 +1111,13 @@ export const useSessionStore = create<SessionState>()(
               } : undefined,
             };
 
-            const response = await ApiService.sendChatMessage(chatRequest, sessionToken);
+            const response = await handleApiResponse<ChatResponse>(
+              await fetch(buildApiUrl(API_CONFIG.SESSIONS.CHAT, { sessionId: activeSessionId }), {
+                method: 'POST',
+                headers: getAuthHeaders(sessionToken),
+                body: JSON.stringify(chatRequest),
+              })
+            );
 
             // Add the message to local state immediately
             const newMessage = {
@@ -1053,7 +1155,18 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingIssues: true, issueError: null });
 
-            const response = await ApiService.createIssueWithContext(request, sessionToken || undefined);
+            const { activeSessionId } = get();
+            if (!activeSessionId) {
+              throw new Error('No active session available');
+            }
+
+            const response = await handleApiResponse<IssueCreationResponse>(
+              await fetch(buildApiUrl(API_CONFIG.SESSIONS.ISSUES.CREATE_WITH_CONTEXT, { sessionId: activeSessionId }), {
+                method: 'POST',
+                headers: getAuthHeaders(sessionToken || ''),
+                body: JSON.stringify(request),
+              })
+            );
 
             set({ isLoadingIssues: false });
             return response;
@@ -1077,7 +1190,13 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingFileContext: true, fileContextError: null });
 
-            await sessionApi.extractFileDependenciesForSession(sessionId, repoUrl, sessionToken || undefined);
+            await handleApiResponse<{ success: boolean; message: string }>(
+              await fetch(buildApiUrl(API_CONFIG.SESSIONS.EXTRACT, { sessionId }), {
+                method: 'POST',
+                headers: getAuthHeaders(sessionToken || ''),
+                body: JSON.stringify({ repo_url: repoUrl }),
+              })
+            );
 
             set({ isLoadingFileContext: false });
             return true;
@@ -1099,7 +1218,12 @@ export const useSessionStore = create<SessionState>()(
           const { sessionToken } = get();
 
           try {
-            const branches = await ApiService.getRepositoryBranches(owner, repo, sessionToken || undefined);
+            const branches = await handleApiResponse<GitHubBranch[]>(
+              await fetch(buildApiUrl(API_CONFIG.GITHUB.REPO_BRANCHES, { owner, repo }), {
+                method: 'GET',
+                headers: getAuthHeaders(sessionToken || ''),
+              })
+            );
 
             // Transform API response to match frontend GitHubBranch type
             const transformedBranches: GitHubBranch[] = branches.map(branch => ({
@@ -1120,10 +1244,19 @@ export const useSessionStore = create<SessionState>()(
         // ============================================================================
 
         createGitHubIssueFromUserIssue: async (issueId: string) => {
-          const { sessionToken } = get();
+          const { sessionToken, activeSessionId } = get();
+
+          if (!activeSessionId) {
+            throw new Error('No active session available');
+          }
 
           try {
-            const response = await ApiService.createGitHubIssueFromUserIssue(issueId, sessionToken || undefined);
+            const response = await handleApiResponse<CreateGitHubIssueResponse>(
+              await fetch(buildApiUrl(API_CONFIG.SESSIONS.ISSUES.CREATE_GITHUB_ISSUE, { sessionId: activeSessionId, issueId }), {
+                method: 'POST',
+                headers: getAuthHeaders(sessionToken || ''),
+              })
+            );
             return response;
           } catch (error) {
             console.error('Failed to create GitHub issue from user issue:', error);

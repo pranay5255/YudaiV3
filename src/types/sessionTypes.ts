@@ -439,6 +439,49 @@ export interface CreateGitHubIssueResponse {
   message: string;
 }
 
+// ============================================================================
+// SOLVER TYPES
+// ============================================================================
+
+export interface StartSolveRequest {
+  repo_url?: string;
+  branch_name?: string;
+  ai_model_id?: number;
+  swe_config_id?: number;
+}
+
+export interface SolveSessionOut {
+  id: number;
+  user_id: number;
+  issue_id: number;
+  ai_model_id?: number;
+  swe_config_id?: number;
+  status: string;
+  repo_url: string;
+  branch_name: string;
+  started_at: string;
+  completed_at?: string;
+  error_message?: string;
+  trajectory_data?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SolveSessionStatsOut {
+  session_id: number;
+  status: string;
+  started_at: string;
+  completed_at?: string;
+  error_message?: string;
+  total_edits: number;
+  files_modified: number;
+  lines_added: number;
+  lines_removed: number;
+  duration_seconds?: number;
+  trajectory_steps: number;
+  last_activity: string;
+}
+
 export interface RepositoryResponse {
   repositories: GitHubRepository[];
 }

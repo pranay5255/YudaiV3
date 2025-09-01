@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ApiService } from '../services/api';
+import { useSessionStore } from '../stores/sessionStore';
 
 /**
  * LoginPage component handles GitHub OAuth login
@@ -23,13 +23,12 @@ export const LoginPage: React.FC = () => {
     try {
       setIsLoading(true);
       setError(null);
-      
+
       console.log('[LoginPage] Initiating GitHub OAuth login');
-      
-      // Get login URL from backend and redirect
-      const { login_url } = await ApiService.getLoginUrl();
-      window.location.href = login_url;
-      
+
+      // Use sessionStore login method
+      await useSessionStore.getState().login();
+
     } catch (error) {
       console.error('[LoginPage] Login failed:', error);
       setError('Failed to initiate login. Please try again.');

@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSessionStore } from '../stores/sessionStore';
+import { API_CONFIG, buildApiUrl } from '../config/api';
 import {
   ChatMessage,
   ContextCard,
@@ -14,7 +15,21 @@ import {
   ContextCardMutationContext,
   SelectedRepository,
   SessionContext,
+  StartSolveRequest,
+  CreateIssueWithContextRequest,
+  GitHubBranch,
+  GitHubRepository,
 } from '../types/sessionTypes';
+
+// Helper function to get auth headers
+const getAuthHeaders = (sessionToken?: string): HeadersInit => {
+  const headers: HeadersInit = { 'Content-Type': 'application/json' };
+  const token = sessionToken || localStorage.getItem('session_token');
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+};
 
 // Helper function to check if error is a session not found error
 const isSessionNotFoundError = (error: unknown): boolean => {
@@ -395,6 +410,259 @@ export const useEnsureSessionExists = () => {
     mutationFn: async (sessionId: string) => {
       return await ensureSessionExists(sessionId);
     },
+  });
+};
+
+// ============================================================================
+// REPOSITORY QUERIES - Unified with Zustand Store
+// ============================================================================
+
+export const useRepositories = () => {
+  const { sessionToken, availableRepositories, loadRepositories } = useSessionStore();
+
+  return useQuery({
+    queryKey: QueryKeys.repositories,
+    queryFn: async (): Promise<GitHubRepository[]> => {
+      await loadRepositories();
+      return availableRepositories;
+    },
+    enabled: !!sessionToken,
+    retry: retryWithBackoff,
+    retryDelay: getRetryDelay,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: false,
+  });
+};
+
+// ============================================================================
+// REPOSITORY BRANCHES QUERY - Unified with Zustand Store
+// ============================================================================
+
+export const useRepositoryBranches = (owner: string, repo: string) => {
+  const { sessionToken, loadRepositoryBranches } = useSessionStore();
+
+  return useQuery({
+    queryKey: ['repository-branches', owner, repo],
+    queryFn: async (): Promise<GitHubBranch[]> => {
+      if (!owner || !repo) {
+        throw new Error('Owner and repo are required');
+      }
+      return await loadRepositoryBranches(owner, repo);
+    },
+    enabled: !!sessionToken && !!owner && !!repo,
+    retry: retryWithBackoff,
+    retryDelay: getRetryDelay,
+    staleTime: 10 * 60 * 1000, // 10 minutes (branches don't change often)
+    refetchOnWindowFocus: false,
+  });
+};
+
+// ============================================================================
+// ISSUE CREATION MUTATION - Consolidated under sessions context
+// ============================================================================
+
+export const useCreateIssueWithContext = () => {
+  const { createIssueWithContext } = useSessionStore();
+
+  return useMutation({
+    mutationFn: async (request: CreateIssueWithContextRequest) => {
+      return await createIssueWithContext(request);
+    },
+  });
+};
+
+// ============================================================================
+// GITHUB ISSUE CREATION MUTATION - Consolidated under sessions context
+// ============================================================================
+
+export const useCreateGitHubIssueFromUserIssue = () => {
+  const { createGitHubIssueFromUserIssue } = useSessionStore();
+
+  return useMutation({
+    mutationFn: async (issueId: string) => {
+      return await createGitHubIssueFromUserIssue(issueId);
+    },
+  });
+};
+
+// ============================================================================
+// SOLVER MUTATIONS - Consolidated under sessions context
+// ============================================================================
+
+export const useStartSolveSession = () => {
+  const queryClient = useQueryClient();
+  const { sessionToken, activeSessionId } = useSessionStore();
+
+  return useMutation({
+    mutationFn: async (request: StartSolveRequest) => {
+      if (!activeSessionId || !sessionToken) {
+        throw new Error('No active session or session token available');
+      }
+
+      const response = await fetch(buildApiUrl(API_CONFIG.SESSIONS.SOLVER.START_SOLVE, { sessionId: activeSessionId }), {
+        method: 'POST',
+        headers: getAuthHeaders(sessionToken),
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      // Invalidate solver sessions list
+      queryClient.invalidateQueries({ queryKey: ['solve-sessions', activeSessionId] });
+    },
+  });
+};
+
+export const useGetSolveSession = (solveSessionId: string) => {
+  const { sessionToken, activeSessionId } = useSessionStore();
+
+  return useQuery({
+    queryKey: ['solve-session', activeSessionId, solveSessionId],
+    queryFn: async () => {
+      if (!activeSessionId || !sessionToken) {
+        throw new Error('No active session or session token available');
+      }
+
+      const response = await fetch(buildApiUrl(API_CONFIG.SESSIONS.SOLVER.SOLVE_SESSION_DETAIL, {
+        sessionId: activeSessionId,
+        solveSessionId
+      }), {
+        method: 'GET',
+        headers: getAuthHeaders(sessionToken),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      }
+
+      return response.json();
+    },
+    enabled: !!activeSessionId && !!sessionToken && !!solveSessionId,
+  });
+};
+
+export const useGetSolveSessionStats = (solveSessionId: string) => {
+  const { sessionToken, activeSessionId } = useSessionStore();
+
+  return useQuery({
+    queryKey: ['solve-session-stats', activeSessionId, solveSessionId],
+    queryFn: async () => {
+      if (!activeSessionId || !sessionToken) {
+        throw new Error('No active session or session token available');
+      }
+
+      const response = await fetch(buildApiUrl(API_CONFIG.SESSIONS.SOLVER.SOLVE_SESSION_STATS, {
+        sessionId: activeSessionId,
+        solveSessionId
+      }), {
+        method: 'GET',
+        headers: getAuthHeaders(sessionToken),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      }
+
+      return response.json();
+    },
+    enabled: !!activeSessionId && !!sessionToken && !!solveSessionId,
+  });
+};
+
+export const useCancelSolveSession = () => {
+  const queryClient = useQueryClient();
+  const { sessionToken, activeSessionId } = useSessionStore();
+
+  return useMutation({
+    mutationFn: async (solveSessionId: string) => {
+      if (!activeSessionId || !sessionToken) {
+        throw new Error('No active session or session token available');
+      }
+
+      const response = await fetch(buildApiUrl(API_CONFIG.SESSIONS.SOLVER.CANCEL_SOLVE, {
+        sessionId: activeSessionId,
+        solveSessionId
+      }), {
+        method: 'POST',
+        headers: getAuthHeaders(sessionToken),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      }
+
+      return response.json();
+    },
+    onSuccess: () => {
+      // Invalidate solver sessions list
+      queryClient.invalidateQueries({ queryKey: ['solve-sessions', activeSessionId] });
+    },
+  });
+};
+
+export const useListSolveSessions = () => {
+  const { sessionToken, activeSessionId } = useSessionStore();
+
+  return useQuery({
+    queryKey: ['solve-sessions', activeSessionId],
+    queryFn: async () => {
+      if (!activeSessionId || !sessionToken) {
+        throw new Error('No active session or session token available');
+      }
+
+      const response = await fetch(buildApiUrl(API_CONFIG.SESSIONS.SOLVER.LIST_SOLVE_SESSIONS, {
+        sessionId: activeSessionId
+      }), {
+        method: 'GET',
+        headers: getAuthHeaders(sessionToken),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      }
+
+      return response.json();
+    },
+    enabled: !!activeSessionId && !!sessionToken,
+  });
+};
+
+export const useSolverHealth = () => {
+  const { sessionToken, activeSessionId } = useSessionStore();
+
+  return useQuery({
+    queryKey: ['solver-health', activeSessionId],
+    queryFn: async () => {
+      if (!activeSessionId || !sessionToken) {
+        throw new Error('No active session or session token available');
+      }
+
+      const response = await fetch(buildApiUrl(API_CONFIG.SESSIONS.SOLVER.SOLVER_HEALTH, {
+        sessionId: activeSessionId
+      }), {
+        method: 'GET',
+        headers: getAuthHeaders(sessionToken),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+      }
+
+      return response.json();
+    },
+    enabled: !!activeSessionId && !!sessionToken,
+    staleTime: 30000, // 30 seconds
   });
 };
 
