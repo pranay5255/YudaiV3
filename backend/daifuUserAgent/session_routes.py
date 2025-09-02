@@ -4,6 +4,67 @@ Session Management Routes for DAifu Agent
 
 This module provides FastAPI routes for session management,
 including session creation, context management, messages, and file dependencies.
+
+TODO: Complete Implementation Tasks
+========================================
+
+CRITICAL ISSUES:
+1. LLM Service Integration
+   - The chat endpoint calls LLMService.generate_response_with_history() which doesn't exist
+   - Need to implement or import proper LLM service integration
+   - Add proper error handling for LLM service failures
+   - Implement streaming responses for real-time chat
+
+2. Frontend Integration (@Chat.tsx compatibility)
+   - Ensure all API responses match frontend expectations
+   - Implement proper error message formatting for UI display
+   - Add real-time WebSocket support for chat updates
+   - Support context card operations from frontend
+
+3. Session Management Enhancements
+   - Add session timeout and cleanup mechanisms
+   - Implement session persistence across browser sessions
+   - Add session export/import functionality
+   - Implement session collaboration features
+
+4. File Dependencies Integration
+   - Complete the file extraction endpoint integration
+   - Add support for large repository processing
+   - Implement file dependency caching
+   - Add file content preview and search capabilities
+
+5. Database Optimization
+   - Add proper indexing for all query operations
+   - Implement database connection pooling
+   - Add query result caching (Redis)
+   - Optimize bulk operations for messages and context cards
+
+
+
+7. Authentication & Authorization
+   - Ensure all endpoints properly validate user access
+   - Add role-based access control where needed
+   - Implement proper session token validation
+   - Add audit logging for sensitive operations
+
+13. Session Context Management
+    - Implement proper context window management
+    - Add context relevance scoring
+    - Support multiple context sources (files, chat, external)
+    - Implement context persistence and retrieval
+
+14. Message Management
+    - Add message search and filtering capabilities
+    - Implement message threading and conversation management
+    - Add message export/import functionality
+    - Support message attachments and rich content
+
+17. Deployment & Configuration
+    - Add environment-specific configuration
+    - Implement proper logging configuration
+    - Add health checks and startup validation
+    - Support containerized deployment
+
 """
 
 # Import file dependencies functionality
@@ -44,23 +105,23 @@ from models import (
     SessionResponse,
     User,
 )
+from pgvector.sqlalchemy import Vector
 from repo_processorGitIngest.scraper_script import (
     categorize_file,
     extract_repository_data,
 )
 from sqlalchemy.orm import Session
-import asyncio
-from pgvector.sqlalchemy import Vector
 
 router = APIRouter(tags=["sessions"])
 
 # CRITICAL PRIORITY ENDPOINTS
 
+
 @router.post("/sessions", response_model=SessionResponse)
 async def create_session(
     request: CreateSessionRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Create a new DAifu session for a repository.
@@ -69,7 +130,7 @@ async def create_session(
     try:
         # Generate unique session ID
         session_id = f"session_{uuid.uuid4().hex[:8]}"
-        
+
         # Create new session in database
         db_session = ChatSession(
             user_id=current_user.id,
@@ -83,13 +144,13 @@ async def create_session(
             is_active=True,
             total_messages=0,
             total_tokens=0,
-            last_activity=datetime.utcnow()
+            last_activity=datetime.utcnow(),
         )
-        
+
         db.add(db_session)
         db.commit()
         db.refresh(db_session)
-        
+
         return SessionResponse(
             id=db_session.id,
             session_id=db_session.session_id,
@@ -104,21 +165,22 @@ async def create_session(
             total_tokens=db_session.total_tokens,
             created_at=db_session.created_at,
             updated_at=db_session.updated_at,
-            last_activity=db_session.last_activity
+            last_activity=db_session.last_activity,
         )
-        
+
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create session: {str(e)}"
+            detail=f"Failed to create session: {str(e)}",
         )
+
 
 @router.get("/sessions/{session_id}", response_model=SessionContextResponse)
 async def get_session_context(
     session_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Get session context including messages, context cards, and repository info.
@@ -126,33 +188,42 @@ async def get_session_context(
     """
     try:
         # Get session from database with user verification
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
-        
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
+
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
-        
+
         # Get session messages
-        messages = db.query(ChatMessage).filter(
-            ChatMessage.session_id == db_session.id
-        ).order_by(ChatMessage.created_at.asc()).all()
-        
+        messages = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == db_session.id)
+            .order_by(ChatMessage.created_at.asc())
+            .all()
+        )
+
         # Get context cards for this session
-        context_cards = db.query(ContextCard).filter(
-            ContextCard.session_id == db_session.id,
-            ContextCard.is_active
-        ).all()
-        
+        context_cards = (
+            db.query(ContextCard)
+            .filter(ContextCard.session_id == db_session.id, ContextCard.is_active)
+            .all()
+        )
+
         # Get file embeddings for this session
-        file_embeddings = db.query(FileEmbedding).filter(
-            FileEmbedding.session_id == db_session.id
-        ).all()
-        
+        file_embeddings = (
+            db.query(FileEmbedding)
+            .filter(FileEmbedding.session_id == db_session.id)
+            .all()
+        )
+
         # Convert to response models
         session_response = SessionResponse(
             id=db_session.id,
@@ -168,9 +239,9 @@ async def get_session_context(
             total_tokens=db_session.total_tokens,
             created_at=db_session.created_at,
             updated_at=db_session.updated_at,
-            last_activity=db_session.last_activity
+            last_activity=db_session.last_activity,
         )
-        
+
         message_responses = [
             ChatMessageResponse(
                 id=msg.id,
@@ -186,10 +257,11 @@ async def get_session_context(
                 referenced_files=msg.referenced_files,
                 error_message=msg.error_message,
                 created_at=msg.created_at,
-                updated_at=msg.updated_at
-            ) for msg in messages
+                updated_at=msg.updated_at,
+            )
+            for msg in messages
         ]
-        
+
         context_card_responses = [
             ContextCardResponse(
                 id=card.id,
@@ -201,10 +273,11 @@ async def get_session_context(
                 tokens=card.tokens,
                 is_active=card.is_active,
                 created_at=card.created_at,
-                updated_at=card.updated_at
-            ) for card in context_cards
+                updated_at=card.updated_at,
+            )
+            for card in context_cards
         ]
-        
+
         file_embedding_responses = [
             FileEmbeddingResponse(
                 id=fe.id,
@@ -216,10 +289,11 @@ async def get_session_context(
                 chunk_index=fe.chunk_index,
                 tokens=fe.tokens,
                 file_metadata=fe.file_metadata,
-                created_at=fe.created_at
-            ) for fe in file_embeddings
+                created_at=fe.created_at,
+            )
+            for fe in file_embeddings
         ]
-        
+
         context_response = SessionContextResponse(
             session=session_response,
             messages=message_responses,
@@ -229,34 +303,42 @@ async def get_session_context(
                 "name": db_session.repo_name,
                 "branch": db_session.repo_branch,
                 "full_name": f"{db_session.repo_owner}/{db_session.repo_name}",
-                "html_url": f"https://github.com/{db_session.repo_owner}/{db_session.repo_name}"
-            } if db_session.repo_owner and db_session.repo_name else None,
+                "html_url": f"https://github.com/{db_session.repo_owner}/{db_session.repo_name}",
+            }
+            if db_session.repo_owner and db_session.repo_name
+            else None,
             file_embeddings_count=len(file_embeddings),
             statistics={
                 "total_messages": db_session.total_messages,
                 "total_tokens": db_session.total_tokens,
-                "session_duration": int((datetime.utcnow() - db_session.created_at).total_seconds()) if db_session.created_at else 0
+                "session_duration": int(
+                    (datetime.utcnow() - db_session.created_at).total_seconds()
+                )
+                if db_session.created_at
+                else 0,
             },
             user_issues=[],
-            file_embeddings=file_embedding_responses
+            file_embeddings=file_embedding_responses,
         )
-        
+
         return context_response
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get session context: {str(e)}"
+            detail=f"Failed to get session context: {str(e)}",
         )
 
+
 # HIGH PRIORITY ENDPOINTS
+
 
 @router.post("/sessions/{session_id}/messages", response_model=ChatMessageResponse)
 async def add_chat_message(
     session_id: str,
     message_data: dict,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Add a new chat message to a session.
@@ -264,17 +346,20 @@ async def add_chat_message(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
-        
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
+
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
-        
+
         # Create new message
         message = ChatMessage(
             session_id=db_session.id,
@@ -288,19 +373,19 @@ async def add_chat_message(
             processing_time=message_data.get("processing_time"),
             context_cards=message_data.get("context_cards"),
             referenced_files=message_data.get("referenced_files"),
-            error_message=message_data.get("error_message")
+            error_message=message_data.get("error_message"),
         )
-        
+
         db.add(message)
-        
+
         # Update session statistics
         db_session.total_messages += 1
         db_session.total_tokens += message.tokens
         db_session.last_activity = datetime.utcnow()
-        
+
         db.commit()
         db.refresh(message)
-        
+
         return ChatMessageResponse(
             id=message.id,
             message_id=message.message_id,
@@ -315,22 +400,23 @@ async def add_chat_message(
             referenced_files=message.referenced_files,
             error_message=message.error_message,
             created_at=message.created_at,
-            updated_at=message.updated_at
+            updated_at=message.updated_at,
         )
-        
+
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to add message: {str(e)}"
+            detail=f"Failed to add message: {str(e)}",
         )
+
 
 @router.get("/sessions/{session_id}/messages", response_model=List[ChatMessageResponse])
 async def get_chat_messages(
     session_id: str,
     limit: int = Query(100, ge=1, le=1000),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Get chat messages for a session.
@@ -338,22 +424,29 @@ async def get_chat_messages(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
-        
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
+
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
-        
+
         # Get messages for this session
-        messages = db.query(ChatMessage).filter(
-            ChatMessage.session_id == db_session.id
-        ).order_by(ChatMessage.created_at.asc()).limit(limit).all()
-        
+        messages = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == db_session.id)
+            .order_by(ChatMessage.created_at.asc())
+            .limit(limit)
+            .all()
+        )
+
         return [
             ChatMessageResponse(
                 id=msg.id,
@@ -369,22 +462,24 @@ async def get_chat_messages(
                 referenced_files=msg.referenced_files,
                 error_message=msg.error_message,
                 created_at=msg.created_at,
-                updated_at=msg.updated_at
-            ) for msg in messages
+                updated_at=msg.updated_at,
+            )
+            for msg in messages
         ]
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get chat messages: {str(e)}"
+            detail=f"Failed to get chat messages: {str(e)}",
         )
+
 
 @router.post("/sessions/{session_id}/context-cards", response_model=ContextCardResponse)
 async def add_context_card(
     session_id: str,
     request: CreateContextCardRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Add a context card to a session.
@@ -392,17 +487,20 @@ async def add_context_card(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
-        
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
+
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
-        
+
         # Create new context card
         context_card = ContextCard(
             user_id=current_user.id,
@@ -412,13 +510,13 @@ async def add_context_card(
             content=request.content,
             source=request.source,
             tokens=request.tokens,
-            is_active=True
+            is_active=True,
         )
-        
+
         db.add(context_card)
         db.commit()
         db.refresh(context_card)
-        
+
         return ContextCardResponse(
             id=context_card.id,
             session_id=context_card.session_id,
@@ -429,21 +527,24 @@ async def add_context_card(
             tokens=context_card.tokens,
             is_active=context_card.is_active,
             created_at=context_card.created_at,
-            updated_at=context_card.updated_at
+            updated_at=context_card.updated_at,
         )
-        
+
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to add context card: {str(e)}"
+            detail=f"Failed to add context card: {str(e)}",
         )
 
-@router.get("/sessions/{session_id}/context-cards", response_model=List[ContextCardResponse])
+
+@router.get(
+    "/sessions/{session_id}/context-cards", response_model=List[ContextCardResponse]
+)
 async def get_context_cards(
     session_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Get context cards for a session.
@@ -451,23 +552,28 @@ async def get_context_cards(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
-        
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
+
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
-        
+
         # Get active context cards for this session
-        context_cards = db.query(ContextCard).filter(
-            ContextCard.session_id == db_session.id,
-            ContextCard.is_active
-        ).order_by(ContextCard.created_at.desc()).all()
-        
+        context_cards = (
+            db.query(ContextCard)
+            .filter(ContextCard.session_id == db_session.id, ContextCard.is_active)
+            .order_by(ContextCard.created_at.desc())
+            .all()
+        )
+
         return [
             ContextCardResponse(
                 id=card.id,
@@ -479,24 +585,27 @@ async def get_context_cards(
                 tokens=card.tokens,
                 is_active=card.is_active,
                 created_at=card.created_at,
-                updated_at=card.updated_at
-            ) for card in context_cards
+                updated_at=card.updated_at,
+            )
+            for card in context_cards
         ]
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get context cards: {str(e)}"
+            detail=f"Failed to get context cards: {str(e)}",
         )
 
+
 # MEDIUM PRIORITY ENDPOINTS
+
 
 @router.delete("/sessions/{session_id}/context-cards/{card_id}")
 async def delete_context_card(
     session_id: str,
     card_id: int,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Delete a context card from a session.
@@ -504,48 +613,58 @@ async def delete_context_card(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
-        
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
+
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
-        
+
         # Find and verify context card belongs to this session and user
-        context_card = db.query(ContextCard).filter(
-            ContextCard.id == card_id,
-            ContextCard.session_id == db_session.id,
-            ContextCard.user_id == current_user.id
-        ).first()
-        
+        context_card = (
+            db.query(ContextCard)
+            .filter(
+                ContextCard.id == card_id,
+                ContextCard.session_id == db_session.id,
+                ContextCard.user_id == current_user.id,
+            )
+            .first()
+        )
+
         if not context_card:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Context card not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Context card not found"
             )
-        
+
         # Soft delete by setting is_active to False
         context_card.is_active = False
         db.commit()
-        
+
         return {"success": True, "message": "Context card deleted successfully"}
-        
+
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete context card: {str(e)}"
+            detail=f"Failed to delete context card: {str(e)}",
         )
 
-@router.get("/sessions/{session_id}/file-deps/session", response_model=List[SessionFileDependencyResponse])
+
+@router.get(
+    "/sessions/{session_id}/file-deps/session",
+    response_model=List[SessionFileDependencyResponse],
+)
 async def get_file_dependencies_for_session(
     session_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Get file dependencies for a session (file metadata only, no embeddings).
@@ -553,54 +672,63 @@ async def get_file_dependencies_for_session(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
-        
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
+
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
-        
+
         # Get file embeddings for this session and aggregate by file
-        file_embeddings = db.query(FileEmbedding).filter(
-            FileEmbedding.session_id == db_session.id
-        ).order_by(FileEmbedding.created_at.desc()).all()
-        
+        file_embeddings = (
+            db.query(FileEmbedding)
+            .filter(FileEmbedding.session_id == db_session.id)
+            .order_by(FileEmbedding.created_at.desc())
+            .all()
+        )
+
         # Aggregate file data by file_path to avoid duplicates
         file_data = {}
         for fe in file_embeddings:
             if fe.file_path not in file_data:
                 file_data[fe.file_path] = {
-                    'id': fe.id,
-                    'file_name': fe.file_name,
-                    'file_path': fe.file_path,
-                    'file_type': fe.file_type,
-                    'tokens': fe.tokens,
-                    'category': fe.file_metadata.get('category') if fe.file_metadata else None,
-                    'created_at': fe.created_at
+                    "id": fe.id,
+                    "file_name": fe.file_name,
+                    "file_path": fe.file_path,
+                    "file_type": fe.file_type,
+                    "tokens": fe.tokens,
+                    "category": fe.file_metadata.get("category")
+                    if fe.file_metadata
+                    else None,
+                    "created_at": fe.created_at,
                 }
             else:
                 # Sum tokens for chunks of the same file
-                file_data[fe.file_path]['tokens'] += fe.tokens
-        
+                file_data[fe.file_path]["tokens"] += fe.tokens
+
         # Convert to response format
         return [
-            SessionFileDependencyResponse(**file_info) 
+            SessionFileDependencyResponse(**file_info)
             for file_info in file_data.values()
         ]
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get file dependencies: {str(e)}"
+            detail=f"Failed to get file dependencies: {str(e)}",
         )
 
 
 # CHAT ENDPOINTS - Consolidated from chat_api.py
 # =================================================================================
+
 
 @router.post("/sessions/{session_id}/chat", response_model=ChatResponse)
 async def chat_in_session(
@@ -619,22 +747,24 @@ async def chat_in_session(
     start_time = time.time()
 
     # Validate session exists and belongs to user
-    db_session = db.query(ChatSession).filter(
-        ChatSession.session_id == session_id,
-        ChatSession.user_id == current_user.id
-    ).first()
+    db_session = (
+        db.query(ChatSession)
+        .filter(
+            ChatSession.session_id == session_id, ChatSession.user_id == current_user.id
+        )
+        .first()
+    )
 
     if not db_session:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Session not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
         )
 
     # Validate session_id matches request
     if not request.session_id or request.session_id.strip() != session_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Session ID mismatch between URL and request body"
+            detail="Session ID mismatch between URL and request body",
         )
 
     try:
@@ -644,7 +774,11 @@ async def chat_in_session(
         repo_name = db_session.repo_name
 
         # Check for repository object in request first (preferred format)
-        if request.repository and request.repository.get("owner") and request.repository.get("name"):
+        if (
+            request.repository
+            and request.repository.get("owner")
+            and request.repository.get("name")
+        ):
             repo_owner = request.repository["owner"]
             repo_name = request.repository["name"]
 
@@ -652,22 +786,56 @@ async def chat_in_session(
         github_context = ""
         github_data = None
         if repo_owner and repo_name:
-            # Import GitHub context functions
-            from daifuUserAgent.chat_api import (
-                get_github_context,
-                get_github_context_data,
+            # Import GitHub operations
+            from daifuUserAgent.githubOps import GitHubOps
+
+            github_ops = GitHubOps(db)
+
+            # Get repository info
+            repo_data = await github_ops.fetch_repository_info(
+                repo_owner, repo_name, current_user.id
             )
-            github_context = await get_github_context(
-                repo_owner,
-                repo_name,
-                current_user,
-                db
+
+            # Get recent issues and commits for context
+            issues_data = await github_ops.fetch_repository_issues(
+                repo_owner, repo_name, current_user.id, limit=5
             )
-            github_data = await get_github_context_data(
-                repo_owner,
-                repo_name,
-                current_user,
-                db
+            commits_data = await github_ops.fetch_repository_commits(
+                repo_owner, repo_name, current_user.id, limit=5
+            )
+
+            # Build context string (similar to ChatOps._build_context_string)
+            context_parts = []
+            if repo_data.get("name"):
+                context_parts.append(f"Repository: {repo_data['name']}")
+                if repo_data.get("description"):
+                    context_parts.append(f"Description: {repo_data['description']}")
+                if repo_data.get("language"):
+                    context_parts.append(f"Primary Language: {repo_data['language']}")
+                if repo_data.get("topics"):
+                    context_parts.append(
+                        f"Topics: {', '.join(repo_data['topics'][:5])}"
+                    )
+
+            if issues_data:
+                context_parts.append(f"\nRecent Issues ({len(issues_data)}):")
+                for issue in issues_data[:3]:
+                    context_parts.append(f"- #{issue['number']}: {issue['title']}")
+
+            if commits_data:
+                context_parts.append(f"\nRecent Commits ({len(commits_data)}):")
+                for commit in commits_data[:3]:
+                    context_parts.append(f"- {commit['sha']}: {commit['message']}")
+
+            github_context = (
+                "\n".join(context_parts)
+                if context_parts
+                else "Repository context not available"
+            )
+
+            # Get detailed GitHub data for structured response
+            github_data = await github_ops.fetch_repository_info_detailed(
+                repo_owner, repo_name, current_user.id
             )
 
         # Add user message to conversation history
@@ -679,9 +847,7 @@ async def chat_in_session(
 
         # Get relevant file contexts for the user message
         file_contexts = await LLMService.get_relevant_file_contexts(
-            db=db,
-            session_id=db_session.id,
-            query_text=user_message
+            db=db, session_id=db_session.id, query_text=user_message
         )
 
         # Generate AI response with file contexts
@@ -689,7 +855,7 @@ async def chat_in_session(
             repo_context=github_context,
             conversation_history=history,
             github_data=github_data,
-            file_contexts=file_contexts
+            file_contexts=file_contexts,
         )
 
         # Add assistant response to conversation history
@@ -723,24 +889,30 @@ async def chat_in_session(
 
 
 # Helper functions for conversation history management
-def _get_conversation_history(session_id: str, limit: int = 50, db: Session = None) -> List[tuple]:
+def _get_conversation_history(
+    session_id: str, limit: int = 50, db: Session = None
+) -> List[tuple]:
     """Get conversation history for a session from database"""
     if not db:
         return []
 
     try:
         # Get the session from database
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id
-        ).first()
+        db_session = (
+            db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
+        )
 
         if not db_session:
             return []
 
         # Get messages for this session
-        messages = db.query(ChatMessage).filter(
-            ChatMessage.session_id == db_session.id
-        ).order_by(ChatMessage.created_at.asc()).limit(limit).all()
+        messages = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == db_session.id)
+            .order_by(ChatMessage.created_at.asc())
+            .limit(limit)
+            .all()
+        )
 
         # Convert to tuple format for compatibility
         history = []
@@ -754,17 +926,27 @@ def _get_conversation_history(session_id: str, limit: int = 50, db: Session = No
         return []
 
 
-def _add_to_conversation_history(session_id: str, sender: str, message: str, db: Session = None, current_user: User = None):
+def _add_to_conversation_history(
+    session_id: str,
+    sender: str,
+    message: str,
+    db: Session = None,
+    current_user: User = None,
+):
     """Add a message to conversation history in database"""
     if not db or not current_user:
         return
 
     try:
         # Get the session from database
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not db_session:
             print(f"Session {session_id} not found for user {current_user.id}")
@@ -779,7 +961,7 @@ def _add_to_conversation_history(session_id: str, sender: str, message: str, db:
             sender_type=sender_type,
             role=sender_type,
             is_code=False,
-            tokens=len(message.split())  # Rough estimation
+            tokens=len(message.split()),  # Rough estimation
         )
 
         db.add(message_obj)
@@ -797,6 +979,7 @@ def _add_to_conversation_history(session_id: str, sender: str, message: str, db:
 
 # FILE DEPENDENCIES ENDPOINTS - Consolidated from filedeps.py
 # =================================================================================
+
 
 def _estimate_tokens_for_file(file_path: str, content_size: int) -> int:
     """Estimate tokens for a file based on its size and type."""
@@ -882,11 +1065,15 @@ async def extract_file_dependencies_for_session(
         print(f"Starting session-based extraction for session: {session_id}")
 
         # First, verify the session exists and belongs to the user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id,
-            ChatSession.is_active,
-        ).first()
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+                ChatSession.is_active,
+            )
+            .first()
+        )
 
         if not db_session:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -957,16 +1144,15 @@ async def extract_file_dependencies_for_session(
 
             # Save file items and create embeddings linked to session
             saved_embeddings = _save_file_embeddings_to_db_with_session(
-        db, repository.id, file_tree, db_session.id
-    )
+                db, repository.id, file_tree, db_session.id
+            )
             print(f"Saved {len(saved_embeddings)} file embeddings")
 
         except Exception as db_error:
             print(f"Database error during save: {db_error}")
             db.rollback()
             raise HTTPException(
-                status_code=500,
-                detail=f"Failed to save file data: {str(db_error)}"
+                status_code=500, detail=f"Failed to save file data: {str(db_error)}"
             )
 
         print(f"Successfully completed extraction for session {session_id}")
@@ -976,10 +1162,7 @@ async def extract_file_dependencies_for_session(
         raise
     except Exception as e:
         print(f"Unexpected error in extract_file_dependencies_for_session: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"File extraction failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"File extraction failed: {str(e)}")
 
 
 # Helper functions for file processing (imported from filedeps.py)
@@ -1003,7 +1186,9 @@ def _process_gitingest_data(raw_repo_data: Dict[str, Any]) -> Dict[str, Any]:
     return processed_data
 
 
-def _build_file_tree(files_data: Dict[str, Any], repo_name: str) -> List[Dict[str, Any]]:
+def _build_file_tree(
+    files_data: Dict[str, Any], repo_name: str
+) -> List[Dict[str, Any]]:
     """Build hierarchical file tree from processed data."""
     file_tree = []
 
@@ -1032,14 +1217,18 @@ def _build_file_tree(files_data: Dict[str, Any], repo_name: str) -> List[Dict[st
             "name": file_name,
             "type": file_info["type"],
             "Category": file_info["type"],
-            "tokens": _estimate_tokens_for_file(file_info["path"], file_info["content_size"]),
+            "tokens": _estimate_tokens_for_file(
+                file_info["path"], file_info["content_size"]
+            ),
             "isDirectory": False,
             "path": file_info["path"],
         }
         current_dir["__files__"].append(file_item)
 
     # Convert directory structure to FileItem format
-    def convert_to_file_items(dir_dict: Dict[str, Any], current_path: str = "") -> List[Dict[str, Any]]:
+    def convert_to_file_items(
+        dir_dict: Dict[str, Any], current_path: str = ""
+    ) -> List[Dict[str, Any]]:
         items = []
 
         for name, content in dir_dict.items():
@@ -1051,7 +1240,8 @@ def _build_file_tree(files_data: Dict[str, Any], repo_name: str) -> List[Dict[st
 
                 # Calculate total tokens for directory
                 total_tokens = sum(
-                    child.get("tokens", 0) for child in children
+                    child.get("tokens", 0)
+                    for child in children
                     if not child.get("isDirectory", False)
                 )
 
@@ -1082,7 +1272,7 @@ def _save_file_analysis_to_db(
     max_file_size: int,
 ):
     """Save file analysis results to database."""
-    analysis = FileAnalysis(
+    analysis = Repository(
         repository_id=repository_id,
         raw_data=json.dumps(raw_data),
         processed_data=json.dumps(processed_data),
@@ -1124,49 +1314,63 @@ def _create_file_embeddings_for_session(
     session_id: int,
     repository_id: int,
     item_data: Dict[str, Any],
-    content: str
-) -> List[FileEmbedding]: 
-    saved_embeddings = []
-    """Create file embeddings linked to session for semantic search."""
+    content: str,
+) -> List[FileEmbedding]:
+    """
+    Store file embeddings linked to session for semantic search.
+    """
     from utils.chunking import create_file_chunker
 
+    saved_embeddings: List[FileEmbedding] = []
+    file_path = item_data.get("path")
+    file_name = item_data.get("name")
+    file_type = item_data.get("type")
+    file_category = item_data.get("Category")
+
     try:
-        # Create chunker and process file content
         chunker = create_file_chunker()
-        chunks = chunker.chunk_text(content, file_item.path)
+        chunks = chunker.chunk_text(content, file_path)
 
         for i, chunk in enumerate(chunks):
-            embedding_vector = asyncio.run(LLMService.embed_text(chunk))
+            embedding_vector = LLMService.embed_text(chunk)
+            if hasattr(embedding_vector, "__await__"):
+                # If embed_text is async, run it synchronously
+                import asyncio
 
-            # Create embedding for this chunk
+                embedding_vector = asyncio.run(embedding_vector)
+
             embedding = FileEmbedding(
                 session_id=session_id,
                 repository_id=repository_id,
-                file_path=item_data["path"],
-                file_name=item_data["name"],
-                file_type=item_data["type"],
+                file_path=file_path,
+                file_name=file_name,
+                file_type=file_type,
                 chunk_index=i,
                 chunk_text=chunk,
                 embedding=Vector(embedding_vector),
-                tokens=_estimate_tokens_for_file(item_data["path"], len(chunk)),
-                file_metadata=json.dumps({
-                    "category": item_data["Category"],
-                    "content_size": len(content),
-                }),
+                tokens=_estimate_tokens_for_file(file_path, len(chunk)),
+                file_metadata=json.dumps(
+                    {
+                        "category": file_category,
+                        "content_size": len(content),
+                    }
+                ),
             )
             db.add(embedding)
+            saved_embeddings.append(embedding)
 
         db.flush()
-        saved_embeddings.append(embedding)
-    return saved_embeddings
+        return saved_embeddings
+
     except Exception as e:
-        print(f"Error creating embeddings for {file_item.path}: {e}")
-        # Don't fail the entire operation if embedding creation fails
+        print(f"Error storing embeddings for {file_path}: {e}")
+        return []
 
 
 # ============================================================================
 # SOLVER ENDPOINTS - Consolidated under sessions context
 # ============================================================================
+
 
 @router.post("/{session_id}/solve/start", response_model=dict)
 async def start_solve_session_for_session(
@@ -1184,22 +1388,25 @@ async def start_solve_session_for_session(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
 
         # Get repository details from session
         if not db_session.repo_owner or not db_session.repo_name:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Session has no associated repository"
+                detail="Session has no associated repository",
             )
 
         # Prepare solve parameters
@@ -1222,7 +1429,7 @@ async def start_solve_session_for_session(
             repo_url=repo_url,
             branch_name=branch,
             ai_model_id=ai_model_id,
-            swe_config_id=swe_config_id
+            swe_config_id=swe_config_id,
         )
         db.add(solve_session)
         db.commit()
@@ -1236,14 +1443,14 @@ async def start_solve_session_for_session(
             repo_url=repo_url,
             branch=branch,
             ai_model_id=ai_model_id,
-            swe_config_id=swe_config_id
+            swe_config_id=swe_config_id,
         )
 
         return {
             "message": "AI Solver started successfully",
             "session_id": solve_session.id,
             "solve_session_id": solve_session.id,
-            "status": "started"
+            "status": "started",
         }
 
     except HTTPException:
@@ -1252,7 +1459,7 @@ async def start_solve_session_for_session(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start solver: {str(e)}"
+            detail=f"Failed to start solver: {str(e)}",
         )
 
 
@@ -1268,27 +1475,34 @@ async def get_solve_session_for_session(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
 
         # Get solve session with authorization check
-        solve_session = db.query(AISolveSession).filter(
-            AISolveSession.id == solve_session_id,
-            AISolveSession.user_id == current_user.id
-        ).first()
+        solve_session = (
+            db.query(AISolveSession)
+            .filter(
+                AISolveSession.id == solve_session_id,
+                AISolveSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not solve_session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Solve session not found or access denied"
+                detail="Solve session not found or access denied",
             )
 
         return {
@@ -1313,11 +1527,13 @@ async def get_solve_session_for_session(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get solve session: {str(e)}"
+            detail=f"Failed to get solve session: {str(e)}",
         )
 
 
-@router.get("/{session_id}/solve/sessions/{solve_session_id}/stats", response_model=dict)
+@router.get(
+    "/{session_id}/solve/sessions/{solve_session_id}/stats", response_model=dict
+)
 async def get_solve_session_stats_for_session(
     session_id: str,
     solve_session_id: int,
@@ -1329,38 +1545,46 @@ async def get_solve_session_stats_for_session(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
 
         # Verify solve session exists and user has access
-        solve_session = db.query(AISolveSession).filter(
-            AISolveSession.id == solve_session_id,
-            AISolveSession.user_id == current_user.id
-        ).first()
+        solve_session = (
+            db.query(AISolveSession)
+            .filter(
+                AISolveSession.id == solve_session_id,
+                AISolveSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not solve_session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Solve session not found or access denied"
+                detail="Solve session not found or access denied",
             )
 
         # Import solver adapter for stats
         from solver.ai_solver import AISolverAdapter
+
         solver = AISolverAdapter(db)
         stats = solver.get_session_status(solve_session_id)
 
         if not stats:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to retrieve session statistics"
+                detail="Failed to retrieve session statistics",
             )
 
         return stats
@@ -1370,11 +1594,13 @@ async def get_solve_session_stats_for_session(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get solve session stats: {str(e)}"
+            detail=f"Failed to get solve session stats: {str(e)}",
         )
 
 
-@router.post("/{session_id}/solve/sessions/{solve_session_id}/cancel", response_model=dict)
+@router.post(
+    "/{session_id}/solve/sessions/{solve_session_id}/cancel", response_model=dict
+)
 async def cancel_solve_session_for_session(
     session_id: str,
     solve_session_id: int,
@@ -1386,19 +1612,23 @@ async def cancel_solve_session_for_session(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
 
         # Import solver adapter
         from solver.ai_solver import AISolverAdapter
+
         solver = AISolverAdapter(db)
 
         # Attempt to cancel session
@@ -1406,31 +1636,35 @@ async def cancel_solve_session_for_session(
 
         if not cancelled:
             # Check if session exists to provide better error message
-            solve_session = db.query(AISolveSession).filter(
-                AISolveSession.id == solve_session_id,
-                AISolveSession.user_id == current_user.id
-            ).first()
+            solve_session = (
+                db.query(AISolveSession)
+                .filter(
+                    AISolveSession.id == solve_session_id,
+                    AISolveSession.user_id == current_user.id,
+                )
+                .first()
+            )
 
             if not solve_session:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Solve session not found or access denied"
+                    detail="Solve session not found or access denied",
                 )
             elif solve_session.status != "RUNNING":
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Cannot cancel session with status: {solve_session.status}"
+                    detail=f"Cannot cancel session with status: {solve_session.status}",
                 )
             else:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to cancel session"
+                    detail="Failed to cancel session",
                 )
 
         return {
             "message": "Solve session cancelled successfully",
             "session_id": solve_session_id,
-            "status": "cancelled"
+            "status": "cancelled",
         }
 
     except HTTPException:
@@ -1438,7 +1672,7 @@ async def cancel_solve_session_for_session(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to cancel solve session: {str(e)}"
+            detail=f"Failed to cancel solve session: {str(e)}",
         )
 
 
@@ -1456,15 +1690,18 @@ async def list_solve_sessions_for_session(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
 
         # Build query
@@ -1475,42 +1712,49 @@ async def list_solve_sessions_for_session(
         # Apply status filter if provided
         if status_filter:
             from schemas.ai_solver import SolveStatus
+
             try:
                 status_enum = SolveStatus(status_filter)
                 query = query.filter(AISolveSession.status == status_enum)
             except ValueError:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid status: {status_filter}"
+                    detail=f"Invalid status: {status_filter}",
                 )
 
         # Apply pagination and ordering
-        solve_sessions = query.order_by(
-            AISolveSession.created_at.desc()
-        ).offset(offset).limit(limit).all()
+        solve_sessions = (
+            query.order_by(AISolveSession.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
 
-        return [{
-            "id": session.id,
-            "user_id": session.user_id,
-            "issue_id": session.issue_id,
-            "ai_model_id": session.ai_model_id,
-            "swe_config_id": session.swe_config_id,
-            "status": session.status,
-            "repo_url": session.repo_url,
-            "branch_name": session.branch_name,
-            "started_at": session.started_at,
-            "completed_at": session.completed_at,
-            "error_message": session.error_message,
-            "created_at": session.created_at,
-            "updated_at": session.updated_at,
-        } for session in solve_sessions]
+        return [
+            {
+                "id": session.id,
+                "user_id": session.user_id,
+                "issue_id": session.issue_id,
+                "ai_model_id": session.ai_model_id,
+                "swe_config_id": session.swe_config_id,
+                "status": session.status,
+                "repo_url": session.repo_url,
+                "branch_name": session.branch_name,
+                "started_at": session.started_at,
+                "completed_at": session.completed_at,
+                "error_message": session.error_message,
+                "created_at": session.created_at,
+                "updated_at": session.updated_at,
+            }
+            for session in solve_sessions
+        ]
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list solve sessions: {str(e)}"
+            detail=f"Failed to list solve sessions: {str(e)}",
         )
 
 
@@ -1525,15 +1769,18 @@ async def solver_health_for_session(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
 
         # TODO: Add actual health checks
@@ -1552,9 +1799,9 @@ async def solver_health_for_session(
             "checks": {
                 "database": "ok",  # TODO: Actual DB health check
                 "swe_agent": "ok",  # TODO: Actual SWE-agent health check
-                "docker": "ok",     # TODO: Actual Docker health check
-                "storage": "ok"     # TODO: Actual storage health check
-            }
+                "docker": "ok",  # TODO: Actual Docker health check
+                "storage": "ok",  # TODO: Actual storage health check
+            },
         }
 
     except HTTPException:
@@ -1562,13 +1809,14 @@ async def solver_health_for_session(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get solver health: {str(e)}"
+            detail=f"Failed to get solver health: {str(e)}",
         )
 
 
 # ============================================================================
 # ISSUES ENDPOINTS - Consolidated under sessions context
 # ============================================================================
+
 
 @router.post("/{session_id}/issues/create-with-context", response_model=dict)
 async def create_issue_with_context_for_session(
@@ -1578,47 +1826,66 @@ async def create_issue_with_context_for_session(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Create an issue with context for a session - Consolidated from issue_service.py
+    Create an issue with context for a session using LLM-based generation
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
 
         # Import issue service functionality
-        from issueChatServices.issue_service import IssueService
+        from daifuUserAgent.IssueOps import IssueService
 
-        # Create issue with context
-        issue_service = IssueService()
-        github_preview = issue_service.generate_github_issue_preview(
-            request, use_sample_data=True, db=db, user_id=current_user.id
+        # Create issue service instance
+        issue_service = IssueService(db)
+
+        # Generate issue using LLM with full context
+        llm_generated_issue = await issue_service.generate_issue_from_context(
+            db=db,
+            user_id=current_user.id,
+            session_id=session_id,
+            title=request.get("title", ""),
+            description=request.get("description", ""),
+            chat_messages=request.get("chat_messages", []),
+            file_context=request.get("file_context", []),
+            repo_owner=db_session.repo_owner,
+            repo_name=db_session.repo_name,
+            priority=request.get("priority", "medium"),
         )
 
-        # Create user issue in database
+        # Update the _fetch_github_repo_context call in generate_issue_from_context to use user_id
+        # This is already handled in the IssueOps._fetch_github_repo_context method
+
+        # Create user issue in database with LLM-generated content
         from models import CreateUserIssueRequest
+
         issue_request = CreateUserIssueRequest(
-            title=request.get("title", ""),
-            issue_text_raw=github_preview.body,
-            description=request.get("description"),
+            title=llm_generated_issue["title"],
+            issue_text_raw=llm_generated_issue["body"],
+            description=request.get("description", ""),
             session_id=session_id,
-            context_cards=request.get("file_context", []),
+            context_cards=request.get("context_cards", []),
             repo_owner=db_session.repo_owner,
             repo_name=db_session.repo_name,
             priority=request.get("priority", "medium"),
             issue_steps=[
                 "Analyze chat conversation context",
-                "Review file dependencies",
-                "Design implementation approach",
-                "Implement functionality",
-                "Add tests and documentation",
+                "Review file dependencies and implementation details",
+                "Design implementation approach based on LLM analysis",
+                "Implement functionality according to specifications",
+                "Add comprehensive tests and documentation",
+                "Validate implementation against acceptance criteria",
             ],
         )
 
@@ -1635,13 +1902,24 @@ async def create_issue_with_context_for_session(
                 "issue_text_raw": user_issue.issue_text_raw,
             },
             "github_preview": {
-                "title": github_preview.title,
-                "body": github_preview.body,
-                "labels": github_preview.labels,
-                "assignees": github_preview.assignees,
-                "repository_info": github_preview.repository_info,
-                "metadata": github_preview.metadata,
+                "title": llm_generated_issue["title"],
+                "body": llm_generated_issue["body"],
+                "labels": llm_generated_issue["labels"],
+                "assignees": llm_generated_issue["assignees"],
+                "repository_info": {
+                    "owner": db_session.repo_owner,
+                    "name": db_session.repo_name,
+                    "branch": db_session.repo_branch,
+                },
+                "metadata": {
+                    "generated_by_llm": True,
+                    "processing_time": llm_generated_issue["processing_time"],
+                    "tokens_used": llm_generated_issue["tokens_used"],
+                    "llm_model": "deepseek/deepseek-r1-0528",
+                    "generated_at": datetime.utcnow().isoformat(),
+                },
             },
+            "llm_response": llm_generated_issue["llm_response"],
             "message": f"Issue created successfully with ID: {user_issue.issue_id}",
         }
 
@@ -1650,7 +1928,7 @@ async def create_issue_with_context_for_session(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create issue with context: {str(e)}"
+            detail=f"Failed to create issue with context: {str(e)}",
         )
 
 
@@ -1668,15 +1946,18 @@ async def get_issues_for_session(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
 
         # Import issue service functionality
@@ -1684,8 +1965,7 @@ async def get_issues_for_session(
 
         # Build query
         query = db.query(UserIssue).filter(
-            UserIssue.user_id == current_user.id,
-            UserIssue.session_id == session_id
+            UserIssue.user_id == current_user.id, UserIssue.session_id == session_id
         )
 
         # Apply filters
@@ -1697,38 +1977,41 @@ async def get_issues_for_session(
         # Apply pagination and ordering
         issues = query.order_by(UserIssue.created_at.desc()).limit(limit).all()
 
-        return [{
-            "id": issue.id,
-            "issue_id": issue.issue_id,
-            "user_id": issue.user_id,
-            "title": issue.title,
-            "description": issue.description,
-            "issue_text_raw": issue.issue_text_raw,
-            "issue_steps": issue.issue_steps,
-            "session_id": issue.session_id,
-            "context_card_id": issue.context_card_id,
-            "context_cards": issue.context_cards,
-            "ideas": issue.ideas,
-            "repo_owner": issue.repo_owner,
-            "repo_name": issue.repo_name,
-            "priority": issue.priority,
-            "status": issue.status,
-            "agent_response": issue.agent_response,
-            "processing_time": issue.processing_time,
-            "tokens_used": issue.tokens_used,
-            "github_issue_url": issue.github_issue_url,
-            "github_issue_number": issue.github_issue_number,
-            "created_at": issue.created_at,
-            "updated_at": issue.updated_at,
-            "processed_at": issue.processed_at,
-        } for issue in issues]
+        return [
+            {
+                "id": issue.id,
+                "issue_id": issue.issue_id,
+                "user_id": issue.user_id,
+                "title": issue.title,
+                "description": issue.description,
+                "issue_text_raw": issue.issue_text_raw,
+                "issue_steps": issue.issue_steps,
+                "session_id": issue.session_id,
+                "context_card_id": issue.context_card_id,
+                "context_cards": issue.context_cards,
+                "ideas": issue.ideas,
+                "repo_owner": issue.repo_owner,
+                "repo_name": issue.repo_name,
+                "priority": issue.priority,
+                "status": issue.status,
+                "agent_response": issue.agent_response,
+                "processing_time": issue.processing_time,
+                "tokens_used": issue.tokens_used,
+                "github_issue_url": issue.github_issue_url,
+                "github_issue_number": issue.github_issue_number,
+                "created_at": issue.created_at,
+                "updated_at": issue.updated_at,
+                "processed_at": issue.processed_at,
+            }
+            for issue in issues
+        ]
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get issues: {str(e)}"
+            detail=f"Failed to get issues: {str(e)}",
         )
 
 
@@ -1744,31 +2027,37 @@ async def get_issue_for_session(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
 
         # Import issue service functionality
         from models import UserIssue
 
         # Get the issue
-        issue = db.query(UserIssue).filter(
-            UserIssue.user_id == current_user.id,
-            UserIssue.issue_id == issue_id,
-            UserIssue.session_id == session_id
-        ).first()
+        issue = (
+            db.query(UserIssue)
+            .filter(
+                UserIssue.user_id == current_user.id,
+                UserIssue.issue_id == issue_id,
+                UserIssue.session_id == session_id,
+            )
+            .first()
+        )
 
         if not issue:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Issue not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found"
             )
 
         return {
@@ -1802,7 +2091,7 @@ async def get_issue_for_session(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get issue: {str(e)}"
+            detail=f"Failed to get issue: {str(e)}",
         )
 
 
@@ -1822,23 +2111,26 @@ async def update_issue_status_for_session(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
 
         # Import issue service functionality
-        from issueChatServices.issue_service import IssueService
+        from daifuUserAgent.IssueOps import IssueService
 
         # Update issue status
-        updated_issue = IssueService.update_issue_status(
-            db,
+        issue_service = IssueService(db)
+        updated_issue = issue_service.update_issue_status(
             current_user.id,
             issue_id,
             status,
@@ -1849,8 +2141,7 @@ async def update_issue_status_for_session(
 
         if not updated_issue:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Issue not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Issue not found"
             )
 
         return {
@@ -1884,7 +2175,7 @@ async def update_issue_status_for_session(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update issue status: {str(e)}"
+            detail=f"Failed to update issue status: {str(e)}",
         )
 
 
@@ -1900,23 +2191,27 @@ async def create_github_issue_from_user_issue_for_session(
     """
     try:
         # Verify session exists and belongs to user
-        db_session = db.query(ChatSession).filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
 
         if not db_session:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
 
         # Import issue service functionality
-        from issueChatServices.issue_service import IssueService
+        from daifuUserAgent.IssueOps import IssueService
 
         # Create GitHub issue
-        result = await IssueService.create_github_issue_from_user_issue(
-            db, current_user.id, issue_id, current_user
+        issue_service = IssueService(db)
+        result = await issue_service.create_github_issue_from_user_issue(
+            current_user.id, issue_id, current_user
         )
 
         if not result:
@@ -1960,5 +2255,5 @@ async def create_github_issue_from_user_issue_for_session(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create GitHub issue: {str(e)}"
+            detail=f"Failed to create GitHub issue: {str(e)}",
         )
