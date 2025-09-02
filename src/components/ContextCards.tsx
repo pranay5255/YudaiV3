@@ -3,12 +3,14 @@ import { Trash2, FileText, MessageCircle, Upload } from 'lucide-react';
 import type {
   ChatContextMessage,
   FileContextItem,
-  GitHubIssuePreview
-} from '../types/api';
-import type { CreateIssueWithContextRequest } from '../types/sessionTypes';
-import { UserIssueResponse, ContextCard } from '../types';
-import { useSessionStore } from '../stores/sessionStore';
+  GitHubIssuePreview,
+  CreateIssueWithContextRequest,
+  UserIssueResponse,
+  ContextCard
+} from '../types/sessionTypes';
 import { useRepository } from '../hooks/useRepository';
+import { useCreateIssueWithContext } from '../hooks/useSessionQueries';
+import { useSessionStore } from '../stores/sessionStore';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -46,7 +48,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   const { activeSessionId } = useSessionStore();
   const { selectedRepository } = useRepository();
   
-  const { deleteContextCard, createIssueWithContext } = useSessionStore();
+  const { deleteContextCard } = useSessionStore();
   const [isLoading, setIsLoading] = useState(false);
 
   const showError = useCallback((message: string) => {
@@ -145,9 +147,10 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
         priority: 'medium',
       };
 
-      const response = await createIssueWithContext(request);
-      
-      if (response.success && onShowIssuePreview) {
+      const createIssueMutation = useCreateIssueWithContext();
+      const response = await createIssueMutation.mutateAsync(request);
+
+      if (response && response.success && onShowIssuePreview) {
         const previewData: IssuePreviewData = {
           ...response.github_preview,
           userIssue: response.user_issue as UserIssueResponse,
@@ -166,7 +169,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, repositoryInfo, selectedRepository, cards, onShowIssuePreview, showError, createIssueWithContext]);
+  }, [isLoading, repositoryInfo, selectedRepository, cards, onShowIssuePreview, showError]);
 
   return (
     <div className="h-full flex flex-col">

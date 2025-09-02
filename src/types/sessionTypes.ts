@@ -152,6 +152,130 @@ export interface AgentStatus {
 }
 
 // ============================================================================
+// ISSUE CREATION & MANAGEMENT TYPES
+// ============================================================================
+
+export interface CreateUserIssueRequest {
+  title: string;
+  issue_text_raw: string;
+  description?: string;
+  session_id?: string;
+  context_card_id?: number;
+  context_cards?: string[];
+  ideas?: string[];
+  repo_owner?: string;
+  repo_name?: string;
+  priority: string;
+  issue_steps?: string[];
+}
+
+export interface IssueGenerationRequest {
+  title: string;
+  description: string;
+  chat_messages: ChatContextMessage[];
+  file_context: FileContextItem[];
+  repository_info?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
+  priority?: string;
+}
+
+export interface IssueGenerationResponse {
+  title: string;
+  body: string;
+  labels: string[];
+  assignees: string[];
+  processing_time: number;
+  tokens_used: number;
+  llm_response: string;
+  raw_response: Record<string, unknown>;
+}
+
+// ============================================================================
+// GITHUB CONTEXT TYPES
+// ============================================================================
+
+export interface GitHubRepositoryContext {
+  repository: GitHubRepositoryInfo;
+  branches: GitHubBranchInfo[];
+  contributors: GitHubContributorInfo[];
+  fetched_at: string;
+  owner: string;
+  name: string;
+}
+
+export interface GitHubRepositoryInfo {
+  id?: number;
+  name: string;
+  full_name: string;
+  description?: string;
+  language?: string;
+  stargazers_count?: number;
+  forks_count?: number;
+  open_issues_count?: number;
+  default_branch?: string;
+  topics?: string[];
+  created_at?: string;
+  updated_at?: string;
+  pushed_at?: string;
+  private?: boolean;
+  html_url?: string;
+}
+
+export interface GitHubBranchInfo {
+  name: string;
+  protected?: boolean;
+  commit_sha?: string;
+}
+
+export interface GitHubContributorInfo {
+  login: string;
+  contributions: number;
+  avatar_url?: string;
+}
+
+export interface GitHubIssueInfo {
+  number: number;
+  title: string;
+  state: string;
+  created_at: string;
+  labels: string[];
+}
+
+export interface GitHubCommitInfo {
+  sha: string;
+  message: string;
+  author?: string;
+  date?: string;
+}
+
+// ============================================================================
+// CHAT PROCESSING TYPES
+// ============================================================================
+
+export interface ChatProcessingRequest {
+  session_id: string;
+  user_id: number;
+  message_text: string;
+  context_cards?: string[];
+  repository?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
+}
+
+export interface ChatProcessingResponse {
+  reply: string;
+  message_id: string;
+  processing_time: number;
+  session_id: string;
+  tokens_used?: number;
+}
+
+// ============================================================================
 // REQUEST TYPES
 // ============================================================================
 
@@ -282,6 +406,12 @@ export interface GitHubIssuePreview {
     total_tokens: number;
     generated_at: string;
     generation_method: string;
+    generated_by_llm?: boolean;
+    processing_time?: number;
+    tokens_used?: number;
+    llm_model?: string;
+    generated_from?: string;
+    preview_generated_at?: string;
   };
 }
 

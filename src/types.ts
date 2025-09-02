@@ -2,7 +2,39 @@
 // FRONTEND-ONLY TYPES (not API-related)
 // ============================================================================
 
-import type { ContextCard, FileItem, User, GitHubRepository, GitHubBranch, SelectedRepository, ChatMessageAPI, SessionResponse, SessionContextResponse, UserIssueResponse, TabType, AgentStatus, CreateSessionMutationData, AddContextCardMutationData, RemoveContextCardMutationData, AddFileDependencyMutationData, ContextCardMutationContext, FileDependencyMutationContext } from './types/sessionTypes';
+import type {
+  ContextCard,
+  FileItem,
+  User,
+  GitHubRepository,
+  GitHubBranch,
+  SelectedRepository,
+  ChatMessageAPI,
+  SessionResponse,
+  SessionContextResponse,
+  UserIssueResponse,
+  TabType,
+  AgentStatus,
+  CreateSessionMutationData,
+  AddContextCardMutationData,
+  RemoveContextCardMutationData,
+  AddFileDependencyMutationData,
+  ContextCardMutationContext,
+  FileDependencyMutationContext,
+  // New types from backend integration
+  CreateUserIssueRequest,
+  IssueGenerationRequest,
+  IssueGenerationResponse,
+  GitHubRepositoryContext,
+  GitHubRepositoryInfo,
+  GitHubBranchInfo,
+  GitHubContributorInfo,
+  GitHubIssueInfo,
+  GitHubCommitInfo,
+  ChatProcessingRequest,
+  ChatProcessingResponse,
+  GitHubIssuePreview
+} from './types/sessionTypes';
 
 export interface IdeaItem {
   id: string;
@@ -12,8 +44,97 @@ export interface IdeaItem {
   confidence: number;
 }
 
+// ============================================================================
+// CHAT COMPONENT SPECIFIC TYPES
+// ============================================================================
+
+export interface IssuePreviewData extends GitHubIssuePreview {
+  userIssue?: UserIssueResponse;
+  conversationContext: import('./types/sessionTypes').ChatContextMessage[];
+  fileContext: import('./types/sessionTypes').FileContextItem[];
+  canCreateGitHubIssue: boolean;
+  repositoryInfo?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
+}
+
+export interface ChatProps {
+  onShowIssuePreview?: (issuePreview: IssuePreviewData) => void;
+  onShowError?: (error: string) => void;
+}
+
+export interface IssuePreviewModalProps {
+  issuePreview: IssuePreviewData;
+  onClose: () => void;
+  onCreateIssue: () => void;
+  onRegenerateIssue: () => void;
+  isCreating: boolean;
+}
+
+// ============================================================================
+// BACKEND INTEGRATION TYPES
+// ============================================================================
+
+export interface ChatOpsContext {
+  session_id: string;
+  user_id: number;
+  message_text: string;
+  context_cards?: string[];
+  repository?: {
+    owner: string;
+    name: string;
+    branch?: string;
+  };
+}
+
+export interface IssueOpsContext {
+  session_id: string;
+  user_id: number;
+  title: string;
+  description: string;
+  chat_messages: import('./types/sessionTypes').ChatContextMessage[];
+  file_context: import('./types/sessionTypes').FileContextItem[];
+  repo_owner: string;
+  repo_name: string;
+  priority: string;
+}
+
 // Re-export types from sessionTypes for backward compatibility
-export type { ContextCard, FileItem, User, GitHubRepository, GitHubBranch, SelectedRepository, ChatMessageAPI, SessionResponse, SessionContextResponse, UserIssueResponse, TabType, AgentStatus, CreateSessionMutationData, AddContextCardMutationData, RemoveContextCardMutationData, AddFileDependencyMutationData, ContextCardMutationContext, FileDependencyMutationContext };
+export type {
+  ContextCard,
+  FileItem,
+  User,
+  GitHubRepository,
+  GitHubBranch,
+  SelectedRepository,
+  ChatMessageAPI,
+  SessionResponse,
+  SessionContextResponse,
+  UserIssueResponse,
+  TabType,
+  AgentStatus,
+  CreateSessionMutationData,
+  AddContextCardMutationData,
+  RemoveContextCardMutationData,
+  AddFileDependencyMutationData,
+  ContextCardMutationContext,
+  FileDependencyMutationContext,
+  // New backend integration types
+  CreateUserIssueRequest,
+  IssueGenerationRequest,
+  IssueGenerationResponse,
+  GitHubRepositoryContext,
+  GitHubRepositoryInfo,
+  GitHubBranchInfo,
+  GitHubContributorInfo,
+  GitHubIssueInfo,
+  GitHubCommitInfo,
+  ChatProcessingRequest,
+  ChatProcessingResponse,
+  GitHubIssuePreview
+};
 
 // ============================================================================
 // UI & STATE TYPES
