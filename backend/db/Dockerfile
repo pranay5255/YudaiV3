@@ -1,18 +1,18 @@
-FROM postgres:15-alpine AS pgvector-builder
+# Use pre-built pgvector image as base (includes pgvector extension)
+FROM pgvector/pgvector:pg15
 
-RUN apk add --no-cache git make gcc libc-dev clang llvm15 llvm15-dev postgresql15-dev postgresql15-contrib
+# Set environment variables for database initialization
+ENV POSTGRES_DB=yudai_dev
+ENV POSTGRES_USER=yudai_user
+ENV POSTGRES_PASSWORD=yudai_password
 
-RUN git clone --branch v0.4.4 https://github.com/pgvector/pgvector.git /tmp/pgvector
+# Copy initialization scripts to run on first startup
+COPY init.sql /docker-entrypoint-initdb.d/01-init.sql
 
-WORKDIR /tmp/pgvector
+# Set proper permissions for init script
+RUN chmod 644 /docker-entrypoint-initdb.d/01-init.sql
 
-RUN make
-RUN make install
-
-FROM postgres:15-alpine
-
-COPY --from=pgvector-builder /usr/local/lib/postgresql/bitcode/vector.index.bc /usr/local/lib/postgresql/bitcode/vector.index.bc
-COPY --from=pgvector-builder /usr/local/lib/postgresql/vector.so /usr/local/lib/postgresql/vector.so
-COPY --from=pgvector-builder /usr/local/share/postgresql/extension /usr/local/share/postgresql/extension
-
-COPY postgresql.conf /usr/share/postgresql/postgresql.conf.sample
+# Copy Python scripts for potential runtime use
+COPY init_db.py /usr/local/bin/
+COPY database.py /usr/local/bin/
+RUN chmod +x /usr/local/bin/init_db.py

@@ -1,53 +1,31 @@
-# Multi-stage build for React frontend (DEVELOPMENT VERSION)
-FROM node:18-alpine AS builder
+# Simple development setup for React frontend with Vite
+FROM node:18-alpine
 
-# Install pnpm
+# Install pnpm globally
 RUN npm install -g pnpm
 
 # Set work directory
 WORKDIR /app
 
-# Accept build args for environment variables
-ARG VITE_API_BASE_URL
-ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+# Set environment variables
+ENV NODE_ENV=development
+ENV VITE_API_BASE_URL=http://localhost:8001
 
-# Copy package files
+# Copy package files first for better caching
 COPY package*.json pnpm-lock.yaml* ./
 
-# Install dependencies using pnpm
+# Install dependencies
 RUN pnpm install
 
 # Copy source code
 COPY . .
 
-# Build the application
-RUN pnpm run build
-
-# Verify build output
-RUN ls -la /app/dist/ && test -f /app/dist/index.html
-
-# Production stage
-FROM nginx:alpine
-
-# Copy built app from builder stage
-COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Copy the DEVELOPMENT nginx configuration (NO SSL)
-RUN rm -f /etc/nginx/nginx.conf
-COPY nginx.dev.conf /etc/nginx/nginx.conf
-
-# Create health endpoint
-RUN echo "healthy" > /usr/share/nginx/html/health
-
-# Set proper permissions
-RUN chmod -R 755 /usr/share/nginx/html
-
-# Expose port
-EXPOSE 80
+# Expose Vite dev server port
+EXPOSE 5173
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:5173 || exit 1
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+# Start Vite development server
+CMD ["pnpm", "run", "dev", "--host", "0.0.0.0", "--port", "5173"]
