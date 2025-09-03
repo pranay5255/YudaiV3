@@ -32,18 +32,18 @@ export default defineConfig(({ mode }) => {
 
     // Development server configuration
     server: {
-      port: 5173,
+      port: 3000,
       host: true,
       strictPort: true,
       // Proxy for development API calls
       proxy: {
         '/api': {
-          target: 'http://localhost:8000',
+          target: process.env.VITE_API_BASE_URL || 'http://localhost:8001',
           changeOrigin: true,
           secure: false,
         },
         '/auth': {
-          target: 'http://localhost:8000',
+          target: process.env.VITE_API_BASE_URL || 'http://localhost:8001',
           changeOrigin: true,
           secure: false,
         }

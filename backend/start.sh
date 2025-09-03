@@ -3,11 +3,6 @@ set -e
 
 echo "🚀 Starting YudaiV3 Backend..."
 
-# Wait for database to be fully ready before initialization
-echo "⏳ Waiting for database to be fully ready..."
-max_attempts=60
-attempt=0
-
 # Extract database name from DATABASE_URL if POSTGRES_DB is not set
 if [ -z "$POSTGRES_DB" ] && [ -n "$DATABASE_URL" ]; then
     # Extract database name from DATABASE_URL (format: postgresql://user:pass@host:port/dbname)
@@ -20,24 +15,6 @@ if [ -z "$POSTGRES_DB" ]; then
     POSTGRES_DB="postgres"
     echo "ℹ️ Using default database name: $POSTGRES_DB"
 fi
-
-while [ $attempt -lt $max_attempts ]; do
-    attempt=$((attempt + 1))
-    echo "  Attempt $attempt/$max_attempts..."
-    
-    # Test database connectivity and readiness
-    if pg_isready -h db -p 5432 -U yudai_user -d "$POSTGRES_DB" >/dev/null 2>&1; then
-        echo "🎉 Database is ready!"
-        break
-    else
-        if [ $attempt -eq $max_attempts ]; then
-            echo "❌ Failed to connect to database after $max_attempts attempts"
-            exit 1
-        fi
-        echo "  ⏳ Waiting 5 seconds before retry..."
-        sleep 5
-    fi
-done
 
 # Initialize database tables
 echo "🏗️  Initializing database tables..."
@@ -83,7 +60,7 @@ test_database_connection() {
 
 }
 
-# Wait for database with enhanced testing
+# Wait for database to be ready
 echo "⏳ Waiting for database to be ready..."
 max_attempts=60
 attempt=0
@@ -91,7 +68,7 @@ attempt=0
 while [ $attempt -lt $max_attempts ]; do
     attempt=$((attempt + 1))
     echo "  Attempt $attempt/$max_attempts..."
-    
+
     if test_database_connection; then
         echo "🎉 Database is ready!"
         break
