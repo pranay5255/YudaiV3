@@ -91,9 +91,9 @@ export const CORS_CONFIG = {
 } as const;
 
 export const API = {
-  AUTH,
-  SESSIONS,
+  AUTH: API_CONFIG.AUTH,
+  SESSIONS: API_CONFIG.SESSIONS,
   // GITHUB,  // Removed as deprecated
-  ISSUES,
-  SOLVE,
+  ISSUES: API_CONFIG.SESSIONS.ISSUES,
+  SOLVER: API_CONFIG.SESSIONS.SOLVER,
 };

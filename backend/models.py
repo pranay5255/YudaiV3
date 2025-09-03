@@ -520,92 +520,6 @@ class ContextCard(Base):
     )
 
 
-# class IdeaItem(Base):
-#     """Ideas to implement"""
-#     # TODO: Make this compatible to display for @IdeasToImplement.tsx
-#     __tablename__ = "idea_items"
-
-#     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-#     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-
-#     # Idea data
-#     title: Mapped[str] = mapped_column(String(255), nullable=False)
-#     description: Mapped[str] = mapped_column(Text, nullable=False)
-#     complexity: Mapped[str] = mapped_column(String(10), nullable=False)
-
-#     # Status
-#     status: Mapped[str] = mapped_column(String(50), default="pending")
-#     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-
-#     # Timestamps
-#     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-#     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
-
-#     # Relationships
-#     user: Mapped["User"] = relationship()
-
-# class ChatSession(Base):
-#     """Chat sessions for user conversations"""
-#     __tablename__ = "chat_sessions"
-
-#     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-#     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-
-#     # Session data
-#     session_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-#     title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-#     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-#     # Repository context (session backbone)
-#     repo_owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
-#     repo_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
-#     repo_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default="main")
-#     repo_context: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)  # Repository metadata
-
-#     # Status and statistics
-#     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-#     total_messages: Mapped[int] = mapped_column(Integer, default=0)
-#     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
-
-#     # Timestamps
-#     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-#     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
-#     last_activity: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-
-#     # Relationships
-#     user: Mapped["User"] = relationship(back_populates="chat_sessions")
-#     messages: Mapped[List["ChatMessage"]] = relationship(back_populates="session", cascade="all, delete-orphan")
-#     file_embeddings: Mapped[List["FileEmbedding"]] = relationship(back_populates="session", cascade="all, delete-orphan")
-#     context_cards: Mapped[List["ContextCard"]] = relationship(back_populates="session", cascade="all, delete-orphan")
-
-# class ChatMessage(Base):
-#     """Individual chat messages within sessions"""
-#     __tablename__ = "chat_messages"
-
-#     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-#     session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id"), nullable=False)
-
-#     # Message data
-#     message_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-#     message_text: Mapped[str] = mapped_column(Text, nullable=False)
-#     sender_type: Mapped[str] = mapped_column(String(50), nullable=False)  # user, assistant, system
-#     role: Mapped[str] = mapped_column(String(50), nullable=False)  # user, assistant, system
-#     is_code: Mapped[bool] = mapped_column(Boolean, default=False)
-
-#     # Metadata
-#     tokens: Mapped[int] = mapped_column(Integer, default=0)
-#     model_used: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-#     processing_time: Mapped[Optional[float]] = mapped_column(nullable=True)  # milliseconds
-#     context_cards: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
-#     referenced_files: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
-#     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-#     # Timestamps
-#     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-#     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
-
-#     # Relationships
-#     session: Mapped["ChatSession"] = relationship(back_populates="messages")
 
 
 class UserIssue(Base):
@@ -891,8 +805,58 @@ class APIError(BaseModel):
     status: Optional[int] = None
     error_code: Optional[str] = None
     timestamp: Optional[datetime] = None
+    path: Optional[str] = None
+    request_id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class StandardizedErrorCodes:
+    """Standardized error codes for consistent error handling"""
+
+    # Authentication errors
+    AUTH_INVALID_TOKEN = "AUTH_INVALID_TOKEN"
+    AUTH_EXPIRED_TOKEN = "AUTH_EXPIRED_TOKEN"
+    AUTH_MISSING_TOKEN = "AUTH_MISSING_TOKEN"
+    AUTH_INSUFFICIENT_PERMISSIONS = "AUTH_INSUFFICIENT_PERMISSIONS"
+
+    # Session errors
+    SESSION_NOT_FOUND = "SESSION_NOT_FOUND"
+    SESSION_ACCESS_DENIED = "SESSION_ACCESS_DENIED"
+    SESSION_INVALID_DATA = "SESSION_INVALID_DATA"
+    SESSION_ALREADY_EXISTS = "SESSION_ALREADY_EXISTS"
+
+    # Message errors
+    MESSAGE_NOT_FOUND = "MESSAGE_NOT_FOUND"
+    MESSAGE_INVALID_DATA = "MESSAGE_INVALID_DATA"
+    MESSAGE_TOO_LONG = "MESSAGE_TOO_LONG"
+
+    # File errors
+    FILE_NOT_FOUND = "FILE_NOT_FOUND"
+    FILE_ACCESS_DENIED = "FILE_ACCESS_DENIED"
+    FILE_INVALID_FORMAT = "FILE_INVALID_FORMAT"
+    FILE_TOO_LARGE = "FILE_TOO_LARGE"
+
+    # Repository errors
+    REPO_NOT_FOUND = "REPO_NOT_FOUND"
+    REPO_ACCESS_DENIED = "REPO_ACCESS_DENIED"
+    REPO_INVALID_URL = "REPO_INVALID_URL"
+
+    # AI/Model errors
+    AI_MODEL_ERROR = "AI_MODEL_ERROR"
+    AI_PROCESSING_FAILED = "AI_PROCESSING_FAILED"
+    AI_RATE_LIMIT_EXCEEDED = "AI_RATE_LIMIT_EXCEEDED"
+
+    # Database errors
+    DB_CONNECTION_ERROR = "DB_CONNECTION_ERROR"
+    DB_INTEGRITY_ERROR = "DB_INTEGRITY_ERROR"
+    DB_TIMEOUT_ERROR = "DB_TIMEOUT_ERROR"
+
+    # General errors
+    VALIDATION_ERROR = "VALIDATION_ERROR"
+    INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
+    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
+    BAD_REQUEST = "BAD_REQUEST"
 
 
 class APIResponse(BaseModel):
@@ -1201,6 +1165,35 @@ class FileEmbeddingResponse(BaseModel):
     chunk_index: int
     tokens: int
     file_metadata: Optional[Dict[str, Any]] = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# Missing Response Models for session_routes.py
+class FileItemResponse(BaseModel):
+    """Response model for file items (used in file extraction endpoints)"""
+    id: str
+    name: str
+    type: str
+    Category: str
+    tokens: int
+    isDirectory: bool
+    children: Optional[List["FileItemResponse"]] = None
+    path: Optional[str] = None
+    expanded: Optional[bool] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SessionFileDependencyResponse(BaseModel):
+    """Response model for session file dependencies"""
+    id: int
+    file_name: str
+    file_path: str
+    file_type: str
+    tokens: int
+    category: Optional[str] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

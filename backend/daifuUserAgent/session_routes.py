@@ -86,6 +86,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 # Import from filedeps.py
 from models import (
     AISolveSession,
+    APIError,
     ChatMessage,
     ChatMessageResponse,
     ChatRequest,
@@ -103,6 +104,8 @@ from models import (
     SessionContextResponse,
     SessionFileDependencyResponse,
     SessionResponse,
+    UpdateFileEmbeddingRequest,
+    UpdateSessionRequest,
     User,
 )
 from pgvector.sqlalchemy import Vector
@@ -111,8 +114,36 @@ from repo_processorGitIngest.scraper_script import (
     extract_repository_data,
 )
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
 
 router = APIRouter(tags=["sessions"])
+
+
+def create_standardized_error(
+    status_code: int,
+    error_code: str,
+    message: str,
+    detail: Optional[str] = None,
+    path: Optional[str] = None
+) -> HTTPException:
+    """
+    Create a standardized HTTPException with consistent error format.
+    """
+    error_response = APIError(
+        detail=detail or message,
+        message=message,
+        status=status_code,
+        error_code=error_code,
+        timestamp=datetime.utcnow(),
+        path=path,
+        request_id=str(uuid.uuid4())
+    )
+
+    return HTTPException(
+        status_code=status_code,
+        detail=error_response.model_dump()
+    )
+
 
 # CRITICAL PRIORITY ENDPOINTS
 
@@ -173,6 +204,75 @@ async def create_session(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create session: {str(e)}",
+        )
+
+
+@router.put("/sessions/{session_id}", response_model=SessionResponse)
+async def update_session(
+    session_id: str,
+    request: UpdateSessionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Update session details (title, description, branch, etc.)
+    This is a CRITICAL endpoint for session management.
+    """
+    try:
+        # Verify session exists and belongs to user
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
+
+        if not db_session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+            )
+
+        # Update fields if provided
+        if request.title is not None:
+            db_session.title = request.title
+        if request.description is not None:
+            db_session.description = request.description
+        if request.repo_branch is not None:
+            db_session.repo_branch = request.repo_branch
+        if request.is_active is not None:
+            db_session.is_active = request.is_active
+
+        # Update last activity
+        db_session.last_activity = datetime.utcnow()
+        db_session.updated_at = datetime.utcnow()
+
+        db.commit()
+        db.refresh(db_session)
+
+        return SessionResponse(
+            id=db_session.id,
+            session_id=db_session.session_id,
+            title=db_session.title,
+            description=db_session.description,
+            repo_owner=db_session.repo_owner,
+            repo_name=db_session.repo_name,
+            repo_branch=db_session.repo_branch,
+            repo_context=db_session.repo_context,
+            is_active=db_session.is_active,
+            total_messages=db_session.total_messages,
+            total_tokens=db_session.total_tokens,
+            created_at=db_session.created_at,
+            updated_at=db_session.updated_at,
+            last_activity=db_session.last_activity,
+        )
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update session: {str(e)}",
         )
 
 
@@ -408,6 +508,443 @@ async def add_chat_message(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to add message: {str(e)}",
+        )
+
+
+@router.post("/sessions/{session_id}/messages/bulk", response_model=List[ChatMessageResponse])
+async def add_bulk_chat_messages(
+    session_id: str,
+    messages: List[dict],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Add multiple chat messages to a session in bulk.
+    This is a HIGH priority endpoint for bulk message operations.
+    """
+    try:
+        # Verify session exists and belongs to user
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
+
+        if not db_session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+            )
+
+        created_messages = []
+        total_tokens_added = 0
+
+        for message_data in messages:
+            # Create new message
+            message = ChatMessage(
+                session_id=db_session.id,
+                message_id=message_data.get("message_id", f"msg_{uuid.uuid4().hex[:8]}"),
+                message_text=message_data["message_text"],
+                sender_type=message_data["sender_type"],
+                role=message_data["role"],
+                is_code=message_data.get("is_code", False),
+                tokens=message_data.get("tokens", 0),
+                model_used=message_data.get("model_used"),
+                processing_time=message_data.get("processing_time"),
+                context_cards=message_data.get("context_cards"),
+                referenced_files=message_data.get("referenced_files"),
+                error_message=message_data.get("error_message"),
+            )
+
+            db.add(message)
+            created_messages.append(message)
+            total_tokens_added += message.tokens
+
+        # Update session statistics
+        db_session.total_messages += len(created_messages)
+        db_session.total_tokens += total_tokens_added
+        db_session.last_activity = datetime.utcnow()
+
+        db.commit()
+
+        # Refresh all messages to get IDs
+        for message in created_messages:
+            db.refresh(message)
+
+        return [
+            ChatMessageResponse(
+                id=msg.id,
+                message_id=msg.message_id,
+                message_text=msg.message_text,
+                sender_type=msg.sender_type,
+                role=msg.role,
+                is_code=msg.is_code,
+                tokens=msg.tokens,
+                model_used=msg.model_used,
+                processing_time=msg.processing_time,
+                context_cards=msg.context_cards,
+                referenced_files=msg.referenced_files,
+                error_message=msg.error_message,
+                created_at=msg.created_at,
+                updated_at=msg.updated_at,
+            )
+            for msg in created_messages
+        ]
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to add bulk messages: {str(e)}",
+        )
+
+
+@router.get("/sessions/{session_id}/export", response_model=dict)
+async def export_session(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Export session data including messages, context cards, and file dependencies.
+    This is a MEDIUM priority endpoint for session backup and migration.
+    """
+    try:
+        # Verify session exists and belongs to user
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
+
+        if not db_session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+            )
+
+        # Get all session data
+        messages = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == db_session.id)
+            .order_by(ChatMessage.created_at.asc())
+            .all()
+        )
+
+        context_cards = (
+            db.query(ContextCard)
+            .filter(ContextCard.session_id == db_session.id)
+            .all()
+        )
+
+        file_embeddings = (
+            db.query(FileEmbedding)
+            .filter(FileEmbedding.session_id == db_session.id)
+            .all()
+        )
+
+        # Build export data
+        export_data = {
+            "version": "1.0",
+            "export_timestamp": datetime.utcnow().isoformat(),
+            "session": {
+                "session_id": db_session.session_id,
+                "title": db_session.title,
+                "description": db_session.description,
+                "repo_owner": db_session.repo_owner,
+                "repo_name": db_session.repo_name,
+                "repo_branch": db_session.repo_branch,
+                "repo_context": db_session.repo_context,
+                "is_active": db_session.is_active,
+                "total_messages": db_session.total_messages,
+                "total_tokens": db_session.total_tokens,
+                "created_at": db_session.created_at.isoformat() if db_session.created_at else None,
+                "updated_at": db_session.updated_at.isoformat() if db_session.updated_at else None,
+                "last_activity": db_session.last_activity.isoformat() if db_session.last_activity else None,
+            },
+            "messages": [
+                {
+                    "message_id": msg.message_id,
+                    "message_text": msg.message_text,
+                    "sender_type": msg.sender_type,
+                    "role": msg.role,
+                    "is_code": msg.is_code,
+                    "tokens": msg.tokens,
+                    "model_used": msg.model_used,
+                    "processing_time": msg.processing_time,
+                    "context_cards": msg.context_cards,
+                    "referenced_files": msg.referenced_files,
+                    "error_message": msg.error_message,
+                    "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                    "updated_at": msg.updated_at.isoformat() if msg.updated_at else None,
+                }
+                for msg in messages
+            ],
+            "context_cards": [
+                {
+                    "title": card.title,
+                    "description": card.description,
+                    "content": card.content,
+                    "source": card.source,
+                    "tokens": card.tokens,
+                    "is_active": card.is_active,
+                    "created_at": card.created_at.isoformat() if card.created_at else None,
+                    "updated_at": card.updated_at.isoformat() if card.updated_at else None,
+                }
+                for card in context_cards
+            ],
+            "file_embeddings": [
+                {
+                    "file_path": fe.file_path,
+                    "file_name": fe.file_name,
+                    "file_type": fe.file_type,
+                    "file_content": fe.file_content,
+                    "chunk_index": fe.chunk_index,
+                    "chunk_text": fe.chunk_text,
+                    "tokens": fe.tokens,
+                    "file_metadata": fe.file_metadata,
+                    "created_at": fe.created_at.isoformat() if fe.created_at else None,
+                }
+                for fe in file_embeddings
+            ],
+        }
+
+        return export_data
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to export session: {str(e)}",
+        )
+
+
+@router.post("/sessions/import", response_model=SessionResponse)
+async def import_session(
+    import_data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Import session data from exported format.
+    This is a MEDIUM priority endpoint for session restoration.
+    """
+    try:
+        # Validate import data structure
+        if not import_data.get("session"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid import data: missing session information"
+            )
+
+        session_data = import_data["session"]
+
+        # Generate new session ID to avoid conflicts
+        new_session_id = f"imported_{uuid.uuid4().hex[:8]}"
+
+        # Create new session
+        db_session = ChatSession(
+            user_id=current_user.id,
+            session_id=new_session_id,
+            title=session_data.get("title", f"Imported Session - {new_session_id}"),
+            description=session_data.get("description"),
+            repo_owner=session_data.get("repo_owner"),
+            repo_name=session_data.get("repo_name"),
+            repo_branch=session_data.get("repo_branch", "main"),
+            repo_context=session_data.get("repo_context"),
+            is_active=session_data.get("is_active", True),
+            total_messages=0,  # Will be updated as we import
+            total_tokens=0,    # Will be updated as we import
+            last_activity=datetime.utcnow(),
+        )
+
+        db.add(db_session)
+        db.flush()  # Get the session ID
+
+        # Import messages
+        total_messages = 0
+        total_tokens = 0
+
+        if import_data.get("messages"):
+            for msg_data in import_data["messages"]:
+                message = ChatMessage(
+                    session_id=db_session.id,
+                    message_id=msg_data.get("message_id", f"msg_{uuid.uuid4().hex[:8]}"),
+                    message_text=msg_data["message_text"],
+                    sender_type=msg_data["sender_type"],
+                    role=msg_data["role"],
+                    is_code=msg_data.get("is_code", False),
+                    tokens=msg_data.get("tokens", 0),
+                    model_used=msg_data.get("model_used"),
+                    processing_time=msg_data.get("processing_time"),
+                    context_cards=msg_data.get("context_cards"),
+                    referenced_files=msg_data.get("referenced_files"),
+                    error_message=msg_data.get("error_message"),
+                )
+                db.add(message)
+                total_messages += 1
+                total_tokens += message.tokens
+
+        # Import context cards
+        if import_data.get("context_cards"):
+            for card_data in import_data["context_cards"]:
+                context_card = ContextCard(
+                    user_id=current_user.id,
+                    session_id=db_session.id,
+                    title=card_data["title"],
+                    description=card_data["description"],
+                    content=card_data["content"],
+                    source=card_data["source"],
+                    tokens=card_data.get("tokens", 0),
+                    is_active=card_data.get("is_active", True),
+                )
+                db.add(context_card)
+
+        # Import file embeddings (without embeddings vector for simplicity)
+        if import_data.get("file_embeddings"):
+            for fe_data in import_data["file_embeddings"]:
+                file_embedding = FileEmbedding(
+                    session_id=db_session.id,
+                    repository_id=None,  # Will need to be set if repository exists
+                    file_path=fe_data["file_path"],
+                    file_name=fe_data["file_name"],
+                    file_type=fe_data["file_type"],
+                    file_content=fe_data.get("file_content"),
+                    chunk_index=fe_data.get("chunk_index", 0),
+                    chunk_text=fe_data["chunk_text"],
+                    tokens=fe_data.get("tokens", 0),
+                    file_metadata=fe_data.get("file_metadata"),
+                    embedding=None,  # Embeddings will need to be regenerated
+                )
+                db.add(file_embedding)
+
+        # Update session statistics
+        db_session.total_messages = total_messages
+        db_session.total_tokens = total_tokens
+
+        db.commit()
+        db.refresh(db_session)
+
+        return SessionResponse(
+            id=db_session.id,
+            session_id=db_session.session_id,
+            title=db_session.title,
+            description=db_session.description,
+            repo_owner=db_session.repo_owner,
+            repo_name=db_session.repo_name,
+            repo_branch=db_session.repo_branch,
+            repo_context=db_session.repo_context,
+            is_active=db_session.is_active,
+            total_messages=db_session.total_messages,
+            total_tokens=db_session.total_tokens,
+            created_at=db_session.created_at,
+            updated_at=db_session.updated_at,
+            last_activity=db_session.last_activity,
+        )
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to import session: {str(e)}",
+        )
+
+
+@router.get("/sessions/{session_id}/stats", response_model=dict)
+async def get_session_statistics(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get comprehensive statistics for a session.
+    This is a HIGH priority endpoint for session analytics.
+    """
+    try:
+        # Verify session exists and belongs to user
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
+
+        if not db_session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+            )
+
+        # Get message statistics
+        message_stats = db.query(
+            ChatMessage.sender_type,
+            func.count(ChatMessage.id).label('count'),
+            func.sum(ChatMessage.tokens).label('total_tokens'),
+            func.avg(ChatMessage.processing_time).label('avg_processing_time')
+        ).filter(ChatMessage.session_id == db_session.id).group_by(ChatMessage.sender_type).all()
+
+        # Get context card count
+        context_card_count = db.query(func.count(ContextCard.id)).filter(
+            ContextCard.session_id == db_session.id,
+            ContextCard.is_active
+        ).scalar()
+
+        # Get file embedding statistics
+        file_stats = db.query(
+            func.count(FileEmbedding.id).label('total_files'),
+            func.sum(FileEmbedding.tokens).label('total_file_tokens'),
+            func.count(func.distinct(FileEmbedding.file_path)).label('unique_files')
+        ).filter(FileEmbedding.session_id == db_session.id).first()
+
+        # Calculate session duration
+        session_duration = None
+        if db_session.created_at and db_session.last_activity:
+            session_duration = int((db_session.last_activity - db_session.created_at).total_seconds())
+
+        # Build statistics response
+        stats = {
+            "session_id": session_id,
+            "basic_stats": {
+                "total_messages": db_session.total_messages,
+                "total_tokens": db_session.total_tokens,
+                "total_context_cards": context_card_count,
+                "total_file_embeddings": file_stats.total_files or 0,
+                "unique_files": file_stats.unique_files or 0,
+                "total_file_tokens": file_stats.total_file_tokens or 0,
+                "session_duration_seconds": session_duration,
+                "is_active": db_session.is_active,
+            },
+            "message_breakdown": {
+                sender_type: {
+                    "count": count,
+                    "total_tokens": total_tokens or 0,
+                    "avg_processing_time": float(avg_processing_time) if avg_processing_time else None
+                }
+                for sender_type, count, total_tokens, avg_processing_time in message_stats
+            },
+            "timestamps": {
+                "created_at": db_session.created_at.isoformat() if db_session.created_at else None,
+                "last_activity": db_session.last_activity.isoformat() if db_session.last_activity else None,
+                "updated_at": db_session.updated_at.isoformat() if db_session.updated_at else None,
+            },
+            "repository_info": {
+                "owner": db_session.repo_owner,
+                "name": db_session.repo_name,
+                "branch": db_session.repo_branch,
+                "full_name": f"{db_session.repo_owner}/{db_session.repo_name}" if db_session.repo_owner and db_session.repo_name else None,
+            } if db_session.repo_owner else None,
+        }
+
+        return stats
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get session statistics: {str(e)}",
         )
 
 
@@ -654,6 +1191,94 @@ async def delete_context_card(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete context card: {str(e)}",
+        )
+
+
+@router.put("/sessions/{session_id}/file-deps/{file_id}", response_model=FileEmbeddingResponse)
+async def update_file_dependency(
+    session_id: str,
+    file_id: int,
+    request: UpdateFileEmbeddingRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Update a file dependency (file embedding) for a session.
+    This is a MEDIUM priority endpoint for file dependency management.
+    """
+    try:
+        # Verify session exists and belongs to user
+        db_session = (
+            db.query(ChatSession)
+            .filter(
+                ChatSession.session_id == session_id,
+                ChatSession.user_id == current_user.id,
+            )
+            .first()
+        )
+
+        if not db_session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
+            )
+
+        # Find and verify file embedding belongs to this session
+        file_embedding = (
+            db.query(FileEmbedding)
+            .filter(
+                FileEmbedding.id == file_id,
+                FileEmbedding.session_id == db_session.id,
+            )
+            .first()
+        )
+
+        if not file_embedding:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="File dependency not found"
+            )
+
+        # Update fields if provided
+        if request.file_path is not None:
+            file_embedding.file_path = request.file_path
+        if request.file_name is not None:
+            file_embedding.file_name = request.file_name
+        if request.file_type is not None:
+            file_embedding.file_type = request.file_type
+        if request.file_content is not None:
+            file_embedding.file_content = request.file_content
+        if request.chunk_text is not None:
+            file_embedding.chunk_text = request.chunk_text
+        if request.chunk_index is not None:
+            file_embedding.chunk_index = request.chunk_index
+        if request.tokens is not None:
+            file_embedding.tokens = request.tokens
+        if request.file_metadata is not None:
+            file_embedding.file_metadata = request.file_metadata
+
+        # Update timestamp
+        file_embedding.updated_at = datetime.utcnow()
+
+        db.commit()
+        db.refresh(file_embedding)
+
+        return FileEmbeddingResponse(
+            id=file_embedding.id,
+            session_id=file_embedding.session_id,
+            repository_id=file_embedding.repository_id,
+            file_path=file_embedding.file_path,
+            file_name=file_embedding.file_name,
+            file_type=file_embedding.file_type,
+            chunk_index=file_embedding.chunk_index,
+            tokens=file_embedding.tokens,
+            file_metadata=file_embedding.file_metadata,
+            created_at=file_embedding.created_at,
+        )
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update file dependency: {str(e)}",
         )
 
 
