@@ -98,9 +98,7 @@ def create_sample_data():
         ChatSession,
         Commit,
         ContextCard,
-        FileAnalysis,
         FileEmbedding,
-        FileItem,
         Issue,
         PullRequest,
         Repository,
@@ -327,63 +325,8 @@ def create_sample_data():
             db.add(commit)
         db.commit()
 
-        # Sample FileItems
-        sample_files = [
-            FileItem(
-                repository_id=1,
-                name="main.py",
-                path="src/main.py",
-                file_type="INTERNAL",
-                category="Source Code",
-                tokens=1500,
-                is_directory=False,
-                content_size=5000,
-                content="# Main application file\n\ndef main():\n    print('Hello, World!')\n\nif __name__ == '__main__':\n    main()",
-            ),
-            FileItem(
-                repository_id=1,
-                name="requirements.txt",
-                path="requirements.txt",
-                file_type="INTERNAL",
-                category="Dependencies",
-                tokens=200,
-                is_directory=False,
-                content_size=500,
-                content="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
-            ),
-            FileItem(
-                repository_id=1,
-                name="src",
-                path="src",
-                file_type="INTERNAL",
-                category="Directory",
-                tokens=0,
-                is_directory=True,
-                content_size=0,
-            ),
-        ]
-
-        for file_item in sample_files:
-            db.add(file_item)
-        db.commit()
-
-        # Sample FileAnalysis
-        sample_analyses = [
-            FileAnalysis(
-                repository_id=1,
-                raw_data='{"total_files": 15, "languages": {"Python": 10, "JavaScript": 5}}',
-                processed_data='{"analysis": "complete", "complexity": "medium"}',
-                total_files=15,
-                total_tokens=25000,
-                max_file_size=10000,
-                status="completed",
-                processed_at=utc_now() - timedelta(days=1),
-            )
-        ]
-
-        for analysis in sample_analyses:
-            db.add(analysis)
-        db.commit()
+        # Note: FileItem and FileAnalysis models have been removed from models.py
+        # Sample data for these models is no longer created
 
         # Sample UserIssues
         sample_user_issues = [

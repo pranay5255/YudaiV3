@@ -4,8 +4,6 @@ Database package for YudaiV3
 
 from models import (
     AuthToken,
-    FileAnalysis,
-    FileItem,
     Repository,
     SessionToken,
     User,
@@ -24,17 +22,15 @@ except ImportError:
         return False
 
 __all__ = [
-    "Base", 
-    "engine", 
-    "SessionLocal", 
-    "get_db", 
+    "Base",
+    "engine",
+    "SessionLocal",
+    "get_db",
     "init_db",
     "create_sample_data",  # Add this
     "User",
     "AuthToken",
     "SessionToken",
     "Repository",
-    "FileItem",
-    "FileAnalysis",
     "UserIssue"
-] 
+]

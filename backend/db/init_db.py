@@ -42,7 +42,7 @@ def wait_for_database(max_retries=30, delay=2):
 def create_tables_with_models(engine):
     """Create tables using SQLAlchemy models (preferred method)"""
     try:
-        from db import init_db
+        from db.database import init_db
         print("Creating tables using SQLAlchemy models...")
         init_db()
         print("✓ Tables created successfully using models")
@@ -165,39 +165,6 @@ def create_tables_standalone(engine):
             author_name VARCHAR(255),
             author_email VARCHAR(255),
             author_date TIMESTAMP WITH TIME ZONE
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS file_items (
-            id SERIAL PRIMARY KEY,
-            repository_id INTEGER REFERENCES repositories(id),
-            name VARCHAR(500) NOT NULL,
-            path VARCHAR(1000) NOT NULL,
-            file_type VARCHAR(50) NOT NULL,
-            category VARCHAR(100) NOT NULL,
-            tokens INTEGER DEFAULT 0,
-            is_directory BOOLEAN DEFAULT FALSE,
-            parent_id INTEGER REFERENCES file_items(id),
-            content TEXT,
-            content_size INTEGER DEFAULT 0,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS file_analyses (
-            id SERIAL PRIMARY KEY,
-            repository_id INTEGER REFERENCES repositories(id),
-            raw_data JSON,
-            processed_data JSON,
-            total_files INTEGER DEFAULT 0,
-            total_tokens INTEGER DEFAULT 0,
-            max_file_size INTEGER,
-            status VARCHAR(50) DEFAULT 'pending',
-            error_message TEXT,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE,
-            processed_at TIMESTAMP WITH TIME ZONE
         )
         """,
         """
@@ -344,14 +311,6 @@ def create_tables_standalone(engine):
         "CREATE INDEX IF NOT EXISTS idx_commits_sha ON commits(sha)",
         "CREATE INDEX IF NOT EXISTS idx_commits_repository_id ON commits(repository_id)",
         
-        # File item indexes
-        "CREATE INDEX IF NOT EXISTS idx_file_items_repository_id ON file_items(repository_id)",
-        "CREATE INDEX IF NOT EXISTS idx_file_items_path ON file_items(path)",
-        "CREATE INDEX IF NOT EXISTS idx_file_items_parent_id ON file_items(parent_id)",
-        
-        # File analysis indexes
-        "CREATE INDEX IF NOT EXISTS idx_file_analyses_repository_id ON file_analyses(repository_id)",
-        "CREATE INDEX IF NOT EXISTS idx_file_analyses_status ON file_analyses(status)",
         
         # User issue indexes
         "CREATE INDEX IF NOT EXISTS idx_user_issues_user_id ON user_issues(user_id)",
@@ -439,21 +398,6 @@ def create_sample_data_standalone(engine):
             ON CONFLICT (github_repo_id) DO NOTHING
         """))
         
-        # Sample File Items
-        db.execute(text("""
-            INSERT INTO file_items (repository_id, name, path, file_type, category, tokens, is_directory, content_size, created_at, updated_at) VALUES
-            (1, 'main.py', 'src/main.py', 'INTERNAL', 'Source Code', 1500, false, 5000, NOW(), NOW()),
-            (1, 'requirements.txt', 'requirements.txt', 'INTERNAL', 'Dependencies', 200, false, 500, NOW(), NOW()),
-            (1, 'src', 'src', 'INTERNAL', 'Directory', 0, true, 0, NOW(), NOW())
-            ON CONFLICT DO NOTHING
-        """))
-        
-        # Sample File Analysis
-        db.execute(text("""
-            INSERT INTO file_analyses (repository_id, raw_data, processed_data, total_files, total_tokens, max_file_size, status, processed_at, created_at, updated_at) VALUES
-            (1, '{"total_files": 15, "languages": {"Python": 10, "JavaScript": 5}}', '{"analysis": "complete", "complexity": "medium"}', 15, 25000, 10000, 'completed', NOW() - INTERVAL '1 day', NOW(), NOW())
-            ON CONFLICT DO NOTHING
-        """))
         
         # Sample User Issues
         db.execute(text("""
@@ -562,9 +506,8 @@ def check_database_health():
             tables = inspector.get_table_names()
             
             expected_tables = [
-                'users', 'auth_tokens', 'session_tokens', 'repositories', 
-                'issues', 'pull_requests', 'commits', 'file_items', 
-                'file_analyses', 'user_issues', 'file_embeddings', 'oauth_states',
+                'users', 'auth_tokens', 'session_tokens', 'repositories',
+                'issues', 'pull_requests', 'commits', 'user_issues', 'file_embeddings', 'oauth_states',
                 'chat_sessions', 'chat_messages', 'context_cards'
             ]
             missing_tables = [table for table in expected_tables if table not in tables]

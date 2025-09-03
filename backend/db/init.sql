@@ -175,38 +175,6 @@ CREATE TABLE IF NOT EXISTS commits (
     author_date TIMESTAMP WITH TIME ZONE
 );
 
--- File items table
-CREATE TABLE IF NOT EXISTS file_items (
-    id SERIAL PRIMARY KEY,
-    repository_id INTEGER REFERENCES repositories(id),
-    name VARCHAR(500) NOT NULL,
-    path VARCHAR(1000) NOT NULL,
-    file_type VARCHAR(50) NOT NULL,
-    category VARCHAR(100) NOT NULL,
-    tokens INTEGER DEFAULT 0,
-    is_directory BOOLEAN DEFAULT FALSE,
-    parent_id INTEGER REFERENCES file_items(id),
-    content TEXT,
-    content_size INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE
-);
-
--- File analyses table
-CREATE TABLE IF NOT EXISTS file_analyses (
-    id SERIAL PRIMARY KEY,
-    repository_id INTEGER REFERENCES repositories(id),
-    raw_data JSON,
-    processed_data JSON,
-    total_files INTEGER DEFAULT 0,
-    total_tokens INTEGER DEFAULT 0,
-    max_file_size INTEGER,
-    status VARCHAR(50) DEFAULT 'pending',
-    error_message TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE,
-    processed_at TIMESTAMP WITH TIME ZONE
-);
 
 -- User issues table
 CREATE TABLE IF NOT EXISTS user_issues (
@@ -353,14 +321,6 @@ CREATE INDEX IF NOT EXISTS idx_pull_requests_repository_id ON pull_requests(repo
 CREATE INDEX IF NOT EXISTS idx_commits_sha ON commits(sha);
 CREATE INDEX IF NOT EXISTS idx_commits_repository_id ON commits(repository_id);
 
--- File item indexes
-CREATE INDEX IF NOT EXISTS idx_file_items_repository_id ON file_items(repository_id);
-CREATE INDEX IF NOT EXISTS idx_file_items_path ON file_items(path);
-CREATE INDEX IF NOT EXISTS idx_file_items_parent_id ON file_items(parent_id);
-
--- File analysis indexes
-CREATE INDEX IF NOT EXISTS idx_file_analyses_repository_id ON file_analyses(repository_id);
-CREATE INDEX IF NOT EXISTS idx_file_analyses_status ON file_analyses(status);
 
 -- User issue indexes
 CREATE INDEX IF NOT EXISTS idx_user_issues_user_id ON user_issues(user_id);
@@ -416,11 +376,6 @@ CREATE TRIGGER update_session_tokens_updated_at BEFORE UPDATE ON session_tokens
 CREATE TRIGGER update_repositories_updated_at BEFORE UPDATE ON repositories
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_file_items_updated_at BEFORE UPDATE ON file_items
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_file_analyses_updated_at BEFORE UPDATE ON file_analyses
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_user_issues_updated_at BEFORE UPDATE ON user_issues
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

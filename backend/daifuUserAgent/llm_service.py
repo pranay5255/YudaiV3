@@ -9,10 +9,10 @@ from typing import List, Tuple
 
 import requests
 from fastapi import HTTPException, status
+from models import FileEmbedding
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from pgvector.sqlalchemy import Vector
-from .models import FileEmbedding
 
 
 class LLMService:

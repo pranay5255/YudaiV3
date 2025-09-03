@@ -51,6 +51,9 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   const { deleteContextCard } = useSessionStore();
   const [isLoading, setIsLoading] = useState(false);
 
+  // ✅ FIXED: Move hook call to top level
+  const createIssueMutation = useCreateIssueWithContext();
+
   const showError = useCallback((message: string) => {
     if (onShowError) {
       onShowError(message);
@@ -147,7 +150,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
         priority: 'medium',
       };
 
-      const createIssueMutation = useCreateIssueWithContext();
+      // ✅ FIXED: Use the hook result instead of calling hook inside callback
       const response = await createIssueMutation.mutateAsync(request);
 
       if (response && response.success && onShowIssuePreview) {
@@ -157,19 +160,26 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
           conversationContext: conversationMessages,
           fileContext: fileContextItems,
           canCreateGitHubIssue: true,
-          repositoryInfo: request.repository_info,
+          repositoryInfo: repoInfo
         };
-        
         onShowIssuePreview(previewData);
       }
     } catch (error) {
-      console.error('Failed to create GitHub issue from context cards:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to create issue';
-      showError(`Failed to create GitHub issue: ${errorMessage}`);
+      console.error('Failed to create issue with context:', error);
+      showError('Failed to create issue with context. Please try again.');
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, repositoryInfo, selectedRepository, cards, onShowIssuePreview, showError]);
+  }, [
+    isLoading, 
+    repositoryInfo, 
+    selectedRepository, 
+    cards, 
+    onShowIssuePreview, 
+    showError,
+    // ✅ FIXED: Add hook dependency
+    createIssueMutation
+  ]);
 
   return (
     <div className="h-full flex flex-col">

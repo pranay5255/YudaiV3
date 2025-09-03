@@ -228,13 +228,16 @@ export const Chat: React.FC<ChatProps> = ({
   // Session creation is now handled by useSessionManagement hook
   // This component no longer needs to create sessions directly
 
+  const addContextCardMutation = useAddContextCard();
+  const createIssueMutation = useCreateIssueWithContext();
+  const createGitHubIssueMutation = useCreateGitHubIssueFromUserIssue();
+
   const handleAddToContext = useCallback(async (content: string) => {
     if (!activeSessionId) {
       showError('No active session to add context to');
       return;
     }
 
-    const addContextCardMutation = useAddContextCard();
     addContextCardMutation.mutate({
       sessionId: activeSessionId,
       card: {
@@ -247,7 +250,7 @@ export const Chat: React.FC<ChatProps> = ({
     }, {
       onError: () => showError('Failed to add to context'),
     });
-  }, [activeSessionId, showError]);
+  }, [activeSessionId, addContextCardMutation, showError]);
 
   const handleSend = useCallback(async () => {
       if (!input.trim() || isLoading || !activeSessionId) {
@@ -335,7 +338,6 @@ export const Chat: React.FC<ChatProps> = ({
       };
 
       // Use the unified sessionStore method for creating issues with context
-      const createIssueMutation = useCreateIssueWithContext();
       const response = await createIssueMutation.mutateAsync(request);
 
       if (response && response.success) {
@@ -360,7 +362,7 @@ export const Chat: React.FC<ChatProps> = ({
     } finally {
       setIsCreatingIssue(false);
     }
-  }, [isCreatingIssue, selectedRepository, messages, fileContext, showError]);
+  }, [isCreatingIssue, selectedRepository, messages, fileContext, showError, createIssueMutation]);
 
   const handleConfirmCreateIssue = useCallback(async () => {
     if (!currentIssuePreview || !currentIssuePreview.userIssue) {
@@ -370,7 +372,6 @@ export const Chat: React.FC<ChatProps> = ({
     try {
       // Call the create GitHub issue API with proper parameters
       if (currentIssuePreview.userIssue?.id) {
-        const createGitHubIssueMutation = useCreateGitHubIssueFromUserIssue();
         const result = await createGitHubIssueMutation.mutateAsync(currentIssuePreview.userIssue.id.toString());
         if (result?.success) {
           console.log('[Chat] GitHub issue created successfully');
@@ -382,7 +383,7 @@ export const Chat: React.FC<ChatProps> = ({
       console.error('[Chat] Failed to create GitHub issue:', error);
       showError('Failed to create GitHub issue');
     }
-  }, [currentIssuePreview, showError]);
+  }, [currentIssuePreview, showError, createGitHubIssueMutation]);
 
   const handleRegenerateIssue = useCallback(async () => {
     // Close the preview and regenerate
