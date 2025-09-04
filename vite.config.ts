@@ -33,7 +33,7 @@ export default defineConfig(({ mode }) => {
     // Development server configuration
     server: {
       port: 3000,
-      host: true,
+      host: '0.0.0.0',
       strictPort: true,
       // Proxy for development API calls
       proxy: {

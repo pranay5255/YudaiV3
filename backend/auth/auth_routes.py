@@ -7,18 +7,16 @@ import logging
 import os
 from urllib.parse import urlencode
 
-from auth.auth_utils import (
-    create_session_token,
-    deactivate_session_token,
-    validate_session_token,
-)
 from auth.github_oauth import (
     GitHubOAuthError,
     create_or_update_user,
+    create_session_token,
+    deactivate_session_token,
     exchange_code,
     get_github_oauth_url,
     user_info,
-    validate_github_config,
+    validate_github_app_config,
+    validate_session_token,
 )
 from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -112,8 +110,20 @@ async def auth_callback(
         username = github_user.get("login", "unknown")
         logger.info(f"Retrieved GitHub user info for: {username}")
         
-        # Create or update user
-        user = await create_or_update_user(db, github_user, access_token)
+        # Extract GitHub App specific information from token response
+        installation_id = token_data.get("installation", {}).get("id") if token_data.get("installation") else None
+        permissions = token_data.get("permissions", {})
+        repositories_url = token_data.get("repositories_url")
+
+        # Create or update user with GitHub App OAuth support
+        user = await create_or_update_user(
+            db,
+            github_user,
+            access_token,
+            installation_id=installation_id,
+            permissions=permissions,
+            repositories_url=repositories_url
+        )
         logger.info(f"Created/updated user record for: {user.github_username} (ID: {user.id})")
         
         # Create session token for frontend (this ALWAYS creates a fresh token)
@@ -159,9 +169,9 @@ async def auth_callback(
 # Simple API endpoints for frontend integration (minimal)
 @router.get("/api/login")
 async def api_login():
-    """API endpoint to get login URL"""
+    """API endpoint to get GitHub App OAuth login URL"""
     try:
-        validate_github_config()
+        validate_github_app_config()
         auth_url = get_github_oauth_url()
         return {"login_url": auth_url}
     except GitHubOAuthError as e:

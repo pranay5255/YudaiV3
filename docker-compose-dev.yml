@@ -1,10 +1,11 @@
 # ===========================================
 # DEVELOPMENT DOCKER COMPOSE CONFIGURATION
-# Version: v1.0.0 (Development Setup)
+# Version: v1.1.0 (GitHub App OAuth)
 # Last Updated: 2025-01-27
 #
 # Based on: docker-compose.prod.yml v1.5.0
 # Purpose: Local development and testing
+# Features: GitHub App OAuth authentication
 # ===========================================
 
 services:
@@ -62,13 +63,15 @@ services:
       - DEBUG=true
       # API Configuration for development
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      # GitHub App OAuth Configuration (REQUIRED for authentication)
+      - GITHUB_APP_CLIENT_ID=${GITHUB_APP_CLIENT_ID}
+      - GITHUB_APP_CLIENT_SECRET=${GITHUB_APP_CLIENT_SECRET}
       - GITHUB_APP_ID=${GITHUB_APP_ID}
-      - GITHUB_CLIENT_ID=${GITHUB_APP_CLIENT_ID}
-      - GITHUB_CLIENT_SECRET=${GITHUB_APP_CLIENT_SECRET}
+      - GITHUB_APP_PRIVATE_KEY_PATH=/app/yudai-dev.2025-09-04.private-key.pem
+      # Optional: For existing installations
       - GITHUB_APP_INSTALLATION_ID=${GITHUB_APP_INSTALLATION_ID}
-      - GITHUB_APP_PRIVATE_KEY_PATH=/app/yudaiv3.2025-08-02.private-key.pem
       - FRONTEND_BASE_URL=http://localhost:3000
-      - GITHUB_REDIRECT_URI=http://localhost:3000/auth/callback
+      - GITHUB_REDIRECT_URI=http://localhost:8001/auth/callback
       - ALLOW_ORIGINS=http://localhost:3000,http://localhost:5173
       - API_DOMAIN=localhost:8001
       - DEV_DOMAIN=localhost:3000
@@ -90,7 +93,7 @@ services:
       - ./backend:/app
       - /app/__pycache__
       - app_logs_dev:/app/logs
-      - ./backend/yudaiv3.2025-08-02.private-key.pem:/app/yudaiv3.2025-08-02.private-key.pem:ro
+      - ./backend/yudai-dev.2025-09-04.private-key.pem:/app/yudai-dev.2025-09-04.private-key.pem:ro
       # SWE-agent volumes
       - /var/run/docker.sock:/var/run/docker.sock
       - swe_runs_dev:/data/swe_runs
@@ -118,7 +121,7 @@ services:
       - VITE_API_BASE_URL=http://localhost:8001
       - NODE_ENV=development
     ports:
-      - "3000:5173"
+      - "3000:3000"
     volumes:
       - .:/app
       - /app/node_modules
@@ -128,7 +131,7 @@ services:
     networks:
       - yudai-dev-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5173"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -168,9 +171,10 @@ networks:
 # ===========================================
 #
 # SETUP REQUIRED:
-# 1. Create .env.dev file with development environment variables
-# 2. Create .env.dev.secrets file with API keys and secrets
-# 3. Ensure private key file exists: ./backend/yudaiv3.2025-08-02.private-key.pem
+# 1. Create GitHub App at: https://github.com/settings/apps
+# 2. Create .env.dev file with GitHub App OAuth credentials (see env-dev-template.txt)
+# 3. Download GitHub App private key to: ./backend/yudai-dev.2025-09-04.private-key.pem
+# 4. Set GITHUB_APP_CLIENT_ID, GITHUB_APP_CLIENT_SECRET, GITHUB_APP_ID in .env.dev
 #
 # Quick Start Commands:
 # 1. Start all services: docker compose -f docker-compose-dev.yml up -d

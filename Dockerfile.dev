@@ -21,11 +21,11 @@ RUN pnpm install
 COPY . .
 
 # Expose Vite dev server port
-EXPOSE 5173
+EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:5173 || exit 1
+  CMD curl -f http://localhost:3000 || exit 1
 
 # Start Vite development server
-CMD ["pnpm", "run", "dev", "--host", "0.0.0.0", "--port", "5173"]
+CMD ["pnpm", "run", "dev", "--host", "0.0.0.0", "--port", "3000"]

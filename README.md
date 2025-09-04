@@ -60,19 +60,58 @@ cd YudaiV3
 pnpm install
 ```
 
-### 3. Set Up the Backend
-- **Local Backend**: Ensure the Python backend is running locally. Refer to the [backend setup guide](#backend-setup) (TBD: link to backend-specific instructions).
-- **Hosted Backend**: Create a `.env` file in the project root and add:
-  ```bash
-  VITE_API_BASE_URL=https://your-backend-api-url.com
-  ```
-  Replace `https://your-backend-api-url.com` with your hosted backend URL.
+### 3. Set Up GitHub App Authentication
+YudaiV3 uses GitHub App OAuth for authentication. Follow these steps:
+
+#### Create GitHub App
+1. Go to [GitHub Settings → Developer settings → GitHub Apps](https://github.com/settings/apps)
+2. Click "New GitHub App"
+3. Configure your app:
+   - **GitHub App name**: `YudaiV3` (or your preferred name)
+   - **Homepage URL**: `http://localhost:3000` (for development)
+   - **User authorization callback URL**: `http://localhost:3000/auth/callback`
+4. Set permissions:
+   - **Repository permissions**:
+     - Contents: Read & Write
+     - Issues: Read & Write
+     - Pull requests: Read & Write
+     - Metadata: Read
+   - **User permissions**:
+     - Email addresses: Read
+     - Profile: Read
+5. Generate a private key and download it
+
+#### Configure Environment Variables
+Create a `.env.dev` file in your project root:
+
+```bash
+# GitHub App OAuth Configuration (REQUIRED)
+GITHUB_APP_CLIENT_ID=your_github_app_client_id
+GITHUB_APP_CLIENT_SECRET=your_github_app_client_secret
+GITHUB_APP_ID=your_github_app_numeric_id
+GITHUB_APP_PRIVATE_KEY_PATH=/app/yudai-dev.2025-09-04.private-key.pem
+
+# Frontend Configuration
+FRONTEND_BASE_URL=http://localhost:3000
+GITHUB_REDIRECT_URI=http://localhost:3000/auth/callback
+VITE_API_BASE_URL=http://localhost:8001
+
+# Database Configuration
+DATABASE_URL=postgresql://yudai_user:yudai_password@db:5432/yudai_dev
+
+# Other API Keys
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+```
+
+#### Place Private Key
+1. Download the private key from GitHub App settings
+2. Place it at: `backend/yudai-dev.2025-09-04.private-key.pem`
 
 ### 4. Run the Development Server
 ```bash
 pnpm run dev
 ```
-The application will be available at `http://localhost:5173`.
+The application will be available at `http://localhost:3000`.
 
 ### Backend Setup (TBD)
 *Note*: Backend setup instructions will be added once the backend repository or documentation is available. Ensure you have Python dependencies installed (e.g., via `pip install -r requirements.txt`) and a GitHub API token configured for repository access.

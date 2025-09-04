@@ -97,7 +97,7 @@ class IssueService:
     def get_user_from_session_token(session_token: str, db: Session) -> Optional[User]:
         """Get user from session token"""
         try:
-            from auth.auth_utils import validate_session_token
+            from auth.github_oauth import validate_session_token
 
             return validate_session_token(db, session_token)
         except Exception as e:

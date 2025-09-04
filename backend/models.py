@@ -42,6 +42,13 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
+# Import JSON type for PostgreSQL
+try:
+    from sqlalchemy.dialects.postgresql import JSON as PG_JSON
+    JSON_TYPE = PG_JSON
+except ImportError:
+    JSON_TYPE = JSON
+
 # ============================================================================
 # ENUMS
 # ============================================================================
@@ -152,27 +159,37 @@ class User(Base):
     ai_solve_sessions: Mapped[List["AISolveSession"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    github_app_installations: Mapped[List["GitHubAppInstallation"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class AuthToken(Base):
-    """Authentication tokens for GitHub OAuth"""
+    """Authentication tokens for GitHub App OAuth"""
 
     __tablename__ = "auth_tokens"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 
-    # GitHub OAuth tokens
+    # GitHub App OAuth tokens
     access_token: Mapped[str] = mapped_column(String(500), nullable=False)
-    refresh_token: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     token_type: Mapped[str] = mapped_column(String(50), default="bearer")
 
+    # GitHub App specific fields
+    github_app_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    installation_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    permissions: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=True)  # GitHub App permissions
+
     # Token metadata
-    scope: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    scope: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # OAuth scopes
     expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # GitHub App installation context
+    repositories_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # API URL for accessible repos
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -184,6 +201,9 @@ class AuthToken(Base):
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="auth_tokens")
+    installation: Mapped[Optional["GitHubAppInstallation"]] = relationship(
+        back_populates="auth_tokens"
+    )
 
 
 class SessionToken(Base):
@@ -634,8 +654,55 @@ class FileEmbedding(Base):
     repository: Mapped[Optional["Repository"]] = relationship()
 
 
+class GitHubAppInstallation(Base):
+    """GitHub App installations tracking"""
+
+    __tablename__ = "github_app_installations"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    github_installation_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
+    github_app_id: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    # Installation details
+    account_type: Mapped[str] = mapped_column(String(20), nullable=False)  # "User" or "Organization"
+    account_login: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    account_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Installation permissions and events
+    permissions: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=True)
+    events: Mapped[Optional[List[str]]] = mapped_column(JSON_TYPE, nullable=True)
+
+    # Repository access
+    repository_selection: Mapped[str] = mapped_column(String(20), default="all")  # "all" or "selected"
+    single_file_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Installation status
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    suspended_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    suspended_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )
+
+    # Relationships
+    user: Mapped[Optional["User"]] = relationship(back_populates="github_app_installations")
+    auth_tokens: Mapped[List["AuthToken"]] = relationship(
+        back_populates="installation", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self):
+        return f"<GitHubAppInstallation(id={self.id}, account={self.account_login}, active={self.is_active})>"
+
+
 class OAuthState(Base):
-    """OAuth state parameters for GitHub authentication"""
+    """OAuth state parameters for GitHub App authentication"""
 
     __tablename__ = "oauth_states"
 
@@ -647,6 +714,10 @@ class OAuthState(Base):
         DateTime(timezone=True), nullable=False
     )
     is_used: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # GitHub App OAuth specific fields
+    github_app_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     def __repr__(self):
         return f"<OAuthState(state={self.state}, expires_at={self.expires_at})>"
@@ -1463,3 +1534,57 @@ class GitHubSearchResponse(BaseModel):
     total_count: int
     incomplete_results: bool
     items: List[GitHubRepo]
+
+
+# ============================================================================
+# GITHUB APP OAUTH MODELS
+# ============================================================================
+
+class GitHubAppInstallationResponse(BaseModel):
+    """Response model for GitHub App installation information"""
+    id: int
+    github_installation_id: int
+    github_app_id: str
+    account_type: str
+    account_login: str
+    account_id: int
+    permissions: Optional[Dict[str, Any]] = None
+    events: Optional[List[str]] = None
+    repository_selection: str
+    single_file_name: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GitHubAppOAuthTokenResponse(BaseModel):
+    """Response model for GitHub App OAuth token information"""
+    id: int
+    user_id: int
+    token_type: str
+    github_app_id: Optional[str] = None
+    installation_id: Optional[int] = None
+    permissions: Optional[Dict[str, Any]] = None
+    scope: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    is_active: bool
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GitHubAppInstallationRequest(BaseModel):
+    """Request model for creating GitHub App installation"""
+    installation_id: int
+    setup_action: Optional[str] = None  # "install" or "update"
+
+
+class GitHubAppOAuthCallbackRequest(BaseModel):
+    """Request model for GitHub App OAuth callback"""
+    code: str
+    state: Optional[str] = None
+    installation_id: Optional[int] = None
+    setup_action: Optional[str] = None

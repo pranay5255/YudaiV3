@@ -80,16 +80,23 @@ CREATE TABLE IF NOT EXISTS users (
     last_login TIMESTAMP WITH TIME ZONE
 );
 
--- Auth tokens table
+-- Auth tokens table (GitHub App OAuth support)
 CREATE TABLE IF NOT EXISTS auth_tokens (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id),
     access_token VARCHAR(500) NOT NULL,
-    refresh_token VARCHAR(500),
     token_type VARCHAR(50) DEFAULT 'bearer',
     scope VARCHAR(500),
     expires_at TIMESTAMP WITH TIME ZONE,
     is_active BOOLEAN DEFAULT TRUE,
+
+    -- GitHub App specific fields
+    github_app_id VARCHAR(50),  -- GitHub App ID
+    installation_id INTEGER REFERENCES github_app_installations(github_installation_id),  -- GitHub App installation ID
+    permissions JSONB,  -- GitHub App permissions
+    repositories_url VARCHAR(500),  -- API URL for accessing installation repositories
+
+    -- Timestamps
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE
 );
@@ -280,8 +287,55 @@ CREATE TABLE IF NOT EXISTS oauth_states (
     state VARCHAR(255) PRIMARY KEY,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    is_used BOOLEAN DEFAULT FALSE
+    is_used BOOLEAN DEFAULT FALSE,
+    github_app_id VARCHAR(50),  -- GitHub App ID for OAuth state tracking
+    user_id INTEGER REFERENCES users(id)  -- User associated with OAuth state
 );
+
+-- GitHub App installations table
+CREATE TABLE IF NOT EXISTS github_app_installations (
+    id SERIAL PRIMARY KEY,
+    github_installation_id INTEGER NOT NULL UNIQUE,
+    github_app_id VARCHAR(50) NOT NULL,
+
+    -- Installation details
+    account_type VARCHAR(20) NOT NULL,  -- "User" or "Organization"
+    account_login VARCHAR(255) NOT NULL,
+    account_id INTEGER NOT NULL,
+
+    -- Installation permissions and events
+    permissions JSONB,  -- GitHub App permissions
+    events JSONB,       -- List of subscribed events
+
+    -- Repository access
+    repository_selection VARCHAR(20) DEFAULT 'all',  -- "all" or "selected"
+    single_file_name VARCHAR(100),  -- For single file installations
+
+    -- Installation status
+    is_active BOOLEAN DEFAULT TRUE,
+    suspended_at TIMESTAMP WITH TIME ZONE,
+    suspended_by VARCHAR(255),
+
+    -- Timestamps
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Add comments for documentation
+COMMENT ON TABLE github_app_installations IS 'Tracks GitHub App installations and their configuration';
+COMMENT ON COLUMN github_app_installations.permissions IS 'GitHub App permissions granted during installation';
+COMMENT ON COLUMN github_app_installations.events IS 'GitHub webhook events the installation is subscribed to';
+COMMENT ON COLUMN github_app_installations.repository_selection IS 'Whether all repositories or selected repositories are accessible';
+
+-- Auth tokens table comments
+COMMENT ON COLUMN auth_tokens.permissions IS 'GitHub App permissions associated with this token';
+COMMENT ON COLUMN auth_tokens.repositories_url IS 'API URL for accessing installation repositories';
+COMMENT ON COLUMN auth_tokens.github_app_id IS 'GitHub App ID that issued this token';
+COMMENT ON COLUMN auth_tokens.installation_id IS 'GitHub App installation ID for this token';
+
+-- OAuth states table comments
+COMMENT ON COLUMN oauth_states.github_app_id IS 'GitHub App ID associated with this OAuth state';
+COMMENT ON COLUMN oauth_states.user_id IS 'User ID associated with this OAuth state';
 
 -- ============================================================================
 -- INDEXES FOR PERFORMANCE
@@ -295,6 +349,8 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 -- Auth token indexes
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_id ON auth_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_is_active ON auth_tokens(is_active);
+CREATE INDEX IF NOT EXISTS idx_auth_tokens_github_app_id ON auth_tokens(github_app_id);
+CREATE INDEX IF NOT EXISTS idx_auth_tokens_installation_id ON auth_tokens(installation_id);
 
 -- Session token indexes
 CREATE INDEX IF NOT EXISTS idx_session_tokens_session_token ON session_tokens(session_token);
@@ -358,6 +414,14 @@ CREATE INDEX IF NOT EXISTS idx_file_embeddings_embedding ON file_embeddings USIN
 -- OAuth state indexes
 CREATE INDEX IF NOT EXISTS idx_oauth_states_expires_at ON oauth_states(expires_at);
 CREATE INDEX IF NOT EXISTS idx_oauth_states_is_used ON oauth_states(is_used);
+CREATE INDEX IF NOT EXISTS idx_oauth_states_github_app_id ON oauth_states(github_app_id);
+CREATE INDEX IF NOT EXISTS idx_oauth_states_user_id ON oauth_states(user_id);
+
+-- GitHub App installation indexes
+CREATE INDEX IF NOT EXISTS idx_github_app_installations_github_installation_id ON github_app_installations(github_installation_id);
+CREATE INDEX IF NOT EXISTS idx_github_app_installations_account_login ON github_app_installations(account_login);
+CREATE INDEX IF NOT EXISTS idx_github_app_installations_github_app_id ON github_app_installations(github_app_id);
+CREATE INDEX IF NOT EXISTS idx_github_app_installations_is_active ON github_app_installations(is_active);
 
 -- ============================================================================
 -- TRIGGERS FOR UPDATED_AT COLUMNS
@@ -390,6 +454,9 @@ CREATE TRIGGER update_context_cards_updated_at BEFORE UPDATE ON context_cards
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_file_embeddings_updated_at BEFORE UPDATE ON file_embeddings
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_github_app_installations_updated_at BEFORE UPDATE ON github_app_installations
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Log initialization
