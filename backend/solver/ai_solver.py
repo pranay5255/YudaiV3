@@ -64,10 +64,12 @@ class AISolverAdapter:
 
     async def run_solver(
         self,
-        issue_id: int,
-        user_id: int,
-        repo_url: str,
+        issue_id: Optional[int] = None,
+        user_id: int = None,
+        repo_url: str = None,
         branch: str = "main",
+        issue_content: Optional[str] = None,
+        issue_title: Optional[str] = None,
         ai_model_id: Optional[int] = None,
         swe_config_id: Optional[int] = None,
     ) -> int:
@@ -76,10 +78,12 @@ class AISolverAdapter:
         Returns session_id for tracking
 
         Args:
-            issue_id: Database ID of the issue to solve
+            issue_id: Optional database ID of the issue to solve
             user_id: Database ID of the user requesting the solve
             repo_url: Git repository URL to clone and work on
             branch: Git branch to work on (default: main)
+            issue_content: Optional issue content/description for solving
+            issue_title: Optional issue title
             ai_model_id: Optional AI model to use
             swe_config_id: Optional SWE-agent config to use
 
@@ -122,17 +126,27 @@ class AISolverAdapter:
             print(f"[AISolver] Session {session.id} status updated to RUNNING")
             logger.info(f"Session {session.id} status: RUNNING")
 
-            # Get issue details
-            issue = self.db.query(Issue).filter(Issue.id == issue_id).first()
-            if not issue:
-                print(f"[AISolver] ERROR: Issue {issue_id} not found in database")
-                logger.error(f"Issue {issue_id} not found for session {session.id}")
-                raise AISolverError(f"Issue {issue_id} not found")
-
-            print(f"[AISolver] Found issue: '{issue.title}' for session {session.id}")
-            logger.info(
-                f"Issue found for session {session.id}: title='{issue.title}', has_body={bool(issue.body)}"
-            )
+            # Get issue details - either from database or provided content
+            if issue_id:
+                issue = self.db.query(Issue).filter(Issue.id == issue_id).first()
+                if not issue:
+                    print(f"[AISolver] ERROR: Issue {issue_id} not found in database")
+                    logger.error(f"Issue {issue_id} not found for session {session.id}")
+                    raise AISolverError(f"Issue {issue_id} not found")
+                issue_title = issue.title
+                issue_body = issue.body or ""
+                print(f"[AISolver] Found issue: '{issue.title}' for session {session.id}")
+                logger.info(
+                    f"Issue found for session {session.id}: title='{issue.title}', has_body={bool(issue.body)}"
+                )
+            elif issue_content and issue_title:
+                issue_body = issue_content
+                print(f"[AISolver] Using provided issue content: '{issue_title}' for session {session.id}")
+                logger.info(
+                    f"Using provided issue content for session {session.id}: title='{issue_title}'"
+                )
+            else:
+                raise AISolverError("Either issue_id or both issue_content and issue_title must be provided")
 
             # Run SWE-agent
             print(f"[AISolver] Executing SWE-agent for session {session.id}")
@@ -140,8 +154,8 @@ class AISolverAdapter:
             trajectory = await self._execute_sweagent(
                 session.id,
                 repo_url,
-                issue.title,
-                issue.body or "",
+                issue_title,
+                issue_body,
                 branch,
                 ai_model_id,
                 swe_config_id,

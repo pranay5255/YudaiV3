@@ -80,6 +80,38 @@ CREATE TABLE IF NOT EXISTS users (
     last_login TIMESTAMP WITH TIME ZONE
 );
 
+-- GitHub App installations table (must be created before auth_tokens due to foreign key constraint)
+CREATE TABLE IF NOT EXISTS github_app_installations (
+    id SERIAL PRIMARY KEY,
+    github_installation_id INTEGER NOT NULL UNIQUE,
+    github_app_id VARCHAR(50) NOT NULL,
+
+    -- Installation details
+    account_type VARCHAR(20) NOT NULL,  -- "User" or "Organization"
+    account_login VARCHAR(255) NOT NULL,
+    account_id INTEGER NOT NULL,
+
+    -- Installation permissions and events
+    permissions JSONB,  -- GitHub App permissions
+    events JSONB,       -- List of subscribed events
+
+    -- Repository access
+    repository_selection VARCHAR(20) DEFAULT 'all',  -- "all" or "selected"
+    single_file_name VARCHAR(100),  -- For single file installations
+
+    -- Installation status
+    is_active BOOLEAN DEFAULT TRUE,
+    suspended_at TIMESTAMP WITH TIME ZONE,
+    suspended_by VARCHAR(255),
+
+    -- Timestamps
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Add comments for documentation
+COMMENT ON TABLE github_app_installations IS 'Tracks GitHub App installations and their configuration';
+
 -- Auth tokens table (GitHub App OAuth support)
 CREATE TABLE IF NOT EXISTS auth_tokens (
     id SERIAL PRIMARY KEY,
@@ -292,40 +324,6 @@ CREATE TABLE IF NOT EXISTS oauth_states (
     user_id INTEGER REFERENCES users(id)  -- User associated with OAuth state
 );
 
--- GitHub App installations table
-CREATE TABLE IF NOT EXISTS github_app_installations (
-    id SERIAL PRIMARY KEY,
-    github_installation_id INTEGER NOT NULL UNIQUE,
-    github_app_id VARCHAR(50) NOT NULL,
-
-    -- Installation details
-    account_type VARCHAR(20) NOT NULL,  -- "User" or "Organization"
-    account_login VARCHAR(255) NOT NULL,
-    account_id INTEGER NOT NULL,
-
-    -- Installation permissions and events
-    permissions JSONB,  -- GitHub App permissions
-    events JSONB,       -- List of subscribed events
-
-    -- Repository access
-    repository_selection VARCHAR(20) DEFAULT 'all',  -- "all" or "selected"
-    single_file_name VARCHAR(100),  -- For single file installations
-
-    -- Installation status
-    is_active BOOLEAN DEFAULT TRUE,
-    suspended_at TIMESTAMP WITH TIME ZONE,
-    suspended_by VARCHAR(255),
-
-    -- Timestamps
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE
-);
-
--- Add comments for documentation
-COMMENT ON TABLE github_app_installations IS 'Tracks GitHub App installations and their configuration';
-COMMENT ON COLUMN github_app_installations.permissions IS 'GitHub App permissions granted during installation';
-COMMENT ON COLUMN github_app_installations.events IS 'GitHub webhook events the installation is subscribed to';
-COMMENT ON COLUMN github_app_installations.repository_selection IS 'Whether all repositories or selected repositories are accessible';
 
 -- Auth tokens table comments
 COMMENT ON COLUMN auth_tokens.permissions IS 'GitHub App permissions associated with this token';
