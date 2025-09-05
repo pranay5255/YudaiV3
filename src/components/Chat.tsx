@@ -25,7 +25,6 @@ import { useSessionStore } from '../stores/sessionStore';
 
 // Define missing types
 interface ChatProps {
-  onShowIssuePreview?: (issuePreview: IssuePreviewData) => void;
   onShowError?: (message: string) => void;
 }
 
@@ -34,6 +33,7 @@ interface IssuePreviewModalProps {
   onClose: () => void;
   onCreateIssue: () => void;
   onRegenerateIssue: () => void;
+  onSolveIssue: (issueId: number) => void;
   isCreating: boolean;
 }
 
@@ -55,6 +55,7 @@ const IssuePreviewModal: React.FC<IssuePreviewModalProps> = ({
   onClose,
   onCreateIssue,
   onRegenerateIssue,
+  onSolveIssue,
   isCreating
 }) => {
   return (
@@ -145,6 +146,19 @@ const IssuePreviewModal: React.FC<IssuePreviewModalProps> = ({
             {isCreating && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />}
             {isCreating ? 'Creating...' : 'Create GitHub Issue'}
           </button>
+          <button
+            onClick={() => {
+              // Handle solve issue functionality
+              if (issuePreview.userIssue?.id) {
+                onSolveIssue(issuePreview.userIssue.id);
+              }
+            }}
+            disabled={isCreating}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white rounded disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+            Solve Issue
+          </button>
         </div>
       </div>
     </div>
@@ -154,7 +168,6 @@ const IssuePreviewModal: React.FC<IssuePreviewModalProps> = ({
 // ChatWithPreview component removed - functionality integrated into main Chat component
 
 export const Chat: React.FC<ChatProps> = ({
-  onShowIssuePreview, // eslint-disable-line @typescript-eslint/no-unused-vars
   onShowError
 }) => {
   // Session management hook for state management
@@ -393,6 +406,48 @@ export const Chat: React.FC<ChatProps> = ({
     await handleCreateGitHubIssue();
   }, [handleCreateGitHubIssue]);
 
+  const handleSolveIssue = useCallback(async (issueId: number) => {
+    if (!selectedRepository) {
+      showError('No repository selected for solving issue');
+      return;
+    }
+
+    try {
+      console.log('[Chat] Starting solver for issue:', issueId);
+
+      // Close the preview modal
+      setShowIssuePreview(false);
+      setCurrentIssuePreview(null);
+
+      // Call the solver endpoint
+      const response = await fetch(`/api/sessions/${activeSessionId}/solve/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          issue_id: issueId,
+          repo_url: `https://github.com/${selectedRepository.repository.full_name}`,
+          branch: selectedRepository.branch || 'main'
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Solver request failed: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log('[Chat] Solver started successfully:', result);
+
+      // Show success message
+      showError('AI Solver started successfully! Check the solve session status for progress.');
+
+    } catch (error) {
+      console.error('[Chat] Failed to start solver:', error);
+      showError(`Failed to start solver: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }, [selectedRepository, activeSessionId, showError]);
+
 
 
   return (
@@ -575,6 +630,7 @@ export const Chat: React.FC<ChatProps> = ({
           }}
           onCreateIssue={handleConfirmCreateIssue}
           onRegenerateIssue={handleRegenerateIssue}
+          onSolveIssue={handleSolveIssue}
           isCreating={isCreatingIssue}
         />
       )}
