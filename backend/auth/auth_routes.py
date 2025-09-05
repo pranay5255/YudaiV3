@@ -35,6 +35,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def get_frontend_base_url() -> str:
+    """
+    Get the frontend base URL based on NODE_ENV environment variable.
+
+    Returns:
+        str: Frontend base URL (localhost:3000 for dev, yudai.app for prod)
+    """
+    node_env = os.getenv('NODE_ENV', 'development').lower()
+    frontend_url = os.getenv('FRONTEND_BASE_URL')
+
+    # If FRONTEND_BASE_URL is explicitly set, use it
+    if frontend_url:
+        return frontend_url
+
+    # Otherwise, determine based on NODE_ENV
+    if node_env == 'production':
+        return 'https://yudai.app'
+    else:
+        # Default to development (localhost:3000)
+        return 'http://localhost:3000'
+
+
 # Removed simple HTML login endpoint - frontend handles login UI
 
 
@@ -68,7 +90,7 @@ async def auth_callback(
                 error_msg += f" - {error_description}"
             logger.error(f"OAuth callback received error from GitHub: {error_msg}")
             return RedirectResponse(
-                url=f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/auth/login?error={error_msg}",
+                url=f"{get_frontend_base_url()}/auth/login?error={error_msg}",
                 status_code=302
             )
 
@@ -76,7 +98,7 @@ async def auth_callback(
             error_msg = "No authorization code received from GitHub"
             logger.warning("OAuth callback received without authorization code")
             return RedirectResponse(
-                url=f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/auth/login?error={error_msg}",
+                url=f"{get_frontend_base_url()}/auth/login?error={error_msg}",
                 status_code=302
             )
         
@@ -89,7 +111,7 @@ async def auth_callback(
             error_msg = "Unable to exchange code for token."
             logger.error(f"Token exchange failed: {token_data}")
             return RedirectResponse(
-                url=f"{os.getenv('FRONTEND_BASE_URL','http://localhost:3000')}/auth/callback?error={error_msg}",
+                url=f"{get_frontend_base_url()}/auth/callback?error={error_msg}",
                 status_code=302
             )
         
@@ -103,7 +125,7 @@ async def auth_callback(
             error_msg = "Unable to get user information."
             logger.error("Failed to retrieve GitHub user information")
             return RedirectResponse(
-                url=f"{os.getenv('FRONTEND_BASE_URL','http://localhost:3000')}/auth/callback?error={error_msg}",
+                url=f"{get_frontend_base_url()}/auth/callback?error={error_msg}",
                 status_code=302
             )
         
@@ -141,7 +163,7 @@ async def auth_callback(
             "github_id": user.github_user_id
         }
         
-        redirect_url = f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/auth/success?{urlencode(auth_params)}"
+        redirect_url = f"{get_frontend_base_url()}/auth/success?{urlencode(auth_params)}"
         logger.info(f"Redirecting user {user.github_username} to frontend with session token")
         
         return RedirectResponse(url=redirect_url, status_code=302)
@@ -150,15 +172,15 @@ async def auth_callback(
         error_msg = f"GitHub OAuth error: {str(e)}"
         logger.error(f"GitHub OAuth error during callback: {str(e)}")
         return RedirectResponse(
-            url=f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/auth/callback?error={error_msg}",
+            url=f"{get_frontend_base_url()}/auth/callback?error={error_msg}",
             status_code=302
         )
-        
+
     except Exception as e:
         error_msg = "Authentication failed due to internal error"
         logger.error(f"Unexpected error in auth callback: {str(e)}", exc_info=True)
         return RedirectResponse(
-            url=f"{os.getenv('FRONTEND_BASE_URL','https://yudai.app')}/auth/callback?error={error_msg}",
+            url=f"{get_frontend_base_url()}/auth/callback?error={error_msg}",
             status_code=302
         )
 

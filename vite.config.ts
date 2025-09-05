@@ -37,12 +37,14 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       // Proxy for development API calls
       proxy: {
+        // Keep API calls proxied to backend in dev
         '/api': {
           target: process.env.VITE_API_BASE_URL || 'http://localhost:8001',
           changeOrigin: true,
           secure: false,
         },
-        '/auth': {
+        // Only proxy auth API endpoints, NOT the React routes like /auth/success
+        '/auth/api': {
           target: process.env.VITE_API_BASE_URL || 'http://localhost:8001',
           changeOrigin: true,
           secure: false,

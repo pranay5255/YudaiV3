@@ -159,9 +159,6 @@ class User(Base):
     ai_solve_sessions: Mapped[List["AISolveSession"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
-    github_app_installations: Mapped[List["GitHubAppInstallation"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan"
-    )
 
 
 class AuthToken(Base):
@@ -178,7 +175,9 @@ class AuthToken(Base):
 
     # GitHub App specific fields
     github_app_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    installation_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    installation_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("github_app_installations.github_installation_id"), nullable=True
+    )
     permissions: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=True)  # GitHub App permissions
 
     # Token metadata
@@ -692,7 +691,6 @@ class GitHubAppInstallation(Base):
     )
 
     # Relationships
-    user: Mapped[Optional["User"]] = relationship(back_populates="github_app_installations")
     auth_tokens: Mapped[List["AuthToken"]] = relationship(
         back_populates="installation", cascade="all, delete-orphan"
     )
