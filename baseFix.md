@@ -39,3 +39,15 @@ Update `backend/daifuUserAgent/IssueOps.py:367` to pass `user_id` to `_fetch_git
 2. **Database Indexing**: Proper indexes on frequently queried fields
 3. **Caching**: Cache solver configurations and model settings
 4. **Monitoring**: Track solver performance and resource
+
+## Deployment Steps
+
+After applying the fixes, follow these steps to deploy:
+
+1. ssh root@<ip_address>
+2. cd /home/yudai/YudaiV3
+3. docker compose --env-file .env.prod -f docker-compose.prod.yml down -v
+4. git pull origin main  // Pull latest changes
+5. docker compose --env-file .env.prod -f docker-compose.prod.yml build  // Build containers
+6. docker compose --env-file .env.prod -f docker-compose.prod.yml up -d  // Start in detached mode
+7. docker compose logs -f  // Monitor logs (optional)
