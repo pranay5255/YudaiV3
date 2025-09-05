@@ -113,8 +113,105 @@ pnpm run dev
 ```
 The application will be available at `http://localhost:3000`.
 
-### Backend Setup (TBD)
-*Note*: Backend setup instructions will be added once the backend repository or documentation is available. Ensure you have Python dependencies installed (e.g., via `pip install -r requirements.txt`) and a GitHub API token configured for repository access.
+### Backend Setup
+
+The backend is containerized and can be deployed using Docker Compose. There are separate configurations for development and production:
+
+#### Development Setup
+```bash
+# Start development environment
+docker compose -f docker-compose-dev.yml up -d
+
+# View logs
+docker compose -f docker-compose-dev.yml logs -f
+
+# Stop services
+docker compose -f docker-compose-dev.yml down
+```
+
+#### Production Deployment
+
+For production deployment, follow these steps:
+
+1. **Create Production Environment Files**
+   ```bash
+   # Create .env.prod file with production settings
+   cp .env.dev .env.prod
+   # Edit .env.prod with production values
+   ```
+
+2. **SSL Certificate Setup**
+   ```bash
+   # Place SSL certificates in ssl/ directory
+   # - ssl/fullchain.pem (certificate chain)
+   # - ssl/privkey.pem (private key)
+   ```
+
+3. **GitHub App Production Setup**
+   ```bash
+   # Download production GitHub App private key
+   # Place at: backend/yudaiv3.2025-08-02.private-key.pem
+
+   # Update .env.prod with production GitHub App credentials:
+   # GITHUB_APP_ID=your_production_app_id
+   # GITHUB_APP_CLIENT_ID=your_production_client_id
+   # GITHUB_APP_CLIENT_SECRET=your_production_client_secret
+   ```
+
+4. **Database Configuration**
+   Update `.env.prod` with production PostgreSQL settings:
+   ```bash
+   POSTGRES_DB=yudai_prod
+   POSTGRES_USER=your_prod_user
+   POSTGRES_PASSWORD=your_secure_password
+   DATABASE_URL=postgresql://your_prod_user:your_secure_password@db:5432/yudai_prod
+   ```
+
+5. **Deploy Production Services**
+   ```bash
+   # Start production environment
+   docker compose -f docker-compose.prod.yml up -d
+
+   # Check service health
+   docker compose -f docker-compose.prod.yml ps
+
+   # View logs
+   docker compose -f docker-compose.prod.yml logs -f
+   ```
+
+6. **Production Configuration Changes**
+   - **Resource Limits**: Production uses CPU/memory limits for stability
+   - **Security**: Enhanced with Docker security options and no-new-privileges
+   - **Logging**: Structured JSON logging with log rotation
+   - **Health Checks**: Comprehensive health monitoring
+   - **SSL/TLS**: HTTPS enabled with certificate management
+   - **Database**: Optimized PostgreSQL configuration for production workloads
+
+7. **Backup and Monitoring**
+   ```bash
+   # Database backups are automatically created in ./backups/postgres/
+   # Logs are available in ./logs/
+
+   # Monitor services
+   docker compose -f docker-compose.prod.yml exec backend curl http://localhost:8000/health
+   ```
+
+8. **Scaling and Maintenance**
+   ```bash
+   # Update services
+   docker compose -f docker-compose.prod.yml pull
+   docker compose -f docker-compose.prod.yml up -d
+
+   # Backup before updates
+   docker compose -f docker-compose.prod.yml exec db pg_dump -U your_prod_user yudai_prod > backup.sql
+   ```
+
+**Security Notes:**
+- Change all default passwords and secrets
+- Use strong, unique credentials for database
+- Keep GitHub App credentials secure
+- Regularly update SSL certificates
+- Monitor logs for security events
 
 ## 🛠️ Usage
 
