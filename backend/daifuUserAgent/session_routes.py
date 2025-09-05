@@ -69,6 +69,7 @@ CRITICAL ISSUES:
 
 # Import file dependencies functionality
 import json
+import logging
 
 # Import chat functionality from chat_api
 import time
@@ -114,9 +115,11 @@ from repo_processorGitIngest.scraper_script import (
     extract_repository_data,
 )
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import func
 
 router = APIRouter(tags=["sessions"])
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 def create_standardized_error(
@@ -143,6 +146,81 @@ def create_standardized_error(
         status_code=status_code,
         detail=error_response.model_dump()
     )
+
+
+# ============================================================================
+# GITHUB ENDPOINTS (ported under DAIFU router)
+# ============================================================================
+
+@router.get("/github/repositories", response_model=List[Dict[str, Any]])
+async def daifu_github_list_user_repositories(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    List repositories accessible by the authenticated user using their GitHub token.
+    """
+    try:
+        from daifuUserAgent.githubOps import GitHubOps
+
+        github_ops = GitHubOps(db)
+        repositories = await github_ops.get_user_repositories(user_id=current_user.id)
+        return repositories
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise create_standardized_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "GITHUB_REPOS_FETCH_FAILED",
+            "Failed to fetch repositories",
+            detail=str(e),
+            path="/daifu/github/repositories",
+        )
+
+
+@router.get(
+    "/github/repositories/{owner}/{repo}/branches",
+    response_model=List[Dict[str, Any]],
+)
+async def daifu_github_list_repository_branches(
+    owner: str,
+    repo: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    List branches for a specific repository the authenticated user can access.
+    """
+    try:
+        from daifuUserAgent.githubOps import GitHubOps
+
+        github_ops = GitHubOps(db)
+        branches = await github_ops.fetch_repository_branches(
+            owner, repo, current_user.id
+        )
+        # Normalize to match frontend's GitHubBranch type shape
+        normalized = [
+            {
+                "name": b.get("name"),
+                "protected": bool(b.get("protected", False)),
+                "commit": {
+                    "sha": b.get("commit_sha"),
+                    "url": b.get("commit_url"),
+                },
+            }
+            for b in branches
+        ]
+        return normalized
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise create_standardized_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "GITHUB_BRANCHES_FETCH_FAILED",
+            "Failed to fetch branches",
+            detail=str(e),
+            path=f"/daifu/github/repositories/{owner}/{repo}/branches",
+        )
 
 
 # CRITICAL PRIORITY ENDPOINTS
@@ -287,141 +365,13 @@ async def get_session_context(
     This is a CRITICAL endpoint required for session loading.
     """
     try:
-        # Get session from database with user verification
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
-        )
+        from .session_service import SessionService
 
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
+        # Ensure session exists and belongs to user
+        db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
 
-        # Get session messages
-        messages = (
-            db.query(ChatMessage)
-            .filter(ChatMessage.session_id == db_session.id)
-            .order_by(ChatMessage.created_at.asc())
-            .all()
-        )
-
-        # Get context cards for this session
-        context_cards = (
-            db.query(ContextCard)
-            .filter(ContextCard.session_id == db_session.id, ContextCard.is_active)
-            .all()
-        )
-
-        # Get file embeddings for this session
-        file_embeddings = (
-            db.query(FileEmbedding)
-            .filter(FileEmbedding.session_id == db_session.id)
-            .all()
-        )
-
-        # Convert to response models
-        session_response = SessionResponse(
-            id=db_session.id,
-            session_id=db_session.session_id,
-            title=db_session.title,
-            description=db_session.description,
-            repo_owner=db_session.repo_owner,
-            repo_name=db_session.repo_name,
-            repo_branch=db_session.repo_branch,
-            repo_context=db_session.repo_context,
-            is_active=db_session.is_active,
-            total_messages=db_session.total_messages,
-            total_tokens=db_session.total_tokens,
-            created_at=db_session.created_at,
-            updated_at=db_session.updated_at,
-            last_activity=db_session.last_activity,
-        )
-
-        message_responses = [
-            ChatMessageResponse(
-                id=msg.id,
-                message_id=msg.message_id,
-                message_text=msg.message_text,
-                sender_type=msg.sender_type,
-                role=msg.role,
-                is_code=msg.is_code,
-                tokens=msg.tokens,
-                model_used=msg.model_used,
-                processing_time=msg.processing_time,
-                context_cards=msg.context_cards,
-                referenced_files=msg.referenced_files,
-                error_message=msg.error_message,
-                created_at=msg.created_at,
-                updated_at=msg.updated_at,
-            )
-            for msg in messages
-        ]
-
-        context_card_responses = [
-            ContextCardResponse(
-                id=card.id,
-                session_id=card.session_id,
-                title=card.title,
-                description=card.description,
-                content=card.content,
-                source=card.source,
-                tokens=card.tokens,
-                is_active=card.is_active,
-                created_at=card.created_at,
-                updated_at=card.updated_at,
-            )
-            for card in context_cards
-        ]
-
-        file_embedding_responses = [
-            FileEmbeddingResponse(
-                id=fe.id,
-                session_id=fe.session_id,
-                repository_id=fe.repository_id,
-                file_path=fe.file_path,
-                file_name=fe.file_name,
-                file_type=fe.file_type,
-                chunk_index=fe.chunk_index,
-                tokens=fe.tokens,
-                file_metadata=fe.file_metadata,
-                created_at=fe.created_at,
-            )
-            for fe in file_embeddings
-        ]
-
-        context_response = SessionContextResponse(
-            session=session_response,
-            messages=message_responses,
-            context_cards=context_card_responses,
-            repository_info={
-                "owner": db_session.repo_owner,
-                "name": db_session.repo_name,
-                "branch": db_session.repo_branch,
-                "full_name": f"{db_session.repo_owner}/{db_session.repo_name}",
-                "html_url": f"https://github.com/{db_session.repo_owner}/{db_session.repo_name}",
-            }
-            if db_session.repo_owner and db_session.repo_name
-            else None,
-            file_embeddings_count=len(file_embeddings),
-            statistics={
-                "total_messages": db_session.total_messages,
-                "total_tokens": db_session.total_tokens,
-                "session_duration": int(
-                    (datetime.utcnow() - db_session.created_at).total_seconds()
-                )
-                if db_session.created_at
-                else 0,
-            },
-            user_issues=[],
-            file_embeddings=file_embedding_responses,
-        )
-
-        return context_response
+        # Get complete session context
+        return SessionService.get_context(db, db_session)
 
     except Exception as e:
         raise HTTPException(
@@ -864,82 +814,13 @@ async def get_session_statistics(
     This is a HIGH priority endpoint for session analytics.
     """
     try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
-        )
+        from .session_service import SessionService
 
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
+        # Ensure session exists and belongs to user
+        db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
 
-        # Get message statistics
-        message_stats = db.query(
-            ChatMessage.sender_type,
-            func.count(ChatMessage.id).label('count'),
-            func.sum(ChatMessage.tokens).label('total_tokens'),
-            func.avg(ChatMessage.processing_time).label('avg_processing_time')
-        ).filter(ChatMessage.session_id == db_session.id).group_by(ChatMessage.sender_type).all()
-
-        # Get context card count
-        context_card_count = db.query(func.count(ContextCard.id)).filter(
-            ContextCard.session_id == db_session.id,
-            ContextCard.is_active
-        ).scalar()
-
-        # Get file embedding statistics
-        file_stats = db.query(
-            func.count(FileEmbedding.id).label('total_files'),
-            func.sum(FileEmbedding.tokens).label('total_file_tokens'),
-            func.count(func.distinct(FileEmbedding.file_path)).label('unique_files')
-        ).filter(FileEmbedding.session_id == db_session.id).first()
-
-        # Calculate session duration
-        session_duration = None
-        if db_session.created_at and db_session.last_activity:
-            session_duration = int((db_session.last_activity - db_session.created_at).total_seconds())
-
-        # Build statistics response
-        stats = {
-            "session_id": session_id,
-            "basic_stats": {
-                "total_messages": db_session.total_messages,
-                "total_tokens": db_session.total_tokens,
-                "total_context_cards": context_card_count,
-                "total_file_embeddings": file_stats.total_files or 0,
-                "unique_files": file_stats.unique_files or 0,
-                "total_file_tokens": file_stats.total_file_tokens or 0,
-                "session_duration_seconds": session_duration,
-                "is_active": db_session.is_active,
-            },
-            "message_breakdown": {
-                sender_type: {
-                    "count": count,
-                    "total_tokens": total_tokens or 0,
-                    "avg_processing_time": float(avg_processing_time) if avg_processing_time else None
-                }
-                for sender_type, count, total_tokens, avg_processing_time in message_stats
-            },
-            "timestamps": {
-                "created_at": db_session.created_at.isoformat() if db_session.created_at else None,
-                "last_activity": db_session.last_activity.isoformat() if db_session.last_activity else None,
-                "updated_at": db_session.updated_at.isoformat() if db_session.updated_at else None,
-            },
-            "repository_info": {
-                "owner": db_session.repo_owner,
-                "name": db_session.repo_name,
-                "branch": db_session.repo_branch,
-                "full_name": f"{db_session.repo_owner}/{db_session.repo_name}" if db_session.repo_owner and db_session.repo_name else None,
-            } if db_session.repo_owner else None,
-        }
-
-        return stats
+        # Get session statistics
+        return SessionService.get_session_statistics(db, db_session)
 
     except Exception as e:
         raise HTTPException(
@@ -960,49 +841,13 @@ async def get_chat_messages(
     This is a HIGH priority endpoint for chat history display.
     """
     try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
-        )
+        from .session_service import SessionService
 
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
+        # Ensure session exists and belongs to user
+        db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
 
         # Get messages for this session
-        messages = (
-            db.query(ChatMessage)
-            .filter(ChatMessage.session_id == db_session.id)
-            .order_by(ChatMessage.created_at.asc())
-            .limit(limit)
-            .all()
-        )
-
-        return [
-            ChatMessageResponse(
-                id=msg.id,
-                message_id=msg.message_id,
-                message_text=msg.message_text,
-                sender_type=msg.sender_type,
-                role=msg.role,
-                is_code=msg.is_code,
-                tokens=msg.tokens,
-                model_used=msg.model_used,
-                processing_time=msg.processing_time,
-                context_cards=msg.context_cards,
-                referenced_files=msg.referenced_files,
-                error_message=msg.error_message,
-                created_at=msg.created_at,
-                updated_at=msg.updated_at,
-            )
-            for msg in messages
-        ]
+        return SessionService.get_session_messages(db, db_session.id, limit)
 
     except Exception as e:
         raise HTTPException(
@@ -1296,52 +1141,18 @@ async def get_file_dependencies_for_session(
     This is a MEDIUM priority endpoint for file context display.
     """
     try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
-        )
+        from .session_service import FileDepsService, SessionService
 
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
+        # Ensure session exists and belongs to user
+        db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
 
-        # Get file embeddings for this session and aggregate by file
-        file_embeddings = (
-            db.query(FileEmbedding)
-            .filter(FileEmbedding.session_id == db_session.id)
-            .order_by(FileEmbedding.created_at.desc())
-            .all()
-        )
-
-        # Aggregate file data by file_path to avoid duplicates
-        file_data = {}
-        for fe in file_embeddings:
-            if fe.file_path not in file_data:
-                file_data[fe.file_path] = {
-                    "id": fe.id,
-                    "file_name": fe.file_name,
-                    "file_path": fe.file_path,
-                    "file_type": fe.file_type,
-                    "tokens": fe.tokens,
-                    "category": fe.file_metadata.get("category")
-                    if fe.file_metadata
-                    else None,
-                    "created_at": fe.created_at,
-                }
-            else:
-                # Sum tokens for chunks of the same file
-                file_data[fe.file_path]["tokens"] += fe.tokens
+        # Get file dependencies for this session
+        file_deps = FileDepsService.list_for_session(db, db_session)
 
         # Convert to response format
         return [
             SessionFileDependencyResponse(**file_info)
-            for file_info in file_data.values()
+            for file_info in file_deps
         ]
 
     except Exception as e:
@@ -1364,10 +1175,10 @@ async def chat_in_session(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Chat Endpoint within Session Context - Consolidated from chat_api.py
+    Chat Endpoint within Session Context - Uses ChatOps for unified chat handling
 
-    This endpoint processes chat messages within a specific session context.
-    It validates the session exists and belongs to the user before processing.
+    This endpoint processes chat messages within a specific session context using
+    the ChatOps class for consistent processing and response formatting.
     """
     start_time = time.time()
 
@@ -1393,113 +1204,48 @@ async def chat_in_session(
         )
 
     try:
-        # Get GitHub context if repository info is provided
-        github_context = ""
-        repo_owner = db_session.repo_owner
-        repo_name = db_session.repo_name
+        # Import ChatOps for unified chat processing
+        from .ChatOps import ChatOps
 
-        # Check for repository object in request first (preferred format)
-        if (
-            request.repository
-            and request.repository.get("owner")
-            and request.repository.get("name")
-        ):
-            repo_owner = request.repository["owner"]
-            repo_name = request.repository["name"]
+        # Initialize ChatOps instance
+        chat_ops = ChatOps(db)
 
-        # Get GitHub context if we have repository information
-        github_context = ""
-        github_data = None
-        if repo_owner and repo_name:
-            # Import GitHub operations
-            from daifuUserAgent.githubOps import GitHubOps
+        # Prepare repository information for ChatOps
+        repository_info = None
+        if request.repository and request.repository.get("owner") and request.repository.get("name"):
+            repository_info = {
+                "owner": request.repository["owner"],
+                "name": request.repository["name"],
+                "branch": request.repository.get("branch", "main")
+            }
+        elif db_session.repo_owner and db_session.repo_name:
+            # Fallback to session repository info
+            repository_info = {
+                "owner": db_session.repo_owner,
+                "name": db_session.repo_name,
+                "branch": "main"
+            }
 
-            github_ops = GitHubOps(db)
+        # Process chat message using ChatOps
+        chat_response = await chat_ops.process_chat_message(
+            session_id=session_id,
+            user_id=current_user.id,
+            message_text=request.message.message_text,
+            context_cards=request.context_cards or [],
+            repository=repository_info
+        )
 
-            # Get repository info
-            repo_data = await github_ops.fetch_repository_info(
-                repo_owner, repo_name, current_user.id
-            )
-
-            # Get recent issues and commits for context
-            issues_data = await github_ops.fetch_repository_issues(
-                repo_owner, repo_name, current_user.id, limit=5
-            )
-            commits_data = await github_ops.fetch_repository_commits(
-                repo_owner, repo_name, current_user.id, limit=5
-            )
-
-            # Build context string (similar to ChatOps._build_context_string)
-            context_parts = []
-            if repo_data.get("name"):
-                context_parts.append(f"Repository: {repo_data['name']}")
-                if repo_data.get("description"):
-                    context_parts.append(f"Description: {repo_data['description']}")
-                if repo_data.get("language"):
-                    context_parts.append(f"Primary Language: {repo_data['language']}")
-                if repo_data.get("topics"):
-                    context_parts.append(
-                        f"Topics: {', '.join(repo_data['topics'][:5])}"
-                    )
-
-            if issues_data:
-                context_parts.append(f"\nRecent Issues ({len(issues_data)}):")
-                for issue in issues_data[:3]:
-                    context_parts.append(f"- #{issue['number']}: {issue['title']}")
-
-            if commits_data:
-                context_parts.append(f"\nRecent Commits ({len(commits_data)}):")
-                for commit in commits_data[:3]:
-                    context_parts.append(f"- {commit['sha']}: {commit['message']}")
-
-            github_context = (
-                "\n".join(context_parts)
-                if context_parts
-                else "Repository context not available"
-            )
-
-            # Get detailed GitHub data for structured response
-            github_data = await github_ops.fetch_repository_info_detailed(
-                repo_owner, repo_name, current_user.id
-            )
-
-        # Add user message to conversation history
-        user_message = request.message.message_text
-        _add_to_conversation_history(session_id, "User", user_message, db, current_user)
-
-        # Get conversation history for context
+        # Get updated conversation history for the response
         history = _get_conversation_history(session_id, 50, db)
-
-        # Get relevant file contexts for the user message
-        file_contexts = await LLMService.get_relevant_file_contexts(
-            db=db, session_id=db_session.id, query_text=user_message
-        )
-
-        # Generate AI response with file contexts
-        reply = await LLMService.generate_response_with_history(
-            repo_context=github_context,
-            conversation_history=history,
-            github_data=github_data,
-            file_contexts=file_contexts,
-        )
-
-        # Add assistant response to conversation history
-        _add_to_conversation_history(session_id, "DAifu", reply, db, current_user)
-
-        # Update session statistics
-        db_session.last_activity = datetime.utcnow()
-        db.commit()
 
         # Calculate processing time
         processing_time = (time.time() - start_time) * 1000
 
-        # Generate a unique message ID
-        message_id = str(uuid.uuid4())
-
+        # Map ChatOps response to ChatResponse format
         return ChatResponse(
-            reply=reply,
-            conversation=history + [("User", user_message), ("DAifu", reply)],
-            message_id=message_id,
+            reply=chat_response["reply"],
+            conversation=history,
+            message_id=chat_response["message_id"],
             processing_time=processing_time,
             session_id=session_id,
         )
@@ -1507,6 +1253,7 @@ async def chat_in_session(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Chat processing failed for session {session_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat processing failed: {str(e)}",
@@ -1954,15 +1701,12 @@ def _create_file_embeddings_for_session(
 
     try:
         chunker = create_file_chunker()
-        chunks = chunker.chunk_text(content, file_path)
+        chunk_data = chunker.chunk_file(file_path, content)
+        chunks = [chunk['chunk_text'] for chunk in chunk_data]
 
         for i, chunk in enumerate(chunks):
+            # Generate embedding for chunk
             embedding_vector = LLMService.embed_text(chunk)
-            if hasattr(embedding_vector, "__await__"):
-                # If embed_text is async, run it synchronously
-                import asyncio
-
-                embedding_vector = asyncio.run(embedding_vector)
 
             embedding = FileEmbedding(
                 session_id=session_id,
@@ -1997,7 +1741,7 @@ def _create_file_embeddings_for_session(
 # ============================================================================
 
 
-@router.post("/{session_id}/solve/start", response_model=dict)
+@router.post("/sessions/{session_id}/solve/start", response_model=dict)
 async def start_solve_session_for_session(
     session_id: str,
     request: Optional[dict] = None,
@@ -2006,10 +1750,7 @@ async def start_solve_session_for_session(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Start AI solver for a session - Consolidated from solve_router.py
-
-    This endpoint validates the session exists and belongs to the user,
-    then starts a background AI solve session.
+    Start AI solver for a session - supports both database issues and direct content
     """
     try:
         # Verify session exists and belongs to user
@@ -2027,18 +1768,18 @@ async def start_solve_session_for_session(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
 
-        # Get repository details from session
-        if not db_session.repo_owner or not db_session.repo_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Session has no associated repository",
-            )
-
-        # Prepare solve parameters
-        repo_url = f"https://github.com/{db_session.repo_owner}/{db_session.repo_name}"
-        branch = db_session.repo_branch or "main"
+        # Extract parameters from request
+        issue_id = request.get("issue_id") if request else None
+        repo_url = request.get("repo_url") if request else None
+        branch = request.get("branch", "main")
+        issue_content = request.get("issue_content") if request else None
+        issue_title = request.get("issue_title") if request else None
         ai_model_id = request.get("ai_model_id") if request else None
         swe_config_id = request.get("swe_config_id") if request else None
+
+        # Validate required parameters
+        if not repo_url:
+            repo_url = f"https://github.com/{db_session.repo_owner}/{db_session.repo_name}"
 
         # Import solver adapter
         from solver.ai_solver import AISolverAdapter
@@ -2046,35 +1787,22 @@ async def start_solve_session_for_session(
         # Create solver adapter
         solver = AISolverAdapter(db)
 
-        # Create a new session record first to get the session_id
-        solve_session = AISolveSession(
-            user_id=current_user.id,
-            issue_id=0,  # Will be set when issue is created
-            status="PENDING",
-            repo_url=repo_url,
-            branch_name=branch,
-            ai_model_id=ai_model_id,
-            swe_config_id=swe_config_id,
-        )
-        db.add(solve_session)
-        db.commit()
-        db.refresh(solve_session)
-
-        # Start solver in background task
-        background_tasks.add_task(
-            solver.run_solver,
-            issue_id=0,  # Placeholder - will be updated when issue is created
+        # Start solver with appropriate parameters
+        session_id_num = await solver.run_solver(
+            issue_id=issue_id,
             user_id=current_user.id,
             repo_url=repo_url,
             branch=branch,
+            issue_content=issue_content,
+            issue_title=issue_title,
             ai_model_id=ai_model_id,
             swe_config_id=swe_config_id,
         )
 
         return {
             "message": "AI Solver started successfully",
-            "session_id": solve_session.id,
-            "solve_session_id": solve_session.id,
+            "session_id": session_id_num,
+            "solve_session_id": session_id_num,
             "status": "started",
         }
 
@@ -2088,7 +1816,7 @@ async def start_solve_session_for_session(
         )
 
 
-@router.get("/{session_id}/solve/sessions/{solve_session_id}", response_model=dict)
+@router.get("/sessions/{session_id}/solve/sessions/{solve_session_id}", response_model=dict)
 async def get_solve_session_for_session(
     session_id: str,
     solve_session_id: int,
@@ -2157,7 +1885,7 @@ async def get_solve_session_for_session(
 
 
 @router.get(
-    "/{session_id}/solve/sessions/{solve_session_id}/stats", response_model=dict
+    "/sessions/{session_id}/solve/sessions/{solve_session_id}/stats", response_model=dict
 )
 async def get_solve_session_stats_for_session(
     session_id: str,
@@ -2224,7 +1952,7 @@ async def get_solve_session_stats_for_session(
 
 
 @router.post(
-    "/{session_id}/solve/sessions/{solve_session_id}/cancel", response_model=dict
+    "/sessions/{session_id}/solve/sessions/{solve_session_id}/cancel", response_model=dict
 )
 async def cancel_solve_session_for_session(
     session_id: str,
@@ -2301,7 +2029,7 @@ async def cancel_solve_session_for_session(
         )
 
 
-@router.get("/{session_id}/solve/sessions", response_model=list)
+@router.get("/sessions/{session_id}/solve/sessions", response_model=list)
 async def list_solve_sessions_for_session(
     session_id: str,
     limit: int = Query(50, ge=1, le=100),
@@ -2383,7 +2111,7 @@ async def list_solve_sessions_for_session(
         )
 
 
-@router.get("/{session_id}/solve/health", response_model=dict)
+@router.get("/sessions/{session_id}/solve/health", response_model=dict)
 async def solver_health_for_session(
     session_id: str,
     current_user: User = Depends(get_current_user),
@@ -2443,7 +2171,7 @@ async def solver_health_for_session(
 # ============================================================================
 
 
-@router.post("/{session_id}/issues/create-with-context", response_model=dict)
+@router.post("/sessions/{session_id}/issues/create-with-context", response_model=dict)
 async def create_issue_with_context_for_session(
     session_id: str,
     request: dict,
@@ -2451,32 +2179,18 @@ async def create_issue_with_context_for_session(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Create an issue with context for a session using LLM-based generation
+    Create an issue with context for a session using consolidated LLM generation and database storage
     """
     try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
-        )
+        from .IssueOps import IssueService as IssueOpsService
+        from .session_service import SessionService
 
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
+        # Ensure session exists and belongs to user
+        db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
 
-        # Import issue service functionality
-        from daifuUserAgent.IssueOps import IssueService
-
-        # Create issue service instance
-        issue_service = IssueService(db)
-
-        # Generate issue using LLM with full context
-        llm_generated_issue = await issue_service.generate_issue_from_context(
+        # Use consolidated issue creation service
+        issue_service = IssueOpsService(db)
+        result = await issue_service.create_issue_with_context(
             db=db,
             user_id=current_user.id,
             session_id=session_id,
@@ -2487,66 +2201,10 @@ async def create_issue_with_context_for_session(
             repo_owner=db_session.repo_owner,
             repo_name=db_session.repo_name,
             priority=request.get("priority", "medium"),
+            create_github_issue=False  # We'll create GitHub issue separately in the modal
         )
 
-        # Update the _fetch_github_repo_context call in generate_issue_from_context to use user_id
-        # This is already handled in the IssueOps._fetch_github_repo_context method
-
-        # Create user issue in database with LLM-generated content
-        from models import CreateUserIssueRequest
-
-        issue_request = CreateUserIssueRequest(
-            title=llm_generated_issue["title"],
-            issue_text_raw=llm_generated_issue["body"],
-            description=request.get("description", ""),
-            session_id=session_id,
-            context_cards=request.get("context_cards", []),
-            repo_owner=db_session.repo_owner,
-            repo_name=db_session.repo_name,
-            priority=request.get("priority", "medium"),
-            issue_steps=[
-                "Analyze chat conversation context",
-                "Review file dependencies and implementation details",
-                "Design implementation approach based on LLM analysis",
-                "Implement functionality according to specifications",
-                "Add comprehensive tests and documentation",
-                "Validate implementation against acceptance criteria",
-            ],
-        )
-
-        user_issue = issue_service.create_user_issue(db, current_user.id, issue_request)
-
-        return {
-            "success": True,
-            "preview_only": False,
-            "user_issue": {
-                "id": user_issue.id,
-                "issue_id": user_issue.issue_id,
-                "title": user_issue.title,
-                "description": user_issue.description,
-                "issue_text_raw": user_issue.issue_text_raw,
-            },
-            "github_preview": {
-                "title": llm_generated_issue["title"],
-                "body": llm_generated_issue["body"],
-                "labels": llm_generated_issue["labels"],
-                "assignees": llm_generated_issue["assignees"],
-                "repository_info": {
-                    "owner": db_session.repo_owner,
-                    "name": db_session.repo_name,
-                    "branch": db_session.repo_branch,
-                },
-                "metadata": {
-                    "generated_by_llm": True,
-                    "processing_time": llm_generated_issue["processing_time"],
-                    "tokens_used": llm_generated_issue["tokens_used"],
-                    "llm_model": "deepseek/deepseek-r1-0528",
-                    "generated_at": datetime.utcnow().isoformat(),
-                },
-            },
-            "llm_response": llm_generated_issue["llm_response"],
-            "message": f"Issue created successfully with ID: {user_issue.issue_id}",
-        }
+        return result
 
     except HTTPException:
         raise
@@ -2557,7 +2215,7 @@ async def create_issue_with_context_for_session(
         )
 
 
-@router.get("/{session_id}/issues", response_model=list)
+@router.get("/sessions/{session_id}/issues", response_model=list)
 async def get_issues_for_session(
     session_id: str,
     status_filter: Optional[str] = Query(None, alias="status"),
@@ -2640,7 +2298,7 @@ async def get_issues_for_session(
         )
 
 
-@router.get("/{session_id}/issues/{issue_id}", response_model=dict)
+@router.get("/sessions/{session_id}/issues/{issue_id}", response_model=dict)
 async def get_issue_for_session(
     session_id: str,
     issue_id: str,
@@ -2720,7 +2378,7 @@ async def get_issue_for_session(
         )
 
 
-@router.put("/{session_id}/issues/{issue_id}/status", response_model=dict)
+@router.put("/sessions/{session_id}/issues/{issue_id}/status", response_model=dict)
 async def update_issue_status_for_session(
     session_id: str,
     issue_id: str,
@@ -2804,7 +2462,7 @@ async def update_issue_status_for_session(
         )
 
 
-@router.post("/{session_id}/issues/{issue_id}/create-github-issue", response_model=dict)
+@router.post("/sessions/{session_id}/issues/{issue_id}/create-github-issue", response_model=dict)
 async def create_github_issue_from_user_issue_for_session(
     session_id: str,
     issue_id: str,
@@ -2815,28 +2473,14 @@ async def create_github_issue_from_user_issue_for_session(
     Create GitHub issue from user issue for a session - Consolidated from issue_service.py
     """
     try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
-        )
+        from .session_service import IssueService, SessionService
 
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
+        # Ensure session exists and belongs to user
+        SessionService.ensure_owned_session(db, current_user.id, session_id)
 
-        # Import issue service functionality
-        from daifuUserAgent.IssueOps import IssueService
-
-        # Create GitHub issue
-        issue_service = IssueService(db)
-        result = await issue_service.create_github_issue_from_user_issue(
-            current_user.id, issue_id, current_user
+        # Create GitHub issue using IssueService
+        result = await IssueService.create_github_issue_from_user_issue(
+            db, current_user.id, issue_id, current_user
         )
 
         if not result:

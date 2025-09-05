@@ -206,63 +206,164 @@ class IssueService:
                 "metadata": {"error": str(e)},
             }
 
-    def create_user_issue(
-        self, db: Session, user_id: int, issue_request: CreateUserIssueRequest
-    ) -> UserIssue:
+    async def create_issue_with_context(
+        self,
+        db: Session,
+        user_id: int,
+        session_id: str,
+        title: str,
+        description: str,
+        chat_messages: List[Dict[str, Any]],
+        file_context: List[Dict[str, Any]],
+        repo_owner: str,
+        repo_name: str,
+        priority: str = "medium",
+        create_github_issue: bool = False
+    ) -> Dict[str, Any]:
         """
-        Create a user issue in the database
+        Unified function to create issue with context - combines LLM generation and database storage
 
         Args:
             db: Database session
             user_id: User ID
-            issue_request: Issue creation request
+            session_id: Session ID
+            title: Issue title
+            description: Issue description
+            chat_messages: List of chat messages
+            file_context: List of relevant files
+            repo_owner: Repository owner
+            repo_name: Repository name
+            priority: Issue priority
+            create_github_issue: Whether to also create GitHub issue
 
         Returns:
-            Created UserIssue object
+            Dictionary containing created issue data and GitHub issue info if requested
         """
         try:
-            logger.info(f"Creating user issue for user {user_id}")
+            logger.info(f"Creating issue with context for user {user_id}")
 
-            # Generate unique issue ID
-            issue_id = f"issue_{uuid.uuid4().hex[:12]}"
-
-            # Create the user issue
-            user_issue = UserIssue(
-                issue_id=issue_id,
+            # Generate issue content using LLM
+            llm_generated_issue = await self.generate_issue_from_context(
+                db=db,
                 user_id=user_id,
-                title=issue_request.title,
-                issue_text_raw=issue_request.issue_text_raw,
-                description=issue_request.description,
-                session_id=issue_request.session_id,
-                context_card_id=issue_request.context_card_id,
-                context_cards=json.dumps(issue_request.context_cards)
-                if issue_request.context_cards
-                else None,
-                ideas=json.dumps(issue_request.ideas) if issue_request.ideas else None,
-                repo_owner=issue_request.repo_owner,
-                repo_name=issue_request.repo_name,
-                priority=issue_request.priority,
-                issue_steps=json.dumps(issue_request.issue_steps)
-                if issue_request.issue_steps
-                else None,
-                status="pending",
-                agent_response=None,
-                processing_time=None,
-                tokens_used=0,
+                session_id=session_id,
+                title=title,
+                description=description,
+                chat_messages=chat_messages,
+                file_context=file_context,
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                priority=priority,
             )
 
-            db.add(user_issue)
-            db.flush()  # Get the ID without committing
+            # Create user issue in database
+            from models import CreateUserIssueRequest
 
-            logger.info(
-                f"Successfully created user issue {issue_id} for user {user_id}"
+            issue_request = CreateUserIssueRequest(
+                title=llm_generated_issue["title"],
+                issue_text_raw=llm_generated_issue["body"],
+                description=description,
+                session_id=session_id,
+                context_cards=[],  # Will be populated from session
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                priority=priority,
+                issue_steps=[
+                    "Analyze chat conversation context",
+                    "Review file dependencies and implementation details",
+                    "Design implementation approach based on static analysis",
+                    "Implement functionality according to specifications",
+                    "Add comprehensive tests and documentation",
+                    "Validate implementation against acceptance criteria",
+                ],
             )
-            return user_issue
+
+            user_issue = self._create_user_issue_record(db, user_id, issue_request)
+
+            result = {
+                "success": True,
+                "user_issue": {
+                    "id": user_issue.id,
+                    "issue_id": user_issue.issue_id,
+                    "title": user_issue.title,
+                    "description": user_issue.description,
+                    "issue_text_raw": user_issue.issue_text_raw,
+                },
+                "github_preview": {
+                    "title": llm_generated_issue["title"],
+                    "body": llm_generated_issue["body"],
+                    "labels": llm_generated_issue["labels"],
+                    "assignees": llm_generated_issue["assignees"],
+                    "repository_info": {
+                        "owner": repo_owner,
+                        "name": repo_name,
+                        "branch": "main",  # Default branch
+                    },
+                    "metadata": {
+                        "generated_by_llm": True,
+                        "processing_time": llm_generated_issue["processing_time"],
+                        "tokens_used": llm_generated_issue["tokens_used"],
+                        "llm_model": "deepseek/deepseek-r1-0528",
+                        "generated_at": utc_now().isoformat(),
+                    },
+                },
+                "llm_response": llm_generated_issue["llm_response"],
+                "message": f"Issue created successfully with ID: {user_issue.issue_id}",
+            }
+
+            # Optionally create GitHub issue
+            if create_github_issue:
+                github_issue = await self.create_github_issue_from_user_issue(user_id, user_issue.issue_id, db)
+                if github_issue:
+                    result["github_issue"] = github_issue
+
+            return result
 
         except Exception as e:
-            logger.error(f"Failed to create user issue: {e}")
-            db.rollback()
-            raise IssueOpsError(f"Failed to create user issue: {str(e)}")
+            logger.error(f"Failed to create issue with context: {e}")
+            raise IssueOpsError(f"Failed to create issue: {str(e)}")
+
+    def _create_user_issue_record(
+        self, db: Session, user_id: int, issue_request: CreateUserIssueRequest
+    ) -> UserIssue:
+        """
+        Helper method to create user issue record in database
+        """
+        # Generate unique issue ID
+        issue_id = f"issue_{uuid.uuid4().hex[:12]}"
+
+        # Create the user issue
+        user_issue = UserIssue(
+            issue_id=issue_id,
+            user_id=user_id,
+            title=issue_request.title,
+            issue_text_raw=issue_request.issue_text_raw,
+            description=issue_request.description,
+            session_id=issue_request.session_id,
+            context_card_id=issue_request.context_card_id,
+            context_cards=json.dumps(issue_request.context_cards)
+            if issue_request.context_cards
+            else None,
+            ideas=json.dumps(issue_request.ideas) if issue_request.ideas else None,
+            repo_owner=issue_request.repo_owner,
+            repo_name=issue_request.repo_name,
+            priority=issue_request.priority,
+            issue_steps=json.dumps(issue_request.issue_steps)
+            if issue_request.issue_steps
+            else None,
+            status="pending",
+            agent_response=None,
+            processing_time=None,
+            tokens_used=0,
+        )
+
+        db.add(user_issue)
+        db.flush()  # Get the ID without committing
+
+        logger.info(
+            f"Successfully created user issue {issue_id} for user {user_id}"
+        )
+        return user_issue
 
     def update_issue_status(
         self,
@@ -365,7 +466,7 @@ class IssueService:
             if github_token:
                 try:
                     repo_context = await self._fetch_github_repo_context(
-                        repo_owner, repo_name, github_token
+                        repo_owner, repo_name, user_id
                     )
                 except Exception as e:
                     logger.warning(f"Failed to fetch GitHub context: {e}")
