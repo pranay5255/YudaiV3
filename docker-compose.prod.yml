@@ -43,15 +43,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
-    # Production resource limits
+    # Production restart policy
     deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 1G
-        reservations:
-          cpus: '0.5'
-          memory: 256M
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -145,15 +138,8 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    # Production resource limits
+    # Production restart policy
     deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
       restart_policy:
         condition: on-failure
         delay: 5s
@@ -189,7 +175,7 @@ services:
     container_name: yudai-fe
     restart: unless-stopped
     environment:
-      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-https://yudai.app}
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL}
       - NGINX_WORKER_PROCESSES=auto
       - NGINX_WORKER_CONNECTIONS=1024
     ports:
@@ -210,15 +196,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
-    # Production resource limits
+    # Production restart policy
     deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 128M
       restart_policy:
         condition: on-failure
         delay: 5s
