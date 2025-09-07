@@ -74,7 +74,6 @@ import logging
 # Import chat functionality from chat_api
 import time
 import uuid
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -116,6 +115,8 @@ from repo_processorGitIngest.scraper_script import (
 )
 from sqlalchemy.orm import Session
 
+from utils import utc_now
+
 router = APIRouter(tags=["sessions"])
 
 # Configure logging
@@ -137,7 +138,7 @@ def create_standardized_error(
         message=message,
         status=status_code,
         error_code=error_code,
-        timestamp=datetime.utcnow(),
+        timestamp=utc_now(),
         path=path,
         request_id=str(uuid.uuid4())
     )
@@ -253,7 +254,7 @@ async def create_session(
             is_active=True,
             total_messages=0,
             total_tokens=0,
-            last_activity=datetime.utcnow(),
+            last_activity=utc_now(),
         )
 
         db.add(db_session)
@@ -323,8 +324,8 @@ async def update_session(
             db_session.is_active = request.is_active
 
         # Update last activity
-        db_session.last_activity = datetime.utcnow()
-        db_session.updated_at = datetime.utcnow()
+        db_session.last_activity = utc_now()
+        db_session.updated_at = utc_now()
 
         db.commit()
         db.refresh(db_session)
@@ -431,7 +432,7 @@ async def add_chat_message(
         # Update session statistics
         db_session.total_messages += 1
         db_session.total_tokens += message.tokens
-        db_session.last_activity = datetime.utcnow()
+        db_session.last_activity = utc_now()
 
         db.commit()
         db.refresh(message)
@@ -515,7 +516,7 @@ async def add_bulk_chat_messages(
         # Update session statistics
         db_session.total_messages += len(created_messages)
         db_session.total_tokens += total_tokens_added
-        db_session.last_activity = datetime.utcnow()
+        db_session.last_activity = utc_now()
 
         db.commit()
 
@@ -600,7 +601,7 @@ async def export_session(
         # Build export data
         export_data = {
             "version": "1.0",
-            "export_timestamp": datetime.utcnow().isoformat(),
+            "export_timestamp": utc_now().isoformat(),
             "session": {
                 "session_id": db_session.session_id,
                 "title": db_session.title,
@@ -708,7 +709,7 @@ async def import_session(
             is_active=session_data.get("is_active", True),
             total_messages=0,  # Will be updated as we import
             total_tokens=0,    # Will be updated as we import
-            last_activity=datetime.utcnow(),
+            last_activity=utc_now(),
         )
 
         db.add(db_session)
@@ -1101,7 +1102,7 @@ async def update_file_dependency(
             file_embedding.file_metadata = request.file_metadata
 
         # Update timestamp
-        file_embedding.updated_at = datetime.utcnow()
+        file_embedding.updated_at = utc_now()
 
         db.commit()
         db.refresh(file_embedding)
@@ -1341,7 +1342,7 @@ def _add_to_conversation_history(
         # Update session statistics
         db_session.total_messages += 1
         db_session.total_tokens += message_obj.tokens
-        db_session.last_activity = datetime.utcnow()
+        db_session.last_activity = utc_now()
 
         db.commit()
     except Exception as e:
@@ -2147,7 +2148,7 @@ async def solver_health_for_session(
             "status": "healthy",
             "service": "ai-solver",
             "version": "1.0.0",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utc_now().isoformat(),
             "session_id": session_id,
             "checks": {
                 "database": "ok",  # TODO: Actual DB health check
