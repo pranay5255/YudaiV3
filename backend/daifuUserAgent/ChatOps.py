@@ -475,8 +475,8 @@ class ChatOps:
                         repo_details, commits, issues, pulls, full_history
                     )
 
-            # Generate response using LLM service
-            response = LLMService.generate_response(
+            # Generate response using LLM service (already in async context)
+            ai_response = await LLMService.generate_response(
                 prompt=prompt,
                 model="deepseek/deepseek-r1-0528",
                 temperature=0.4,
@@ -484,17 +484,7 @@ class ChatOps:
                 timeout=45,
             )
 
-            # Since LLMService.generate_response is async, we need to handle that
-            import asyncio
-
-            # Run the async function synchronously
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                ai_response = loop.run_until_complete(response)
-                return ai_response
-            finally:
-                loop.close()
+            return ai_response
 
         except Exception as e:
             logger.error(f"Failed to generate AI response: {e}")
