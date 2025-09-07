@@ -38,7 +38,7 @@ services:
       - yudai-network
     # Enhanced health check with better timing
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U yudai_user -d yudai_db -h localhost || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h localhost"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -123,7 +123,7 @@ services:
       - ./backend:/app
       - /app/__pycache__
       - app_logs:/app/logs
-      - ./backend/yudaiv3.2025-08-02.private-key.pem:/app/yudaiv3.2025-08-02.private-key.pem:ro
+      - ./backend/yudaiv3.2025-09-07.private-key.pem:/app/yudaiv3.2025-09-07.private-key.pem:ro
       # SWE-agent volumes
       - /var/run/docker.sock:/var/run/docker.sock
       - swe_runs:/data/swe_runs
