@@ -38,11 +38,11 @@ services:
       - yudai-network
     # Enhanced health check with better timing
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      test: ["CMD-SHELL", "pg_isready -U yudai_user -d yudai_db -h localhost || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
     # Production restart policy
     deploy:
       restart_policy:
