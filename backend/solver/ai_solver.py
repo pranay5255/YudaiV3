@@ -8,7 +8,6 @@ import json
 import logging
 import os
 import tempfile
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -16,6 +15,8 @@ import yaml
 from models import AIModel, AISolveEdit, AISolveSession, Issue, SWEAgentConfig
 from schemas.ai_solver import EditType, SolveStatus
 from sqlalchemy.orm import Session
+
+from utils import utc_now
 
 # Configure logging
 logging.basicConfig(
@@ -97,7 +98,7 @@ class AISolverAdapter:
             f"Starting AI solve session: issue_id={issue_id}, user_id={user_id}, repo={repo_url}, branch={branch}"
         )
 
-        start_time = datetime.utcnow()
+        start_time = utc_now()
 
         # Create solve session
         session = AISolveSession(
@@ -170,7 +171,7 @@ class AISolverAdapter:
 
             # Update session as completed
             session.status = SolveStatus.COMPLETED
-            session.completed_at = datetime.utcnow()
+            session.completed_at = utc_now()
             session.trajectory_data = trajectory
 
             duration = (session.completed_at - start_time).total_seconds()
@@ -185,7 +186,7 @@ class AISolverAdapter:
             # Update session as failed
             session.status = SolveStatus.FAILED
             session.error_message = str(e)
-            session.completed_at = datetime.utcnow()
+            session.completed_at = utc_now()
 
             duration = (session.completed_at - start_time).total_seconds()
             print(
@@ -672,7 +673,7 @@ class AISolverAdapter:
 
         # Update session status
         session.status = SolveStatus.CANCELLED
-        session.completed_at = datetime.utcnow()
+        session.completed_at = utc_now()
         session.error_message = "Cancelled by user"
 
         self.db.commit()

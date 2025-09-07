@@ -7,7 +7,6 @@ extracted from the router handlers for better separation of concerns.
 """
 
 import logging
-from datetime import datetime
 from typing import List
 
 from fastapi import HTTPException, status
@@ -24,6 +23,8 @@ from models import (
     User,
 )
 from sqlalchemy.orm import Session
+
+from utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +192,7 @@ class SessionService:
                 "total_messages": db_session.total_messages,
                 "total_tokens": db_session.total_tokens,
                 "session_duration": int(
-                    (datetime.utcnow() - db_session.created_at).total_seconds()
+                    (utc_now() - db_session.created_at).total_seconds()
                 )
                 if db_session.created_at
                 else 0,
