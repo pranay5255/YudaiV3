@@ -171,6 +171,7 @@ class AuthToken(Base):
 
     # GitHub App OAuth tokens
     access_token: Mapped[str] = mapped_column(String(500), nullable=False)
+    refresh_token: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     token_type: Mapped[str] = mapped_column(String(50), default="bearer")
 
     # GitHub App specific fields

@@ -36,6 +36,9 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 RUN rm -f /etc/nginx/nginx.conf
 COPY nginx.prod.conf /etc/nginx/nginx.conf
 
+# Copy nginx templates directory
+COPY nginx/templates /etc/nginx/templates
+
 # Create health endpoint
 RUN echo "healthy" > /usr/share/nginx/html/health
 
