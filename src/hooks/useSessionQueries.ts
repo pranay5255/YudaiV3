@@ -4,7 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSessionStore } from '../stores/sessionStore';
-import { API_CONFIG, buildApiUrl } from '../config/api';
+import { API, buildApiUrl } from '../config/api';
 import {
   ChatMessage,
   ContextCard,
@@ -499,7 +499,7 @@ export const useStartSolveSession = () => {
         throw new Error('No active session or session token available');
       }
 
-      const response = await fetch(buildApiUrl(API_CONFIG.SESSIONS.SOLVER.START_SOLVE, { sessionId: activeSessionId }), {
+      const response = await fetch(buildApiUrl(API.SESSIONS.SOLVER.START, { sessionId: activeSessionId }), {
         method: 'POST',
         headers: getAuthHeaders(sessionToken),
         body: JSON.stringify(request),
@@ -529,7 +529,7 @@ export const useGetSolveSession = (solveSessionId: string) => {
         throw new Error('No active session or session token available');
       }
 
-      const response = await fetch(buildApiUrl(API_CONFIG.SESSIONS.SOLVER.SOLVE_SESSION_DETAIL, {
+      const response = await fetch(buildApiUrl(API.SESSIONS.SOLVER.STATUS, {
         sessionId: activeSessionId,
         solveSessionId
       }), {
@@ -548,34 +548,6 @@ export const useGetSolveSession = (solveSessionId: string) => {
   });
 };
 
-export const useGetSolveSessionStats = (solveSessionId: string) => {
-  const { sessionToken, activeSessionId } = useSessionStore();
-
-  return useQuery({
-    queryKey: ['solve-session-stats', activeSessionId, solveSessionId],
-    queryFn: async () => {
-      if (!activeSessionId || !sessionToken) {
-        throw new Error('No active session or session token available');
-      }
-
-      const response = await fetch(buildApiUrl(API_CONFIG.SESSIONS.SOLVER.SOLVE_SESSION_STATS, {
-        sessionId: activeSessionId,
-        solveSessionId
-      }), {
-        method: 'GET',
-        headers: getAuthHeaders(sessionToken),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
-      }
-
-      return response.json();
-    },
-    enabled: !!activeSessionId && !!sessionToken && !!solveSessionId,
-  });
-};
 
 export const useCancelSolveSession = () => {
   const queryClient = useQueryClient();
@@ -587,7 +559,7 @@ export const useCancelSolveSession = () => {
         throw new Error('No active session or session token available');
       }
 
-      const response = await fetch(buildApiUrl(API_CONFIG.SESSIONS.SOLVER.CANCEL_SOLVE, {
+      const response = await fetch(buildApiUrl(API.SESSIONS.SOLVER.CANCEL, {
         sessionId: activeSessionId,
         solveSessionId
       }), {
@@ -606,63 +578,6 @@ export const useCancelSolveSession = () => {
       // Invalidate solver sessions list
       queryClient.invalidateQueries({ queryKey: ['solve-sessions', activeSessionId] });
     },
-  });
-};
-
-export const useListSolveSessions = () => {
-  const { sessionToken, activeSessionId } = useSessionStore();
-
-  return useQuery({
-    queryKey: ['solve-sessions', activeSessionId],
-    queryFn: async () => {
-      if (!activeSessionId || !sessionToken) {
-        throw new Error('No active session or session token available');
-      }
-
-      const response = await fetch(buildApiUrl(API_CONFIG.SESSIONS.SOLVER.LIST_SOLVE_SESSIONS, {
-        sessionId: activeSessionId
-      }), {
-        method: 'GET',
-        headers: getAuthHeaders(sessionToken),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
-      }
-
-      return response.json();
-    },
-    enabled: !!activeSessionId && !!sessionToken,
-  });
-};
-
-export const useSolverHealth = () => {
-  const { sessionToken, activeSessionId } = useSessionStore();
-
-  return useQuery({
-    queryKey: ['solver-health', activeSessionId],
-    queryFn: async () => {
-      if (!activeSessionId || !sessionToken) {
-        throw new Error('No active session or session token available');
-      }
-
-      const response = await fetch(buildApiUrl(API_CONFIG.SESSIONS.SOLVER.SOLVER_HEALTH, {
-        sessionId: activeSessionId
-      }), {
-        method: 'GET',
-        headers: getAuthHeaders(sessionToken),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
-      }
-
-      return response.json();
-    },
-    enabled: !!activeSessionId && !!sessionToken,
-    staleTime: 30000, // 30 seconds
   });
 };
 
