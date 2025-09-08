@@ -29,6 +29,8 @@ from models import (
 )
 from sqlalchemy.orm import Session
 
+from utils import utc_now
+
 # Configure logger for this module
 logger = logging.getLogger(__name__)
 
@@ -197,9 +199,16 @@ async def api_login():
         auth_url = get_github_oauth_url()
         return {"login_url": auth_url}
     except GitHubOAuthError as e:
+        logger.error(f"GitHub OAuth configuration error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service is not properly configured. Please contact the administrator."
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error in login endpoint: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail="Internal server error"
         )
 
 
@@ -248,6 +257,35 @@ async def api_logout(request: SessionTokenRequest, db: Session = Depends(get_db)
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
         )
+
+
+# Health check endpoint for auth service
+@router.get("/health")
+async def auth_health_check():
+    """Health check for auth service"""
+    try:
+        # Check if GitHub OAuth is configured
+        oauth_configured = False
+        try:
+            validate_github_app_config()
+            oauth_configured = True
+        except GitHubOAuthError:
+            oauth_configured = False
+
+        return {
+            "status": "healthy",
+            "service": "auth",
+            "oauth_configured": oauth_configured,
+            "timestamp": utc_now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Auth health check failed: {str(e)}")
+        return {
+            "status": "unhealthy",
+            "service": "auth",
+            "error": str(e),
+            "timestamp": utc_now().isoformat()
+        }
 
 
 # @router.post("/api/refresh-session")

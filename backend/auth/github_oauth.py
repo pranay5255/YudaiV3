@@ -329,9 +329,12 @@ def validate_github_app_config():
         missing_vars.append("GITHUB_APP_PRIVATE_KEY_PATH")
 
     if missing_vars:
-        raise GitHubOAuthError(
-            f"Missing required GitHub App OAuth configuration: {', '.join(missing_vars)}"
+        error_msg = (
+            f"GitHub OAuth is not configured. Missing environment variables: {', '.join(missing_vars)}. "
+            "Please check your .env.prod file and ensure all GitHub App credentials are set. "
+            "See PROD_ENV_SETUP.md for configuration instructions."
         )
+        raise GitHubOAuthError(error_msg)
 
     # Check if private key file exists
     if not os.path.exists(GITHUB_APP_PRIVATE_KEY_PATH):
