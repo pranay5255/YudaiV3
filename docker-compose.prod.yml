@@ -164,14 +164,14 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        # Use empty string in prod so frontend calls same-origin paths.
-        # Nginx routes /auth/*, /daifu/*, /github/*, /api/* to backend.
-        - VITE_API_BASE_URL=${VITE_API_BASE_URL:-""}
+        # Contract One: Use /api umbrella for all backend calls
+        # nginx strips /api/ and forwards to backend unchanged
+        - VITE_API_BASE_URL=/api
     container_name: yudai-fe
     restart: unless-stopped
     environment:
-      # Explicitly set to empty string to avoid shell expansion issues
-      - VITE_API_BASE_URL=
+      # Contract One: Explicit /api base URL for production
+      - VITE_API_BASE_URL=/api
       - NGINX_WORKER_PROCESSES=auto
       - NGINX_WORKER_CONNECTIONS=1024
     ports:
