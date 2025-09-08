@@ -1,7 +1,6 @@
 components
 config
 hooks
-services
 stores
 types
 utils
