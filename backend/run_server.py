@@ -22,16 +22,18 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 
 # Import all service routers
 from auth import auth_router
 from daifuUserAgent.session_routes import router as session_router
-from github import github_router  # Re-added: Standalone GitHub router for /github/* routes
 
 # Import database initialization
 from db.database import init_db
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from github import (
+    github_router,  # Re-added: Standalone GitHub router for /github/* routes
+)
 
 # Import centralized route configuration
 from config.routes import APIRoutes
