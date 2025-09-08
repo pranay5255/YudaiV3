@@ -426,37 +426,82 @@ CREATE INDEX IF NOT EXISTS idx_github_app_installations_is_active ON github_app_
 -- TRIGGERS FOR UPDATED_AT COLUMNS
 -- ============================================================================
 
--- Create triggers for updated_at columns
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Function to create trigger only if it doesn't exist
+CREATE OR REPLACE FUNCTION create_trigger_if_not_exists(
+    trigger_name TEXT,
+    table_name TEXT,
+    trigger_sql TEXT
+) RETURNS VOID AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = trigger_name
+    ) THEN
+        EXECUTE trigger_sql;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
 
-CREATE TRIGGER update_auth_tokens_updated_at BEFORE UPDATE ON auth_tokens
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- Create triggers for updated_at columns (only if they don't exist)
+SELECT create_trigger_if_not_exists(
+    'update_users_updated_at',
+    'users',
+    'CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
 
-CREATE TRIGGER update_session_tokens_updated_at BEFORE UPDATE ON session_tokens
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+SELECT create_trigger_if_not_exists(
+    'update_auth_tokens_updated_at',
+    'auth_tokens',
+    'CREATE TRIGGER update_auth_tokens_updated_at BEFORE UPDATE ON auth_tokens FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
 
-CREATE TRIGGER update_repositories_updated_at BEFORE UPDATE ON repositories
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+SELECT create_trigger_if_not_exists(
+    'update_session_tokens_updated_at',
+    'session_tokens',
+    'CREATE TRIGGER update_session_tokens_updated_at BEFORE UPDATE ON session_tokens FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
 
+SELECT create_trigger_if_not_exists(
+    'update_repositories_updated_at',
+    'repositories',
+    'CREATE TRIGGER update_repositories_updated_at BEFORE UPDATE ON repositories FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
 
-CREATE TRIGGER update_user_issues_updated_at BEFORE UPDATE ON user_issues
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+SELECT create_trigger_if_not_exists(
+    'update_user_issues_updated_at',
+    'user_issues',
+    'CREATE TRIGGER update_user_issues_updated_at BEFORE UPDATE ON user_issues FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
 
-CREATE TRIGGER update_chat_sessions_updated_at BEFORE UPDATE ON chat_sessions
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+SELECT create_trigger_if_not_exists(
+    'update_chat_sessions_updated_at',
+    'chat_sessions',
+    'CREATE TRIGGER update_chat_sessions_updated_at BEFORE UPDATE ON chat_sessions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
 
-CREATE TRIGGER update_chat_messages_updated_at BEFORE UPDATE ON chat_messages
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+SELECT create_trigger_if_not_exists(
+    'update_chat_messages_updated_at',
+    'chat_messages',
+    'CREATE TRIGGER update_chat_messages_updated_at BEFORE UPDATE ON chat_messages FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
 
-CREATE TRIGGER update_context_cards_updated_at BEFORE UPDATE ON context_cards
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+SELECT create_trigger_if_not_exists(
+    'update_context_cards_updated_at',
+    'context_cards',
+    'CREATE TRIGGER update_context_cards_updated_at BEFORE UPDATE ON context_cards FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
 
-CREATE TRIGGER update_file_embeddings_updated_at BEFORE UPDATE ON file_embeddings
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+SELECT create_trigger_if_not_exists(
+    'update_file_embeddings_updated_at',
+    'file_embeddings',
+    'CREATE TRIGGER update_file_embeddings_updated_at BEFORE UPDATE ON file_embeddings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
 
-CREATE TRIGGER update_github_app_installations_updated_at BEFORE UPDATE ON github_app_installations
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+SELECT create_trigger_if_not_exists(
+    'update_github_app_installations_updated_at',
+    'github_app_installations',
+    'CREATE TRIGGER update_github_app_installations_updated_at BEFORE UPDATE ON github_app_installations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
 
 -- Log initialization
 SELECT 'YudaiV3 database initialized with complete schema matching models.py' as status; 
