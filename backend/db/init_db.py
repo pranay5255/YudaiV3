@@ -27,6 +27,7 @@ def wait_for_database(max_retries=30, delay=2):
                 pool_pre_ping=True
             )
             with engine.connect() as conn:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
                 conn.execute(text("SELECT 1"))
             print("✓ Database is ready!")
             return engine
@@ -70,6 +71,24 @@ def create_tables_standalone(engine):
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             updated_at TIMESTAMP WITH TIME ZONE,
             last_login TIMESTAMP WITH TIME ZONE
+        );
+        
+        CREATE TABLE IF NOT EXISTS github_app_installations (
+            id SERIAL PRIMARY KEY,
+            github_installation_id INTEGER NOT NULL UNIQUE,
+            github_app_id VARCHAR(50) NOT NULL,
+            account_type VARCHAR(20) NOT NULL,
+            account_login VARCHAR(255) NOT NULL,
+            account_id INTEGER NOT NULL,
+            permissions JSONB,
+            events JSONB,
+            repository_selection VARCHAR(20) DEFAULT 'all',
+            single_file_name VARCHAR(100),
+            is_active BOOLEAN DEFAULT TRUE,
+            suspended_at TIMESTAMP WITH TIME ZONE,
+            suspended_by VARCHAR(255),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE
         )
         """,
         """
@@ -82,6 +101,10 @@ def create_tables_standalone(engine):
             scope VARCHAR(500),
             expires_at TIMESTAMP WITH TIME ZONE,
             is_active BOOLEAN DEFAULT TRUE,
+            github_app_id VARCHAR(50),
+            installation_id INTEGER REFERENCES github_app_installations(github_installation_id),
+            permissions JSONB,
+            repositories_url VARCHAR(500),
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             updated_at TIMESTAMP WITH TIME ZONE
         )
@@ -199,7 +222,9 @@ def create_tables_standalone(engine):
             state VARCHAR(255) PRIMARY KEY,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-            is_used BOOLEAN DEFAULT FALSE
+            is_used BOOLEAN DEFAULT FALSE,
+            github_app_id VARCHAR(50),
+            user_id INTEGER REFERENCES users(id)
         )
         """,
         """
@@ -230,10 +255,11 @@ def create_tables_standalone(engine):
             file_name VARCHAR(500) NOT NULL,
             file_type VARCHAR(100) NOT NULL,
             file_content TEXT,
-            embedding TEXT,
+            embedding VECTOR(1536),
             chunk_index INTEGER DEFAULT 0,
             chunk_text TEXT NOT NULL,
             tokens INTEGER DEFAULT 0,
+            session_tokens_used INTEGER DEFAULT 0,
             file_metadata JSON,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             updated_at TIMESTAMP WITH TIME ZONE

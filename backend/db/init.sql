@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id),
     access_token VARCHAR(500) NOT NULL,
+    refresh_token VARCHAR(500),
     token_type VARCHAR(50) DEFAULT 'bearer',
     scope VARCHAR(500),
     expires_at TIMESTAMP WITH TIME ZONE,
