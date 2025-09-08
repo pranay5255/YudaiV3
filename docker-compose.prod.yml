@@ -169,8 +169,8 @@ services:
     container_name: yudai-fe
     restart: unless-stopped
     environment:
-      # Default to empty for relative paths and nginx proxying
-      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-""}
+      # Explicitly set to empty string to avoid shell expansion issues
+      - VITE_API_BASE_URL=
       - NGINX_WORKER_PROCESSES=auto
       - NGINX_WORKER_CONNECTIONS=1024
     ports:

@@ -3,8 +3,8 @@
 
 // Base API configuration
 export const API_CONFIG = {
-  // Base URLs
-  BASE_URL: import.meta.env.VITE_API_BASE_URL || '',
+  // Base URLs - ensure proper handling of empty strings
+  BASE_URL: (import.meta.env.VITE_API_BASE_URL || '').trim(),
   API_PREFIX: '/api',
 
   // Service endpoints
@@ -51,9 +51,12 @@ export const API_CONFIG = {
   // SOLVER section removed - now consolidated under SESSIONS
 } as const;
 
-// Type-safe API URL builder
+// Improved URL builder
 export const buildApiUrl = (endpoint: string, pathParams?: Record<string, string>, queryParams?: Record<string, string>): string => {
-  let url = `${API_CONFIG.BASE_URL}${endpoint}`;
+  // Ensure endpoint starts with /
+  const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  
+  let url = `${API_CONFIG.BASE_URL}${normalizedEndpoint}`;
 
   // Replace path parameters
   if (pathParams) {
