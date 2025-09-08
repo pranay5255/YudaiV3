@@ -170,7 +170,6 @@ def create_sample_data():
             AuthToken(
                 user_id=1,
                 access_token=f"ghp_{uuid.uuid4().hex[:40]}",
-                refresh_token=f"ghr_{uuid.uuid4().hex[:40]}",
                 token_type="bearer",
                 scope="repo user",
                 expires_at=utc_now() + timedelta(days=30),
@@ -179,7 +178,6 @@ def create_sample_data():
             AuthToken(
                 user_id=2,
                 access_token=f"ghp_{uuid.uuid4().hex[:40]}",
-                refresh_token=f"ghr_{uuid.uuid4().hex[:40]}",
                 token_type="bearer",
                 scope="repo user",
                 expires_at=utc_now() + timedelta(days=30),
@@ -188,7 +186,6 @@ def create_sample_data():
             AuthToken(
                 user_id=4,  # demo_user
                 access_token=f"ghp_{uuid.uuid4().hex[:40]}",
-                refresh_token=f"ghr_{uuid.uuid4().hex[:40]}",
                 token_type="bearer",
                 scope="repo user",
                 expires_at=utc_now() + timedelta(days=30),
@@ -199,6 +196,17 @@ def create_sample_data():
         for token in sample_tokens:
             db.add(token)
         db.commit()
+
+        # Assign refresh_token after construction to avoid keyword issues
+        try:
+            if hasattr(AuthToken, "refresh_token"):
+                tokens = db.query(AuthToken).order_by(AuthToken.id.asc()).all()
+                for t in tokens[-len(sample_tokens):]:  # best effort: last inserted
+                    t.refresh_token = f"ghr_{uuid.uuid4().hex[:40]}"
+                db.commit()
+        except Exception:
+            # Non-fatal: continue without refresh tokens
+            db.rollback()
 
         # Sample Repositories
         sample_repos = [

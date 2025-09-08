@@ -29,6 +29,9 @@ RUN ls -la /app/dist/ && test -f /app/dist/index.html
 # Production stage
 FROM nginx:alpine
 
+# Install curl for healthchecks
+RUN apk add --no-cache curl
+
 # Copy built app from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
 

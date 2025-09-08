@@ -170,11 +170,14 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE_URL=${VITE_API_BASE_URL:-https://yudai.app}
+        # Use empty string in prod so frontend calls same-origin paths.
+        # Nginx routes /auth/*, /daifu/*, /github/*, /api/* to backend.
+        - VITE_API_BASE_URL=${VITE_API_BASE_URL:-""}
     container_name: yudai-fe
     restart: unless-stopped
     environment:
-      - VITE_API_BASE_URL=${VITE_API_BASE_URL}
+      # Default to empty for relative paths and nginx proxying
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-""}
       - NGINX_WORKER_PROCESSES=auto
       - NGINX_WORKER_CONNECTIONS=1024
     ports:
