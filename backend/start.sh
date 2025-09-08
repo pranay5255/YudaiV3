@@ -51,7 +51,7 @@ test_database_connection() {
     
     # Test 2: Check if PostgreSQL is ready
     echo "  - Testing PostgreSQL readiness..."
-    if pg_isready -h db -p 5432 -U yudai_user -d "$POSTGRES_DB" >/dev/null 2>&1; then
+    if pg_isready -h db -p 5432 -U "${POSTGRES_USER:-yudai_user}" -d "$POSTGRES_DB" >/dev/null 2>&1; then
         echo "    ✓ PostgreSQL is ready"
     else
         echo "    ✗ PostgreSQL not ready"
@@ -81,7 +81,7 @@ while [ $attempt -lt $max_attempts ]; do
             echo "  - Network connectivity:"
             nc -zv db 5432 || echo "    Cannot reach db:5432"
             echo "  - PostgreSQL status:"
-            pg_isready -h db -p 5432 -U yudai_user -d "$POSTGRES_DB" || echo "    PostgreSQL not ready"
+            pg_isready -h db -p 5432 -U "${POSTGRES_USER:-yudai_user}" -d "$POSTGRES_DB" || echo "    PostgreSQL not ready"
             exit 1
         fi
         echo "  ⏳ Waiting 5 seconds before retry..."

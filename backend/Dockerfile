@@ -30,7 +30,7 @@ RUN pip install --upgrade pip && \
 COPY . .
 
 # Create non-root user for production (no sudo, minimal privileges)
-RUN groupadd -r appuser && useradd -r -g appuser -s /bin/false appuser && \
+RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     chown -R appuser:appuser /app && \
     chmod +x /app/start.sh
 
