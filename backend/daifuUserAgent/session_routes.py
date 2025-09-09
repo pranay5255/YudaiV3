@@ -1427,7 +1427,7 @@ async def extract_file_dependencies_for_session(
     request: RepositoryRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-):
+) -> FileTreeResponse:
     """
     Extract file dependencies for a specific session and create embeddings.
 

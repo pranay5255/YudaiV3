@@ -1279,6 +1279,21 @@ class FileItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class FileTreeResponse(BaseModel):
+    """Response model for file tree structure in repository analysis - matches frontend FileTreeResponse interface"""
+    id: str
+    name: str
+    type: str
+    Category: str  # Matches TypeScript interface with capital C
+    tokens: int
+    isDirectory: bool
+    children: Optional[List["FileTreeResponse"]] = None
+    path: Optional[str] = None
+    expanded: Optional[bool] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class SessionFileDependencyResponse(BaseModel):
     """Response model for session file dependencies"""
     id: int
