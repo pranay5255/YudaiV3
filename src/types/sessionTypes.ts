@@ -317,6 +317,11 @@ export interface CreateFileEmbeddingRequest {
 
 export interface UpdateFileEmbeddingRequest {
   file_path?: string;
+  file_name?: string;
+  file_type?: string;
+  file_content?: string;
+  chunk_text?: string;
+  chunk_index?: number;
   tokens?: number;
   file_metadata?: Record<string, unknown>;
 }

@@ -1219,6 +1219,18 @@ class CreateFileEmbeddingResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class UpdateFileEmbeddingRequest(BaseModel):
+    """Request model for updating file embedding properties"""
+    file_path: Optional[str] = Field(None)
+    file_name: Optional[str] = Field(None)
+    file_type: Optional[str] = Field(None)
+    file_content: Optional[str] = Field(None)
+    chunk_text: Optional[str] = Field(None)
+    chunk_index: Optional[int] = Field(None, ge=0)
+    tokens: Optional[int] = Field(None, ge=0)
+    file_metadata: Optional[Dict[str, Any]] = Field(None)
+
+
 class UpdateFileEmbeddingResponse(BaseModel):
     id: int
     session_id: int
