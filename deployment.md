@@ -218,26 +218,49 @@ After comprehensive analysis of the Contract One implementation and the applicat
 
 ### 🚨 **Critical Configuration Issues**
 
-#### 1. **API Configuration Inconsistency**
+#### 0. Repository selection breaks in `RepositorySelectionToast.tsx` ❌ NOT FIXED
+**Symptom**: After successful auth, repository dropdown fails to load; UI shows an error and no repos are listed.
+
+**What we observed (current code):**
+- Frontend uses `buildApiUrl(API.GITHUB.REPOS)` → `${API_BASE}/github/repositories` (in `src/stores/sessionStore.ts:707`).
+- Backend exposes both:
+  - `GET /github/repositories` (via `backend/github/routes.py` mounted at `/github`)
+  - `GET /daifu/github/repositories` (duplicated under `backend/daifuUserAgent/session_routes.py` mounted at `/daifu`)
+- Dev setup sets `VITE_API_BASE_URL=http://localhost:8001/api` (see `docker-compose-dev.yml:126`).
+- Vite proxy forwards `/api/*` to `target` without path rewrite (see `vite.config.ts`), so a request to `/api/github/repositories` becomes `http://localhost:8001/api/github/repositories` which the backend does not serve (no `/api` prefix in FastAPI).
+
+**Root cause (dev):** Path-prefix mismatch. In dev there is no nginx to strip `/api`, and the Vite proxy does not rewrite `/api` → `/`. Combined with `VITE_API_BASE_URL` including `/api`, calls hit `http://localhost:8001/api/...` and 404.
+
+**Root cause (prod sanity):** Nginx template correctly rewrites `/api/*` to backend root (see `nginx/templates/api-routes.conf`), so prod is fine as long as `VITE_API_BASE_URL` is set to `https://<host>/api`. The breakage is primarily in the dev path.
+
+**Fix required (dev):** Choose one consistent approach:
+- Option A (recommended): Set `VITE_API_BASE_URL=http://localhost:8001` for dev and add a Vite proxy rewrite so `'/api'` is stripped:
+  - In `vite.config.ts` under `server.proxy['/api']`, add `rewrite: (path) => path.replace(/^\/api/, '')`.
+  - Keep frontend using `API_BASE='/api'` by default for local dev convenience.
+- Option B: Keep `VITE_API_BASE_URL=http://localhost:8001/api` and remove the Vite `/api` proxy entirely so requests go directly to the backend URL. Ensure all frontend calls are absolute and include the correct base.
+
+Until this is applied, repo selection will continue to fail despite the correct `API.GITHUB.REPOS` usage.
+
+#### 1. **API Configuration Inconsistency** ✅ **FIXED**
 **Issue**: The frontend uses two different API imports:
 - `src/stores/sessionStore.ts` imports `API_CONFIG` (line 25)
 - `src/config/api.ts` exports `API` but not `API_CONFIG`
 
 **Impact**: Runtime errors when sessionStore methods are called
-**Fix Required**: Update sessionStore.ts to use `API` instead of `API_CONFIG`
+**Fix Applied**: Updated sessionStore.ts to import and use `API` instead of `API_CONFIG`, fixed all 19 endpoint references
 
-#### 2. **Solver Endpoint Mismatch** 
+#### 2. **Solver Endpoint Mismatch** ❌ NOT FIXED
 **Issue**: Frontend solver implementation has inconsistent endpoint usage:
 - Direct fetch call in `Chat.tsx` line 423: `/api/sessions/${activeSessionId}/solve/start`
 - Hook in `useSessionQueries.ts` line 502: `API_CONFIG.SESSIONS.SOLVER.START` (undefined)
 
 **Impact**: Solver functionality completely broken
-**Fix Required**: Standardize all solver calls to use the proper API endpoints
+**Fix Required**: Standardize all solver calls to use the proper API endpoints (use `API.SESSIONS.SOLVER.START/STATUS/CANCEL` via `buildApiUrl`, remove hard-coded `/api/...`).
 
-#### 3. **Missing GitHub Issue Creation Route**
+#### 3. **Missing GitHub Issue Creation Route** ✅ FIXED
 **Issue**: Frontend calls `API_CONFIG.SESSIONS.ISSUES.CREATE_GITHUB_ISSUE` but this route doesn't exist in `api.ts`
 **Backend Route**: `/sessions/{session_id}/issues/{issue_id}/create-github-issue`
-**Fix Required**: Add missing route to frontend API configuration
+**Fix Applied**: Added `CREATE_GITHUB_ISSUE` endpoint to API configuration and updated sessionStore to use it
 
 ### ⚠️ **Functional Issues**
 
@@ -256,7 +279,7 @@ After comprehensive analysis of the Contract One implementation and the applicat
 **Current Problem**: Frontend implementation incorrectly treats these as duplicates
 **Fix Required**: Ensure proper workflow: CreateIssue → Preview → CreateGitHubIssue
 
-#### 5. **File Embedding Data Exposure**
+#### 5. **File Embedding Data Exposure** ✅ FIXED
 **Issue**: Frontend types include embedding vector fields unnecessarily:
 - `CreateFileEmbeddingRequest` should not include embedding vector data
 - Frontend only needs file metadata, not vector embeddings
@@ -264,20 +287,20 @@ After comprehensive analysis of the Contract One implementation and the applicat
 **Security/Performance Impact**: 
 - Unnecessary data transfer
 - Potential exposure of embedding vectors to frontend
-**Fix Required**: Remove embedding vector fields from frontend types
+**Current Status**: Frontend types no longer expose embeddings or raw chunk vectors (`src/types/sessionTypes.ts`), only file metadata is sent/received.
 
-#### 6. **Solver Backend Integration Gap**
+#### 6. **Solver Backend Integration Gap** ⚠️ PARTIAL
 **Issue**: Solver endpoints exist in backend but are not properly integrated:
 - Routes exist: `/solve/start`, `/solve/sessions/{id}`, `/solve/cancel`
 - Frontend has partial implementation but uses wrong API configuration
 - No proper error handling or status tracking
 
 **Impact**: AI solving functionality completely non-functional
-**Fix Required**: Complete solver integration with proper API configuration
+**Fix Required**: Complete solver integration using `API.SESSIONS.SOLVER.*` consistently; remove hard-coded `fetch('/api/...')` in `Chat.tsx` and wire status polling.
 
 ### 🔧 **Implementation Issues**
 
-#### 7. **File Dependencies Processing**
+#### 7. **File Dependencies Processing** ✅ CLARIFIED
 **Issue**: File embeddings are intended for backend semantic search only, but frontend types suggest client-side processing:
 ```typescript
 // This should not exist in frontend
@@ -285,38 +308,36 @@ embedding?: Vector // pgvector data
 chunk_text: string // Raw text chunks
 ```
 
-**Clarification Needed**: Frontend should only receive:
+**Clarification**: Frontend should only receive:
 - File metadata (name, path, type, tokens)
 - Not embedding vectors or raw content chunks
 
-#### 8. **Session Context Loading Inconsistency**
+#### 8. **Session Context Loading Inconsistency** ⚠️ PARTIAL
 **Issue**: Session loading uses different API patterns:
 - Some methods use `API.SESSIONS.DETAIL`
 - Others use direct fetch with manual URL construction
 - sessionStore methods inconsistent with useSessionQueries hooks
 
 **Impact**: Potential data synchronization issues
-**Fix Required**: Standardize all session API calls
+**Current Status**: Most calls are unified through Zustand store (`useSessionStore` and `useSessionQueries`). Remaining outlier: solver call in `src/components/Chat.tsx` uses a hard-coded `fetch('/api/...')`.
+**Fix Required**: Standardize remaining outliers to `API` + `buildApiUrl`.
 
-#### 9. **Missing API Routes in Configuration**
-**Issues Found**:
-```typescript
-// Missing from src/config/api.ts:
-SESSIONS.ISSUES.CREATE_GITHUB_ISSUE  // For DiffModal
-SESSIONS.SOLVER.SESSION_DETAIL       // For solver status
-SESSIONS.SOLVER.SESSION_STATS        // For solver monitoring  
-SESSIONS.SOLVER.LIST_SESSIONS        // For solver history
-SESSIONS.SOLVER.HEALTH               // For solver health checks
-```
+#### 9. **Missing API Routes in Configuration** ⚠️ PARTIAL
+**Current State in `src/config/api.ts`:**
+- `SESSIONS.ISSUES.CREATE_GITHUB_ISSUE` present.
+- `SESSIONS.SOLVER.START`, `SESSIONS.SOLVER.STATUS`, `SESSIONS.SOLVER.CANCEL` present.
+- No explicit `SESSIONS.STATS` endpoint; if needed, add later when backend supports it.
+
+**Action**: Use existing `STATUS` for solver session tracking; add any missing routes only when required by UI.
 
 #### 10. **Environment Variable Inconsistencies**
-**Issue**: Different environment handling between dev/prod:
-- Development: `VITE_API_BASE_URL=http://localhost:8001/api`
-- Production: `VITE_API_BASE_URL=/api`
-- Some hardcoded URLs in solver implementation
+**Issue**: Different environment handling between dev/prod and missing path rewrite in dev:
+- Development (current): `VITE_API_BASE_URL=http://localhost:8001/api` → conflicts with Vite proxy that does not rewrite `/api`.
+- Production: `VITE_API_BASE_URL=/api` (fine behind nginx where `/api` is rewritten).
+- Some hardcoded URLs in solver implementation.
 
-**Impact**: Solver and some API calls may fail in production
-**Fix Required**: Ensure all API calls use environment-aware base URL
+**Impact**: Repo selection and solver calls 404 in dev due to double `/api` prefix; inconsistent behavior between dev and prod.
+**Fix Required**: For dev set `VITE_API_BASE_URL=http://localhost:8001` and add Vite proxy rewrite `'/api'` → `''`. Ensure all API calls use `API` + `buildApiUrl`.
 
 ### 📋 **Priority Fix List**
 
@@ -443,7 +464,7 @@ But no foreign key constraint exists in database initialization scripts.
 **Impact**: Security vulnerabilities in production
 **Compliance Risk**: Audit trail gaps
 
-#### 16. **GitHub API Integration Reliability Issues**
+#### 16. **GitHub API Integration Reliability Issues**(NOT REQUIRED TO SOLVE RIGHT NOW)
 **Issue**: Documented reliability problems across multiple modules:
 
 **From ChatOps.py** (lines 19-22):
@@ -482,23 +503,23 @@ CREATE INDEX idx_user_issues_session_id ON user_issues(session_id);
 **Impact**: Poor query performance with large datasets
 **Scalability Risk**: System will degrade with user growth
 
-#### 18. **Vector Database Configuration Issues**
+#### 18. **Vector Database Configuration Issues** ✅ **FIXED**
 **Issue**: pgvector extension and embedding storage problems:
 
 **From llm_service.py** implementation:
 - Uses `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions)
-- But models.py line 630 specifies `Vector(1536)` (OpenAI dimensions)
-- Dimension mismatch will cause insertion failures
+- But models.py line 630 specified `Vector(1536)` (OpenAI dimensions)
+- Dimension mismatch caused insertion failures
 
-**Missing Vector Configuration**:
-```sql
--- Missing from database init:
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE INDEX ON file_embeddings USING ivfflat (embedding);
-```
+**Fix Applied**:
+- ✅ Updated `backend/models.py` to use `Vector(384)`
+- ✅ Updated `backend/db/init.sql` to use `VECTOR(384)`
+- ✅ Updated `backend/db/init_db.py` to use `VECTOR(384)`
+- ✅ Added missing vector index with ivfflat for cosine distance
+- ✅ Updated comments to reflect sentence-transformers model
 
-**Impact**: Embedding functionality completely broken
-**Production Risk**: File context search will fail
+**Status**: Vector database configuration now properly aligned with LLM service
+**Impact**: Embedding functionality restored and file context search operational
 
 ### 📊 **Integration & Workflow Problems**
 
@@ -542,8 +563,8 @@ CREATE INDEX ON file_embeddings USING ivfflat (embedding);
 
 **CRITICAL (Production Blocking)**:
 1. Fix database schema initialization inconsistencies
-2. Resolve foreign key constraint violations  
-3. Fix vector database dimension mismatch
+2. Resolve foreign key constraint violations
+3. ✅ Fix vector database dimension mismatch - COMPLETED
 4. Complete missing table creation in init_db.py
 
 **HIGH (Core Functionality)**:
@@ -566,10 +587,10 @@ CREATE INDEX ON file_embeddings USING ivfflat (embedding);
 
 ### 🎯 **Critical Production Readiness Assessment**
 
-**Database Layer**: ❌ **CRITICAL ISSUES**
+**Database Layer**: ⚠️ **PARTIAL RESOLUTION**
 - Schema initialization inconsistencies will cause deployment failures
 - Missing foreign key constraints risk data corruption
-- Vector database misconfiguration breaks embedding functionality
+- ✅ Vector database configuration fixed - embedding functionality restored
 
 **API Layer**: ⚠️ **PARTIAL IMPLEMENTATION**
 - Core endpoints exist but lack proper error handling
@@ -586,6 +607,44 @@ CREATE INDEX ON file_embeddings USING ivfflat (embedding);
 - No connection pooling or caching
 - Bulk operations not optimized
 
-**Conclusion**: Current implementation has **CRITICAL BLOCKING ISSUES** that prevent safe production deployment. Database schema inconsistencies and security gaps must be resolved before any production release.
+**Conclusion**: Current implementation has critical gaps. Immediate blockers for basic flow are dev API path mismatch (repo selection) and solver endpoint inconsistency. ✅ Database vector dimension mismatch resolved - embedding features now operational. Security and performance hardening remain open for production readiness.
 
- 
+## NEXT STEPS
+ #TODOS: prod likely fixed
+Phase 0 — Unblock Repository Selection (prod) (Li) 
+- Fix `VITE_API_BASE_URL` in dev to `http://localhost:8001` (not including `/api`).
+- Add Vite proxy rewrite for `'/api'` → `''` in `vite.config.ts` under `server.proxy['/api']`.
+- Alternatively, remove the `/api` proxy and keep absolute `VITE_API_BASE_URL` without `/api`.
+- Verify `GET /github/repositories` returns 200 with `Authorization: Bearer <session_token>` after login.
+
+Phase 1 — Unify Frontend API Usage
+#TODOs: unified the api but also changed Solver types make sure CHAT and ISSUES work before jumping SOLVER
+- Replace hard-coded `fetch('/api/...')` usages in `src/components/Chat.tsx` with `API` + `buildApiUrl` (solver start and future status/cancel).
+- Ensure repository branches call uses `API.GITHUB.REPO_BRANCHES` everywhere (already done in `sessionStore`).
+- Remove any lingering `API_CONFIG` references (current code appears clean).
+
+Phase 2 — Solver Integration Completion
+- Wire `useStartSolveSession` everywhere solver is triggered; add polling using `API.SESSIONS.SOLVER.STATUS`.
+- Add basic UI state: starting, in-progress, completed, failed.
+- Handle 4xx/5xx with user-friendly errors and retries.
+
+Phase 3 — Embedding Pipeline Alignment
+- Decide on embedding dimension: switch DB to `VECTOR(384)` or switch model to 1536-d.
+- Update `backend/db/init_db.py` and `backend/models.py` or `LLMService.embed_text()` accordingly.
+- Add migration for existing `file_embeddings.embedding` column.
+
+Phase 4 — Security & Observability
+- Add audit logging for GitHub API calls and session actions.
+- Rate limit critical endpoints (auth, repo listing, solver start).
+- Expand `ALLOW_ORIGINS` as env var with clear docs for prod.
+- Add structured JSON logging and request IDs end-to-end.
+
+Phase 5 — Performance & DB Health
+- Create missing indexes listed in this doc where applicable; verify with `EXPLAIN`.
+- Add connection pooling and optional Redis caching.
+- Verify health checks and tighten timeouts in docker-compose and nginx.
+
+Phase 6 — Cleanup & Consistency
+- Consider removing duplicated GitHub routes under `/daifu/github/*` or switch frontend to use them consistently.
+- Standardize service layer naming (`*Ops` vs `*Service`) and move shared logic behind clear interfaces.
+- Document final API surface in `src/config/api.ts` and backend docs.
