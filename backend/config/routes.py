@@ -64,6 +64,43 @@ class APIRoutes:
             "sessions": cls.DAIFU_PREFIX,
         }
 
+    @classmethod
+    def validate_routes_on_startup(cls):
+        """Validate API route configuration on startup"""
+        try:
+            # Validate that all required route constants are defined
+            required_routes = [
+                cls.AUTH_LOGIN,
+                cls.AUTH_CALLBACK,
+                cls.AUTH_USER,
+                cls.AUTH_LOGOUT,
+                cls.GITHUB_REPOS,
+                cls.SESSIONS_BASE,
+                cls.SESSIONS_DETAIL,
+                cls.SESSIONS_MESSAGES,
+                cls.SESSIONS_CHAT,
+                cls.HEALTH,
+                cls.ROOT,
+            ]
+            
+            # Check that all routes are properly formatted
+            for route in required_routes:
+                if not isinstance(route, str) or not route.startswith('/'):
+                    raise ValueError(f"Invalid route format: {route}")
+            
+            # Validate router prefixes
+            prefixes = cls.get_router_prefixes()
+            for name, prefix in prefixes.items():
+                if not isinstance(prefix, str) or not prefix.startswith('/'):
+                    raise ValueError(f"Invalid router prefix for {name}: {prefix}")
+            
+            print("✅ API route validation passed - all routes properly configured")
+            return True
+            
+        except Exception as e:
+            print(f"❌ API route validation failed: {e}")
+            raise
+
 
 # Export simplified constants
 API_ROUTES = APIRoutes()

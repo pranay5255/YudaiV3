@@ -1237,7 +1237,7 @@ class UpdateFileEmbeddingResponse(BaseModel):
 
 
 class FileEmbeddingResponse(BaseModel):
-    """Backend response model for file embedding operations - includes pgvector data for internal use"""
+    """API response model for file embedding operations - excludes raw vector data for API efficiency"""
     id: int
     session_id: int
     repository_id: Optional[int] = None
@@ -1245,7 +1245,7 @@ class FileEmbeddingResponse(BaseModel):
     file_name: str
     file_type: str
     file_content: Optional[str] = None
-    embedding: Optional[Vector] = None  # pgvector data for semantic search
+    # Note: embedding vector data excluded from API response for efficiency and Pydantic compatibility
     chunk_index: int
     chunk_text: str  # Raw chunk text for backend processing
     tokens: int
