@@ -305,7 +305,7 @@ CREATE TABLE IF NOT EXISTS file_embeddings (
     file_name VARCHAR(500) NOT NULL,
     file_type VARCHAR(100) NOT NULL,
     file_content TEXT,
-    embedding VECTOR(1536),  -- OpenAI ada-002 dimensions
+    embedding VECTOR(384),  -- sentence-transformers/all-MiniLM-L6-v2 dimensions
     chunk_index INTEGER DEFAULT 0,
     chunk_text TEXT NOT NULL,
     tokens INTEGER DEFAULT 0,

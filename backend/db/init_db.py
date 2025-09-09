@@ -255,7 +255,7 @@ def create_tables_standalone(engine):
             file_name VARCHAR(500) NOT NULL,
             file_type VARCHAR(100) NOT NULL,
             file_content TEXT,
-            embedding VECTOR(1536),
+            embedding VECTOR(384),  -- sentence-transformers/all-MiniLM-L6-v2 dimensions
             chunk_index INTEGER DEFAULT 0,
             chunk_text TEXT NOT NULL,
             tokens INTEGER DEFAULT 0,
@@ -348,6 +348,8 @@ def create_tables_standalone(engine):
         "CREATE INDEX IF NOT EXISTS idx_file_embeddings_session_id ON file_embeddings(session_id)",
         "CREATE INDEX IF NOT EXISTS idx_file_embeddings_repository_id ON file_embeddings(repository_id)",
         "CREATE INDEX IF NOT EXISTS idx_file_embeddings_file_path ON file_embeddings(file_path)",
+        # Vector index for similarity search (using IVFFlat for cosine distance)
+        "CREATE INDEX IF NOT EXISTS idx_file_embeddings_embedding ON file_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)",
         
         # Chat session indexes
         "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)",

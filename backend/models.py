@@ -627,8 +627,8 @@ class FileEmbedding(Base):
 
     # Embedding data - using pgvector for efficient similarity search
     embedding: Mapped[Optional[Vector]] = mapped_column(
-        Vector(1536), nullable=True
-    )  # OpenAI ada-002 dimensions
+        Vector(384), nullable=True
+    )  # sentence-transformers/all-MiniLM-L6-v2 dimensions
     chunk_index: Mapped[int] = mapped_column(Integer, default=0)
     chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
     tokens: Mapped[int] = mapped_column(Integer, default=0)
@@ -1203,35 +1203,14 @@ class UpdateContextCardRequest(BaseModel):
 
 
 # File Embedding Models
-class CreateFileEmbeddingRequest(BaseModel):
-    file_path: str = Field(..., min_length=1, max_length=1000)
-    file_name: str = Field(..., min_length=1, max_length=500)
-    file_type: str = Field(..., min_length=1, max_length=100)
-    file_content: Optional[str] = Field(None)
-    chunk_text: str = Field(..., min_length=1)
-    chunk_index: int = Field(default=0, ge=0)
-    tokens: int = Field(default=0, ge=0)
-    file_metadata: Optional[Dict[str, Any]] = Field(None)
-
-
-class UpdateFileEmbeddingRequest(BaseModel):
-    file_path: Optional[str] = Field(None, min_length=1, max_length=1000)
-    file_name: Optional[str] = Field(None, min_length=1, max_length=500)
-    file_type: Optional[str] = Field(None, min_length=1, max_length=100)
-    file_content: Optional[str] = Field(None)
-    chunk_text: Optional[str] = Field(None, min_length=1)
-    chunk_index: Optional[int] = Field(None, ge=0)
-    tokens: Optional[int] = Field(None, ge=0)
-    file_metadata: Optional[Dict[str, Any]] = Field(None)
-
-
-class FileEmbeddingResponse(BaseModel):
+class CreateFileEmbeddingResponse(BaseModel):
     id: int
     session_id: int
-    repository_id: Optional[int] = None
     file_path: str
-    file_name: str
+    file_name: str 
     file_type: str
+    file_content: Optional[str] = None
+    chunk_text: str
     chunk_index: int
     tokens: int
     file_metadata: Optional[Dict[str, Any]] = None
@@ -1240,18 +1219,62 @@ class FileEmbeddingResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# Missing Response Models for session_routes.py
+class UpdateFileEmbeddingResponse(BaseModel):
+    id: int
+    session_id: int
+    file_path: str
+    file_name: str
+    file_type: str
+    file_content: Optional[str] = None
+    chunk_text: str
+    chunk_index: int
+    tokens: int
+    file_metadata: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FileEmbeddingResponse(BaseModel):
+    """Backend response model for file embedding operations - includes pgvector data for internal use"""
+    id: int
+    session_id: int
+    repository_id: Optional[int] = None
+    file_path: str
+    file_name: str
+    file_type: str
+    file_content: Optional[str] = None
+    embedding: Optional[Vector] = None  # pgvector data for semantic search
+    chunk_index: int
+    chunk_text: str  # Raw chunk text for backend processing
+    tokens: int
+    session_tokens_used: int
+    file_metadata: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# Frontend UI Response Models
 class FileItemResponse(BaseModel):
-    """Response model for file items (used in file extraction endpoints)"""
+    """Response model for frontend UI display in FileDependencies component - simplified for UI interactions"""
     id: str
     name: str
-    type: str
-    Category: str
-    tokens: int
-    isDirectory: bool
-    children: Optional[List["FileItemResponse"]] = None
     path: Optional[str] = None
+    type: str
+    tokens: int
+    category: str
+    isDirectory: Optional[bool] = None
+    children: Optional[List["FileItemResponse"]] = None
     expanded: Optional[bool] = None
+    content_size: Optional[int] = None
+    created_at: Optional[str] = None
+    file_name: Optional[str] = None
+    file_path: Optional[str] = None
+    file_type: Optional[str] = None
+    content_summary: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

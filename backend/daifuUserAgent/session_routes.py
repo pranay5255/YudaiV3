@@ -98,7 +98,7 @@ from models import (
     CreateSessionRequest,
     FileEmbedding,
     FileEmbeddingResponse,
-    FileItemResponse,
+    FileTreeResponse,
     Repository,
     RepositoryRequest,
     SessionContextResponse,
@@ -1421,7 +1421,7 @@ def _get_or_create_repository(
     return repository
 
 
-@router.post("/sessions/{session_id}/extract", response_model=FileItemResponse)
+@router.post("/sessions/{session_id}/extract", response_model=FileTreeResponse)
 async def extract_file_dependencies_for_session(
     session_id: str,
     request: RepositoryRequest,
@@ -1481,8 +1481,8 @@ async def extract_file_dependencies_for_session(
             for f in repo_data.get("files", [])
         )
 
-        # Create root FileItem node
-        root_file_item = FileItemResponse(
+        # Create root FileTree node
+        root_file_item = FileTreeResponse(
             id="root",
             name=repo_name,
             type="INTERNAL",
