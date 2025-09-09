@@ -20,6 +20,7 @@ import {
 import { useSessionManagement } from '../hooks/useSessionManagement';
 import { useRepository } from '../hooks/useRepository';
 import { useSessionStore } from '../stores/sessionStore';
+import { API, buildApiUrl } from '../config/api';
 
 // Types are now imported from '../types'
 
@@ -419,11 +420,12 @@ export const Chat: React.FC<ChatProps> = ({
       setShowIssuePreview(false);
       setCurrentIssuePreview(null);
 
-      // Call the solver endpoint
-      const response = await fetch(`/api/sessions/${activeSessionId}/solve/start`, {
+      // Call the solver endpoint using unified API
+      const response = await fetch(buildApiUrl(API.SESSIONS.SOLVER.START, { sessionId: activeSessionId || '' }), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('session_token') || ''}`,
         },
         body: JSON.stringify({
           issue_id: issueId,

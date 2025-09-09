@@ -22,7 +22,7 @@ import {
   ChatResponse,
   CreateGitHubIssueResponse
 } from '../types/sessionTypes';
-import { API_CONFIG, buildApiUrl } from '../config/api';
+import { API, buildApiUrl } from '../config/api';
 
 // Helper function to safely retrieve session token from localStorage
 const getStoredSessionToken = (): string | null => {
@@ -351,7 +351,7 @@ export const useSessionStore = create<SessionState>()(
                   display_name: string;
                   avatar_url: string;
                 }>(
-                  await fetch(buildApiUrl(API_CONFIG.AUTH.USER), {
+                  await fetch(buildApiUrl(API.AUTH.USER), {
                     method: 'GET',
                     headers: getAuthHeaders(storedSessionToken),
                   })
@@ -421,7 +421,7 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ authLoading: true, authError: null });
             const { login_url } = await handleApiResponse<{ login_url: string }>(
-              await fetch(buildApiUrl(API_CONFIG.AUTH.LOGIN), {
+              await fetch(buildApiUrl(API.AUTH.LOGIN), {
                 method: 'GET',
                 headers: getAuthHeaders(),
               })
@@ -439,7 +439,7 @@ export const useSessionStore = create<SessionState>()(
             const { sessionToken } = get();
             if (sessionToken) {
               await handleApiResponse<{ success: boolean }>(
-                await fetch(buildApiUrl(API_CONFIG.AUTH.LOGOUT), {
+                await fetch(buildApiUrl(API.AUTH.LOGOUT), {
                   method: 'POST',
                   headers: getAuthHeaders(sessionToken),
                   body: JSON.stringify({ session_token: sessionToken }),
@@ -519,7 +519,7 @@ export const useSessionStore = create<SessionState>()(
             const repoName = repository.repository.name;
 
             const sessionData = await handleApiResponse<Session>(
-              await fetch(buildApiUrl(API_CONFIG.SESSIONS.BASE), {
+              await fetch(buildApiUrl(API.SESSIONS.BASE), {
                 method: 'POST',
                 headers: getAuthHeaders(sessionToken),
                 body: JSON.stringify({
@@ -563,7 +563,7 @@ export const useSessionStore = create<SessionState>()(
             set({ isLoading: true, error: null });
 
             const context = await handleApiResponse<SessionContext>(
-              await fetch(buildApiUrl(API_CONFIG.SESSIONS.DETAIL, { sessionId }), {
+              await fetch(buildApiUrl(API.SESSIONS.DETAIL, { sessionId }), {
                 method: 'GET',
                 headers: getAuthHeaders(sessionToken),
               })
@@ -618,7 +618,7 @@ export const useSessionStore = create<SessionState>()(
             }
 
             await handleApiResponse<SessionContext>(
-              await fetch(buildApiUrl(API_CONFIG.SESSIONS.DETAIL, { sessionId }), {
+              await fetch(buildApiUrl(API.SESSIONS.DETAIL, { sessionId }), {
                 method: 'GET',
                 headers: getAuthHeaders(sessionToken),
               })
@@ -667,7 +667,7 @@ export const useSessionStore = create<SessionState>()(
 
           try {
             await handleApiResponse<SessionContext>(
-              await fetch(buildApiUrl(API_CONFIG.SESSIONS.DETAIL, { sessionId: activeSessionId }), {
+              await fetch(buildApiUrl(API.SESSIONS.DETAIL, { sessionId: activeSessionId }), {
                 method: 'GET',
                 headers: getAuthHeaders(sessionToken),
               })
@@ -704,7 +704,7 @@ export const useSessionStore = create<SessionState>()(
             set({ isLoadingRepositories: true, repositoryError: null });
 
             const repositories = await handleApiResponse<GitHubRepository[]>(
-              await fetch(buildApiUrl(API_CONFIG.GITHUB.USER_REPOS), {
+              await fetch(buildApiUrl(API.GITHUB.REPOS), {
                 method: 'GET',
                 headers: getAuthHeaders(sessionToken || ''),
               })
@@ -766,12 +766,14 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingMessages: true, messageError: null });
 
-            const messages = await handleApiResponse<ChatMessage[]>(
-              await fetch(buildApiUrl(API_CONFIG.SESSIONS.MESSAGES, { sessionId }, { limit: '100' }), {
+            const allMessages = await handleApiResponse<ChatMessage[]>(
+              await fetch(buildApiUrl(API.SESSIONS.MESSAGES, { sessionId }), {
                 method: 'GET',
                 headers: getAuthHeaders(sessionToken || ''),
               })
             );
+            
+            const messages = allMessages;
 
             set({
               messages,
@@ -810,7 +812,7 @@ export const useSessionStore = create<SessionState>()(
             set({ isLoadingContextCards: true, contextCardError: null });
 
             const newCard = await handleApiResponse<ContextCard>(
-              await fetch(buildApiUrl(API_CONFIG.SESSIONS.CONTEXT_CARDS, { sessionId: activeSessionId }), {
+              await fetch(buildApiUrl(API.SESSIONS.CONTEXT_CARDS, { sessionId: activeSessionId }), {
                 method: 'POST',
                 headers: getAuthHeaders(sessionToken),
                 body: JSON.stringify(card),
@@ -858,7 +860,7 @@ export const useSessionStore = create<SessionState>()(
             set({ isLoadingContextCards: true, contextCardError: null });
 
             await handleApiResponse<{ success: boolean; message: string }>(
-              await fetch(buildApiUrl(API_CONFIG.SESSIONS.CONTEXT_CARD_DETAIL, { sessionId: activeSessionId, cardId }), {
+              await fetch(buildApiUrl(API.SESSIONS.CONTEXT_CARD_DETAIL, { sessionId: activeSessionId, cardId }), {
                 method: 'DELETE',
                 headers: getAuthHeaders(sessionToken),
               })
@@ -892,7 +894,7 @@ export const useSessionStore = create<SessionState>()(
             set({ isLoadingContextCards: true, contextCardError: null });
 
             const cards = await handleApiResponse<ContextCard[]>(
-              await fetch(buildApiUrl(API_CONFIG.SESSIONS.CONTEXT_CARDS, { sessionId }), {
+              await fetch(buildApiUrl(API.SESSIONS.CONTEXT_CARDS, { sessionId }), {
                 method: 'GET',
                 headers: getAuthHeaders(sessionToken || ''),
               })
@@ -961,7 +963,7 @@ export const useSessionStore = create<SessionState>()(
             set({ isLoadingFileContext: true, fileContextError: null });
 
             const deps = await handleApiResponse<FileItem[]>(
-              await fetch(buildApiUrl(API_CONFIG.SESSIONS.FILE_DEPS_SESSION, { sessionId }), {
+              await fetch(buildApiUrl(API.SESSIONS.FILE_DEPS_SESSION, { sessionId }), {
                 method: 'GET',
                 headers: getAuthHeaders(sessionToken || ''),
               })
@@ -1112,7 +1114,7 @@ export const useSessionStore = create<SessionState>()(
             };
 
             const response = await handleApiResponse<ChatResponse>(
-              await fetch(buildApiUrl(API_CONFIG.SESSIONS.CHAT, { sessionId: activeSessionId }), {
+              await fetch(buildApiUrl(API.SESSIONS.CHAT, { sessionId: activeSessionId }), {
                 method: 'POST',
                 headers: getAuthHeaders(sessionToken),
                 body: JSON.stringify(chatRequest),
@@ -1161,7 +1163,7 @@ export const useSessionStore = create<SessionState>()(
             }
 
             const response = await handleApiResponse<IssueCreationResponse>(
-              await fetch(buildApiUrl(API_CONFIG.SESSIONS.ISSUES.CREATE_WITH_CONTEXT, { sessionId: activeSessionId }), {
+              await fetch(buildApiUrl(API.SESSIONS.ISSUES.CREATE, { sessionId: activeSessionId }), {
                 method: 'POST',
                 headers: getAuthHeaders(sessionToken || ''),
                 body: JSON.stringify(request),
@@ -1191,7 +1193,7 @@ export const useSessionStore = create<SessionState>()(
             set({ isLoadingFileContext: true, fileContextError: null });
 
             await handleApiResponse<{ success: boolean; message: string }>(
-              await fetch(buildApiUrl(API_CONFIG.SESSIONS.EXTRACT, { sessionId }), {
+              await fetch(buildApiUrl(API.SESSIONS.EXTRACT, { sessionId }), {
                 method: 'POST',
                 headers: getAuthHeaders(sessionToken || ''),
                 body: JSON.stringify({ repo_url: repoUrl }),
@@ -1219,7 +1221,7 @@ export const useSessionStore = create<SessionState>()(
 
           try {
             const branches = await handleApiResponse<GitHubBranch[]>(
-              await fetch(buildApiUrl(API_CONFIG.GITHUB.REPO_BRANCHES, { owner, repo }), {
+              await fetch(buildApiUrl(API.GITHUB.REPO_BRANCHES, { owner, repo }), {
                 method: 'GET',
                 headers: getAuthHeaders(sessionToken || ''),
               })
@@ -1252,7 +1254,7 @@ export const useSessionStore = create<SessionState>()(
 
           try {
             const response = await handleApiResponse<CreateGitHubIssueResponse>(
-              await fetch(buildApiUrl(API_CONFIG.SESSIONS.ISSUES.CREATE_GITHUB_ISSUE, { sessionId: activeSessionId, issueId }), {
+              await fetch(buildApiUrl(API.SESSIONS.ISSUES.CREATE_GITHUB_ISSUE, { sessionId: activeSessionId, issueId }), {
                 method: 'POST',
                 headers: getAuthHeaders(sessionToken || ''),
               })

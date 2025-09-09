@@ -27,6 +27,7 @@ export const API = {
       CREATE: `${API_BASE}/daifu/sessions/{sessionId}/issues/create-with-context`,
       LIST: `${API_BASE}/daifu/sessions/{sessionId}/issues`,
       DETAIL: `${API_BASE}/daifu/sessions/{sessionId}/issues/{issueId}`,
+      CREATE_GITHUB_ISSUE: `${API_BASE}/daifu/sessions/{sessionId}/issues/{issueId}/create-github-issue`,
     },
     SOLVER: {
       START: `${API_BASE}/daifu/sessions/{sessionId}/solve/start`,
