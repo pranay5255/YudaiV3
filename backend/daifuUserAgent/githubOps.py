@@ -183,6 +183,7 @@ class GitHubOps:
                 "full_name": repo_data.get("full_name"),
                 "private": repo_data.get("private"),
                 "html_url": repo_data.get("html_url"),
+                "clone_url": repo_data.get("clone_url"),
                 "description": repo_data.get("description"),
                 "language": repo_data.get("language"),
                 "stargazers_count": repo_data.get("stargazers_count"),

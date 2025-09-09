@@ -405,7 +405,7 @@ class ChatOps:
             logger.error(f"Failed to get context cards content: {e}")
             return ""
 
-    def _generate_ai_response(
+    async def _generate_ai_response(
         self,
         message: str,
         history: List[Tuple[str, str]],

@@ -74,11 +74,13 @@ import logging
 # Import chat functionality from chat_api
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from auth.github_oauth import get_current_user
+from daifuUserAgent.githubOps import GitHubOps
 from daifuUserAgent.llm_service import LLMService
 from db.database import get_db
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -1395,7 +1397,22 @@ def _extract_repo_info_from_url(repo_url: str) -> tuple[str, str]:
 
 
 def _get_or_create_repository(
-    db: Session, repo_url: str, repo_name: str, repo_owner: str, user_id: int
+    db: Session,
+    repo_url: str,
+    repo_name: str,
+    repo_owner: str,
+    user_id: int,
+    html_url: Optional[str] = None,
+    clone_url: Optional[str] = None,
+    description: Optional[str] = None,
+    language: Optional[str] = None,
+    stargazers_count: Optional[int] = 0,
+    forks_count: Optional[int] = 0,
+    open_issues_count: Optional[int] = 0,
+    default_branch: Optional[str] = None,
+    github_created_at: Optional[datetime] = None,
+    github_updated_at: Optional[datetime] = None,
+    pushed_at: Optional[datetime] = None,
 ) -> Repository:
     """Retrieve existing repository metadata or create a new record."""
     # First try to find existing repository by URL and user
@@ -1406,6 +1423,30 @@ def _get_or_create_repository(
     )
 
     if repository:
+        # Update existing repository with latest data if provided
+        if html_url is not None:
+            repository.html_url = html_url
+        if clone_url is not None:
+            repository.clone_url = clone_url
+        if description is not None:
+            repository.description = description
+        if language is not None:
+            repository.language = language
+        if stargazers_count is not None:
+            repository.stargazers_count = stargazers_count
+        if forks_count is not None:
+            repository.forks_count = forks_count
+        if open_issues_count is not None:
+            repository.open_issues_count = open_issues_count
+        if default_branch is not None:
+            repository.default_branch = default_branch
+        if github_created_at is not None:
+            repository.github_created_at = github_created_at
+        if github_updated_at is not None:
+            repository.github_updated_at = github_updated_at
+        if pushed_at is not None:
+            repository.pushed_at = pushed_at
+        db.commit()
         return repository
 
     # Create new repository record
@@ -1415,6 +1456,17 @@ def _get_or_create_repository(
         owner=repo_owner,
         full_name=f"{repo_owner}/{repo_name}",
         repo_url=repo_url,
+        html_url=html_url or repo_url,  # Default to repo_url if html_url is None
+        clone_url=clone_url or repo_url,  # Default to repo_url if clone_url is None
+        description=description,
+        language=language,
+        stargazers_count=stargazers_count or 0,
+        forks_count=forks_count or 0,
+        open_issues_count=open_issues_count or 0,
+        default_branch=default_branch,
+        github_created_at=github_created_at,
+        github_updated_at=github_updated_at,
+        pushed_at=pushed_at,
     )
     db.add(repository)
     db.flush()
@@ -1495,6 +1547,17 @@ async def extract_file_dependencies_for_session(
 
         # Save to database with session integration
         try:
+            # Fetch repository metadata from GitHub API
+            github_ops = GitHubOps(db)
+            try:
+                repo_metadata = await github_ops.fetch_repository_info_detailed(
+                    owner=repo_owner, repo=repo_name, user_id=current_user.id
+                )
+                print(f"Fetched repository metadata: {repo_metadata.get('name', 'unknown')}")
+            except Exception as e:
+                print(f"Failed to fetch repository metadata from GitHub API: {e}")
+                repo_metadata = {}
+
             # Ensure repository metadata exists
             repository = _get_or_create_repository(
                 db=db,
@@ -1502,6 +1565,17 @@ async def extract_file_dependencies_for_session(
                 repo_name=repo_name,
                 repo_owner=repo_owner,
                 user_id=current_user.id,
+                html_url=repo_metadata.get("html_url"),
+                clone_url=repo_metadata.get("clone_url"),
+                description=repo_metadata.get("description"),
+                language=repo_metadata.get("language"),
+                stargazers_count=repo_metadata.get("stargazers_count", 0),
+                forks_count=repo_metadata.get("forks_count", 0),
+                open_issues_count=repo_metadata.get("open_issues_count", 0),
+                default_branch=repo_metadata.get("default_branch"),
+                github_created_at=repo_metadata.get("created_at"),
+                github_updated_at=repo_metadata.get("updated_at"),
+                pushed_at=repo_metadata.get("pushed_at"),
             )
 
             # Save analysis results

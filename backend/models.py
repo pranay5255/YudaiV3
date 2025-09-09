@@ -1510,7 +1510,7 @@ class GitHubRepo(BaseModel):
     name: str
     full_name: str
     private: bool
-    html_url: str
+    html_url: Optional[str] = None
     description: Optional[str] = None
     clone_url: Optional[str] = None
     language: Optional[str] = None
@@ -1523,6 +1523,13 @@ class GitHubRepo(BaseModel):
     pushed_at: Optional[datetime] = None
     topics: Optional[List[str]] = []
     license: Optional[Dict[str, Any]] = None
+
+    @validator("html_url", always=True)
+    def set_html_url_from_clone_url(cls, v, values):
+        """If html_url is not provided or is None, use clone_url as fallback."""
+        if not v and values.get("clone_url"):
+            return values["clone_url"]
+        return v
 
 
 class GitHubIssue(BaseModel):
