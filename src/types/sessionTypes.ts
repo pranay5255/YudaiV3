@@ -82,7 +82,6 @@ export interface FileItem {
   isDirectory?: boolean;
   children?: FileItem[];
   expanded?: boolean;
-  content?: string;
   content_size?: number;
   created_at?: string;
   file_name?: string;

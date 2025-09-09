@@ -351,6 +351,36 @@ export interface SessionFileDependencyResponse {
   created_at: string;
 }
 
+export interface FileTreeResponse {
+  id: string;
+  name: string;
+  type: string;
+  Category: string;
+  tokens: number;
+  isDirectory: boolean;
+  children?: FileTreeResponse[];
+  path?: string;
+  expanded?: boolean;
+}
+
+export interface FileItemResponse {
+  id: string;
+  name: string;
+  path?: string;
+  type: string;
+  tokens: number;
+  category: string;
+  isDirectory?: boolean;
+  children?: FileItemResponse[];
+  expanded?: boolean;
+  content_size?: number;
+  created_at?: string;
+  file_name?: string;
+  file_path?: string;
+  file_type?: string;
+  content_summary?: string;
+}
+
 // ============================================================================
 // CONTEXT CARDS & FILE EMBEDDINGS API TYPES
 // ============================================================================
