@@ -296,23 +296,40 @@ CREATE TABLE IF NOT EXISTS context_cards (
     updated_at TIMESTAMP WITH TIME ZONE
 );
 
+-- File items table (for frontend display - matches FileItem interface)
+CREATE TABLE IF NOT EXISTS file_items (
+    id SERIAL PRIMARY KEY,
+    session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    repository_id INTEGER REFERENCES repositories(id),
+    name VARCHAR(500) NOT NULL,
+    path VARCHAR(1000),
+    type VARCHAR(50) NOT NULL DEFAULT 'INTERNAL',
+    tokens INTEGER DEFAULT 0,
+    category VARCHAR(100) NOT NULL,
+    is_directory BOOLEAN,
+    content_size INTEGER,
+    file_name VARCHAR(500),
+    file_path VARCHAR(1000),
+    file_type VARCHAR(100),
+    content_summary TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE
+);
+
 -- File embeddings table (UPDATED - USING VECTOR TYPE FOR EMBEDDINGS)
 CREATE TABLE IF NOT EXISTS file_embeddings (
     id SERIAL PRIMARY KEY,
     session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
     repository_id INTEGER REFERENCES repositories(id),
+    file_item_id INTEGER REFERENCES file_items(id),  -- Reference to file_items
     file_path VARCHAR(1000) NOT NULL,
     file_name VARCHAR(500) NOT NULL,
-    file_type VARCHAR(100) NOT NULL,
-    file_content TEXT,
     embedding VECTOR(384),  -- sentence-transformers/all-MiniLM-L6-v2 dimensions
     chunk_index INTEGER DEFAULT 0,
     chunk_text TEXT NOT NULL,
     tokens INTEGER DEFAULT 0,
     session_tokens_used INTEGER DEFAULT 0,  -- Track tokens used for this session
-    file_metadata JSON,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- OAuth states table
@@ -400,6 +417,14 @@ CREATE INDEX IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created
 -- Context card indexes (NEW)
 CREATE INDEX IF NOT EXISTS idx_context_cards_user_id ON context_cards(user_id);
 CREATE INDEX IF NOT EXISTS idx_context_cards_session_id ON context_cards(session_id);
+
+-- File item indexes (NEW)
+CREATE INDEX IF NOT EXISTS idx_file_items_session_id ON file_items(session_id);
+CREATE INDEX IF NOT EXISTS idx_file_items_repository_id ON file_items(repository_id);
+CREATE INDEX IF NOT EXISTS idx_file_items_path ON file_items(path);
+
+-- File embedding indexes (UPDATED)
+CREATE INDEX IF NOT EXISTS idx_file_embeddings_file_item_id ON file_embeddings(file_item_id);
 CREATE INDEX IF NOT EXISTS idx_context_cards_source ON context_cards(source);
 CREATE INDEX IF NOT EXISTS idx_context_cards_is_active ON context_cards(is_active);
 
