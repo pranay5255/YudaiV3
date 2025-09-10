@@ -466,8 +466,8 @@ class ChatOps:
                 model="deepseek/deepseek-r1-0528",
                 temperature=0.4,
                 max_tokens=1500,
-                timeout=45,
-                fetch_limit=5
+                timeout=25,  # Reduced timeout from 45 to 25 seconds
+                fetch_limit=3  # Reduced from 5 to 3 for faster response
             )
 
             return ai_response

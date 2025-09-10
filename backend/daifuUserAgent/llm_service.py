@@ -73,7 +73,8 @@ class LLMService:
                 repo_branch=repo_branch,
                 conversation=conversation_history or [],
                 file_contexts=file_contexts,
-                fetch_limit=fetch_limit
+                fetch_limit=fetch_limit,
+                timeout_seconds=8  # Shorter timeout for LLM service
             )
         # Fallback to legacy method if github_data is provided
         elif github_data:
