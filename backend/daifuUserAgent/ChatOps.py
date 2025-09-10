@@ -313,9 +313,17 @@ class ChatOps:
                     context_cards, user_id
                 )
 
-            # Generate AI response using LLM service
+            # Generate AI response using LLM service with GitHub context
             ai_response = await self._generate_ai_response(
-                message_text, history, repo_context, context_content, None
+                message=message_text,
+                history=history,
+                repo_context=repo_context,
+                context_content=context_content,
+                github_data=None,  # Legacy fallback, will use new GitHub context
+                repo_owner=session.repo_owner,
+                repo_name=session.repo_name,
+                repo_branch=session.repo_branch,
+                user_id=user_id
             )
 
             # Save user message to database
@@ -412,76 +420,54 @@ class ChatOps:
         repo_context: str,
         context_content: str,
         github_data: tuple = None,
+        repo_owner: str = None,
+        repo_name: str = None,
+        repo_branch: str = None,
+        user_id: int = None,
     ) -> str:
         """
-        Generate AI response using LLM service with proper context
+        Generate AI response using LLM service with GitHub context
 
         Args:
             message: User's current message
             history: Conversation history as (sender, message) tuples
             repo_context: GitHub repository context
             context_content: Additional context from context cards
-            github_data: Tuple of (repo_details, commits, issues, pulls)
+            github_data: Tuple of (repo_details, commits, issues, pulls) - legacy fallback
+            repo_owner: Repository owner for GitHub context fetching
+            repo_name: Repository name for GitHub context fetching
+            repo_branch: Repository branch for GitHub context fetching
+            user_id: User ID for authentication
 
         Returns:
             AI response string
         """
         try:
             from .llm_service import LLMService
-            from .prompt import build_daifu_prompt
 
             # Build the conversation history including the current message
             full_history = history + [("User", message)]
 
-            # Build the prompt using the same template as prompt.py
-            if github_data and len(github_data) >= 4:
-                repo_details, commits, issues, pulls = github_data
-                prompt = build_daifu_prompt(
-                    repo_details, commits, issues, pulls, full_history
-                )
-            else:
-                # Fallback with minimal data structure
-                repo_details = {
-                    "full_name": repo_context.split("\n")[0].replace("Repository: ", "")
-                    if repo_context
-                    else "Unknown Repository",
-                    "description": "",
-                    "default_branch": "main",
-                    "languages": {},
-                    "topics": [],
-                    "license": None,
-                    "stargazers_count": 0,
-                    "forks_count": 0,
-                    "open_issues_count": 0,
-                    "html_url": "",
-                }
-                commits = []
-                issues = []
-                pulls = []
+            # Prepare file contexts if available
+            file_contexts = None
+            if context_content:
+                file_contexts = [f"Additional Context:\n{context_content}"]
 
-                # Add context content to the prompt if available
-                if context_content:
-                    # Insert context content into the prompt
-                    context_str = f"\nAdditional Context:\n{context_content}\n"
-                    prompt = build_daifu_prompt(
-                        repo_details, commits, issues, pulls, full_history
-                    )
-                    prompt = prompt.replace(
-                        "<FILE_CONTEXTS_BEGIN>\n</FILE_CONTEXTS_END>",
-                        f"<FILE_CONTEXTS_BEGIN>\n{context_str}</FILE_CONTEXTS_END>",
-                    )
-                else:
-                    prompt = build_daifu_prompt(
-                        repo_details, commits, issues, pulls, full_history
-                    )
-
-            # Generate response using LLM service (already in async context)
-            ai_response = await LLMService.generate_response(
-                prompt=prompt,
+            # Generate response using LLM service with GitHub context
+            ai_response = await LLMService.generate_response_with_history(
+                db=self.db,
+                user_id=user_id,
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                repo_branch=repo_branch,
+                conversation_history=full_history,
+                github_data=github_data,  # Legacy fallback
+                file_contexts=file_contexts,
                 model="deepseek/deepseek-r1-0528",
                 temperature=0.4,
                 max_tokens=1500,
                 timeout=45,
+                fetch_limit=5
             )
 
             return ai_response

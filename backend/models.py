@@ -459,6 +459,9 @@ class ChatSession(Base):
     file_embeddings: Mapped[List["FileEmbedding"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
+    file_items: Mapped[List["FileItem"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
 
 
 class ChatMessage(Base):
@@ -619,11 +622,14 @@ class FileEmbedding(Base):
         ForeignKey("repositories.id"), nullable=True
     )
 
-    # File information
+    # File reference (foreign key to FileItem)
+    file_item_id: Mapped[int] = mapped_column(
+        ForeignKey("file_items.id"), nullable=False
+    )
+
+    # File information (minimal - most data in FileItem)
     file_path: Mapped[str] = mapped_column(String(1000), nullable=False, index=True)
     file_name: Mapped[str] = mapped_column(String(500), nullable=False)
-    file_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    file_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Embedding data - using pgvector for efficient similarity search
     embedding: Mapped[Optional[Vector]] = mapped_column(
@@ -652,6 +658,51 @@ class FileEmbedding(Base):
     # Relationships
     session: Mapped["ChatSession"] = relationship(back_populates="file_embeddings")
     repository: Mapped[Optional["Repository"]] = relationship()
+    file_item: Mapped["FileItem"] = relationship(back_populates="embeddings")
+
+
+class FileItem(Base):
+    """File metadata for frontend display - matches FileItem interface exactly"""
+
+    __tablename__ = "file_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_sessions.id"), nullable=False
+    )
+    repository_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("repositories.id"), nullable=True
+    )
+
+    # Core file information (matches frontend FileItem interface)
+    name: Mapped[str] = mapped_column(String(500), nullable=False)
+    path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    type: Mapped[str] = mapped_column(String(50), nullable=False, default="INTERNAL")
+    tokens: Mapped[int] = mapped_column(Integer, default=0)
+    category: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # Optional fields
+    is_directory: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    content_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    file_name: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    file_path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    file_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    content_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )
+
+    # Relationships
+    session: Mapped["ChatSession"] = relationship(back_populates="file_items")
+    repository: Mapped[Optional["Repository"]] = relationship()
+    embeddings: Mapped[List["FileEmbedding"]] = relationship(
+        back_populates="file_item", cascade="all, delete-orphan"
+    )
 
 
 class GitHubAppInstallation(Base):
@@ -1249,22 +1300,17 @@ class UpdateFileEmbeddingResponse(BaseModel):
 
 
 class FileEmbeddingResponse(BaseModel):
-    """API response model for file embedding operations - excludes raw vector data for API efficiency"""
+    """Response model for embedding operations - excludes vector data"""
     id: int
     session_id: int
     repository_id: Optional[int] = None
+    file_item_id: int
     file_path: str
     file_name: str
-    file_type: str
-    file_content: Optional[str] = None
-    # Note: embedding vector data excluded from API response for efficiency and Pydantic compatibility
     chunk_index: int
-    chunk_text: str  # Raw chunk text for backend processing
+    chunk_text: str
     tokens: int
-    session_tokens_used: int
-    file_metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
-    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
