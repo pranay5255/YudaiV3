@@ -68,7 +68,6 @@ CRITICAL ISSUES:
 """
 
 # Import file dependencies functionality
-import json
 import logging
 
 # Import chat functionality from chat_api
@@ -76,12 +75,11 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from auth.github_oauth import get_current_user
 from daifuUserAgent.githubOps import GitHubOps
-from daifuUserAgent.llm_service import LLMService
 from db.database import get_db
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
@@ -100,11 +98,12 @@ from models import (
     CreateSessionRequest,
     FileEmbedding,
     FileEmbeddingResponse,
+    FileItem,
+    FileItemResponse,
     FileTreeResponse,
     Repository,
     RepositoryRequest,
     SessionContextResponse,
-    SessionFileDependencyResponse,
     SessionResponse,
     UpdateFileEmbeddingRequest,
     UpdateSessionRequest,
@@ -118,6 +117,9 @@ from repo_processorGitIngest.scraper_script import (
 from sqlalchemy.orm import Session
 
 from utils import utc_now
+from utils.chunking import create_file_chunker
+
+from .llm_service import LLMService
 
 router = APIRouter(tags=["sessions"])
 
@@ -1132,30 +1134,47 @@ async def update_file_dependency(
 
 @router.get(
     "/sessions/{session_id}/file-deps/session",
-    response_model=List[SessionFileDependencyResponse],
+    response_model=List[FileItemResponse],
 )
 async def get_file_dependencies_for_session(
     session_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Get file dependencies for a session (file metadata only, no embeddings).
-    This is a MEDIUM priority endpoint for file context display.
-    """
+    """Get file items for a session (matches frontend FileItem interface)"""
     try:
-        from .session_service import FileDepsService, SessionService
+        from ..models import FileItem, FileItemResponse
+        from .session_service import SessionService
 
         # Ensure session exists and belongs to user
         db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
 
-        # Get file dependencies for this session
-        file_deps = FileDepsService.list_for_session(db, db_session)
+        # Get file items for this session
+        file_items = (
+            db.query(FileItem)
+            .filter(FileItem.session_id == db_session.id)
+            .order_by(FileItem.created_at.desc())
+            .all()
+        )
 
         # Convert to response format
         return [
-            SessionFileDependencyResponse(**file_info)
-            for file_info in file_deps
+            FileItemResponse(
+                id=str(item.id),
+                name=item.name,
+                path=item.path,
+                type=item.type,
+                tokens=item.tokens,
+                category=item.category,
+                isDirectory=item.is_directory,
+                content_size=item.content_size,
+                created_at=item.created_at.isoformat() if item.created_at else None,
+                file_name=item.file_name,
+                file_path=item.file_path,
+                file_type=item.file_type,
+                content_summary=item.content_summary
+            )
+            for item in file_items
         ]
 
     except Exception as e:
@@ -1590,10 +1609,10 @@ async def extract_file_dependencies_for_session(
             )
 
             # Save file items and create embeddings linked to session
-            saved_embeddings = _save_file_embeddings_to_db_with_session(
+            saved_file_items, saved_embeddings = _save_file_items_and_embeddings(
                 db, repository.id, file_tree, db_session.id
             )
-            print(f"Saved {len(saved_embeddings)} file embeddings")
+            print(f"Saved {len(saved_file_items)} file items and {len(saved_embeddings)} embeddings")
 
         except Exception as db_error:
             print(f"Database error during save: {db_error}")
@@ -1718,61 +1737,77 @@ def _save_file_analysis_to_db(
     total_tokens: int,
     max_file_size: int,
 ):
-    """Save file analysis results to database."""
-    analysis = Repository(
-        repository_id=repository_id,
-        raw_data=json.dumps(raw_data),
-        processed_data=json.dumps(processed_data),
-        total_files=total_files,
-        total_tokens=total_tokens,
-        max_file_size=max_file_size,
-        status="completed",
-    )
-    db.add(analysis)
-    db.flush()
-    return analysis
+    """Log file analysis results instead of storing in database."""
+    print(f"Repository analysis completed for repository {repository_id}:")
+    print(f"  - Total files processed: {total_files}")
+    print(f"  - Total tokens: {total_tokens}")
+    print(f"  - Max file size: {max_file_size}")
+    print(f"  - Files saved as embeddings: {len(processed_data.get('files', []))}")
+    
+    # No database storage - just logging
+    return None
 
 
-def _save_file_embeddings_to_db_with_session(
+def _save_file_items_and_embeddings(
     db: Session, repository_id: int, file_tree: List[Dict[str, Any]], session_id: int
-) -> List[FileEmbedding]:
-    """Create file embeddings in database linked to session, skipping deprecated FileItem."""
+) -> Tuple[List[FileItem], List[FileEmbedding]]:
+    """Save file items and their embeddings separately"""
+
+    saved_file_items = []
     saved_embeddings = []
 
-    def save_recursive(items: List[Dict[str, Any]]):
+    def process_recursive(items: List[Dict[str, Any]]):
         for item_data in items:
-            # If it's a file (not directory), create embeddings linked to session
-            if not item_data["isDirectory"] and item_data.get("content"):
-                embeddings = _create_file_embeddings_for_session(
-                    db, session_id, repository_id, item_data, item_data["content"]
+            # Create FileItem record
+            file_item = FileItem(
+                session_id=session_id,
+                repository_id=repository_id,
+                name=item_data.get("name", ""),
+                path=item_data.get("path"),
+                type=item_data.get("type", "INTERNAL"),
+                tokens=item_data.get("tokens", 0),
+                category=item_data.get("Category", "unknown"),
+                is_directory=item_data.get("isDirectory", False),
+                content_size=item_data.get("content_size"),
+                file_name=item_data.get("file_name"),
+                file_path=item_data.get("file_path"),
+                file_type=item_data.get("file_type"),
+                content_summary=item_data.get("content_summary")
+            )
+            db.add(file_item)
+            db.flush()  # Get the ID
+
+            saved_file_items.append(file_item)
+
+            # If it's a file with content, create embeddings
+            if not item_data.get("isDirectory", False) and item_data.get("content"):
+                embeddings = _create_embeddings_for_file_item(
+                    db, session_id, repository_id, file_item.id, item_data
                 )
                 saved_embeddings.extend(embeddings)
 
-            # Recursively process children if it's a directory
-            if item_data["isDirectory"] and "children" in item_data:
-                save_recursive(item_data["children"])
+            # Process children recursively
+            if item_data.get("isDirectory", False) and "children" in item_data:
+                process_recursive(item_data["children"])
 
-    save_recursive(file_tree)
-    return saved_embeddings
+    process_recursive(file_tree)
+    return saved_file_items, saved_embeddings
 
 
-def _create_file_embeddings_for_session(
+def _create_embeddings_for_file_item(
     db: Session,
     session_id: int,
     repository_id: int,
-    item_data: Dict[str, Any],
-    content: str,
+    file_item_id: int,
+    item_data: Dict[str, Any]
 ) -> List[FileEmbedding]:
-    """
-    Store file embeddings linked to session for semantic search.
-    """
-    from utils.chunking import create_file_chunker
+    """Create embeddings for a specific file item"""
+   
 
-    saved_embeddings: List[FileEmbedding] = []
-    file_path = item_data.get("path")
-    file_name = item_data.get("name")
-    file_type = item_data.get("type")
-    file_category = item_data.get("Category")
+    saved_embeddings = []
+    content = item_data.get("content", "")
+    file_path = item_data.get("path", "")
+    file_name = item_data.get("name", "")
 
     try:
         chunker = create_file_chunker()
@@ -1786,19 +1821,13 @@ def _create_file_embeddings_for_session(
             embedding = FileEmbedding(
                 session_id=session_id,
                 repository_id=repository_id,
+                file_item_id=file_item_id,
                 file_path=file_path,
                 file_name=file_name,
-                file_type=file_type,
                 chunk_index=i,
                 chunk_text=chunk,
                 embedding=Vector(embedding_vector),
-                tokens=_estimate_tokens_for_file(file_path, len(chunk)),
-                file_metadata=json.dumps(
-                    {
-                        "category": file_category,
-                        "content_size": len(content),
-                    }
-                ),
+                tokens=_estimate_tokens_for_file(file_path, len(chunk))
             )
             db.add(embedding)
             saved_embeddings.append(embedding)
@@ -1807,7 +1836,7 @@ def _create_file_embeddings_for_session(
         return saved_embeddings
 
     except Exception as e:
-        print(f"Error storing embeddings for {file_path}: {e}")
+        print(f"Error creating embeddings for file item {file_item_id}: {e}")
         return []
 
 

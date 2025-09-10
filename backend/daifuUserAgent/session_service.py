@@ -18,6 +18,7 @@ from models import (
     ContextCardResponse,
     FileEmbedding,
     FileEmbeddingResponse,
+    FileItem,
     SessionContextResponse,
     SessionResponse,
     User,
@@ -340,35 +341,71 @@ class FileDepsService:
         Returns:
             List of file dependency dictionaries
         """
-        # Get file embeddings for this session and aggregate by file
-        file_embeddings = (
-            db.query(FileEmbedding)
-            .filter(FileEmbedding.session_id == db_session.id)
-            .order_by(FileEmbedding.created_at.desc())
+        # Get file items for this session (new approach)
+        file_items = (
+            db.query(FileItem)
+            .filter(FileItem.session_id == db_session.id)
+            .order_by(FileItem.created_at.desc())
             .all()
         )
 
-        # Aggregate file data by file_path to avoid duplicates
-        file_data = {}
-        for fe in file_embeddings:
-            if fe.file_path not in file_data:
-                file_data[fe.file_path] = {
-                    "id": fe.id,
-                    "file_name": fe.file_name,
-                    "file_path": fe.file_path,
-                    "file_type": fe.file_type,
-                    "tokens": fe.tokens,
-                    "category": fe.file_metadata.get("category")
-                    if fe.file_metadata
-                    else None,
-                    "created_at": fe.created_at,
-                }
-            else:
-                # Sum tokens for chunks of the same file
-                file_data[fe.file_path]["tokens"] += fe.tokens
-
         # Convert to response format
-        return list(file_data.values())
+        return [
+            {
+                "id": item.id,
+                "name": item.name,
+                "path": item.path,
+                "type": item.type,
+                "tokens": item.tokens,
+                "category": item.category,
+                "is_directory": item.is_directory,
+                "content_size": item.content_size,
+                "created_at": item.created_at,
+                "file_name": item.file_name,
+                "file_path": item.file_path,
+                "file_type": item.file_type,
+                "content_summary": item.content_summary,
+            }
+            for item in file_items
+        ]
+
+    @staticmethod
+    def get_file_items_for_session(db: Session, db_session: ChatSession) -> List[dict]:
+        """
+        Get file items for a session (for frontend display).
+
+        Args:
+            db: Database session
+            db_session: The ChatSession object
+
+        Returns:
+            List of file item dictionaries
+        """
+        file_items = (
+            db.query(FileItem)
+            .filter(FileItem.session_id == db_session.id)
+            .order_by(FileItem.created_at.desc())
+            .all()
+        )
+
+        return [
+            {
+                "id": item.id,
+                "name": item.name,
+                "path": item.path,
+                "type": item.type,
+                "tokens": item.tokens,
+                "category": item.category,
+                "is_directory": item.is_directory,
+                "content_size": item.content_size,
+                "created_at": item.created_at,
+                "file_name": item.file_name,
+                "file_path": item.file_path,
+                "file_type": item.file_type,
+                "content_summary": item.content_summary,
+            }
+            for item in file_items
+        ]
 
 
 class IssueService:
