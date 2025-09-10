@@ -1,7 +1,14 @@
 # DAifu Prompt Template
-"""Utility to build prompts for the DAifu agent."""
+"""Utility to build prompts for the DAifu agent with GitHub context integration."""
+import logging
 from textwrap import dedent
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+from sqlalchemy.orm import Session
+
+from .githubOps import GitHubOps
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_HEADER = dedent(
     """
@@ -31,13 +38,99 @@ SYSTEM_HEADER = dedent(
 ).strip()
 
 
+async def build_daifu_prompt_with_github_context(
+    db: Session,
+    user_id: int,
+    repo_owner: str,
+    repo_name: str,
+    repo_branch: str,
+    conversation: List[Tuple[str, str]],
+    file_contexts: List[str] = None,
+    fetch_limit: int = 5
+) -> str:
+    """
+    Build DAifu prompt with real-time GitHub context fetching.
+
+    Args:
+        db: Database session
+        user_id: User ID for authentication
+        repo_owner: Repository owner
+        repo_name: Repository name
+        repo_branch: Repository branch
+        conversation: List of (speaker, message) tuples
+        file_contexts: Optional list of file context strings
+        fetch_limit: Maximum number of items to fetch for each GitHub resource
+
+    Returns:
+        Complete prompt string with GitHub context
+    """
+    try:
+        # Initialize GitHub operations
+        github_ops = GitHubOps(db)
+
+        # Fetch repository details
+        repo_details = await github_ops.fetch_repository_info_detailed(repo_owner, repo_name, user_id)
+        if not repo_details:
+            logger.warning(f"Failed to fetch repository details for {repo_owner}/{repo_name}")
+            repo_details = {
+                "full_name": f"{repo_owner}/{repo_name}",
+                "name": repo_name,
+                "description": "",
+                "default_branch": repo_branch,
+                "language": "",
+                "stargazers_count": 0,
+                "forks_count": 0,
+                "open_issues_count": 0,
+                "html_url": f"https://github.com/{repo_owner}/{repo_name}",
+                "topics": [],
+            }
+
+        # Fetch recent commits
+        commits = await github_ops.fetch_repository_commits(repo_owner, repo_name, user_id, fetch_limit)
+        if not commits:
+            logger.warning(f"Failed to fetch commits for {repo_owner}/{repo_name}")
+            commits = []
+
+        # Fetch open issues
+        issues = await github_ops.fetch_repository_issues(repo_owner, repo_name, user_id, fetch_limit)
+        if not issues:
+            logger.warning(f"Failed to fetch issues for {repo_owner}/{repo_name}")
+            issues = []
+
+        # Fetch repository branches (not pull requests, branches are different)
+        branches = await github_ops.fetch_repository_branches(repo_owner, repo_name, user_id)
+        if not branches:
+            logger.warning(f"Failed to fetch branches for {repo_owner}/{repo_name}")
+            branches = []
+
+        # Build the prompt
+        return build_daifu_prompt(repo_details, commits, issues, branches, conversation, file_contexts)
+
+    except Exception as e:
+        logger.error(f"Error building prompt with GitHub context: {e}")
+        # Fallback to basic prompt without GitHub context
+        repo_details = {
+            "full_name": f"{repo_owner}/{repo_name}",
+            "name": repo_name,
+            "description": "",
+            "default_branch": repo_branch,
+            "language": "",
+            "stargazers_count": 0,
+            "forks_count": 0,
+            "open_issues_count": 0,
+            "html_url": f"https://github.com/{repo_owner}/{repo_name}",
+            "topics": [],
+        }
+        return build_daifu_prompt(repo_details, [], [], [], conversation, file_contexts)
+
+
 def build_daifu_prompt(
     repo_details: Dict[str, Any],
     commits: List[Dict[str, Any]],
     issues: List[Dict[str, Any]],
-    pulls: List[Dict[str, Any]],
+    branches: List[Dict[str, Any]],
     conversation: List[Tuple[str, str]],
-    file_contexts: List[str] = None
+    file_contexts: Optional[List[str]] = None
 ) -> str:
     """Return the complete prompt string for DAifu."""
     # Format repository details
@@ -69,12 +162,11 @@ def build_daifu_prompt(
             f"- #{i['number']}: {i['title']} (by {i['user'].get('login','?')})\n"
         )
 
-    # Format open pull requests (limit to 5)
-    pulls_str = "Open Pull Requests:\n"
-    open_pulls = [p for p in pulls if p['state'] == 'open'][:5]
-    for p in open_pulls:
-        pulls_str += (
-            f"- #{p['number']}: {p['title']} (by {p['user'].get('login','?')})\n"
+    # Format repository branches (limit to 5)
+    branches_str = "Repository Branches:\n"
+    for b in branches[:5]:
+        branches_str += (
+            f"- {b.get('name', 'unknown')}\n"
         )
 
     # Format file contexts if provided
@@ -94,7 +186,7 @@ def build_daifu_prompt(
         {details_str}
         {commits_str}
         {issues_str}
-        {pulls_str}
+        {branches_str}
         </GITHUB_CONTEXT_END>
 
         <FILE_CONTEXTS_BEGIN>
