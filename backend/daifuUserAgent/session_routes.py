@@ -120,6 +120,7 @@ from utils import utc_now
 from utils.chunking import create_file_chunker
 
 from .llm_service import LLMService
+from .session_service import SessionService
 
 router = APIRouter(tags=["sessions"])
 
@@ -1143,8 +1144,9 @@ async def get_file_dependencies_for_session(
 ):
     """Get file items for a session (matches frontend FileItem interface)"""
     try:
-        from ..models import FileItem, FileItemResponse
-        from .session_service import SessionService
+        # Remove these lines - classes are already imported at module level
+        # from ..models import FileItem, FileItemResponse
+        # from .session_service import SessionService
 
         # Ensure session exists and belongs to user
         db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
