@@ -341,10 +341,9 @@ class IssueService:
             description=issue_request.description,
             session_id=issue_request.session_id,
             context_card_id=issue_request.context_card_id,
-            context_cards=json.dumps(issue_request.context_cards)
-            if issue_request.context_cards
-            else None,
-            ideas=json.dumps(issue_request.ideas) if issue_request.ideas else None,
+            # Note: context_cards and ideas fields are commented out in the SQLAlchemy model
+            # context_cards=json.dumps(issue_request.context_cards) if issue_request.context_cards else None,
+            # ideas=json.dumps(issue_request.ideas) if issue_request.ideas else None,
             repo_owner=issue_request.repo_owner,
             repo_name=issue_request.repo_name,
             priority=issue_request.priority,
