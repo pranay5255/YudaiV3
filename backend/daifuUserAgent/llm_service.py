@@ -11,12 +11,11 @@ from typing import Generator, List, Tuple
 
 import requests
 from fastapi import HTTPException, status
+from models import FileEmbedding
 from pgvector.sqlalchemy import Vector
 from sentence_transformers import SentenceTransformer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
-from backend.models import FileEmbedding
 
 logger = logging.getLogger(__name__)
 
