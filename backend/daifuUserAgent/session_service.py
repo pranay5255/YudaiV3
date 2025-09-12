@@ -10,7 +10,9 @@ import logging
 from typing import List
 
 from fastapi import HTTPException, status
-from models import (
+from sqlalchemy.orm import Session
+
+from backend.models import (
     ChatMessage,
     ChatMessageResponse,
     ChatSession,
@@ -23,9 +25,7 @@ from models import (
     SessionResponse,
     User,
 )
-from sqlalchemy.orm import Session
-
-from utils import utc_now
+from backend.utils import utc_now
 
 logger = logging.getLogger(__name__)
 

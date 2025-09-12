@@ -68,8 +68,8 @@ CRITICAL ISSUES:
 """
 
 # Import file dependencies functionality
-import logging
 import asyncio
+import logging
 
 # Import chat functionality from chat_api
 import time
@@ -81,11 +81,17 @@ from urllib.parse import urlparse
 
 from auth.github_oauth import get_current_user
 from daifuUserAgent.githubOps import GitHubOps
-from db.database import get_db, SessionLocal
+from db.database import SessionLocal, get_db
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from pgvector.sqlalchemy import Vector
+from repo_processorGitIngest.scraper_script import (
+    categorize_file,
+    extract_repository_data,
+)
+from sqlalchemy.orm import Session
 
 # Import from filedeps.py
-from models import (
+from backend.models import (
     AISolveSession,
     APIError,
     ChatMessage,
@@ -110,15 +116,8 @@ from models import (
     UpdateSessionRequest,
     User,
 )
-from pgvector.sqlalchemy import Vector
-from repo_processorGitIngest.scraper_script import (
-    categorize_file,
-    extract_repository_data,
-)
-from sqlalchemy.orm import Session
-
-from utils import utc_now
-from utils.chunking import create_file_chunker
+from backend.utils import utc_now
+from backend.utils.chunking import create_file_chunker
 
 from .llm_service import LLMService
 from .session_service import SessionService
@@ -1951,8 +1950,7 @@ async def _index_repository_for_session_background(
             gh = GitHubOps(db)
             meta = await gh.fetch_repository_info_detailed(repo_owner, repo_name, user_id)
         except Exception as e:
-            logger.warning(f"[Index] Failed to fetch repo metadata: {e}
-")
+            logger.warning(f"[Index] Failed to fetch repo metadata: {e}")
             meta = {}
 
         repository = _get_or_create_repository(
@@ -2495,7 +2493,7 @@ async def get_issues_for_session(
             )
 
         # Import issue service functionality
-        from models import UserIssue
+        from backend.models import UserIssue
 
         # Build query
         query = db.query(UserIssue).filter(
@@ -2576,7 +2574,7 @@ async def get_issue_for_session(
             )
 
         # Import issue service functionality
-        from models import UserIssue
+        from backend.models import UserIssue
 
         # Get the issue
         issue = (
