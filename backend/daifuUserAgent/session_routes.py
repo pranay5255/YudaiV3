@@ -83,15 +83,9 @@ from auth.github_oauth import get_current_user
 from daifuUserAgent.githubOps import GitHubOps
 from db.database import SessionLocal, get_db
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from pgvector.sqlalchemy import Vector
-from repo_processorGitIngest.scraper_script import (
-    categorize_file,
-    extract_repository_data,
-)
-from sqlalchemy.orm import Session
 
 # Import from filedeps.py
-from backend.models import (
+from models import (
     AISolveSession,
     APIError,
     ChatMessage,
@@ -116,8 +110,15 @@ from backend.models import (
     UpdateSessionRequest,
     User,
 )
-from backend.utils import utc_now
-from backend.utils.chunking import create_file_chunker
+from pgvector.sqlalchemy import Vector
+from repo_processorGitIngest.scraper_script import (
+    categorize_file,
+    extract_repository_data,
+)
+from sqlalchemy.orm import Session
+
+from utils import utc_now
+from utils.chunking import create_file_chunker
 
 from .llm_service import LLMService
 from .session_service import SessionService
@@ -2493,7 +2494,7 @@ async def get_issues_for_session(
             )
 
         # Import issue service functionality
-        from backend.models import UserIssue
+        from models import UserIssue
 
         # Build query
         query = db.query(UserIssue).filter(
@@ -2574,7 +2575,7 @@ async def get_issue_for_session(
             )
 
         # Import issue service functionality
-        from backend.models import UserIssue
+        from models import UserIssue
 
         # Get the issue
         issue = (
