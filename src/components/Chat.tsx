@@ -121,7 +121,7 @@ const IssuePreviewModal: React.FC<IssuePreviewModalProps> = ({
               <div>Messages Count: {issuePreview.metadata?.chat_messages_count || 'N/A'}</div>
               <div>Files Count: {issuePreview.metadata?.file_context_count || 'N/A'}</div>
               <div>Tokens Used: {issuePreview.metadata?.total_tokens || issuePreview.metadata?.tokens_used || 'N/A'}</div>
-              <div>LLM Model: {issuePreview.metadata?.llm_model || 'deepseek/deepseek-r1-0528'}</div>
+              <div>LLM Model: {issuePreview.metadata?.llm_model || 'openrouter/sonoma-sky-alpha'}</div>
               <div>Generation Method: {issuePreview.metadata?.generation_method || 'llm'}</div>
               {issuePreview.metadata?.processing_time && (
                 <div>Processing Time: {issuePreview.metadata.processing_time.toFixed(2)}s</div>
