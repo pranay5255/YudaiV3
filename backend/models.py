@@ -289,6 +289,14 @@ class Repository(Base):
         DateTime(timezone=True), onupdate=func.now()
     )
 
+    # Cached GitHub context data
+    github_context: Mapped[Optional[str]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )  # Stores comprehensive GitHub context from get_github_context
+    github_context_updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )  # When the GitHub context was last fetched
+
     # Relationships
     user: Mapped["User"] = relationship(back_populates="repositories")
     issues: Mapped[List["Issue"]] = relationship(
@@ -1192,9 +1200,6 @@ class CreateSessionRequest(BaseModel):
     repo_branch: Optional[str] = Field("main", max_length=255)
     title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = Field(None)
-    # New: trigger background codebase indexing on session creation
-    index_codebase: Optional[bool] = Field(True, description="Whether to index the repository in background")
-    index_max_file_size: Optional[int] = Field(None, ge=1, description="Optional max file size for indexing")
 
 
 class UpdateSessionRequest(BaseModel):
@@ -1375,8 +1380,8 @@ class CreateUserIssueRequest(BaseModel):
     description: Optional[str] = Field(None)
     session_id: Optional[str] = Field(None, max_length=255)
     context_card_id: Optional[int] = Field(None)
-    context_cards: Optional[List[str]] = Field(default_factory=list)
-    ideas: Optional[List[str]] = Field(default_factory=list)
+    # context_cards: Optional[List[str]] = Field(default_factory=list)
+    # ideas: Optional[List[str]] = Field(default_factory=list)
     repo_owner: Optional[str] = Field(None, max_length=255)
     repo_name: Optional[str] = Field(None, max_length=255)
     priority: Literal["low", "medium", "high"] = Field(default="medium")
