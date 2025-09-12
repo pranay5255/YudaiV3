@@ -1187,9 +1187,9 @@ export const useSessionStore = create<SessionState>()(
         // ============================================================================
         // FILE DEPENDENCY EXTRACTION IMPLEMENTATION
         // ============================================================================
-
-        extractFileDependenciesForSession: async (sessionId: string, repoUrl: string) => {
-          const { sessionToken } = get();
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        extractFileDependenciesForSession: async (_sessionId: string, _repoUrl: string) => {
+          
 
           try {
             // Deprecated: extraction now starts automatically after session creation.
@@ -1289,5 +1289,3 @@ export const useSessionStore = create<SessionState>()(
     }
   )
 );
-
-
