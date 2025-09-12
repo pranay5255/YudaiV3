@@ -313,12 +313,25 @@ class ChatOps:
                     context_cards, user_id
                 )
 
+            # Retrieve relevant file contexts via embeddings for RAG
+            try:
+                from .llm_service import LLMService as _LLM
+                # Build a simple query from the current message plus last few turns
+                recent_text = " ".join([m[1] for m in history[-5:]]) if history else ""
+                query_text = (message_text + " " + recent_text).strip()
+                embedding_contexts = await _LLM.get_relevant_file_contexts(
+                    db=self.db, session_id=session.id, query_text=query_text, top_k=5
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed retrieving relevant file contexts: {e}")
+                embedding_contexts = []
+
             # Generate AI response using LLM service with GitHub context
             ai_response = await self._generate_ai_response(
                 message=message_text,
                 history=history,
                 repo_context=repo_context,
-                context_content=context_content,
+                file_contexts=(embedding_contexts + ([f"Additional Context:\n{context_content}"] if context_content else [])),
                 github_data=None,  # Legacy fallback, will use new GitHub context
                 repo_owner=session.repo_owner,
                 repo_name=session.repo_name,
@@ -418,7 +431,7 @@ class ChatOps:
         message: str,
         history: List[Tuple[str, str]],
         repo_context: str,
-        context_content: str,
+        file_contexts: Optional[List[str]] = None,
         github_data: tuple = None,
         repo_owner: str = None,
         repo_name: str = None,
@@ -447,11 +460,6 @@ class ChatOps:
 
             # Build the conversation history including the current message
             full_history = history + [("User", message)]
-
-            # Prepare file contexts if available
-            file_contexts = None
-            if context_content:
-                file_contexts = [f"Additional Context:\n{context_content}"]
 
             # Generate response using LLM service with GitHub context
             ai_response = await LLMService.generate_response_with_history(

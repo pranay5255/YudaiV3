@@ -1192,6 +1192,9 @@ class CreateSessionRequest(BaseModel):
     repo_branch: Optional[str] = Field("main", max_length=255)
     title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = Field(None)
+    # New: trigger background codebase indexing on session creation
+    index_codebase: Optional[bool] = Field(True, description="Whether to index the repository in background")
+    index_max_file_size: Optional[int] = Field(None, ge=1, description="Optional max file size for indexing")
 
 
 class UpdateSessionRequest(BaseModel):
