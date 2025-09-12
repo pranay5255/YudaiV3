@@ -309,5 +309,124 @@ def build_daifu_prompt(
     ).strip()
     return prompt
 
+async def build_daifu_prompt_from_stored_context(
+    github_context: Dict[str, Any] = None,
+    conversation: List[Tuple[str, str]] = None,
+    file_contexts: List[str] = None
+) -> str:
+    """
+    Build DAifu prompt using pre-fetched and stored GitHub context
+
+    Args:
+        github_context: Pre-fetched comprehensive GitHub context dictionary
+        conversation: List of (speaker, message) tuples
+        file_contexts: Optional list of file context strings
+
+    Returns:
+        Complete prompt string with stored GitHub context
+    """
+    try:
+        # Format repository details from stored context
+        details_str = "Repository information not available"
+        commits_str = "Recent Commits: None available"
+        issues_str = "Open Issues: None available"
+        branches_str = "Repository Branches: None available"
+
+        if github_context and "repository" in github_context:
+            repo = github_context["repository"]
+
+            # Repository info
+            details_str = (
+                f"Repository: {repo.get('full_name', 'Unknown')}\n"
+                f"Description: {repo.get('description', '')}\n"
+                f"Default branch: {repo.get('default_branch', 'main')}\n"
+                f"Language: {repo.get('language', '')}\n"
+                f"Stars: {repo.get('stargazers_count', 0)}, Forks: {repo.get('forks_count', 0)}\n"
+                f"Open issues: {repo.get('open_issues_count', 0)}\n"
+                f"URL: {repo.get('html_url', '')}\n"
+            )
+
+            # Recent commits
+            if "recent_commits" in github_context and github_context["recent_commits"]:
+                commits = github_context["recent_commits"][:3]  # Limit to 3
+                commits_str = "Recent Commits:\n"
+                for commit in commits:
+                    commits_str += f"- {commit.get('sha', '')[:7]}: {commit.get('message', '')[:50]}\n"
+            else:
+                commits_str = "Recent Commits: None available\n"
+
+            # Open issues
+            if "recent_issues" in github_context and github_context["recent_issues"]:
+                issues = github_context["recent_issues"][:3]  # Limit to 3
+                issues_str = "Open Issues:\n"
+                for issue in issues:
+                    issues_str += f"- #{issue.get('number', '?')}: {issue.get('title', '')[:50]}\n"
+            else:
+                issues_str = "Open Issues: None available\n"
+
+            # Branches
+            if "branches" in github_context and github_context["branches"]:
+                branches = github_context["branches"][:3]  # Limit to 3
+                branches_str = "Repository Branches:\n"
+                for branch in branches:
+                    branches_str += f"- {branch.get('name', 'unknown')}\n"
+            else:
+                branches_str = "Repository Branches: None available\n"
+
+        # Format file contexts if provided
+        file_contexts_str = ""
+        if file_contexts:
+            file_contexts_str = "Relevant File Contexts:\n" + "\n".join(file_contexts)
+
+        # Format conversation
+        convo_formatted = ""
+        if conversation:
+            convo_formatted = "\n".join(f"{speaker}: {utterance}" for speaker, utterance in conversation)
+
+        # Combine all into final prompt
+        prompt = dedent(
+            f"""
+            {SYSTEM_HEADER}
+
+            <GITHUB_CONTEXT_BEGIN>
+            {details_str}
+            {commits_str}
+            {issues_str}
+            {branches_str}
+            </GITHUB_CONTEXT_END>
+
+            <FILE_CONTEXTS_BEGIN>
+            {file_contexts_str}
+            </FILE_CONTEXTS_END>
+
+            <CONVERSATION_BEGIN>
+            {convo_formatted}
+            </CONVERSATION_END>
+
+            (Respond now as **DAifu** following the guidelines above. Focus on providing direct, actionable responses based on the available context.)
+            """
+        ).strip()
+        return prompt
+
+    except Exception as e:
+        logger.error(f"Error building prompt from stored context: {e}")
+        # Fallback to basic prompt
+        convo_formatted = ""
+        if conversation:
+            convo_formatted = "\n".join(f"{speaker}: {utterance}" for speaker, utterance in conversation)
+
+        return dedent(
+            f"""
+            {SYSTEM_HEADER}
+
+            <CONVERSATION_BEGIN>
+            {convo_formatted}
+            </CONVERSATION_END>
+
+            (Respond now as **DAifu**. Limited context available due to processing error.)
+            """
+        ).strip()
+
+
 # Note: GitHub context fetching is now handled by ChatOps class using GitHubOps
 # This ensures consistent data fetching and error handling across the application
