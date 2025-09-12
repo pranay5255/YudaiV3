@@ -69,6 +69,7 @@ CRITICAL ISSUES:
 
 # Import file dependencies functionality
 import logging
+import asyncio
 
 # Import chat functionality from chat_api
 import time
@@ -80,7 +81,7 @@ from urllib.parse import urlparse
 
 from auth.github_oauth import get_current_user
 from daifuUserAgent.githubOps import GitHubOps
-from db.database import get_db
+from db.database import get_db, SessionLocal
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 # Import from filedeps.py
@@ -237,6 +238,7 @@ async def create_session(
     request: CreateSessionRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     """
     Create a new DAifu session for a repository.
@@ -265,6 +267,34 @@ async def create_session(
         db.add(db_session)
         db.commit()
         db.refresh(db_session)
+
+        # Kick off background indexing of the repository if requested
+        if getattr(request, "index_codebase", False):
+            try:
+                repo_owner = request.repo_owner
+                repo_name = request.repo_name
+                repo_branch = request.repo_branch or "main"
+                max_file_size = getattr(request, "index_max_file_size", None)
+
+                async def _run_index():
+                    await _index_repository_for_session_background(
+                        session_uuid=db_session.session_id,
+                        user_id=current_user.id,
+                        repo_owner=repo_owner,
+                        repo_name=repo_name,
+                        repo_branch=repo_branch,
+                        max_file_size=max_file_size,
+                    )
+
+                try:
+                    # If inside event loop, schedule directly
+                    asyncio.get_running_loop()
+                    asyncio.create_task(_run_index())
+                except RuntimeError:
+                    # Fallback when no loop is active
+                    background_tasks.add_task(lambda: asyncio.run(_run_index()))
+            except Exception as e_bg:
+                logger.error(f"Failed to schedule repository indexing: {e_bg}")
 
         return SessionResponse(
             id=db_session.id,
@@ -557,17 +587,22 @@ async def add_bulk_chat_messages(
         )
 
 
-@router.get("/sessions/{session_id}/export", response_model=dict)
+@router.get("/sessions/{session_id}/export", response_model=dict, deprecated=True)
 async def export_session(
     session_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Export session data including messages, context cards, and file dependencies.
-    This is a MEDIUM priority endpoint for session backup and migration.
-    """
-    try:
+    """Deprecated: exporting sessions is no longer supported."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "message": "Deprecated: session export is no longer supported.",
+            "error_code": "ENDPOINT_DEPRECATED",
+            "path": f"/daifu/sessions/{session_id}/export",
+        },
+    )
+    try:  # Unreachable legacy block retained for reference
         # Verify session exists and belongs to user
         db_session = (
             db.query(ChatSession)
@@ -678,17 +713,22 @@ async def export_session(
         )
 
 
-@router.post("/sessions/import", response_model=SessionResponse)
+@router.post("/sessions/import", response_model=SessionResponse, deprecated=True)
 async def import_session(
     import_data: dict,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Import session data from exported format.
-    This is a MEDIUM priority endpoint for session restoration.
-    """
-    try:
+    """Deprecated: importing sessions is no longer supported."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "message": "Deprecated: session import is no longer supported.",
+            "error_code": "ENDPOINT_DEPRECATED",
+            "path": "/daifu/sessions/import",
+        },
+    )
+    try:  # Unreachable legacy block retained for reference
         # Validate import data structure
         if not import_data.get("session"):
             raise HTTPException(
@@ -1045,7 +1085,7 @@ async def delete_context_card(
         )
 
 
-@router.put("/sessions/{session_id}/file-deps/{file_id}", response_model=FileEmbeddingResponse)
+@router.put("/sessions/{session_id}/file-deps/{file_id}", response_model=FileEmbeddingResponse, deprecated=True)
 async def update_file_dependency(
     session_id: str,
     file_id: int,
@@ -1053,11 +1093,16 @@ async def update_file_dependency(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Update a file dependency (file embedding) for a session.
-    This is a MEDIUM priority endpoint for file dependency management.
-    """
-    try:
+    """Deprecated: client-side updates to file embeddings are not supported."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "message": "Deprecated: file embedding updates are not supported from client.",
+            "error_code": "ENDPOINT_DEPRECATED",
+            "path": f"/daifu/sessions/{session_id}/file-deps/{file_id}",
+        },
+    )
+    try:  # Unreachable legacy block retained for reference
         # Verify session exists and belongs to user
         db_session = (
             db.query(ChatSession)
@@ -1494,20 +1539,23 @@ def _get_or_create_repository(
     return repository
 
 
-@router.post("/sessions/{session_id}/extract", response_model=FileTreeResponse)
+@router.post("/sessions/{session_id}/extract", response_model=FileTreeResponse, deprecated=True)
 async def extract_file_dependencies_for_session(
     session_id: str,
     request: RepositoryRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> FileTreeResponse:
-    """
-    Extract file dependencies for a specific session and create embeddings.
-
-    This endpoint integrates with the session system and creates file embeddings
-    that can be used for semantic search and context management.
-    """
-    try:
+    """Deprecated: indexing now starts automatically after session creation."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "message": "Deprecated: use session creation with index_codebase flag.",
+            "error_code": "ENDPOINT_DEPRECATED",
+            "path": f"/daifu/sessions/{session_id}/extract",
+        },
+    )
+    try:  # Unreachable legacy block retained for reference
         print(f"Starting session-based extraction for session: {session_id}")
 
         # First, verify the session exists and belongs to the user
@@ -1751,9 +1799,16 @@ def _save_file_analysis_to_db(
 
 
 def _save_file_items_and_embeddings(
-    db: Session, repository_id: int, file_tree: List[Dict[str, Any]], session_id: int
+    db: Session,
+    repository_id: int,
+    file_tree: List[Dict[str, Any]],
+    session_id: int,
+    content_lookup: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[FileItem], List[FileEmbedding]]:
-    """Save file items and their embeddings separately"""
+    """Save file items and their embeddings separately.
+
+    content_lookup maps file paths to full file contents for embedding creation.
+    """
 
     saved_file_items = []
     saved_embeddings = []
@@ -1781,12 +1836,24 @@ def _save_file_items_and_embeddings(
 
             saved_file_items.append(file_item)
 
-            # If it's a file with content, create embeddings
-            if not item_data.get("isDirectory", False) and item_data.get("content"):
-                embeddings = _create_embeddings_for_file_item(
-                    db, session_id, repository_id, file_item.id, item_data
-                )
-                saved_embeddings.extend(embeddings)
+            # If it's a file (not a directory), create embeddings using content map
+            if not item_data.get("isDirectory", False):
+                fpath = item_data.get("path") or item_data.get("file_path")
+                if content_lookup and fpath:
+                    content = content_lookup.get(fpath)
+                else:
+                    content = None
+                if content:
+                    embeddings = _create_embeddings_for_file_item(
+                        db,
+                        session_id,
+                        repository_id,
+                        file_item.id,
+                        fpath,
+                        item_data.get("name", ""),
+                        content,
+                    )
+                    saved_embeddings.extend(embeddings)
 
             # Process children recursively
             if item_data.get("isDirectory", False) and "children" in item_data:
@@ -1801,15 +1868,13 @@ def _create_embeddings_for_file_item(
     session_id: int,
     repository_id: int,
     file_item_id: int,
-    item_data: Dict[str, Any]
+    file_path: str,
+    file_name: str,
+    content: str,
 ) -> List[FileEmbedding]:
-    """Create embeddings for a specific file item"""
-   
+    """Create embeddings for a specific file item using provided content."""
 
     saved_embeddings = []
-    content = item_data.get("content", "")
-    file_path = item_data.get("path", "")
-    file_name = item_data.get("name", "")
 
     try:
         chunker = create_file_chunker()
@@ -1840,6 +1905,86 @@ def _create_embeddings_for_file_item(
     except Exception as e:
         print(f"Error creating embeddings for file item {file_item_id}: {e}")
         return []
+
+
+async def _index_repository_for_session_background(
+    session_uuid: str,
+    user_id: int,
+    repo_owner: str,
+    repo_name: str,
+    repo_branch: str = "main",
+    max_file_size: Optional[int] = None,
+) -> None:
+    """Background task: extract the repository, chunk files, create embeddings and persist.
+
+    This runs after session creation when index_codebase=True.
+    """
+    db = SessionLocal()
+    try:
+        logger.info(
+            f"[Index] Starting indexing for session={session_uuid} repo={repo_owner}/{repo_name}"
+        )
+
+        # Verify the session exists and is owned by the user
+        chat_session = (
+            db.query(ChatSession)
+            .filter(ChatSession.session_id == session_uuid, ChatSession.user_id == user_id)
+            .first()
+        )
+        if not chat_session:
+            logger.warning(f"[Index] Session not found or not owned by user: {session_uuid}")
+            return
+
+        repo_url = f"https://github.com/{repo_owner}/{repo_name}"
+
+        # Extract repository content via GitIngest
+        raw_repo = await extract_repository_data(repo_url=repo_url, max_file_size=max_file_size)
+        if isinstance(raw_repo, dict) and raw_repo.get("error"):
+            logger.error(f"[Index] GitIngest error: {raw_repo['error']}")
+            return
+
+        processed = _process_gitingest_data(raw_repo)
+        tree = _build_file_tree({"files": processed.get("files", [])}, repo_name)
+
+        # Fetch repo metadata (best effort)
+        try:
+            gh = GitHubOps(db)
+            meta = await gh.fetch_repository_info_detailed(repo_owner, repo_name, user_id)
+        except Exception as e:
+            logger.warning(f"[Index] Failed to fetch repo metadata: {e}
+")
+            meta = {}
+
+        repository = _get_or_create_repository(
+            db,
+            repo_url,
+            repo_name,
+            repo_owner,
+            user_id,
+            html_url=meta.get("html_url"),
+            clone_url=meta.get("clone_url"),
+            description=meta.get("description"),
+            language=meta.get("language"),
+            stargazers_count=meta.get("stargazers_count", 0),
+            forks_count=meta.get("forks_count", 0),
+            open_issues_count=meta.get("open_issues_count", 0),
+            default_branch=meta.get("default_branch", repo_branch),
+            github_created_at=meta.get("created_at"),
+            github_updated_at=meta.get("updated_at"),
+            pushed_at=meta.get("pushed_at"),
+        )
+
+        # Create content lookup and persist
+        content_map = {f.get("path"): f.get("content", "") for f in processed.get("files", [])}
+        _save_file_items_and_embeddings(db, repository.id, tree, chat_session.id, content_map)
+        db.commit()
+
+        logger.info(f"[Index] Completed indexing for session {session_uuid}")
+    except Exception as e:
+        logger.error(f"[Index] Unexpected indexing error: {e}")
+        db.rollback()
+    finally:
+        db.close()
 
 
 # ============================================================================
