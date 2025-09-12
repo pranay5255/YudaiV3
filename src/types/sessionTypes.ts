@@ -284,6 +284,8 @@ export interface CreateSessionRequest {
   repo_branch?: string;
   title?: string;
   description?: string;
+  index_codebase?: boolean;
+  index_max_file_size?: number;
 }
 
 export interface UpdateSessionRequest {
