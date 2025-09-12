@@ -218,7 +218,7 @@ class IssueService:
         repo_owner: str,
         repo_name: str,
         priority: str = "medium",
-        create_github_issue: bool = False
+        create_github_issue: bool = False,
     ) -> Dict[str, Any]:
         """
         Unified function to create issue with context - combines LLM generation and database storage
@@ -313,7 +313,9 @@ class IssueService:
 
             # Optionally create GitHub issue
             if create_github_issue:
-                github_issue = await self.create_github_issue_from_user_issue(user_id, user_issue.issue_id, db)
+                github_issue = await self.create_github_issue_from_user_issue(
+                    user_id, user_issue.issue_id, db
+                )
                 if github_issue:
                     result["github_issue"] = github_issue
 
@@ -359,9 +361,7 @@ class IssueService:
         db.add(user_issue)
         db.flush()  # Get the ID without committing
 
-        logger.info(
-            f"Successfully created user issue {issue_id} for user {user_id}"
-        )
+        logger.info(f"Successfully created user issue {issue_id} for user {user_id}")
         return user_issue
 
     def update_issue_status(
@@ -474,6 +474,38 @@ class IssueService:
             # Get context cards for additional context
             context_cards = self._get_session_context_cards(db, session_id, user_id)
 
+            # Retrieve relevant file contexts via embeddings using last few messages + description
+            embedding_contexts: List[str] = []
+            try:
+                from models import ChatSession as _ChatSession
+
+                from .llm_service import LLMService as _LLM
+
+                # TODO: add context card content to the query text to fetch relevant file contexts
+                # Fetch numeric session id
+                sess = (
+                    db.query(_ChatSession)
+                    .filter(
+                        _ChatSession.session_id == session_id,
+                        _ChatSession.user_id == user_id,
+                    )
+                    .first()
+                )
+                if sess:
+                    last_msgs = " ".join(
+                        m.get("content", "") for m in (chat_messages or [])[-5:]
+                    )
+                    query_text = " ".join(
+                        filter(None, [title or "", description or "", last_msgs])
+                    )
+                    embedding_contexts = await _LLM.get_relevant_file_contexts(
+                        db=db, session_id=sess.id, query_text=query_text, top_k=5
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to retrieve embedding contexts for issue generation: {e}"
+                )
+
             # Build the LLM prompt for issue generation
             prompt = self._build_issue_generation_prompt(
                 title=title,
@@ -482,6 +514,7 @@ class IssueService:
                 file_context=file_context,
                 repo_context=repo_context,
                 context_cards=context_cards,
+                embedding_contexts=embedding_contexts,
                 priority=priority,
             )
 
@@ -595,11 +628,12 @@ class IssueService:
         self,
         title: str,
         description: str,
+        priority: str,
         chat_messages: List[Dict[str, Any]],
         file_context: List[Dict[str, Any]],
         repo_context: str,
         context_cards: List[Dict[str, Any]],
-        priority: str,
+        embedding_contexts: Optional[List[str]] = None,
     ) -> str:
         """Build the prompt for LLM issue generation"""
         prompt_parts = [
@@ -649,6 +683,16 @@ class IssueService:
                         f"- {file.get('name', file.get('file_name', 'Unknown'))} ({file.get('tokens', 0)} tokens)"
                         for file in file_context
                     ],
+                    "",
+                ]
+            )
+
+        # Include semantic code snippets from embeddings when available
+        if embedding_contexts:
+            prompt_parts.extend(
+                [
+                    "RELEVANT CODE CONTEXT (semantic):",
+                    *[ctx[:400] for ctx in embedding_contexts[:5]],
                     "",
                 ]
             )
