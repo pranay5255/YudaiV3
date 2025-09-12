@@ -527,6 +527,8 @@ export const useSessionStore = create<SessionState>()(
                   repo_name: repoName,
                   repo_branch: repository.branch,
                   title: `Chat - ${repoOwner}/${repoName}`,
+                  // Trigger background indexing on session creation
+                  index_codebase: true,
                 }),
               })
             );
@@ -1190,18 +1192,9 @@ export const useSessionStore = create<SessionState>()(
           const { sessionToken } = get();
 
           try {
-            set({ isLoadingFileContext: true, fileContextError: null });
-
-            await handleApiResponse<{ success: boolean; message: string }>(
-              await fetch(buildApiUrl(API.SESSIONS.EXTRACT, { sessionId }), {
-                method: 'POST',
-                headers: getAuthHeaders(sessionToken || ''),
-                body: JSON.stringify({ repo_url: repoUrl }),
-              })
-            );
-
-            set({ isLoadingFileContext: false });
-            return true;
+            // Deprecated: extraction now starts automatically after session creation.
+            console.info('[SessionStore] extractFileDependenciesForSession is deprecated. Indexing happens automatically.');
+            return true; // treat as success/no-op
           } catch (error) {
             console.error('Failed to extract file dependencies:', error);
             set({
@@ -1296,6 +1289,5 @@ export const useSessionStore = create<SessionState>()(
     }
   )
 );
-
 
 
