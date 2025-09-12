@@ -43,7 +43,7 @@
 #         if not self.api_key:
 #             raise ValueError("OPENROUTER_API_KEY is required")
         
-#         self.model = "deepseek/deepseek-r1-0528:free"
+#         self.model = "openrouter/sonoma-sky-alpha:free"
 #         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
         
 #     def _make_llm_call(self, prompt: str, max_tokens: int = 4000) -> str:
