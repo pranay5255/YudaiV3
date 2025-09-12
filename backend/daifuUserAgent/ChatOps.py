@@ -48,10 +48,10 @@ CRITICAL ISSUES:
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from models import ChatMessage, ChatSession, User
 from sqlalchemy.orm import Session
 
-from utils import utc_now
+from backend.models import ChatMessage, ChatSession, User
+from backend.utils import utc_now
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -98,65 +98,12 @@ class ChatOps:
 
     async def get_github_context(
         self, repo_owner: str, repo_name: str, user: User, db: Session
-    ) -> str:
-        """
-        Fetch GitHub repository context for chat conversations
-
-        Args:
-            repo_owner: Repository owner
-            repo_name: Repository name
-            user: User object
-            db: Database session
-
-        Returns:
-            Repository context string for AI processing
-        """
-        try:
-            logger.info(
-                f"Fetching GitHub context for {repo_owner}/{repo_name} by user {user.id}"
-            )
-
-            from .githubOps import GitHubOps
-
-            github_ops = GitHubOps(db)
-
-            # Fetch repository information
-            repo_data = await github_ops.fetch_repository_info(
-                repo_owner, repo_name, user.id
-            )
-
-            # Fetch recent issues
-            issues_data = await github_ops.fetch_repository_issues(
-                repo_owner, repo_name, user.id, limit=5
-            )
-
-            # Fetch recent commits
-            commits_data = await github_ops.fetch_repository_commits(
-                repo_owner, repo_name, user.id, limit=5
-            )
-
-            # Combine all context
-            full_context = self._build_context_string(
-                repo_data, issues_data, commits_data
-            )
-
-            logger.info(
-                f"Successfully fetched GitHub context for {repo_owner}/{repo_name}"
-            )
-            return full_context
-
-        except Exception as e:
-            logger.error(
-                f"Failed to fetch GitHub context for {repo_owner}/{repo_name}: {e}"
-            )
-            # Return basic context as fallback
-            return f"Repository: {repo_owner}/{repo_name}. Limited context available due to API error."
-
-    async def get_github_context_data(
-        self, repo_owner: str, repo_name: str, user: User, db: Session
     ) -> Dict[str, Any]:
         """
-        Fetch structured GitHub repository data
+        Fetch comprehensive GitHub repository context for downstream AI tasks
+
+        This function combines both context string generation and structured data fetching
+        to provide complete repository context for AI processing and programmatic access.
 
         Args:
             repo_owner: Repository owner
@@ -165,18 +112,18 @@ class ChatOps:
             db: Database session
 
         Returns:
-            Structured repository data dictionary
+            Dictionary containing both structured data and formatted context string
         """
         try:
             logger.info(
-                f"Fetching structured GitHub data for {repo_owner}/{repo_name} by user {user.id}"
+                f"Fetching comprehensive GitHub context for {repo_owner}/{repo_name} by user {user.id}"
             )
 
             from .githubOps import GitHubOps
 
             github_ops = GitHubOps(db)
 
-            # Fetch repository information
+            # Fetch detailed repository information
             repo_data = await github_ops.fetch_repository_info_detailed(
                 repo_owner, repo_name, user.id
             )
@@ -191,30 +138,56 @@ class ChatOps:
                 repo_owner, repo_name, user.id, limit=10
             )
 
-            # Structure the response
-            structured_data = {
+            # Fetch recent issues
+            issues_data = await github_ops.fetch_repository_issues(
+                repo_owner, repo_name, user.id, limit=5
+            )
+
+            # Fetch recent commits
+            commits_data = await github_ops.fetch_repository_commits(
+                repo_owner, repo_name, user.id, limit=5
+            )
+
+            # Build context string from basic repo info (for backward compatibility)
+            basic_repo_info = await github_ops.fetch_repository_info(
+                repo_owner, repo_name, user.id
+            )
+            context_string = self._build_context_string(
+                basic_repo_info, issues_data, commits_data
+            )
+
+            # Structure the comprehensive response
+            comprehensive_data = {
                 "repository": repo_data,
                 "branches": branches,
                 "contributors": contributors,
+                "recent_issues": issues_data,
+                "recent_commits": commits_data,
+                "context_string": context_string,
                 "fetched_at": utc_now().isoformat(),
                 "owner": repo_owner,
                 "name": repo_name,
             }
 
             logger.info(
-                f"Successfully fetched structured data for {repo_owner}/{repo_name}"
+                f"Successfully fetched comprehensive GitHub context for {repo_owner}/{repo_name}"
             )
-            return structured_data
+            return comprehensive_data
 
         except Exception as e:
             logger.error(
-                f"Failed to fetch structured GitHub data for {repo_owner}/{repo_name}: {e}"
+                f"Failed to fetch comprehensive GitHub context for {repo_owner}/{repo_name}: {e}"
             )
+            # Return fallback data
+            fallback_context = f"Repository: {repo_owner}/{repo_name}. Limited context available due to API error."
             return {
                 "error": str(e),
                 "repository": {"name": repo_name, "owner": repo_owner},
                 "branches": [],
                 "contributors": [],
+                "recent_issues": [],
+                "recent_commits": [],
+                "context_string": fallback_context,
                 "fetched_at": utc_now().isoformat(),
             }
 
@@ -298,13 +271,16 @@ class ChatOps:
 
             # Get repository context if available
             repo_context = ""
+            github_context_data = None
             if repository and repository.get("owner") and repository.get("name"):
                 # Get user for GitHub API access
                 user = self.db.query(User).filter(User.id == user_id).first()
                 if user:
-                    repo_context = await self.get_github_context(
+                    github_context_data = await self.get_github_context(
                         repository["owner"], repository["name"], user, self.db
                     )
+                    # Extract context string for AI processing
+                    repo_context = github_context_data.get("context_string", "")
 
             # Get context cards content
             context_content = ""
@@ -332,7 +308,7 @@ class ChatOps:
                 history=history,
                 repo_context=repo_context,
                 file_contexts=(embedding_contexts + ([f"Additional Context:\n{context_content}"] if context_content else [])),
-                github_data=None,  # Legacy fallback, will use new GitHub context
+                github_data=github_context_data,  # Pass comprehensive GitHub context data
                 repo_owner=session.repo_owner,
                 repo_name=session.repo_name,
                 repo_branch=session.repo_branch,
@@ -406,7 +382,7 @@ class ChatOps:
     def _get_context_cards_content(self, card_ids: List[str], user_id: int) -> str:
         """Get content from context cards"""
         try:
-            from models import ContextCard
+            from backend.models import ContextCard
 
             cards = (
                 self.db.query(ContextCard)
@@ -439,13 +415,13 @@ class ChatOps:
         user_id: int = None,
     ) -> str:
         """
-        Generate AI response using LLM service with GitHub context
+        Generate AI response using get_github_context and stored GitHub context
 
         Args:
             message: User's current message
             history: Conversation history as (sender, message) tuples
-            repo_context: GitHub repository context
-            context_content: Additional context from context cards
+            repo_context: GitHub repository context (deprecated, use GitHub context instead)
+            file_contexts: Additional file context strings
             github_data: Tuple of (repo_details, commits, issues, pulls) - legacy fallback
             repo_owner: Repository owner for GitHub context fetching
             repo_name: Repository name for GitHub context fetching
@@ -456,26 +432,79 @@ class ChatOps:
             AI response string
         """
         try:
+            from datetime import timedelta
+
+            from backend.models import Repository
+            from backend.utils import utc_now
+
             from .llm_service import LLMService
 
             # Build the conversation history including the current message
             full_history = history + [("User", message)]
 
-            # Generate response using LLM service with GitHub context
-            ai_response = await LLMService.generate_response_with_history(
+            # Get or fetch GitHub context
+            github_context = None
+            if repo_owner and repo_name:
+                # Try to get stored GitHub context from database
+                repository = (
+                    self.db.query(Repository)
+                    .filter(
+                        Repository.owner == repo_owner,
+                        Repository.name == repo_name,
+                        Repository.user_id == user_id
+                    )
+                    .first()
+                )
+
+                # Check if we have recent GitHub context (within last 30 minutes)
+                context_fresh = False
+                if repository and repository.github_context and repository.github_context_updated_at:
+                    time_diff = utc_now() - repository.github_context_updated_at
+                    if time_diff < timedelta(minutes=30):
+                        context_fresh = True
+                        github_context = repository.github_context
+
+                # If no fresh context, fetch it
+                if not context_fresh:
+                    logger.info(f"Fetching fresh GitHub context for {repo_owner}/{repo_name}")
+                    user = self.db.query(User).filter(User.id == user_id).first()
+                    if user:
+                        github_context_data = await self.get_github_context(
+                            repo_owner, repo_name, user, self.db
+                        )
+
+                        # Store the context in database
+                        if repository:
+                            repository.github_context = github_context_data
+                            repository.github_context_updated_at = utc_now()
+                        else:
+                            # Create repository record if it doesn't exist
+                            repository = Repository(
+                                user_id=user_id,
+                                name=repo_name,
+                                owner=repo_owner,
+                                full_name=f"{repo_owner}/{repo_name}",
+                                html_url=f"https://github.com/{repo_owner}/{repo_name}",
+                                clone_url=f"https://github.com/{repo_owner}/{repo_name}.git",
+                                github_context=github_context_data,
+                                github_context_updated_at=utc_now()
+                            )
+                            self.db.add(repository)
+
+                        self.db.commit()
+                        github_context = github_context_data
+
+            # Generate response using LLM service with stored GitHub context
+            ai_response = await LLMService.generate_response_with_stored_context(
                 db=self.db,
                 user_id=user_id,
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-                repo_branch=repo_branch,
+                github_context=github_context,
                 conversation_history=full_history,
-                github_data=github_data,  # Legacy fallback
                 file_contexts=file_contexts,
-                model="deepseek/deepseek-r1-0528",
+                model="openrouter/sonoma-sky-alpha",
                 temperature=0.4,
-                max_tokens=1500,
-                timeout=25,  # Reduced timeout from 45 to 25 seconds
-                fetch_limit=3  # Reduced from 5 to 3 for faster response
+                max_tokens=2500,
+                timeout=25
             )
 
             return ai_response
