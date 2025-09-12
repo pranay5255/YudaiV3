@@ -4,25 +4,29 @@ Eliminates duplication and standardizes LLM calls across chat endpoints
 """
 
 import json
+import logging
 import os
 import time
 from typing import Generator, List, Tuple
 
 import requests
 from fastapi import HTTPException, status
-from models import FileEmbedding
 from pgvector.sqlalchemy import Vector
 from sentence_transformers import SentenceTransformer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from backend.models import FileEmbedding
+
+logger = logging.getLogger(__name__)
 
 
 class LLMService:
     """Centralized service for LLM interactions"""
 
     # Standard model configuration
-    DEFAULT_MODEL = "deepseek/deepseek-r1-0528"
-    DEFAULT_TEMPERATURE = 0.4
+    DEFAULT_MODEL = "openrouter/sonoma-sky-alpha"
+    DEFAULT_TEMPERATURE = 0.6
     DEFAULT_MAX_TOKENS = 4000
     DEFAULT_TIMEOUT = 30
     EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -336,6 +340,61 @@ class LLMService:
         return results
 
     @staticmethod
+    async def generate_response_with_stored_context(
+        db: Session,
+        user_id: int,
+        github_context: dict = None,
+        conversation_history: List[Tuple[str, str]] = None,
+        file_contexts: List[str] = None,
+        model: str = None,
+        temperature: float = None,
+        max_tokens: int = None,
+        timeout: int = None
+    ) -> str:
+        """
+        Generate response using pre-fetched and stored GitHub context
+
+        Args:
+            db: Database session
+            user_id: User ID for authentication
+            github_context: Pre-fetched comprehensive GitHub context dictionary
+            conversation_history: List of (sender, message) tuples
+            file_contexts: List of relevant file context strings
+            model: Model to use
+            temperature: Temperature for generation
+            max_tokens: Maximum tokens to generate
+            timeout: Request timeout in seconds
+
+        Returns:
+            Generated response text
+        """
+        try:
+            from .prompt import build_daifu_prompt_from_stored_context
+
+            # Build prompt using stored GitHub context
+            prompt = build_daifu_prompt_from_stored_context(
+                github_context=github_context,
+                conversation=conversation_history or [],
+                file_contexts=file_contexts
+            )
+
+            # Generate response
+            return await LLMService.generate_response(
+                prompt=prompt,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to generate response with stored context: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"LLM response generation failed: {str(e)}",
+            )
+
+    @staticmethod
     async def generate_response_with_history(
         db: Session,
         user_id: int,
@@ -353,6 +412,9 @@ class LLMService:
     ) -> str:
         """
         Generate response using conversation history with GitHub context
+
+        DEPRECATED: Use generate_response_with_stored_context instead.
+        This method is kept for backward compatibility but will be removed in future versions.
 
         Args:
             db: Database session
