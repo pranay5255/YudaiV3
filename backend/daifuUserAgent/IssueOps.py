@@ -303,7 +303,7 @@ class IssueService:
                         "generated_by_llm": True,
                         "processing_time": llm_generated_issue["processing_time"],
                         "tokens_used": llm_generated_issue["tokens_used"],
-                        "llm_model": "deepseek/deepseek-r1-0528",
+                        "llm_model": "openrouter/sonoma-sky-alpha",
                         "generated_at": utc_now().isoformat(),
                     },
                 },
@@ -524,7 +524,7 @@ class IssueService:
             start_time = time.time()
             llm_response = await LLMService.generate_response(
                 prompt=prompt,
-                model="deepseek/deepseek-r1-0528",  # Use the same model as chat
+                model="openrouter/sonoma-sky-alpha",  # Use the same model as chat
                 temperature=0.3,  # Lower temperature for more focused issue generation
                 max_tokens=2000,
                 timeout=60,
