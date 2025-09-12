@@ -48,10 +48,10 @@ CRITICAL ISSUES:
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from models import ChatMessage, ChatSession, User
 from sqlalchemy.orm import Session
 
-from backend.models import ChatMessage, ChatSession, User
-from backend.utils import utc_now
+from utils import utc_now
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -382,7 +382,7 @@ class ChatOps:
     def _get_context_cards_content(self, card_ids: List[str], user_id: int) -> str:
         """Get content from context cards"""
         try:
-            from backend.models import ContextCard
+            from models import ContextCard
 
             cards = (
                 self.db.query(ContextCard)
@@ -434,8 +434,9 @@ class ChatOps:
         try:
             from datetime import timedelta
 
-            from backend.models import Repository
-            from backend.utils import utc_now
+            from models import Repository
+
+            from utils import utc_now
 
             from .llm_service import LLMService
 

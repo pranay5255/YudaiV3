@@ -63,10 +63,10 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from models import CreateUserIssueRequest, User, UserIssue
 from sqlalchemy.orm import Session
 
-from backend.models import CreateUserIssueRequest, User, UserIssue
-from backend.utils import utc_now
+from utils import utc_now
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -257,7 +257,7 @@ class IssueService:
             )
 
             # Create user issue in database
-            from backend.models import CreateUserIssueRequest
+            from models import CreateUserIssueRequest
 
             issue_request = CreateUserIssueRequest(
                 title=llm_generated_issue["title"],
@@ -477,7 +477,7 @@ class IssueService:
             # Retrieve relevant file contexts via embeddings using last few messages + description
             embedding_contexts: List[str] = []
             try:
-                from backend.models import ChatSession as _ChatSession
+                from models import ChatSession as _ChatSession
 
                 from .llm_service import LLMService as _LLM
 
@@ -596,7 +596,7 @@ class IssueService:
     ) -> List[Dict[str, Any]]:
         """Get context cards for a session"""
         try:
-            from backend.models import ContextCard
+            from models import ContextCard
 
             cards = (
                 db.query(ContextCard)

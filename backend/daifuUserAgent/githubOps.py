@@ -28,10 +28,10 @@ from typing import Any, Dict, List, Optional
 
 from auth.github_oauth import get_github_api
 from ghapi.all import GhApi
+from models import AuthToken
 from sqlalchemy.orm import Session
 
-from backend.models import AuthToken
-from backend.utils import utc_now
+from utils import utc_now
 
 # Configure logging
 logger = logging.getLogger(__name__)
