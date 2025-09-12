@@ -1,5 +1,5 @@
 {
-    "deepseek/deepseek-r1-0528:free": {
+    "openrouter/sonoma-sky-alpha:free": {
       "max_tokens": 32768,
       "max_input_tokens": 32768,
       "max_output_tokens": 32768,
