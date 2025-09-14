@@ -10,8 +10,8 @@ TODO: Complete Implementation Tasks
 
 CRITICAL ISSUES:
 1. LLM Service Integration
-   - The chat endpoint calls LLMService.generate_response_with_history() which doesn't exist
-   - Need to implement or import proper LLM service integration
+   - Chat endpoint uses ChatOps.process_chat_message() with LLMService.generate_response_with_stored_context()
+   - Issue endpoints use IssueOps.create_issue_with_context() with LLMService.generate_response()
    - Add proper error handling for LLM service failures
    - Implement streaming responses for real-time chat
 
@@ -98,7 +98,6 @@ from models import (
     CreateContextCardRequest,
     CreateSessionRequest,
     FileEmbedding,
-    FileEmbeddingResponse,
     FileItem,
     FileItemResponse,
     FileTreeResponse,
@@ -106,9 +105,9 @@ from models import (
     RepositoryRequest,
     SessionContextResponse,
     SessionResponse,
-    UpdateFileEmbeddingRequest,
     UpdateSessionRequest,
     User,
+    UserIssueResponse,
 )
 from pgvector.sqlalchemy import Vector
 from repo_processorGitIngest.scraper_script import (
@@ -134,7 +133,7 @@ def create_standardized_error(
     error_code: str,
     message: str,
     detail: Optional[str] = None,
-    path: Optional[str] = None
+    path: Optional[str] = None,
 ) -> HTTPException:
     """
     Create a standardized HTTPException with consistent error format.
@@ -146,18 +145,16 @@ def create_standardized_error(
         error_code=error_code,
         timestamp=utc_now(),
         path=path,
-        request_id=str(uuid.uuid4())
+        request_id=str(uuid.uuid4()),
     )
 
-    return HTTPException(
-        status_code=status_code,
-        detail=error_response.model_dump()
-    )
+    return HTTPException(status_code=status_code, detail=error_response.model_dump())
 
 
 # ============================================================================
 # GITHUB ENDPOINTS (ported under DAIFU router)
 # ============================================================================
+
 
 @router.get("/github/repositories", response_model=List[Dict[str, Any]])
 async def daifu_github_list_user_repositories(
@@ -404,7 +401,9 @@ async def get_session_context(
         from .session_service import SessionService
 
         # Ensure session exists and belongs to user
-        db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+        db_session = SessionService.ensure_owned_session(
+            db, current_user.id, session_id
+        )
 
         # Get complete session context
         return SessionService.get_context(db, db_session)
@@ -497,7 +496,9 @@ async def add_chat_message(
         )
 
 
-@router.post("/sessions/{session_id}/messages/bulk", response_model=List[ChatMessageResponse])
+@router.post(
+    "/sessions/{session_id}/messages/bulk", response_model=List[ChatMessageResponse]
+)
 async def add_bulk_chat_messages(
     session_id: str,
     messages: List[dict],
@@ -531,7 +532,9 @@ async def add_bulk_chat_messages(
             # Create new message
             message = ChatMessage(
                 session_id=db_session.id,
-                message_id=message_data.get("message_id", f"msg_{uuid.uuid4().hex[:8]}"),
+                message_id=message_data.get(
+                    "message_id", f"msg_{uuid.uuid4().hex[:8]}"
+                ),
                 message_text=message_data["message_text"],
                 sender_type=message_data["sender_type"],
                 role=message_data["role"],
@@ -627,9 +630,7 @@ async def export_session(
         )
 
         context_cards = (
-            db.query(ContextCard)
-            .filter(ContextCard.session_id == db_session.id)
-            .all()
+            db.query(ContextCard).filter(ContextCard.session_id == db_session.id).all()
         )
 
         file_embeddings = (
@@ -653,9 +654,15 @@ async def export_session(
                 "is_active": db_session.is_active,
                 "total_messages": db_session.total_messages,
                 "total_tokens": db_session.total_tokens,
-                "created_at": db_session.created_at.isoformat() if db_session.created_at else None,
-                "updated_at": db_session.updated_at.isoformat() if db_session.updated_at else None,
-                "last_activity": db_session.last_activity.isoformat() if db_session.last_activity else None,
+                "created_at": db_session.created_at.isoformat()
+                if db_session.created_at
+                else None,
+                "updated_at": db_session.updated_at.isoformat()
+                if db_session.updated_at
+                else None,
+                "last_activity": db_session.last_activity.isoformat()
+                if db_session.last_activity
+                else None,
             },
             "messages": [
                 {
@@ -670,8 +677,12 @@ async def export_session(
                     "context_cards": msg.context_cards,
                     "referenced_files": msg.referenced_files,
                     "error_message": msg.error_message,
-                    "created_at": msg.created_at.isoformat() if msg.created_at else None,
-                    "updated_at": msg.updated_at.isoformat() if msg.updated_at else None,
+                    "created_at": msg.created_at.isoformat()
+                    if msg.created_at
+                    else None,
+                    "updated_at": msg.updated_at.isoformat()
+                    if msg.updated_at
+                    else None,
                 }
                 for msg in messages
             ],
@@ -683,8 +694,12 @@ async def export_session(
                     "source": card.source,
                     "tokens": card.tokens,
                     "is_active": card.is_active,
-                    "created_at": card.created_at.isoformat() if card.created_at else None,
-                    "updated_at": card.updated_at.isoformat() if card.updated_at else None,
+                    "created_at": card.created_at.isoformat()
+                    if card.created_at
+                    else None,
+                    "updated_at": card.updated_at.isoformat()
+                    if card.updated_at
+                    else None,
                 }
                 for card in context_cards
             ],
@@ -713,168 +728,6 @@ async def export_session(
         )
 
 
-@router.post("/sessions/import", response_model=SessionResponse, deprecated=True)
-async def import_session(
-    import_data: dict,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Deprecated: importing sessions is no longer supported."""
-    raise HTTPException(
-        status_code=status.HTTP_410_GONE,
-        detail={
-            "message": "Deprecated: session import is no longer supported.",
-            "error_code": "ENDPOINT_DEPRECATED",
-            "path": "/daifu/sessions/import",
-        },
-    )
-    try:  # Unreachable legacy block retained for reference
-        # Validate import data structure
-        if not import_data.get("session"):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid import data: missing session information"
-            )
-
-        session_data = import_data["session"]
-
-        # Generate new session ID to avoid conflicts
-        new_session_id = f"imported_{uuid.uuid4().hex[:8]}"
-
-        # Create new session
-        db_session = ChatSession(
-            user_id=current_user.id,
-            session_id=new_session_id,
-            title=session_data.get("title", f"Imported Session - {new_session_id}"),
-            description=session_data.get("description"),
-            repo_owner=session_data.get("repo_owner"),
-            repo_name=session_data.get("repo_name"),
-            repo_branch=session_data.get("repo_branch", "main"),
-            repo_context=session_data.get("repo_context"),
-            is_active=session_data.get("is_active", True),
-            total_messages=0,  # Will be updated as we import
-            total_tokens=0,    # Will be updated as we import
-            last_activity=utc_now(),
-        )
-
-        db.add(db_session)
-        db.flush()  # Get the session ID
-
-        # Import messages
-        total_messages = 0
-        total_tokens = 0
-
-        if import_data.get("messages"):
-            for msg_data in import_data["messages"]:
-                message = ChatMessage(
-                    session_id=db_session.id,
-                    message_id=msg_data.get("message_id", f"msg_{uuid.uuid4().hex[:8]}"),
-                    message_text=msg_data["message_text"],
-                    sender_type=msg_data["sender_type"],
-                    role=msg_data["role"],
-                    is_code=msg_data.get("is_code", False),
-                    tokens=msg_data.get("tokens", 0),
-                    model_used=msg_data.get("model_used"),
-                    processing_time=msg_data.get("processing_time"),
-                    context_cards=msg_data.get("context_cards"),
-                    referenced_files=msg_data.get("referenced_files"),
-                    error_message=msg_data.get("error_message"),
-                )
-                db.add(message)
-                total_messages += 1
-                total_tokens += message.tokens
-
-        # Import context cards
-        if import_data.get("context_cards"):
-            for card_data in import_data["context_cards"]:
-                context_card = ContextCard(
-                    user_id=current_user.id,
-                    session_id=db_session.id,
-                    title=card_data["title"],
-                    description=card_data["description"],
-                    content=card_data["content"],
-                    source=card_data["source"],
-                    tokens=card_data.get("tokens", 0),
-                    is_active=card_data.get("is_active", True),
-                )
-                db.add(context_card)
-
-        # Import file embeddings (without embeddings vector for simplicity)
-        if import_data.get("file_embeddings"):
-            for fe_data in import_data["file_embeddings"]:
-                file_embedding = FileEmbedding(
-                    session_id=db_session.id,
-                    repository_id=None,  # Will need to be set if repository exists
-                    file_path=fe_data["file_path"],
-                    file_name=fe_data["file_name"],
-                    file_type=fe_data["file_type"],
-                    file_content=fe_data.get("file_content"),
-                    chunk_index=fe_data.get("chunk_index", 0),
-                    chunk_text=fe_data["chunk_text"],
-                    tokens=fe_data.get("tokens", 0),
-                    file_metadata=fe_data.get("file_metadata"),
-                    embedding=None,  # Embeddings will need to be regenerated
-                )
-                db.add(file_embedding)
-
-        # Update session statistics
-        db_session.total_messages = total_messages
-        db_session.total_tokens = total_tokens
-
-        db.commit()
-        db.refresh(db_session)
-
-        return SessionResponse(
-            id=db_session.id,
-            session_id=db_session.session_id,
-            title=db_session.title,
-            description=db_session.description,
-            repo_owner=db_session.repo_owner,
-            repo_name=db_session.repo_name,
-            repo_branch=db_session.repo_branch,
-            repo_context=db_session.repo_context,
-            is_active=db_session.is_active,
-            total_messages=db_session.total_messages,
-            total_tokens=db_session.total_tokens,
-            created_at=db_session.created_at,
-            updated_at=db_session.updated_at,
-            last_activity=db_session.last_activity,
-        )
-
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to import session: {str(e)}",
-        )
-
-
-@router.get("/sessions/{session_id}/stats", response_model=dict)
-async def get_session_statistics(
-    session_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Get comprehensive statistics for a session.
-    This is a HIGH priority endpoint for session analytics.
-    """
-    try:
-        from .session_service import SessionService
-
-        # Ensure session exists and belongs to user
-        db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
-
-        # Get session statistics
-        return SessionService.get_session_statistics(db, db_session)
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get session statistics: {str(e)}",
-        )
-
-
 @router.get("/sessions/{session_id}/messages", response_model=List[ChatMessageResponse])
 async def get_chat_messages(
     session_id: str,
@@ -890,7 +743,9 @@ async def get_chat_messages(
         from .session_service import SessionService
 
         # Ensure session exists and belongs to user
-        db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+        db_session = SessionService.ensure_owned_session(
+            db, current_user.id, session_id
+        )
 
         # Get messages for this session
         return SessionService.get_session_messages(db, db_session.id, limit)
@@ -1028,156 +883,6 @@ async def get_context_cards(
 # MEDIUM PRIORITY ENDPOINTS
 
 
-@router.delete("/sessions/{session_id}/context-cards/{card_id}")
-async def delete_context_card(
-    session_id: str,
-    card_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Delete a context card from a session.
-    This is a MEDIUM priority endpoint for context cleanup.
-    """
-    try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
-        )
-
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
-
-        # Find and verify context card belongs to this session and user
-        context_card = (
-            db.query(ContextCard)
-            .filter(
-                ContextCard.id == card_id,
-                ContextCard.session_id == db_session.id,
-                ContextCard.user_id == current_user.id,
-            )
-            .first()
-        )
-
-        if not context_card:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Context card not found"
-            )
-
-        # Soft delete by setting is_active to False
-        context_card.is_active = False
-        db.commit()
-
-        return {"success": True, "message": "Context card deleted successfully"}
-
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete context card: {str(e)}",
-        )
-
-
-@router.put("/sessions/{session_id}/file-deps/{file_id}", response_model=FileEmbeddingResponse, deprecated=True)
-async def update_file_dependency(
-    session_id: str,
-    file_id: int,
-    request: UpdateFileEmbeddingRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Deprecated: client-side updates to file embeddings are not supported."""
-    raise HTTPException(
-        status_code=status.HTTP_410_GONE,
-        detail={
-            "message": "Deprecated: file embedding updates are not supported from client.",
-            "error_code": "ENDPOINT_DEPRECATED",
-            "path": f"/daifu/sessions/{session_id}/file-deps/{file_id}",
-        },
-    )
-    try:  # Unreachable legacy block retained for reference
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
-        )
-
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
-
-        # Find and verify file embedding belongs to this session
-        file_embedding = (
-            db.query(FileEmbedding)
-            .filter(
-                FileEmbedding.id == file_id,
-                FileEmbedding.session_id == db_session.id,
-            )
-            .first()
-        )
-
-        if not file_embedding:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="File dependency not found"
-            )
-
-        # Update fields if provided
-        if request.file_path is not None:
-            file_embedding.file_path = request.file_path
-        if request.file_name is not None:
-            file_embedding.file_name = request.file_name
-        if request.file_type is not None:
-            file_embedding.file_type = request.file_type
-        if request.file_content is not None:
-            file_embedding.file_content = request.file_content
-        if request.chunk_text is not None:
-            file_embedding.chunk_text = request.chunk_text
-        if request.chunk_index is not None:
-            file_embedding.chunk_index = request.chunk_index
-        if request.tokens is not None:
-            file_embedding.tokens = request.tokens
-        if request.file_metadata is not None:
-            file_embedding.file_metadata = request.file_metadata
-
-        # Update timestamp
-        file_embedding.updated_at = utc_now()
-
-        db.commit()
-        db.refresh(file_embedding)
-
-        return FileEmbeddingResponse(
-            id=file_embedding.id,
-            session_id=file_embedding.session_id,
-            repository_id=file_embedding.repository_id,
-            file_path=file_embedding.file_path,
-            file_name=file_embedding.file_name,
-            file_type=file_embedding.file_type,
-            chunk_index=file_embedding.chunk_index,
-            tokens=file_embedding.tokens,
-            file_metadata=file_embedding.file_metadata,
-            created_at=file_embedding.created_at,
-        )
-
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update file dependency: {str(e)}",
-        )
-
-
 @router.get(
     "/sessions/{session_id}/file-deps/session",
     response_model=List[FileItemResponse],
@@ -1194,7 +899,9 @@ async def get_file_dependencies_for_session(
         # from .session_service import SessionService
 
         # Ensure session exists and belongs to user
-        db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+        db_session = SessionService.ensure_owned_session(
+            db, current_user.id, session_id
+        )
 
         # Get file items for this session
         file_items = (
@@ -1219,7 +926,7 @@ async def get_file_dependencies_for_session(
                 file_name=item.file_name,
                 file_path=item.file_path,
                 file_type=item.file_type,
-                content_summary=item.content_summary
+                content_summary=item.content_summary,
             )
             for item in file_items
         ]
@@ -1281,18 +988,22 @@ async def chat_in_session(
 
         # Prepare repository information for ChatOps
         repository_info = None
-        if request.repository and request.repository.get("owner") and request.repository.get("name"):
+        if (
+            request.repository
+            and request.repository.get("owner")
+            and request.repository.get("name")
+        ):
             repository_info = {
                 "owner": request.repository["owner"],
                 "name": request.repository["name"],
-                "branch": request.repository.get("branch", "main")
+                "branch": request.repository.get("branch", "main"),
             }
         elif db_session.repo_owner and db_session.repo_name:
             # Fallback to session repository info
             repository_info = {
                 "owner": db_session.repo_owner,
                 "name": db_session.repo_name,
-                "branch": "main"
+                "branch": "main",
             }
 
         # Process chat message using ChatOps
@@ -1301,7 +1012,7 @@ async def chat_in_session(
             user_id=current_user.id,
             message_text=request.message.message_text,
             context_cards=request.context_cards or [],
-            repository=repository_info
+            repository=repository_info,
         )
 
         # Get updated conversation history for the response
@@ -1539,7 +1250,9 @@ def _get_or_create_repository(
     return repository
 
 
-@router.post("/sessions/{session_id}/extract", response_model=FileTreeResponse, deprecated=True)
+@router.post(
+    "/sessions/{session_id}/extract", response_model=FileTreeResponse, deprecated=True
+)
 async def extract_file_dependencies_for_session(
     session_id: str,
     request: RepositoryRequest,
@@ -1622,7 +1335,9 @@ async def extract_file_dependencies_for_session(
                 repo_metadata = await github_ops.fetch_repository_info_detailed(
                     owner=repo_owner, repo=repo_name, user_id=current_user.id
                 )
-                print(f"Fetched repository metadata: {repo_metadata.get('name', 'unknown')}")
+                print(
+                    f"Fetched repository metadata: {repo_metadata.get('name', 'unknown')}"
+                )
             except Exception as e:
                 print(f"Failed to fetch repository metadata from GitHub API: {e}")
                 repo_metadata = {}
@@ -1662,7 +1377,9 @@ async def extract_file_dependencies_for_session(
             saved_file_items, saved_embeddings = _save_file_items_and_embeddings(
                 db, repository.id, file_tree, db_session.id
             )
-            print(f"Saved {len(saved_file_items)} file items and {len(saved_embeddings)} embeddings")
+            print(
+                f"Saved {len(saved_file_items)} file items and {len(saved_embeddings)} embeddings"
+            )
 
         except Exception as db_error:
             print(f"Database error during save: {db_error}")
@@ -1793,7 +1510,7 @@ def _save_file_analysis_to_db(
     print(f"  - Total tokens: {total_tokens}")
     print(f"  - Max file size: {max_file_size}")
     print(f"  - Files saved as embeddings: {len(processed_data.get('files', []))}")
-    
+
     # No database storage - just logging
     return None
 
@@ -1829,7 +1546,7 @@ def _save_file_items_and_embeddings(
                 file_name=item_data.get("file_name"),
                 file_path=item_data.get("file_path"),
                 file_type=item_data.get("file_type"),
-                content_summary=item_data.get("content_summary")
+                content_summary=item_data.get("content_summary"),
             )
             db.add(file_item)
             db.flush()  # Get the ID
@@ -1879,7 +1596,7 @@ def _create_embeddings_for_file_item(
     try:
         chunker = create_file_chunker()
         chunk_data = chunker.chunk_file(file_path, content)
-        chunks = [chunk['chunk_text'] for chunk in chunk_data]
+        chunks = [chunk["chunk_text"] for chunk in chunk_data]
 
         for i, chunk in enumerate(chunks):
             # Generate embedding for chunk
@@ -1894,7 +1611,7 @@ def _create_embeddings_for_file_item(
                 chunk_index=i,
                 chunk_text=chunk,
                 embedding=Vector(embedding_vector),
-                tokens=_estimate_tokens_for_file(file_path, len(chunk))
+                tokens=_estimate_tokens_for_file(file_path, len(chunk)),
             )
             db.add(embedding)
             saved_embeddings.append(embedding)
@@ -1928,17 +1645,23 @@ async def _index_repository_for_session_background(
         # Verify the session exists and is owned by the user
         chat_session = (
             db.query(ChatSession)
-            .filter(ChatSession.session_id == session_uuid, ChatSession.user_id == user_id)
+            .filter(
+                ChatSession.session_id == session_uuid, ChatSession.user_id == user_id
+            )
             .first()
         )
         if not chat_session:
-            logger.warning(f"[Index] Session not found or not owned by user: {session_uuid}")
+            logger.warning(
+                f"[Index] Session not found or not owned by user: {session_uuid}"
+            )
             return
 
         repo_url = f"https://github.com/{repo_owner}/{repo_name}"
 
         # Extract repository content via GitIngest
-        raw_repo = await extract_repository_data(repo_url=repo_url, max_file_size=max_file_size)
+        raw_repo = await extract_repository_data(
+            repo_url=repo_url, max_file_size=max_file_size
+        )
         if isinstance(raw_repo, dict) and raw_repo.get("error"):
             logger.error(f"[Index] GitIngest error: {raw_repo['error']}")
             return
@@ -1949,7 +1672,9 @@ async def _index_repository_for_session_background(
         # Fetch repo metadata (best effort)
         try:
             gh = GitHubOps(db)
-            meta = await gh.fetch_repository_info_detailed(repo_owner, repo_name, user_id)
+            meta = await gh.fetch_repository_info_detailed(
+                repo_owner, repo_name, user_id
+            )
         except Exception as e:
             logger.warning(f"[Index] Failed to fetch repo metadata: {e}")
             meta = {}
@@ -1974,8 +1699,12 @@ async def _index_repository_for_session_background(
         )
 
         # Create content lookup and persist
-        content_map = {f.get("path"): f.get("content", "") for f in processed.get("files", [])}
-        _save_file_items_and_embeddings(db, repository.id, tree, chat_session.id, content_map)
+        content_map = {
+            f.get("path"): f.get("content", "") for f in processed.get("files", [])
+        }
+        _save_file_items_and_embeddings(
+            db, repository.id, tree, chat_session.id, content_map
+        )
         db.commit()
 
         logger.info(f"[Index] Completed indexing for session {session_uuid}")
@@ -2029,7 +1758,9 @@ async def start_solve_session_for_session(
 
         # Validate required parameters
         if not repo_url:
-            repo_url = f"https://github.com/{db_session.repo_owner}/{db_session.repo_name}"
+            repo_url = (
+                f"https://github.com/{db_session.repo_owner}/{db_session.repo_name}"
+            )
 
         # Import solver adapter
         from solver.ai_solver import AISolverAdapter
@@ -2066,7 +1797,9 @@ async def start_solve_session_for_session(
         )
 
 
-@router.get("/sessions/{session_id}/solve/sessions/{solve_session_id}", response_model=dict)
+@router.get(
+    "/sessions/{session_id}/solve/sessions/{solve_session_id}", response_model=dict
+)
 async def get_solve_session_for_session(
     session_id: str,
     solve_session_id: int,
@@ -2135,7 +1868,8 @@ async def get_solve_session_for_session(
 
 
 @router.get(
-    "/sessions/{session_id}/solve/sessions/{solve_session_id}/stats", response_model=dict
+    "/sessions/{session_id}/solve/sessions/{solve_session_id}/stats",
+    response_model=dict,
 )
 async def get_solve_session_stats_for_session(
     session_id: str,
@@ -2202,7 +1936,8 @@ async def get_solve_session_stats_for_session(
 
 
 @router.post(
-    "/sessions/{session_id}/solve/sessions/{solve_session_id}/cancel", response_model=dict
+    "/sessions/{session_id}/solve/sessions/{solve_session_id}/cancel",
+    response_model=dict,
 )
 async def cancel_solve_session_for_session(
     session_id: str,
@@ -2436,7 +2171,9 @@ async def create_issue_with_context_for_session(
         from .session_service import SessionService
 
         # Ensure session exists and belongs to user
-        db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+        db_session = SessionService.ensure_owned_session(
+            db, current_user.id, session_id
+        )
 
         # Use consolidated issue creation service
         issue_service = IssueOpsService(db)
@@ -2451,7 +2188,7 @@ async def create_issue_with_context_for_session(
             repo_owner=db_session.repo_owner,
             repo_name=db_session.repo_name,
             priority=request.get("priority", "medium"),
-            create_github_issue=False  # We'll create GitHub issue separately in the modal
+            create_github_issue=False,  # We'll create GitHub issue separately in the modal
         )
 
         return result
@@ -2465,7 +2202,7 @@ async def create_issue_with_context_for_session(
         )
 
 
-@router.get("/sessions/{session_id}/issues", response_model=list)
+@router.get("/sessions/{session_id}/issues", response_model=List[UserIssueResponse])
 async def get_issues_for_session(
     session_id: str,
     status_filter: Optional[str] = Query(None, alias="status"),
@@ -2548,7 +2285,9 @@ async def get_issues_for_session(
         )
 
 
-@router.get("/sessions/{session_id}/issues/{issue_id}", response_model=dict)
+@router.get(
+    "/sessions/{session_id}/issues/{issue_id}", response_model=UserIssueResponse
+)
 async def get_issue_for_session(
     session_id: str,
     issue_id: str,
@@ -2628,7 +2367,9 @@ async def get_issue_for_session(
         )
 
 
-@router.put("/sessions/{session_id}/issues/{issue_id}/status", response_model=dict)
+@router.put(
+    "/sessions/{session_id}/issues/{issue_id}/status", response_model=UserIssueResponse
+)
 async def update_issue_status_for_session(
     session_id: str,
     issue_id: str,
@@ -2712,7 +2453,9 @@ async def update_issue_status_for_session(
         )
 
 
-@router.post("/sessions/{session_id}/issues/{issue_id}/create-github-issue", response_model=dict)
+@router.post(
+    "/sessions/{session_id}/issues/{issue_id}/create-github-issue", response_model=dict
+)
 async def create_github_issue_from_user_issue_for_session(
     session_id: str,
     issue_id: str,
