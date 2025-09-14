@@ -1200,6 +1200,10 @@ class CreateSessionRequest(BaseModel):
     repo_branch: Optional[str] = Field("main", max_length=255)
     title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = Field(None)
+    # When true, trigger background code indexing and embeddings creation
+    index_codebase: Optional[bool] = Field(default=False)
+    # Optional max file size (in bytes) for repository extraction
+    index_max_file_size: Optional[int] = Field(default=None, ge=1)
 
 
 class UpdateSessionRequest(BaseModel):
