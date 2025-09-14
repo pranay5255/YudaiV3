@@ -3,13 +3,12 @@ Centralized LLM Service for DAifu Agent
 Eliminates duplication and standardizes LLM calls across chat endpoints
 """
 
-import json
 import logging
 import os
 import time
-from typing import Generator, List, Tuple
+from typing import List, Tuple
 
-import requests
+import httpx
 from fastapi import HTTPException, status
 from models import FileEmbedding
 from pgvector.sqlalchemy import Vector
@@ -32,7 +31,7 @@ class LLMService:
 
     # Class variable to cache the model
     _embedding_model = None
-    
+
     @staticmethod
     def get_api_key() -> str:
         """Get OpenRouter API key from environment"""
@@ -45,271 +44,111 @@ class LLMService:
         return api_key
 
     @staticmethod
+    def get_api_url() -> str:
+        """Resolve the base URL for chat completions (configurable)."""
+        return os.getenv(
+            "OPENROUTER_API_URL",
+            "https://openrouter.ai/api/v1/chat/completions",
+        )
+
+    @staticmethod
     def get_embedding_model() -> SentenceTransformer:
         """Get or load the embedding model (cached for performance)"""
         if LLMService._embedding_model is None:
-            LLMService._embedding_model = SentenceTransformer(LLMService.EMBEDDING_MODEL)
-        return LLMService._embedding_model
-    
-    @staticmethod
-    async def build_prompt_from_history(
-        db: Session,
-        user_id: int,
-        repo_owner: str = None,
-        repo_name: str = None,
-        repo_branch: str = None,
-        conversation_history: List[Tuple[str, str]] = None,
-        github_data: tuple = None,
-        file_contexts: List[str] = None,
-        fetch_limit: int = 5
-    ) -> str:
-        """Build prompt from conversation history with GitHub context"""
-        from .prompt import build_daifu_prompt, build_daifu_prompt_with_github_context
-
-        # Use new GitHub context fetching if repository info is available
-        if repo_owner and repo_name and repo_branch:
-            return await build_daifu_prompt_with_github_context(
-                db=db,
-                user_id=user_id,
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-                repo_branch=repo_branch,
-                conversation=conversation_history or [],
-                file_contexts=file_contexts,
-                fetch_limit=fetch_limit,
-                timeout_seconds=8  # Shorter timeout for LLM service
+            LLMService._embedding_model = SentenceTransformer(
+                LLMService.EMBEDDING_MODEL
             )
-        # Fallback to legacy method if github_data is provided
-        elif github_data:
-            from .prompt import build_daifu_prompt
-            repo_details, commits, issues, pulls = github_data
-            return build_daifu_prompt(repo_details, commits, issues, pulls, conversation_history or [], file_contexts)
-        # Fallback to basic prompt without GitHub context
-        else:
-            from .prompt import build_daifu_prompt
-            repo_details = {"full_name": "Repository", "description": "", "default_branch": "main",
-                           "language": "", "topics": [], "stargazers_count": 0,
-                           "forks_count": 0, "open_issues_count": 0, "html_url": ""}
-            commits = []
-            issues = []
-            pulls = []
-            return build_daifu_prompt(repo_details, commits, issues, pulls, conversation_history or [], file_contexts)
-    
+        return LLMService._embedding_model
+
     @staticmethod
     async def generate_response(
         prompt: str,
         model: str = None,
         temperature: float = None,
         max_tokens: int = None,
-        timeout: int = None
+        timeout: int = None,
     ) -> str:
         """
         Generate response from LLM with standardized configuration
-        
+
         Args:
             prompt: The prompt to send to the LLM
             model: Model to use (defaults to DEFAULT_MODEL)
             temperature: Temperature for generation (defaults to DEFAULT_TEMPERATURE)
             max_tokens: Maximum tokens to generate (defaults to DEFAULT_MAX_TOKENS)
             timeout: Request timeout in seconds (defaults to DEFAULT_TIMEOUT)
-            
+
         Returns:
             Generated response text
-            
+
         Raises:
             HTTPException: For API errors or configuration issues
         """
         start_time = time.time()
-        
+
         # Use defaults if not provided
         model = model or LLMService.DEFAULT_MODEL
         temperature = temperature or LLMService.DEFAULT_TEMPERATURE
         max_tokens = max_tokens or LLMService.DEFAULT_MAX_TOKENS
         timeout = timeout or LLMService.DEFAULT_TIMEOUT
-        
+
         try:
             api_key = LLMService.get_api_key()
-            
+            url = LLMService.get_api_url()
+
             headers = {
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             }
-            
+
             body = {
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": temperature,
                 "max_tokens": max_tokens,
             }
-            
-            resp = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=body,
-                timeout=timeout,
-            )
-            resp.raise_for_status()
-            
-            response_data = resp.json()
-            reply = response_data["choices"][0]["message"]["content"].strip()
-            
+
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(url, headers=headers, json=body)
+                resp.raise_for_status()
+
+                response_data = resp.json()
+                reply = response_data["choices"][0]["message"]["content"].strip()
+
             processing_time = (time.time() - start_time) * 1000
-            print(f"LLM response generated in {processing_time:.2f}ms")
-            
+            logger.info(f"LLM response generated in {processing_time:.2f}ms")
             return reply
-            
-        except requests.RequestException as e:
+
+        except httpx.TimeoutException as e:
             processing_time = (time.time() - start_time) * 1000
-            print(f"LLM request failed after {processing_time:.2f}ms: {str(e)}")
+            logger.error(f"LLM request timeout after {processing_time:.2f}ms: {e}")
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"LLM service unavailable: {str(e)}",
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="LLM request timed out",
+            )
+        except httpx.HTTPStatusError as e:
+            processing_time = (time.time() - start_time) * 1000
+            content = e.response.text if e.response is not None else str(e)
+            logger.error(
+                f"LLM HTTP error after {processing_time:.2f}ms: {e.response.status_code if e.response else 'unknown'} {content}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"LLM HTTP error: {content}",
             )
         except Exception as e:
             processing_time = (time.time() - start_time) * 1000
-            print(f"LLM processing failed after {processing_time:.2f}ms: {str(e)}")
+            logger.exception(
+                f"LLM processing failed after {processing_time:.2f}ms: {str(e)}"
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"LLM call failed: {str(e)}",
             )
-    
-    @staticmethod
-    def stream_response(
-        prompt: str,
-        model: str = None,
-        temperature: float = None,
-        max_tokens: int = None,
-        timeout: int = None,
-    ) -> Generator[str, None, None]:
-        """
-        Stream response tokens from OpenRouter as they arrive.
-
-        Yields incremental content strings. Consumers can concatenate them
-        to form the full response. Other auth and DB operations remain unchanged.
-
-        Args:
-            prompt: The prompt to send to the LLM
-            model: Model to use (defaults to DEFAULT_MODEL)
-            temperature: Temperature for generation
-            max_tokens: Maximum tokens to generate
-            timeout: Request timeout in seconds
-
-        Yields:
-            str: Next piece of content from the streaming response
-        """
-        # Use defaults if not provided
-        model = model or LLMService.DEFAULT_MODEL
-        temperature = temperature if temperature is not None else LLMService.DEFAULT_TEMPERATURE
-        max_tokens = max_tokens or LLMService.DEFAULT_MAX_TOKENS
-        timeout = timeout or LLMService.DEFAULT_TIMEOUT
-
-        api_key = LLMService.get_api_key()
-
-        url = "https://openrouter.ai/api/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": True,
-        }
-
-        buffer = ""
-        try:
-            with requests.post(url, headers=headers, json=payload, stream=True, timeout=timeout) as r:
-                r.raise_for_status()
-                for chunk in r.iter_content(chunk_size=1024, decode_unicode=True):
-                    if not chunk:
-                        continue
-                    buffer += chunk
-                    while True:
-                        try:
-                            line_end = buffer.find("\n")
-                            if line_end == -1:
-                                break
-
-                            line = buffer[:line_end].strip()
-                            buffer = buffer[line_end + 1 :]
-
-                            if line.startswith("data: "):
-                                data = line[6:]
-                                if data == "[DONE]":
-                                    return
-                                try:
-                                    data_obj = json.loads(data)
-                                    delta = data_obj.get("choices", [{}])[0].get("delta", {})
-                                    content = delta.get("content")
-                                    if content:
-                                        yield content
-                                except json.JSONDecodeError:
-                                    # Ignore partial/incomplete JSON lines
-                                    pass
-                        except Exception:
-                            # Any parsing exceptions should not crash the stream loop
-                            break
-        except requests.RequestException as e:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"LLM streaming unavailable: {str(e)}",
-            )
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"LLM streaming failed: {str(e)}",
-            )
-
-    @staticmethod
-    async def stream_response_with_history(
-        db: Session,
-        user_id: int,
-        repo_owner: str = None,
-        repo_name: str = None,
-        repo_branch: str = None,
-        conversation_history: List[Tuple[str, str]] = None,
-        github_data: tuple = None,
-        file_contexts: List[str] = None,
-        model: str = None,
-        temperature: float = None,
-        max_tokens: int = None,
-        timeout: int = None,
-        fetch_limit: int = 5,
-    ) -> Generator[str, None, None]:
-        """
-        Stream a response using GitHub context prompt construction,
-        yielding content chunks from OpenRouter.
-        """
-        prompt = await LLMService.build_prompt_from_history(
-            db=db,
-            user_id=user_id,
-            repo_owner=repo_owner,
-            repo_name=repo_name,
-            repo_branch=repo_branch,
-            conversation_history=conversation_history,
-            github_data=github_data,
-            file_contexts=file_contexts,
-            fetch_limit=fetch_limit,
-        )
-        # Return the generator directly so caller can iterate
-        return LLMService.stream_response(
-            prompt=prompt,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
-        )
 
     @staticmethod
     async def get_relevant_file_contexts(
-        db: Session,
-        session_id: int,
-        query_text: str,
-        top_k: int = 5,
-        model: str = None
+        db: Session, session_id: int, query_text: str, top_k: int = 5, model: str = None
     ) -> List[str]:
         """
         Retrieve relevant file chunk texts using embedding similarity search.
@@ -326,7 +165,7 @@ class LLMService:
         """
         # Generate embedding for query
         query_embedding = LLMService.embed_text(query_text)
-        
+
         # Query for top similar embeddings
         stmt = (
             select(FileEmbedding.chunk_text)
@@ -334,7 +173,7 @@ class LLMService:
             .order_by(FileEmbedding.embedding.cosine_distance(Vector(query_embedding)))
             .limit(top_k)
         )
-        
+
         results = db.execute(stmt).scalars().all()
         return results
 
@@ -348,7 +187,7 @@ class LLMService:
         model: str = None,
         temperature: float = None,
         max_tokens: int = None,
-        timeout: int = None
+        timeout: int = None,
     ) -> str:
         """
         Generate response using pre-fetched and stored GitHub context
@@ -368,13 +207,11 @@ class LLMService:
             Generated response text
         """
         try:
-            from .prompt import build_daifu_prompt_from_stored_context
-
-            # Build prompt using stored GitHub context
-            prompt = build_daifu_prompt_from_stored_context(
+            # Build prompt using centralized prompt building
+            prompt = LLMService._build_daifu_prompt_from_context(
                 github_context=github_context,
                 conversation=conversation_history or [],
-                file_contexts=file_contexts
+                file_contexts=file_contexts,
             )
 
             # Generate response
@@ -383,7 +220,7 @@ class LLMService:
                 model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                timeout=timeout
+                timeout=timeout,
             )
 
         except Exception as e:
@@ -394,64 +231,175 @@ class LLMService:
             )
 
     @staticmethod
-    async def generate_response_with_history(
-        db: Session,
-        user_id: int,
-        repo_owner: str = None,
-        repo_name: str = None,
-        repo_branch: str = None,
-        conversation_history: List[Tuple[str, str]] = None,
-        github_data: tuple = None,
+    def _build_daifu_prompt_from_context(
+        github_context: dict = None,
+        conversation: List[Tuple[str, str]] = None,
         file_contexts: List[str] = None,
-        model: str = None,
-        temperature: float = None,
-        max_tokens: int = None,
-        timeout: int = None,
-        fetch_limit: int = 5
     ) -> str:
         """
-        Generate response using conversation history with GitHub context
-
-        DEPRECATED: Use generate_response_with_stored_context instead.
-        This method is kept for backward compatibility but will be removed in future versions.
+        Centralized prompt building using stored GitHub context
 
         Args:
-            db: Database session
-            user_id: User ID for authentication
-            repo_owner: Repository owner (if using GitHub context)
-            repo_name: Repository name (if using GitHub context)
-            repo_branch: Repository branch (if using GitHub context)
-            conversation_history: List of (sender, message) tuples
-            github_data: Tuple of (repo_details, commits, issues, pulls) - legacy fallback
-            file_contexts: List of relevant file context strings
-            model: Model to use
-            temperature: Temperature for generation
-            max_tokens: Maximum tokens to generate
-            timeout: Request timeout in seconds
-            fetch_limit: Maximum number of GitHub items to fetch
+            github_context: Pre-fetched comprehensive GitHub context dictionary
+            conversation: List of (speaker, message) tuples
+            file_contexts: Optional list of file context strings
 
         Returns:
-            Generated response text
+            Complete prompt string with stored GitHub context
         """
-        prompt = await LLMService.build_prompt_from_history(
-            db=db,
-            user_id=user_id,
-            repo_owner=repo_owner,
-            repo_name=repo_name,
-            repo_branch=repo_branch,
-            conversation_history=conversation_history,
-            github_data=github_data,
-            file_contexts=file_contexts,
-            fetch_limit=fetch_limit
-        )
-        return await LLMService.generate_response(
-            prompt=prompt,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout
-        ) 
-    
+        try:
+            # System header
+            system_header = """You are **DAifu**, an AI assistant specialized in GitHub repository management and issue creation.
+Your primary role is to help users create clear, actionable GitHub issues from their conversations
+and repository context.
+
+**Core Responsibilities:**
+1. Analyze user requests and repository context to create well-structured GitHub issues
+2. Provide direct, professional responses based on available context
+3. Suggest next steps and improvements when appropriate
+4. Maintain focus on actionable outcomes
+
+**Response Guidelines:**
+- Be direct and professional in all communications
+- Use repository context to provide informed responses
+- Focus on creating clear, actionable GitHub issues when requested
+- Ask for clarification only when essential information is missing
+- Provide specific recommendations based on repository data
+
+**Output Format:**
+When creating issues, structure them with:
+- Clear, descriptive titles
+- Detailed descriptions including context and requirements
+- Appropriate labels and metadata"""
+
+            # Format repository details from stored context
+            details_str = "Repository information not available"
+            commits_str = "Recent Commits: None available"
+            issues_str = "Open Issues: None available"
+            branches_str = "Repository Branches: None available"
+
+            if github_context and "repository" in github_context:
+                repo = github_context["repository"]
+
+                # Repository info
+                details_str = (
+                    f"Repository: {repo.get('full_name', 'Unknown')}\n"
+                    f"Description: {repo.get('description', '')}\n"
+                    f"Default branch: {repo.get('default_branch', 'main')}\n"
+                    f"Language: {repo.get('language', '')}\n"
+                    f"Stars: {repo.get('stargazers_count', 0)}, Forks: {repo.get('forks_count', 0)}\n"
+                    f"Open issues: {repo.get('open_issues_count', 0)}\n"
+                    f"URL: {repo.get('html_url', '')}\n"
+                )
+
+                # Recent commits
+                if (
+                    "recent_commits" in github_context
+                    and github_context["recent_commits"]
+                ):
+                    commits = github_context["recent_commits"][:3]  # Limit to 3
+                    commits_str = "Recent Commits:\n"
+                    for commit in commits:
+                        commits_str += f"- {commit.get('sha', '')[:7]}: {commit.get('message', '')[:50]}\n"
+                else:
+                    commits_str = "Recent Commits: None available\n"
+
+                # Open issues
+                if (
+                    "recent_issues" in github_context
+                    and github_context["recent_issues"]
+                ):
+                    issues = github_context["recent_issues"][:3]  # Limit to 3
+                    issues_str = "Open Issues:\n"
+                    for issue in issues:
+                        issues_str += f"- #{issue.get('number', '?')}: {issue.get('title', '')[:50]}\n"
+                else:
+                    issues_str = "Open Issues: None available\n"
+
+                # Branches
+                if "branches" in github_context and github_context["branches"]:
+                    branches = github_context["branches"][:3]  # Limit to 3
+                    branches_str = "Repository Branches:\n"
+                    for branch in branches:
+                        branches_str += f"- {branch.get('name', 'unknown')}\n"
+                else:
+                    branches_str = "Repository Branches: None available\n"
+
+            # Format file contexts if provided
+            file_contexts_str = ""
+            if file_contexts:
+                file_contexts_str = "Relevant File Contexts:\n" + "\n".join(
+                    file_contexts
+                )
+
+            # Format conversation
+            convo_formatted = ""
+            if conversation:
+                convo_formatted = "\n".join(
+                    f"{speaker}: {utterance}" for speaker, utterance in conversation
+                )
+
+            # Combine all into final prompt
+            prompt = f"""{system_header}
+
+<GITHUB_CONTEXT_BEGIN>
+{details_str}
+{commits_str}
+{issues_str}
+{branches_str}
+</GITHUB_CONTEXT_END>
+
+<FILE_CONTEXTS_BEGIN>
+{file_contexts_str}
+</FILE_CONTEXTS_END>
+
+<CONVERSATION_BEGIN>
+{convo_formatted}
+</CONVERSATION_END>
+
+(Respond now as **DAifu** following the guidelines above. Focus on providing direct, actionable responses based on the available context.)"""
+            return prompt.strip()
+
+        except Exception as e:
+            logger.error(f"Error building prompt from stored context: {e}")
+            # Fallback to basic prompt
+            convo_formatted = ""
+            if conversation:
+                convo_formatted = "\n".join(
+                    f"{speaker}: {utterance}" for speaker, utterance in conversation
+                )
+
+            system_header = """You are **DAifu**, an AI assistant specialized in GitHub repository management and issue creation.
+Your primary role is to help users create clear, actionable GitHub issues from their conversations
+and repository context.
+
+**Core Responsibilities:**
+1. Analyze user requests and repository context to create well-structured GitHub issues
+2. Provide direct, professional responses based on available context
+3. Suggest next steps and improvements when appropriate
+4. Maintain focus on actionable outcomes
+
+**Response Guidelines:**
+- Be direct and professional in all communications
+- Use repository context to provide informed responses
+- Focus on creating clear, actionable GitHub issues when requested
+- Ask for clarification only when essential information is missing
+- Provide specific recommendations based on repository data
+
+**Output Format:**
+When creating issues, structure them with:
+- Clear, descriptive titles
+- Detailed descriptions including context and requirements
+- Appropriate labels and metadata"""
+
+            return f"""{system_header}
+
+<CONVERSATION_BEGIN>
+{convo_formatted}
+</CONVERSATION_END>
+
+(Respond now as **DAifu**. Limited context available due to processing error.)"""
+
     @staticmethod
     def embed_text(text: str) -> List[float]:
         """
