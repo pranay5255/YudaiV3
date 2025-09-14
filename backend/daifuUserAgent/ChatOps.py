@@ -9,37 +9,12 @@ previously scattered across multiple files and provides unified chat operations.
 TODO: Complete Implementation Tasks
 ========================================
 
-CRITICAL ISSUES:
-1. LLM Integration - The _generate_ai_response() method is a placeholder
-   - Replace with actual OpenRouter/OpenAI API integration
-   - Implement proper conversation history formatting
-   - Add token counting and cost tracking
-   - Handle rate limiting and retries
+LLM INTEGRATION: Implemented
+- Uses centralized LLMService with OpenRouter for responses
+- Conversation history and stored GitHub context are incorporated
+- Add token counting/cost tracking (future)
+- Add rate limiting/retries (future)
 
-2. GitHub API Error Handling
-   - Implement exponential backoff for rate limits
-   - Add proper error recovery for network failures
-   - Handle GitHub API token refresh scenarios
-
-3. Session Management Integration
-   - Implement proper message deduplication
-   - Add conversation context window management
-   - Handle session cleanup and archiving
-
-4. Frontend Integration (@Chat.tsx compatibility)
-   - Ensure response format matches ChatResponse model
-   - Implement real-time streaming responses
-   - Add proper error message formatting for UI display
-   - Support context card integration in responses
-
-6. Security Enhancements
-   - Add input sanitization for user messages
-   - Implement content filtering for sensitive data
-   - Add audit logging for all GitHub API calls
-   - Validate repository access permissions
-
-8. Database Optimization
-   - Add proper indexing for message queries
 
 
 
@@ -292,9 +267,12 @@ class ChatOps:
             # Retrieve relevant file contexts via embeddings for RAG
             try:
                 from .llm_service import LLMService as _LLM
-                # Build a simple query from the current message plus last few turns
+
+                # Build comprehensive query from current message, history, and context cards
                 recent_text = " ".join([m[1] for m in history[-5:]]) if history else ""
-                query_text = (message_text + " " + recent_text).strip()
+                query_text = " ".join(
+                    filter(None, [message_text, recent_text, context_content])
+                ).strip()
                 embedding_contexts = await _LLM.get_relevant_file_contexts(
                     db=self.db, session_id=session.id, query_text=query_text, top_k=5
                 )
@@ -307,12 +285,19 @@ class ChatOps:
                 message=message_text,
                 history=history,
                 repo_context=repo_context,
-                file_contexts=(embedding_contexts + ([f"Additional Context:\n{context_content}"] if context_content else [])),
+                file_contexts=(
+                    embedding_contexts
+                    + (
+                        [f"Additional Context:\n{context_content}"]
+                        if context_content
+                        else []
+                    )
+                ),
                 github_data=github_context_data,  # Pass comprehensive GitHub context data
                 repo_owner=session.repo_owner,
                 repo_name=session.repo_name,
                 repo_branch=session.repo_branch,
-                user_id=user_id
+                user_id=user_id,
             )
 
             # Save user message to database
@@ -415,85 +400,49 @@ class ChatOps:
         user_id: int = None,
     ) -> str:
         """
-        Generate AI response using get_github_context and stored GitHub context
+        Generate AI response using stored GitHub context
 
         Args:
             message: User's current message
             history: Conversation history as (sender, message) tuples
-            repo_context: GitHub repository context (deprecated, use GitHub context instead)
+            repo_context: GitHub repository context (deprecated)
             file_contexts: Additional file context strings
             github_data: Tuple of (repo_details, commits, issues, pulls) - legacy fallback
-            repo_owner: Repository owner for GitHub context fetching
-            repo_name: Repository name for GitHub context fetching
-            repo_branch: Repository branch for GitHub context fetching
+            repo_owner: Repository owner
+            repo_name: Repository name
+            repo_branch: Repository branch
             user_id: User ID for authentication
 
         Returns:
             AI response string
         """
         try:
-            from datetime import timedelta
-
-            from models import Repository
-
-            from utils import utc_now
-
             from .llm_service import LLMService
 
             # Build the conversation history including the current message
             full_history = history + [("User", message)]
 
-            # Get or fetch GitHub context
+            # Get stored GitHub context from database
             github_context = None
             if repo_owner and repo_name:
-                # Try to get stored GitHub context from database
+                from models import Repository
+
                 repository = (
                     self.db.query(Repository)
                     .filter(
                         Repository.owner == repo_owner,
                         Repository.name == repo_name,
-                        Repository.user_id == user_id
+                        Repository.user_id == user_id,
                     )
                     .first()
                 )
 
-                # Check if we have recent GitHub context (within last 30 minutes)
-                context_fresh = False
-                if repository and repository.github_context and repository.github_context_updated_at:
-                    time_diff = utc_now() - repository.github_context_updated_at
-                    if time_diff < timedelta(minutes=30):
-                        context_fresh = True
-                        github_context = repository.github_context
-
-                # If no fresh context, fetch it
-                if not context_fresh:
-                    logger.info(f"Fetching fresh GitHub context for {repo_owner}/{repo_name}")
-                    user = self.db.query(User).filter(User.id == user_id).first()
-                    if user:
-                        github_context_data = await self.get_github_context(
-                            repo_owner, repo_name, user, self.db
-                        )
-
-                        # Store the context in database
-                        if repository:
-                            repository.github_context = github_context_data
-                            repository.github_context_updated_at = utc_now()
-                        else:
-                            # Create repository record if it doesn't exist
-                            repository = Repository(
-                                user_id=user_id,
-                                name=repo_name,
-                                owner=repo_owner,
-                                full_name=f"{repo_owner}/{repo_name}",
-                                html_url=f"https://github.com/{repo_owner}/{repo_name}",
-                                clone_url=f"https://github.com/{repo_owner}/{repo_name}.git",
-                                github_context=github_context_data,
-                                github_context_updated_at=utc_now()
-                            )
-                            self.db.add(repository)
-
-                        self.db.commit()
-                        github_context = github_context_data
+                if repository and repository.github_context:
+                    github_context = repository.github_context
+                else:
+                    logger.warning(
+                        f"No stored GitHub context found for {repo_owner}/{repo_name}"
+                    )
 
             # Generate response using LLM service with stored GitHub context
             ai_response = await LLMService.generate_response_with_stored_context(
@@ -505,7 +454,7 @@ class ChatOps:
                 model="openrouter/sonoma-sky-alpha",
                 temperature=0.4,
                 max_tokens=2500,
-                timeout=25
+                timeout=25,
             )
 
             return ai_response
