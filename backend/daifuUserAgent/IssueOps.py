@@ -457,19 +457,43 @@ class IssueService:
         try:
             logger.info(f"Generating issue from context for user {user_id}")
 
-            # Get user's GitHub token for context
-            github_token = self.get_user_github_token(user_id, db)
-
-            # Fetch GitHub repository context
+            # Get stored GitHub context from repository
             repo_context = ""
-            if github_token:
-                try:
-                    repo_context = await self._fetch_github_repo_context(
-                        repo_owner, repo_name, user_id
+            try:
+                from models import Repository
+
+                repository = (
+                    db.query(Repository)
+                    .filter(
+                        Repository.owner == repo_owner,
+                        Repository.name == repo_name,
+                        Repository.user_id == user_id,
                     )
-                except Exception as e:
-                    logger.warning(f"Failed to fetch GitHub context: {e}")
+                    .first()
+                )
+                if repository and repository.github_context:
+                    # Extract basic context string from stored GitHub context
+                    repo_data = repository.github_context.get("repository", {})
+                    repo_context = f"Repository: {repo_data.get('full_name', f'{repo_owner}/{repo_name}')}\n"
+                    repo_context += f"Description: {repo_data.get('description', 'No description')}\n"
+                    repo_context += (
+                        f"Language: {repo_data.get('language', 'Unknown')}\n"
+                    )
+                    repo_context += (
+                        f"Open Issues: {repo_data.get('open_issues_count', 0)}\n"
+                    )
+
+                    # Add recent issues if available
+                    recent_issues = repository.github_context.get("recent_issues", [])
+                    if recent_issues:
+                        repo_context += "\nRecent Open Issues:\n"
+                        for issue in recent_issues[:3]:
+                            repo_context += f"- #{issue['number']}: {issue['title']}\n"
+                else:
                     repo_context = f"Repository: {repo_owner}/{repo_name}"
+            except Exception as e:
+                logger.warning(f"Failed to get stored GitHub context: {e}")
+                repo_context = f"Repository: {repo_owner}/{repo_name}"
 
             # Get context cards for additional context
             context_cards = self._get_session_context_cards(db, session_id, user_id)
@@ -481,7 +505,6 @@ class IssueService:
 
                 from .llm_service import LLMService as _LLM
 
-                # TODO: add context card content to the query text to fetch relevant file contexts
                 # Fetch numeric session id
                 sess = (
                     db.query(_ChatSession)
@@ -492,11 +515,23 @@ class IssueService:
                     .first()
                 )
                 if sess:
+                    # Build comprehensive query text including context cards
                     last_msgs = " ".join(
                         m.get("content", "") for m in (chat_messages or [])[-5:]
                     )
+                    context_card_content = self._get_session_context_cards_content(
+                        db, session_id, user_id
+                    )
                     query_text = " ".join(
-                        filter(None, [title or "", description or "", last_msgs])
+                        filter(
+                            None,
+                            [
+                                title or "",
+                                description or "",
+                                last_msgs,
+                                context_card_content,
+                            ],
+                        )
                     )
                     embedding_contexts = await _LLM.get_relevant_file_contexts(
                         db=db, session_id=sess.id, query_text=query_text, top_k=5
@@ -552,45 +587,6 @@ class IssueService:
             logger.error(f"Failed to generate issue from context: {e}")
             raise IssueOpsError(f"Failed to generate issue: {str(e)}")
 
-    async def _fetch_github_repo_context(
-        self, repo_owner: str, repo_name: str, user_id: int
-    ) -> str:
-        """Fetch GitHub repository context for issue generation"""
-        try:
-            from .githubOps import GitHubOps
-
-            github_ops = GitHubOps(self.db)
-
-            # Get repository info
-            repo_data = await github_ops.fetch_repository_info_detailed(
-                repo_owner, repo_name, user_id
-            )
-
-            # Get recent issues
-            issues_data = await github_ops.fetch_repository_issues(
-                repo_owner, repo_name, user_id, limit=5
-            )
-
-            # Build context string
-            context_parts = [
-                f"Repository: {repo_data.get('full_name', f'{repo_owner}/{repo_name}')}",
-                f"Description: {repo_data.get('description', 'No description')}",
-                f"Language: {repo_data.get('language', 'Unknown')}",
-                f"Open Issues: {repo_data.get('open_issues_count', 0)}",
-                f"Default Branch: {repo_data.get('default_branch', 'main')}",
-            ]
-
-            if issues_data:
-                context_parts.append("\nRecent Open Issues:")
-                for issue in issues_data:
-                    context_parts.append(f"- #{issue['number']}: {issue['title']}")
-
-            return "\n".join(context_parts)
-
-        except Exception as e:
-            logger.error(f"Failed to fetch GitHub repo context: {e}")
-            return f"Repository: {repo_owner}/{repo_name}"
-
     def _get_session_context_cards(
         self, db: Session, session_id: str, user_id: int
     ) -> List[Dict[str, Any]]:
@@ -623,6 +619,28 @@ class IssueService:
         except Exception as e:
             logger.error(f"Failed to get context cards: {e}")
             return []
+
+    def _get_session_context_cards_content(
+        self, db: Session, session_id: str, user_id: int
+    ) -> str:
+        """Get concatenated content from all context cards for a session"""
+        try:
+            cards = self._get_session_context_cards(db, session_id, user_id)
+            if not cards:
+                return ""
+
+            # Concatenate card titles and content for embedding query
+            card_contents = []
+            for card in cards[:5]:  # Limit to 5 cards to avoid overly long queries
+                card_contents.append(
+                    f"{card['title']}: {card['content'][:200]}"
+                )  # Truncate content
+
+            return " ".join(card_contents)
+
+        except Exception as e:
+            logger.error(f"Failed to get context cards content: {e}")
+            return ""
 
     def _build_issue_generation_prompt(
         self,
