@@ -29,6 +29,11 @@ COPY . .
 # Make start script executable
 RUN chmod +x /app/start.sh
 
+# Fix sentence-transformers cache permissions for development
+RUN mkdir -p /home/appuser/.cache && \
+    chown -R appuser:appuser /home/appuser && \
+    chmod -R 755 /home/appuser
+
 # Expose port
 EXPOSE 8000
 
