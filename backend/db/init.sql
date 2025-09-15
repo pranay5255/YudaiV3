@@ -331,7 +331,9 @@ CREATE TABLE IF NOT EXISTS file_embeddings (
     chunk_text TEXT NOT NULL,
     tokens INTEGER DEFAULT 0,
     session_tokens_used INTEGER DEFAULT 0,  -- Track tokens used for this session
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    file_metadata JSON,  -- Metadata for file embeddings (added to match models.py)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE
 );
 
 -- OAuth states table
