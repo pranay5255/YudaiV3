@@ -27,10 +27,14 @@ class LLMService:
     DEFAULT_TEMPERATURE = 0.6
     DEFAULT_MAX_TOKENS = 4000
     DEFAULT_TIMEOUT = 30
-    EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+    EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
     # Class variable to cache the model
     _embedding_model = None
+
+    # Cache directory configuration
+    TRANSFORMERS_CACHE = os.getenv("TRANSFORMERS_CACHE", "/tmp/transformers_cache")
+    HF_HOME = os.getenv("HF_HOME", "/tmp/huggingface_cache")
 
     @staticmethod
     def get_api_key() -> str:
@@ -55,9 +59,42 @@ class LLMService:
     def get_embedding_model() -> SentenceTransformer:
         """Get or load the embedding model (cached for performance)"""
         if LLMService._embedding_model is None:
-            LLMService._embedding_model = SentenceTransformer(
-                LLMService.EMBEDDING_MODEL
-            )
+            try:
+                # Ensure cache directories exist and have correct permissions
+                os.makedirs(LLMService.TRANSFORMERS_CACHE, exist_ok=True)
+                os.makedirs(LLMService.HF_HOME, exist_ok=True)
+
+                # Set environment variables for transformers and huggingface
+                os.environ["TRANSFORMERS_CACHE"] = LLMService.TRANSFORMERS_CACHE
+                os.environ["HF_HOME"] = LLMService.HF_HOME
+
+                logger.info(f"Loading embedding model: {LLMService.EMBEDDING_MODEL}")
+                logger.info(f"Using cache directory: {LLMService.TRANSFORMERS_CACHE}")
+
+                LLMService._embedding_model = SentenceTransformer(
+                    LLMService.EMBEDDING_MODEL,
+                    cache_folder=LLMService.TRANSFORMERS_CACHE,
+                    local_files_only=False
+                )
+                logger.info("Embedding model loaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to load embedding model: {e}")
+                # Try with a fallback model if the primary model fails
+                try:
+                    logger.info("Attempting to load fallback model: all-MiniLM-L6-v2")
+                    LLMService._embedding_model = SentenceTransformer(
+                        "all-MiniLM-L6-v2",
+                        cache_folder=LLMService.TRANSFORMERS_CACHE,
+                        local_files_only=False
+                    )
+                    logger.info("Fallback embedding model loaded successfully")
+                except Exception as fallback_error:
+                    logger.error(f"Fallback model also failed: {fallback_error}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Failed to load embedding model: {str(e)}, fallback also failed: {str(fallback_error)}"
+                    )
+
         return LLMService._embedding_model
 
     @staticmethod

@@ -36,8 +36,14 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
 
 # Fix sentence-transformers cache permissions
 RUN mkdir -p /home/appuser/.cache && \
+    mkdir -p /tmp/transformers_cache && \
+    mkdir -p /tmp/huggingface_cache && \
     chown -R appuser:appuser /home/appuser && \
-    chmod -R 755 /home/appuser
+    chown -R appuser:appuser /tmp/transformers_cache && \
+    chown -R appuser:appuser /tmp/huggingface_cache && \
+    chmod -R 755 /home/appuser && \
+    chmod -R 755 /tmp/transformers_cache && \
+    chmod -R 755 /tmp/huggingface_cache
 
 # Switch to non-root user
 USER appuser
