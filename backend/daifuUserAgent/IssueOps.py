@@ -274,10 +274,12 @@ class IssueService:
                 ],
             )
 
+            # Persist a user issue record that the UI can reference for final GH creation
             user_issue = self._create_user_issue_record(user_id, issue_request)
 
             result = {
                 "success": True,
+                "preview_only": False,
                 "user_issue": {
                     "id": user_issue.id,
                     "issue_id": user_issue.issue_id,
@@ -301,11 +303,21 @@ class IssueService:
                         "tokens_used": llm_generated_issue["tokens_used"],
                         "llm_model": "openrouter/sonoma-sky-alpha",
                         "generated_at": utc_now().isoformat(),
+                        "generation_method": "create-with-context",
                     },
                 },
                 "llm_response": llm_generated_issue["llm_response"],
                 "message": f"Issue created successfully with ID: {user_issue.issue_id}",
             }
+
+            # Ensure DB persistence before responding so the follow-up
+            # "Create GitHub Issue" action can find the record reliably.
+            try:
+                self.db.commit()
+            except Exception as commit_err:
+                logger.error(f"Commit failed after creating user issue: {commit_err}")
+                self.db.rollback()
+                raise
 
             # Optionally create GitHub issue
             if create_github_issue:
@@ -330,33 +342,44 @@ class IssueService:
         # Generate unique issue ID
         issue_id = f"issue_{uuid.uuid4().hex[:12]}"
 
-        # Create the user issue
-        user_issue = UserIssue(
-            issue_id=issue_id,
-            user_id=user_id,
-            title=issue_request.title,
-            issue_text_raw=issue_request.issue_text_raw,
-            description=issue_request.description,
-            session_id=issue_request.session_id,
-            context_card_id=issue_request.context_card_id,
-            # Note: context_cards and ideas fields are commented out in the SQLAlchemy model
-            # context_cards=json.dumps(issue_request.context_cards) if issue_request.context_cards else None,
-            # ideas=json.dumps(issue_request.ideas) if issue_request.ideas else None,
-            repo_owner=issue_request.repo_owner,
-            repo_name=issue_request.repo_name,
-            priority=issue_request.priority,
-            issue_steps=issue_request.issue_steps,
-            status="pending",
-            agent_response=None,
-            processing_time=None,
-            tokens_used=0,
-        )
+        try:
+            # Create the user issue
+            user_issue = UserIssue(
+                issue_id=issue_id,
+                user_id=user_id,
+                title=issue_request.title,
+                issue_text_raw=issue_request.issue_text_raw,
+                description=issue_request.description,
+                session_id=issue_request.session_id,
+                context_card_id=issue_request.context_card_id,
+                # Note: context_cards and ideas fields are commented out in the SQLAlchemy model
+                # context_cards=json.dumps(issue_request.context_cards) if issue_request.context_cards else None,
+                # ideas=json.dumps(issue_request.ideas) if issue_request.ideas else None,
+                repo_owner=issue_request.repo_owner,
+                repo_name=issue_request.repo_name,
+                priority=issue_request.priority,
+                issue_steps=issue_request.issue_steps,
+                status="pending",
+                agent_response=None,
+                processing_time=None,
+                tokens_used=0,
+            )
 
-        self.db.add(user_issue)
-        self.db.flush()  # Get the ID without committing
+            self.db.add(user_issue)
+            self.db.flush()  # Get the ID without committing
 
-        logger.info(f"Successfully created user issue {issue_id} for user {user_id}")
-        return user_issue
+            logger.info(
+                f"Successfully created user issue {issue_id} for user {user_id}"
+            )
+            return user_issue
+        except Exception as e:
+            logger.error(
+                f"Failed while creating user issue {issue_id} for user {user_id}: {e}"
+            )
+            # If any prior DB SELECT failed, the transaction may be aborted.
+            # Roll back to reset the session state.
+            self.db.rollback()
+            raise
 
     def update_issue_status(
         self,
@@ -484,6 +507,11 @@ class IssueService:
             except Exception as e:
                 logger.warning(f"Failed to get stored GitHub context: {e}")
                 repo_context = f"Repository: {repo_owner}/{repo_name}"
+                # Reset DB session if a read failed to avoid aborted transaction state
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
 
             # Get context cards for additional context
             context_cards = self._get_session_context_cards(session_id, user_id)
@@ -530,6 +558,11 @@ class IssueService:
                 logger.warning(
                     f"Failed to retrieve embedding contexts for issue generation: {e}"
                 )
+                # Reset DB session if a read failed to avoid aborted transaction state
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
 
             # Build the LLM prompt for issue generation
             prompt = self._build_issue_generation_prompt(
@@ -582,12 +615,24 @@ class IssueService:
     ) -> List[Dict[str, Any]]:
         """Get context cards for a session"""
         try:
-            from models import ContextCard
+            from models import ContextCard, ChatSession as _ChatSession
+
+            # Resolve the numeric chat session primary key from the public session_id
+            sess = (
+                self.db.query(_ChatSession)
+                .filter(
+                    _ChatSession.session_id == session_id,
+                    _ChatSession.user_id == user_id,
+                )
+                .first()
+            )
+            if not sess:
+                return []
 
             cards = (
                 self.db.query(ContextCard)
                 .filter(
-                    ContextCard.session_id == session_id,
+                    ContextCard.session_id == sess.id,
                     ContextCard.user_id == user_id,
                     ContextCard.is_active,
                 )
@@ -608,6 +653,10 @@ class IssueService:
 
         except Exception as e:
             logger.error(f"Failed to get context cards: {e}")
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
             return []
 
     def _get_session_context_cards_content(

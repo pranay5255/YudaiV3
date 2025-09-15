@@ -2341,13 +2341,15 @@ async def create_github_issue_from_user_issue_for_session(
     Create GitHub issue from user issue for a session - Consolidated from issue_service.py
     """
     try:
-        from .session_service import IssueService, SessionService
+        # Use the consolidated IssueOps service directly to avoid wrapper arg mismatch
+        from .IssueOps import IssueService as IssueOpsService
+        from .session_service import SessionService
 
         # Ensure session exists and belongs to user
         SessionService.ensure_owned_session(db, current_user.id, session_id)
 
-        # Create GitHub issue using IssueService
-        issue_service = IssueService(db)
+        # Create GitHub issue using consolidated IssueOps
+        issue_service = IssueOpsService(db)
         result = await issue_service.create_github_issue_from_user_issue(
             current_user.id, issue_id
         )
