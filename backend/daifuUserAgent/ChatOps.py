@@ -212,93 +212,97 @@ class ChatOps:
         repository: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
-        Process a chat message and return AI response
-
-        Args:
-            session_id: Chat session ID
-            user_id: User ID
-            message_text: User's message
-            context_cards: Optional context card IDs
-            repository: Optional repository info
-
-        Returns:
-            AI response data
+        Process a chat message and generate AI response with comprehensive error handling
         """
         try:
-            logger.info(
-                f"Processing chat message for session {session_id}, user {user_id}"
-            )
+            logger.info(f"Processing chat message for session {session_id}")
 
-            # Get session and validate access
+            # Get session from database
             session = (
                 self.db.query(ChatSession)
                 .filter(
-                    ChatSession.session_id == session_id, ChatSession.user_id == user_id
+                    ChatSession.session_id == session_id,
+                    ChatSession.user_id == user_id,
                 )
                 .first()
             )
 
             if not session:
-                raise ChatOpsError(f"Session {session_id} not found or access denied")
+                raise ChatOpsError(f"Session {session_id} not found")
+
+            # Extract repository info
+            repo_owner = None
+            repo_name = None
+            if repository:
+                repo_owner = repository.get("owner")
+                repo_name = repository.get("name")
+            elif session.repo_owner and session.repo_name:
+                repo_owner = session.repo_owner
+                repo_name = session.repo_name
 
             # Get conversation history
-            history = self._get_conversation_history(session.id)
+            history = self._get_conversation_history(session.id, 10)
 
-            # Get repository context if available
-            repo_context = ""
-            github_context_data = None
-            if repository and repository.get("owner") and repository.get("name"):
-                # Get user for GitHub API access
-                user = self.db.query(User).filter(User.id == user_id).first()
-                if user:
-                    github_context_data = await self.get_github_context(
-                        repository["owner"], repository["name"], user, self.db
-                    )
-                    # Extract context string for AI processing
-                    repo_context = github_context_data.get("context_string", "")
-
-            # Get context cards content
-            context_content = ""
-            if context_cards:
-                context_content = self._get_context_cards_content(
-                    context_cards, user_id
-                )
-
-            # Retrieve relevant file contexts via embeddings for RAG
+            # Get file contexts (with error handling)
+            file_contexts = []
             try:
-                from .llm_service import LLMService as _LLM
-
-                # Build comprehensive query from current message, history, and context cards
-                recent_text = " ".join([m[1] for m in history[-5:]]) if history else ""
-                query_text = " ".join(
-                    filter(None, [message_text, recent_text, context_content])
-                ).strip()
-                embedding_contexts = await _LLM.get_relevant_file_contexts(
-                    db=self.db, session_id=session.id, query_text=query_text, top_k=5
+                from .llm_service import LLMService
+                file_contexts = await LLMService.get_relevant_file_contexts(
+                    db=self.db, session_id=session.id, query_text=message_text, top_k=5
                 )
             except Exception as e:
-                self.logger.warning(f"Failed retrieving relevant file contexts: {e}")
-                embedding_contexts = []
+                logger.warning(f"Failed to get file contexts: {e}")
+                # Continue without file contexts - non-fatal
 
-            # Generate AI response using LLM service with GitHub context
-            ai_response = await self._generate_ai_response(
-                message=message_text,
-                history=history,
-                repo_context=repo_context,
-                file_contexts=(
-                    embedding_contexts
-                    + (
-                        [f"Additional Context:\n{context_content}"]
-                        if context_content
-                        else []
-                    )
-                ),
-                github_data=github_context_data,  # Pass comprehensive GitHub context data
-                repo_owner=session.repo_owner,
-                repo_name=session.repo_name,
-                repo_branch=session.repo_branch,
-                user_id=user_id,
-            )
+            # Generate AI response with improved error handling
+            try:
+                from .llm_service import LLMService
+
+                # Build the conversation history including the current message
+                full_history = history + [("User", message_text)]
+
+                # Get stored GitHub context from database with error handling
+                github_context = None
+                if repo_owner and repo_name:
+                    try:
+                        from models import Repository
+
+                        repository = (
+                            self.db.query(Repository)
+                            .filter(
+                                Repository.owner == repo_owner,
+                                Repository.name == repo_name,
+                                Repository.user_id == user_id,
+                            )
+                            .first()
+                        )
+
+                        if repository and hasattr(repository, 'github_context') and repository.github_context:
+                            github_context = repository.github_context
+                        else:
+                            logger.info(f"No stored GitHub context found for {repo_owner}/{repo_name}")
+
+                    except Exception as db_error:
+                        logger.warning(f"Database error while fetching GitHub context: {db_error}")
+                        # Continue without GitHub context - non-fatal
+
+                # Generate response using LLM service
+                ai_response = await LLMService.generate_response_with_stored_context(
+                    db=self.db,
+                    user_id=user_id,
+                    github_context=github_context,
+                    conversation_history=full_history,
+                    file_contexts=file_contexts,
+                    model="openrouter/sonoma-sky-alpha",
+                    temperature=0.4,
+                    max_tokens=2500,
+                    timeout=25,
+                )
+
+            except Exception as llm_error:
+                logger.error(f"LLM service error: {llm_error}")
+                # Fallback response
+                ai_response = f"I understand you said: '{message_text}'. I'm currently having trouble processing your request. Could you please try again?"
 
             # Save user message to database
             user_msg = ChatMessage(
