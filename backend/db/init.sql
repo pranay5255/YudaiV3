@@ -167,7 +167,9 @@ CREATE TABLE IF NOT EXISTS repositories (
     github_updated_at TIMESTAMP WITH TIME ZONE,
     pushed_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE
+    updated_at TIMESTAMP WITH TIME ZONE,
+    github_context JSONB,
+    github_context_updated_at TIMESTAMP WITH TIME ZONE
 );
 
 -- Issues table
@@ -527,6 +529,9 @@ SELECT create_trigger_if_not_exists(
     'github_app_installations',
     'CREATE TRIGGER update_github_app_installations_updated_at BEFORE UPDATE ON github_app_installations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
 );
+
+-- Add missing columns to repositories table
+
 
 -- Log initialization
 SELECT 'YudaiV3 database initialized with complete schema matching models.py' as status; 

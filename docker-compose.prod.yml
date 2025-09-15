@@ -107,6 +107,8 @@ services:
       - MAX_SOLVE_TIME_MINUTES=30
       - MAX_CONCURRENT_SOLVES=3
       - SOLVER_TIMEOUT_SECONDS=1800
+      - TRANSFORMERS_CACHE=/tmp/transformers_cache
+      - HF_HOME=/tmp/huggingface_cache
     ports:
       - "8000:8000"
     depends_on:
@@ -121,6 +123,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - swe_runs:/data/swe_runs
       - ./backend/solver:/app/solver
+      - transformers_cache:/tmp/transformers_cache
+      - huggingface_cache:/tmp/huggingface_cache
     networks:
       - yudai-network
     # Enhanced health check
@@ -242,6 +246,18 @@ volumes:
       type: local
       o: bind
       device: ./data/swe_runs
+  transformers_cache:
+    driver: local
+    driver_opts:
+      type: local
+      o: bind
+      device: ./data/transformers_cache
+  huggingface_cache:
+    driver: local
+    driver_opts:
+      type: local
+      o: bind
+      device: ./data/huggingface_cache
 
 networks:
   yudai-network:

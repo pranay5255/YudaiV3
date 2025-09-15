@@ -7,7 +7,7 @@ import {
   useFileDependencies,
   useAddContextCard
 } from '../hooks/useSessionQueries';
-import { useQueryClient } from '@tanstack/react-query';
+// react-query not needed here currently
 
 interface FileDependenciesProps {
   onShowDetails: (file: FileItem) => void;
@@ -26,10 +26,8 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
   const { data: fileContext = [], isLoading, refetch } = useFileDependencies(activeSessionId || '');
   const addContextCardMutation = useAddContextCard();
   
-  const queryClient = useQueryClient();
-  const { extractFileDependenciesForSession } = useSessionStore();
+  // no queryClient needed; extraction is deprecated
   const [loadingStates, setLoadingStates] = useState<{[key: string]: boolean}>({});
-  const [isExtracting, setIsExtracting] = useState(false);
 
   const showError = useCallback((message: string) => {
     if (onShowError) {
@@ -42,31 +40,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
     refetch();
   };
 
-  const handleExtractFiles = async () => {
-    if (!selectedRepository || !activeSessionId) {
-      console.log('[FileDependencies] Cannot extract: no repository or session');
-      showError('No repository selected or active session');
-      return;
-    }
-
-    const repoUrl = `https://github.com/${selectedRepository.repository.full_name}`;
-    console.log('[FileDependencies] Extracting file dependencies from repository:', repoUrl);
-
-    setIsExtracting(true);
-    try {
-      // Use unified sessionStore method to extract file dependencies
-      await extractFileDependenciesForSession(activeSessionId, repoUrl);
-      // Refetch the file dependencies after extraction
-      await queryClient.invalidateQueries({ 
-        queryKey: ['file-deps', activeSessionId] 
-      });
-    } catch (error) {
-      console.error('[FileDependencies] Error extracting file dependencies:', error);
-      showError('Failed to extract file dependencies from repository');
-    } finally {
-      setIsExtracting(false);
-    }
-  };
+  // Extraction is deprecated; indexing happens automatically.
 
   const handleAddToContext = useCallback(async (item: FileItem) => {
     if (!activeSessionId) {
@@ -157,29 +131,15 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
-          {selectedRepository && (
-            <button
-              onClick={handleExtractFiles}
-              disabled={isLoading || isExtracting}
-              className="p-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded-md disabled:opacity-50"
-              title="Extract files from repository"
-            >
-              {isExtracting ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <Plus className="w-4 h-4" />
-              )}
-            </button>
-          )}
         </div>
       </div>
 
       <div className="flex-1 overflow-auto">
-        {isLoading || isExtracting ? (
+        {isLoading ? (
           <div className="flex items-center justify-center h-40">
             <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
             <span className="ml-2 text-gray-600">
-              {isExtracting ? 'Extracting file dependencies...' : 'Loading...'}
+              Loading...
             </span>
           </div>
         ) : fileContext.length === 0 ? (
@@ -188,30 +148,10 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
             <div className="space-y-2">
               <p className="font-medium">No file dependencies found</p>
               <p className="text-sm">
-                {selectedRepository 
-                  ? 'Extract file dependencies from the repository to enable file context in conversations.'
-                  : 'Select a repository to analyze file dependencies'
-                }
+                {selectedRepository
+                  ? 'Indexing happens automatically after repository selection. Please wait or refresh.'
+                  : 'Select a repository to analyze file dependencies'}
               </p>
-              {selectedRepository && (
-                <button
-                  onClick={handleExtractFiles}
-                  disabled={isExtracting}
-                  className="mt-4 inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm"
-                >
-                  {isExtracting ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      Extracting...
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="w-4 h-4" />
-                      Extract File Dependencies
-                    </>
-                  )}
-                </button>
-              )}
             </div>
           </div>
         ) : (

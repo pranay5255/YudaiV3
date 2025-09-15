@@ -34,6 +34,11 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     chown -R appuser:appuser /app && \
     chmod +x /app/start.sh
 
+# Fix sentence-transformers cache permissions
+RUN mkdir -p /home/appuser/.cache && \
+    chown -R appuser:appuser /home/appuser && \
+    chmod -R 755 /home/appuser
+
 # Switch to non-root user
 USER appuser
 
