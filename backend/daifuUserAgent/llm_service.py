@@ -190,45 +190,39 @@ class LLMService:
         timeout: int = None,
     ) -> str:
         """
-        Generate response using pre-fetched and stored GitHub context
-
-        Args:
-            db: Database session
-            user_id: User ID for authentication
-            github_context: Pre-fetched comprehensive GitHub context dictionary
-            conversation_history: List of (sender, message) tuples
-            file_contexts: List of relevant file context strings
-            model: Model to use
-            temperature: Temperature for generation
-            max_tokens: Maximum tokens to generate
-            timeout: Request timeout in seconds
-
-        Returns:
-            Generated response text
+        Generate response using pre-fetched and stored GitHub context with improved error handling
         """
         try:
-            # Build prompt using centralized prompt building
-            prompt = LLMService._build_daifu_prompt_from_context(
-                github_context=github_context,
-                conversation=conversation_history or [],
-                file_contexts=file_contexts,
-            )
+            # Build prompt using centralized prompt building with error handling
+            try:
+                prompt = LLMService._build_daifu_prompt_from_context(
+                    github_context=github_context,
+                    conversation=conversation_history or [],
+                    file_contexts=file_contexts,
+                )
+            except Exception as prompt_error:
+                logger.warning(f"Failed to build prompt: {prompt_error}")
+                # Fallback to simple prompt
+                prompt = f"User: {conversation_history[-1][1] if conversation_history else 'Hello'}\nAssistant:"
 
-            # Generate response
-            return await LLMService.generate_response(
-                prompt=prompt,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                timeout=timeout,
-            )
+            # Generate response with error handling
+            try:
+                return await LLMService.generate_response(
+                    prompt=prompt,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                )
+            except Exception as generation_error:
+                logger.error(f"Failed to generate response: {generation_error}")
+                # Return fallback response
+                return "I'm having trouble processing your request right now. Please try again in a moment."
 
         except Exception as e:
             logger.error(f"Failed to generate response with stored context: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"LLM response generation failed: {str(e)}",
-            )
+            # Return a helpful fallback response instead of raising an exception
+            return "I understand you're asking about something, but I'm currently experiencing technical difficulties. Please try again in a moment."
 
     @staticmethod
     def _build_daifu_prompt_from_context(
@@ -272,58 +266,74 @@ When creating issues, structure them with:
 - Detailed descriptions including context and requirements
 - Appropriate labels and metadata"""
 
-            # Format repository details from stored context
+            # Format repository details from stored context with error handling
             details_str = "Repository information not available"
             commits_str = "Recent Commits: None available"
             issues_str = "Open Issues: None available"
             branches_str = "Repository Branches: None available"
 
-            if github_context and "repository" in github_context:
-                repo = github_context["repository"]
+            try:
+                if github_context and isinstance(github_context, dict) and "repository" in github_context:
+                    repo = github_context["repository"]
 
-                # Repository info
-                details_str = (
-                    f"Repository: {repo.get('full_name', 'Unknown')}\n"
-                    f"Description: {repo.get('description', '')}\n"
-                    f"Default branch: {repo.get('default_branch', 'main')}\n"
-                    f"Language: {repo.get('language', '')}\n"
-                    f"Stars: {repo.get('stargazers_count', 0)}, Forks: {repo.get('forks_count', 0)}\n"
-                    f"Open issues: {repo.get('open_issues_count', 0)}\n"
-                    f"URL: {repo.get('html_url', '')}\n"
-                )
+                    # Repository info with safe access
+                    details_str = (
+                        f"Repository: {repo.get('full_name', 'Unknown')}\n"
+                        f"Description: {repo.get('description', '')}\n"
+                        f"Default branch: {repo.get('default_branch', 'main')}\n"
+                        f"Language: {repo.get('language', '')}\n"
+                        f"Stars: {repo.get('stargazers_count', 0)}, Forks: {repo.get('forks_count', 0)}\n"
+                        f"Open issues: {repo.get('open_issues_count', 0)}\n"
+                        f"URL: {repo.get('html_url', '')}\n"
+                    )
 
-                # Recent commits
-                if (
-                    "recent_commits" in github_context
-                    and github_context["recent_commits"]
-                ):
-                    commits = github_context["recent_commits"][:3]  # Limit to 3
-                    commits_str = "Recent Commits:\n"
-                    for commit in commits:
-                        commits_str += f"- {commit.get('sha', '')[:7]}: {commit.get('message', '')[:50]}\n"
-                else:
-                    commits_str = "Recent Commits: None available\n"
+                    # Recent commits with error handling
+                    try:
+                        if (
+                            "recent_commits" in github_context
+                            and github_context["recent_commits"]
+                            and isinstance(github_context["recent_commits"], list)
+                        ):
+                            commits = github_context["recent_commits"][:3]  # Limit to 3
+                            commits_str = "Recent Commits:\n"
+                            for commit in commits:
+                                if isinstance(commit, dict):
+                                    commits_str += f"- {commit.get('sha', '')[:7]}: {commit.get('message', '')[:50]}\n"
+                    except Exception as commits_error:
+                        logger.warning(f"Error processing commits: {commits_error}")
+                        commits_str = "Recent Commits: Error loading\n"
 
-                # Open issues
-                if (
-                    "recent_issues" in github_context
-                    and github_context["recent_issues"]
-                ):
-                    issues = github_context["recent_issues"][:3]  # Limit to 3
-                    issues_str = "Open Issues:\n"
-                    for issue in issues:
-                        issues_str += f"- #{issue.get('number', '?')}: {issue.get('title', '')[:50]}\n"
-                else:
-                    issues_str = "Open Issues: None available\n"
+                    # Open issues with error handling
+                    try:
+                        if (
+                            "recent_issues" in github_context
+                            and github_context["recent_issues"]
+                            and isinstance(github_context["recent_issues"], list)
+                        ):
+                            issues = github_context["recent_issues"][:3]  # Limit to 3
+                            issues_str = "Open Issues:\n"
+                            for issue in issues:
+                                if isinstance(issue, dict):
+                                    issues_str += f"- #{issue.get('number', '?')}: {issue.get('title', '')[:50]}\n"
+                    except Exception as issues_error:
+                        logger.warning(f"Error processing issues: {issues_error}")
+                        issues_str = "Open Issues: Error loading\n"
 
-                # Branches
-                if "branches" in github_context and github_context["branches"]:
-                    branches = github_context["branches"][:3]  # Limit to 3
-                    branches_str = "Repository Branches:\n"
-                    for branch in branches:
-                        branches_str += f"- {branch.get('name', 'unknown')}\n"
-                else:
-                    branches_str = "Repository Branches: None available\n"
+                    # Branches with error handling
+                    try:
+                        if "branches" in github_context and github_context["branches"] and isinstance(github_context["branches"], list):
+                            branches = github_context["branches"][:3]  # Limit to 3
+                            branches_str = "Repository Branches:\n"
+                            for branch in branches:
+                                if isinstance(branch, dict):
+                                    branches_str += f"- {branch.get('name', 'Unknown')}\n"
+                    except Exception as branches_error:
+                        logger.warning(f"Error processing branches: {branches_error}")
+                        branches_str = "Repository Branches: Error loading\n"
+
+            except Exception as context_error:
+                logger.warning(f"Error processing GitHub context: {context_error}")
+                # Continue with default values
 
             # Format file contexts if provided
             file_contexts_str = ""
@@ -361,44 +371,9 @@ When creating issues, structure them with:
             return prompt.strip()
 
         except Exception as e:
-            logger.error(f"Error building prompt from stored context: {e}")
-            # Fallback to basic prompt
-            convo_formatted = ""
-            if conversation:
-                convo_formatted = "\n".join(
-                    f"{speaker}: {utterance}" for speaker, utterance in conversation
-                )
-
-            system_header = """You are **DAifu**, an AI assistant specialized in GitHub repository management and issue creation.
-Your primary role is to help users create clear, actionable GitHub issues from their conversations
-and repository context.
-
-**Core Responsibilities:**
-1. Analyze user requests and repository context to create well-structured GitHub issues
-2. Provide direct, professional responses based on available context
-3. Suggest next steps and improvements when appropriate
-4. Maintain focus on actionable outcomes
-
-**Response Guidelines:**
-- Be direct and professional in all communications
-- Use repository context to provide informed responses
-- Focus on creating clear, actionable GitHub issues when requested
-- Ask for clarification only when essential information is missing
-- Provide specific recommendations based on repository data
-
-**Output Format:**
-When creating issues, structure them with:
-- Clear, descriptive titles
-- Detailed descriptions including context and requirements
-- Appropriate labels and metadata"""
-
-            return f"""{system_header}
-
-<CONVERSATION_BEGIN>
-{convo_formatted}
-</CONVERSATION_END>
-
-(Respond now as **DAifu**. Limited context available due to processing error.)"""
+            logger.error(f"Failed to build prompt from context: {e}")
+            # Return a simple fallback prompt
+            return f"User: {conversation[-1][1] if conversation else 'Hello'}\nAssistant:"
 
     @staticmethod
     def embed_text(text: str) -> List[float]:
