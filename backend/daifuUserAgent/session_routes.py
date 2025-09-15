@@ -605,127 +605,6 @@ async def export_session(
             "path": f"/daifu/sessions/{session_id}/export",
         },
     )
-    try:  # Unreachable legacy block retained for reference
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
-        )
-
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
-
-        # Get all session data
-        messages = (
-            db.query(ChatMessage)
-            .filter(ChatMessage.session_id == db_session.id)
-            .order_by(ChatMessage.created_at.asc())
-            .all()
-        )
-
-        context_cards = (
-            db.query(ContextCard).filter(ContextCard.session_id == db_session.id).all()
-        )
-
-        file_embeddings = (
-            db.query(FileEmbedding)
-            .filter(FileEmbedding.session_id == db_session.id)
-            .all()
-        )
-
-        # Build export data
-        export_data = {
-            "version": "1.0",
-            "export_timestamp": utc_now().isoformat(),
-            "session": {
-                "session_id": db_session.session_id,
-                "title": db_session.title,
-                "description": db_session.description,
-                "repo_owner": db_session.repo_owner,
-                "repo_name": db_session.repo_name,
-                "repo_branch": db_session.repo_branch,
-                "repo_context": db_session.repo_context,
-                "is_active": db_session.is_active,
-                "total_messages": db_session.total_messages,
-                "total_tokens": db_session.total_tokens,
-                "created_at": db_session.created_at.isoformat()
-                if db_session.created_at
-                else None,
-                "updated_at": db_session.updated_at.isoformat()
-                if db_session.updated_at
-                else None,
-                "last_activity": db_session.last_activity.isoformat()
-                if db_session.last_activity
-                else None,
-            },
-            "messages": [
-                {
-                    "message_id": msg.message_id,
-                    "message_text": msg.message_text,
-                    "sender_type": msg.sender_type,
-                    "role": msg.role,
-                    "is_code": msg.is_code,
-                    "tokens": msg.tokens,
-                    "model_used": msg.model_used,
-                    "processing_time": msg.processing_time,
-                    "context_cards": msg.context_cards,
-                    "referenced_files": msg.referenced_files,
-                    "error_message": msg.error_message,
-                    "created_at": msg.created_at.isoformat()
-                    if msg.created_at
-                    else None,
-                    "updated_at": msg.updated_at.isoformat()
-                    if msg.updated_at
-                    else None,
-                }
-                for msg in messages
-            ],
-            "context_cards": [
-                {
-                    "title": card.title,
-                    "description": card.description,
-                    "content": card.content,
-                    "source": card.source,
-                    "tokens": card.tokens,
-                    "is_active": card.is_active,
-                    "created_at": card.created_at.isoformat()
-                    if card.created_at
-                    else None,
-                    "updated_at": card.updated_at.isoformat()
-                    if card.updated_at
-                    else None,
-                }
-                for card in context_cards
-            ],
-            "file_embeddings": [
-                {
-                    "file_path": fe.file_path,
-                    "file_name": fe.file_name,
-                    "file_type": fe.file_type,
-                    "file_content": fe.file_content,
-                    "chunk_index": fe.chunk_index,
-                    "chunk_text": fe.chunk_text,
-                    "tokens": fe.tokens,
-                    "file_metadata": fe.file_metadata,
-                    "created_at": fe.created_at.isoformat() if fe.created_at else None,
-                }
-                for fe in file_embeddings
-            ],
-        }
-
-        return export_data
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to export session: {str(e)}",
-        )
 
 
 @router.get("/sessions/{session_id}/messages", response_model=List[ChatMessageResponse])
@@ -894,9 +773,6 @@ async def get_file_dependencies_for_session(
 ):
     """Get file items for a session (matches frontend FileItem interface)"""
     try:
-        # Remove these lines - classes are already imported at module level
-        # from ..models import FileItem, FileItemResponse
-        # from .session_service import SessionService
 
         # Ensure session exists and belongs to user
         db_session = SessionService.ensure_owned_session(
@@ -2178,7 +2054,6 @@ async def create_issue_with_context_for_session(
         # Use consolidated issue creation service
         issue_service = IssueOpsService(db)
         result = await issue_service.create_issue_with_context(
-            db=db,
             user_id=current_user.id,
             session_id=session_id,
             title=request.get("title", ""),
@@ -2472,8 +2347,9 @@ async def create_github_issue_from_user_issue_for_session(
         SessionService.ensure_owned_session(db, current_user.id, session_id)
 
         # Create GitHub issue using IssueService
-        result = await IssueService.create_github_issue_from_user_issue(
-            db, current_user.id, issue_id, current_user
+        issue_service = IssueService(db)
+        result = await issue_service.create_github_issue_from_user_issue(
+            current_user.id, issue_id
         )
 
         if not result:

@@ -569,8 +569,8 @@ class UserIssue(Base):
         ForeignKey("context_cards.id"), nullable=True
     )
     issue_text_raw: Mapped[str] = mapped_column(Text, nullable=False)
-    issue_steps: Mapped[Optional[str]] = mapped_column(
-        JSON, nullable=True
+    issue_steps: Mapped[Optional[List[str]]] = mapped_column(
+        JSON_TYPE, nullable=True
     )  # Store as JSON array
 
     # Additional data from chat API

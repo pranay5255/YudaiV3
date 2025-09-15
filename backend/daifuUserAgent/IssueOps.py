@@ -57,7 +57,6 @@ CRITICAL ISSUES:
     - Create integration points for CI/CD systems
 """
 
-import json
 import logging
 import time
 import uuid
@@ -208,7 +207,6 @@ class IssueService:
 
     async def create_issue_with_context(
         self,
-        db: Session,
         user_id: int,
         session_id: str,
         title: str,
@@ -224,7 +222,6 @@ class IssueService:
         Unified function to create issue with context - combines LLM generation and database storage
 
         Args:
-            db: Database session
             user_id: User ID
             session_id: Session ID
             title: Issue title
@@ -244,7 +241,6 @@ class IssueService:
 
             # Generate issue content using LLM
             llm_generated_issue = await self.generate_issue_from_context(
-                db=db,
                 user_id=user_id,
                 session_id=session_id,
                 title=title,
@@ -278,7 +274,7 @@ class IssueService:
                 ],
             )
 
-            user_issue = self._create_user_issue_record(db, user_id, issue_request)
+            user_issue = self._create_user_issue_record(user_id, issue_request)
 
             result = {
                 "success": True,
@@ -314,7 +310,7 @@ class IssueService:
             # Optionally create GitHub issue
             if create_github_issue:
                 github_issue = await self.create_github_issue_from_user_issue(
-                    user_id, user_issue.issue_id, db
+                    user_id, user_issue.issue_id
                 )
                 if github_issue:
                     result["github_issue"] = github_issue
@@ -326,7 +322,7 @@ class IssueService:
             raise IssueOpsError(f"Failed to create issue: {str(e)}")
 
     def _create_user_issue_record(
-        self, db: Session, user_id: int, issue_request: CreateUserIssueRequest
+        self, user_id: int, issue_request: CreateUserIssueRequest
     ) -> UserIssue:
         """
         Helper method to create user issue record in database
@@ -349,24 +345,21 @@ class IssueService:
             repo_owner=issue_request.repo_owner,
             repo_name=issue_request.repo_name,
             priority=issue_request.priority,
-            issue_steps=json.dumps(issue_request.issue_steps)
-            if issue_request.issue_steps
-            else None,
+            issue_steps=issue_request.issue_steps,
             status="pending",
             agent_response=None,
             processing_time=None,
             tokens_used=0,
         )
 
-        db.add(user_issue)
-        db.flush()  # Get the ID without committing
+        self.db.add(user_issue)
+        self.db.flush()  # Get the ID without committing
 
         logger.info(f"Successfully created user issue {issue_id} for user {user_id}")
         return user_issue
 
     def update_issue_status(
         self,
-        db: Session,
         user_id: int,
         issue_id: str,
         status: str,
@@ -378,7 +371,6 @@ class IssueService:
         Update the status of a user issue
 
         Args:
-            db: Database session
             user_id: User ID
             issue_id: Issue ID
             status: New status
@@ -394,7 +386,7 @@ class IssueService:
 
             # Find the issue
             issue = (
-                db.query(UserIssue)
+                self.db.query(UserIssue)
                 .filter(UserIssue.user_id == user_id, UserIssue.issue_id == issue_id)
                 .first()
             )
@@ -413,19 +405,18 @@ class IssueService:
             issue.updated_at = utc_now()
             issue.processed_at = utc_now()
 
-            db.commit()
+            self.db.commit()
 
             logger.info(f"Successfully updated issue {issue_id} status to {status}")
             return issue
 
         except Exception as e:
             logger.error(f"Failed to update issue status: {e}")
-            db.rollback()
+            self.db.rollback()
             raise IssueOpsError(f"Failed to update issue status: {str(e)}")
 
     async def generate_issue_from_context(
         self,
-        db: Session,
         user_id: int,
         session_id: str,
         title: str,
@@ -440,7 +431,6 @@ class IssueService:
         Generate a GitHub issue from chat context using LLM
 
         Args:
-            db: Database session
             user_id: User ID
             session_id: Session ID
             title: Issue title
@@ -463,7 +453,7 @@ class IssueService:
                 from models import Repository
 
                 repository = (
-                    db.query(Repository)
+                    self.db.query(Repository)
                     .filter(
                         Repository.owner == repo_owner,
                         Repository.name == repo_name,
@@ -496,7 +486,7 @@ class IssueService:
                 repo_context = f"Repository: {repo_owner}/{repo_name}"
 
             # Get context cards for additional context
-            context_cards = self._get_session_context_cards(db, session_id, user_id)
+            context_cards = self._get_session_context_cards(session_id, user_id)
 
             # Retrieve relevant file contexts via embeddings using last few messages + description
             embedding_contexts: List[str] = []
@@ -507,7 +497,7 @@ class IssueService:
 
                 # Fetch numeric session id
                 sess = (
-                    db.query(_ChatSession)
+                    self.db.query(_ChatSession)
                     .filter(
                         _ChatSession.session_id == session_id,
                         _ChatSession.user_id == user_id,
@@ -520,7 +510,7 @@ class IssueService:
                         m.get("content", "") for m in (chat_messages or [])[-5:]
                     )
                     context_card_content = self._get_session_context_cards_content(
-                        db, session_id, user_id
+                        session_id, user_id
                     )
                     query_text = " ".join(
                         filter(
@@ -534,7 +524,7 @@ class IssueService:
                         )
                     )
                     embedding_contexts = await _LLM.get_relevant_file_contexts(
-                        db=db, session_id=sess.id, query_text=query_text, top_k=5
+                        db=self.db, session_id=sess.id, query_text=query_text, top_k=5
                     )
             except Exception as e:
                 logger.warning(
@@ -588,14 +578,14 @@ class IssueService:
             raise IssueOpsError(f"Failed to generate issue: {str(e)}")
 
     def _get_session_context_cards(
-        self, db: Session, session_id: str, user_id: int
+        self, session_id: str, user_id: int
     ) -> List[Dict[str, Any]]:
         """Get context cards for a session"""
         try:
             from models import ContextCard
 
             cards = (
-                db.query(ContextCard)
+                self.db.query(ContextCard)
                 .filter(
                     ContextCard.session_id == session_id,
                     ContextCard.user_id == user_id,
@@ -621,11 +611,11 @@ class IssueService:
             return []
 
     def _get_session_context_cards_content(
-        self, db: Session, session_id: str, user_id: int
+        self, session_id: str, user_id: int
     ) -> str:
         """Get concatenated content from all context cards for a session"""
         try:
-            cards = self._get_session_context_cards(db, session_id, user_id)
+            cards = self._get_session_context_cards(session_id, user_id)
             if not cards:
                 return ""
 
@@ -771,16 +761,14 @@ class IssueService:
             }
 
     async def create_github_issue_from_user_issue(
-        self, db: Session, user_id: int, issue_id: str, user: User
+        self, user_id: int, issue_id: str
     ) -> Optional[UserIssue]:
         """
         Create a GitHub issue from a user issue
 
         Args:
-            db: Database session
             user_id: User ID
             issue_id: User issue ID
-            user: User object
 
         Returns:
             Updated UserIssue object with GitHub issue URL or None if failed
@@ -792,7 +780,7 @@ class IssueService:
 
             # Find the user issue
             user_issue = (
-                db.query(UserIssue)
+                self.db.query(UserIssue)
                 .filter(UserIssue.user_id == user_id, UserIssue.issue_id == issue_id)
                 .first()
             )
@@ -816,7 +804,7 @@ class IssueService:
                 )
 
             # Get user's GitHub token
-            github_token = self.get_user_github_token(user_id, db)
+            github_token = self.get_user_github_token(user_id, self.db)
             if not github_token:
                 raise IssueOpsError("No valid GitHub token available")
 
@@ -837,7 +825,7 @@ class IssueService:
                 user_issue.updated_at = utc_now()
                 user_issue.processed_at = utc_now()
 
-                db.commit()
+                self.db.commit()
 
                 logger.info(
                     f"Successfully created GitHub issue for user issue {issue_id}"
@@ -849,7 +837,7 @@ class IssueService:
 
         except Exception as e:
             logger.error(f"Failed to create GitHub issue from user issue: {e}")
-            db.rollback()
+            self.db.rollback()
             raise IssueOpsError(f"Failed to create GitHub issue: {str(e)}")
 
     async def _create_github_issue(
@@ -898,7 +886,6 @@ class IssueService:
 
     def get_user_issues(
         self,
-        db: Session,
         user_id: int,
         session_id: Optional[str] = None,
         status_filter: Optional[str] = None,
@@ -908,7 +895,6 @@ class IssueService:
         Get user issues with optional filtering
 
         Args:
-            db: Database session
             user_id: User ID
             session_id: Optional session ID filter
             status_filter: Optional status filter
@@ -920,7 +906,7 @@ class IssueService:
         try:
             logger.info(f"Getting user issues for user {user_id}")
 
-            query = db.query(UserIssue).filter(UserIssue.user_id == user_id)
+            query = self.db.query(UserIssue).filter(UserIssue.user_id == user_id)
 
             if session_id:
                 query = query.filter(UserIssue.session_id == session_id)
@@ -938,13 +924,12 @@ class IssueService:
             return []
 
     def get_user_issue(
-        self, db: Session, user_id: int, issue_id: str
+        self, user_id: int, issue_id: str
     ) -> Optional[UserIssue]:
         """
         Get a specific user issue
 
         Args:
-            db: Database session
             user_id: User ID
             issue_id: Issue ID
 
@@ -955,7 +940,7 @@ class IssueService:
             logger.info(f"Getting user issue {issue_id} for user {user_id}")
 
             issue = (
-                db.query(UserIssue)
+                self.db.query(UserIssue)
                 .filter(UserIssue.user_id == user_id, UserIssue.issue_id == issue_id)
                 .first()
             )
