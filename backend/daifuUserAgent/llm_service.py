@@ -33,7 +33,6 @@ class LLMService:
     _embedding_model = None
 
     # Cache directory configuration
-    TRANSFORMERS_CACHE = os.getenv("TRANSFORMERS_CACHE", "/tmp/transformers_cache")
     HF_HOME = os.getenv("HF_HOME", "/tmp/huggingface_cache")
 
     @staticmethod
@@ -60,20 +59,18 @@ class LLMService:
         """Get or load the embedding model (cached for performance)"""
         if LLMService._embedding_model is None:
             try:
-                # Ensure cache directories exist and have correct permissions
-                os.makedirs(LLMService.TRANSFORMERS_CACHE, exist_ok=True)
+                # Ensure cache directory exists and has correct permissions
                 os.makedirs(LLMService.HF_HOME, exist_ok=True)
 
-                # Set environment variables for transformers and huggingface
-                os.environ["TRANSFORMERS_CACHE"] = LLMService.TRANSFORMERS_CACHE
+                # Set environment variable for huggingface
                 os.environ["HF_HOME"] = LLMService.HF_HOME
 
                 logger.info(f"Loading embedding model: {LLMService.EMBEDDING_MODEL}")
-                logger.info(f"Using cache directory: {LLMService.TRANSFORMERS_CACHE}")
+                logger.info(f"Using HF cache directory: {LLMService.HF_HOME}")
 
                 LLMService._embedding_model = SentenceTransformer(
                     LLMService.EMBEDDING_MODEL,
-                    cache_folder=LLMService.TRANSFORMERS_CACHE,
+                    cache_folder=LLMService.HF_HOME,
                     local_files_only=False
                 )
                 logger.info("Embedding model loaded successfully")
@@ -84,7 +81,7 @@ class LLMService:
                     logger.info("Attempting to load fallback model: all-MiniLM-L6-v2")
                     LLMService._embedding_model = SentenceTransformer(
                         "all-MiniLM-L6-v2",
-                        cache_folder=LLMService.TRANSFORMERS_CACHE,
+                        cache_folder=LLMService.HF_HOME,
                         local_files_only=False
                     )
                     logger.info("Fallback embedding model loaded successfully")
