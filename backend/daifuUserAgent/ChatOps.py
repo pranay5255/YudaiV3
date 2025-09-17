@@ -261,12 +261,11 @@ class ChatOps:
                 # Build the conversation history including the current message
                 full_history = history + [("User", message_text)]
 
-                # Get stored GitHub context from database with error handling
+                # Get stored GitHub context using filesystem cache; store only metadata in DB
                 github_context = None
                 if repo_owner and repo_name:
                     try:
                         from models import Repository, User
-
                         from utils import utc_now
 
                         repository = (
@@ -279,31 +278,56 @@ class ChatOps:
                             .first()
                         )
 
-                        # Check if we have recent cached context
-                        if (repository and hasattr(repository, 'github_context') and
-                            repository.github_context and
-                            hasattr(repository, 'github_context_updated_at') and
-                            repository.github_context_updated_at):
+                        # Try reading from cache if we have recent metadata
+                        if (
+                            repository
+                            and hasattr(repository, "github_context")
+                            and repository.github_context
+                            and hasattr(repository, "github_context_updated_at")
+                            and repository.github_context_updated_at
+                        ):
                             # Check if context is less than 24 hours old
-                            if (utc_now() - repository.github_context_updated_at).total_seconds() < 86400:
-                                github_context = repository.github_context
+                            if (
+                                (utc_now() - repository.github_context_updated_at).total_seconds()
+                                < 86400
+                            ):
+                                github_context = LLMService.read_github_context_cache(
+                                    repository.github_context
+                                )
                             else:
-                                logger.info(f"GitHub context for {repo_owner}/{repo_name} is stale, will refresh")
+                                logger.info(
+                                    f"GitHub context for {repo_owner}/{repo_name} is stale, will refresh"
+                                )
 
-                        # If no cached context or stale, fetch fresh context
+                        # If no cached data or cache missing/stale, fetch and write to cache
                         if not github_context:
                             try:
                                 user = self.db.query(User).filter(User.id == user_id).first()
                                 if user:
-                                    logger.info(f"Fetching fresh GitHub context for {repo_owner}/{repo_name}")
-                                    fetched_context = await self.get_github_context(repo_owner, repo_name, user, self.db)
+                                    logger.info(
+                                        f"Fetching fresh GitHub context for {repo_owner}/{repo_name}"
+                                    )
+                                    fetched_context = await self.get_github_context(
+                                        repo_owner, repo_name, user, self.db
+                                    )
 
                                     if fetched_context:
-                                        github_context = fetched_context
+                                        # Write to cache, get metadata
+                                        cache_meta = LLMService.write_github_context_cache(
+                                            data=fetched_context,
+                                            user_id=user_id,
+                                            session_id=session.session_id,
+                                            owner=repo_owner,
+                                            name=repo_name,
+                                        )
 
-                                        # Cache the context in database
+                                        # Load what we just cached
+                                        github_context = LLMService.read_github_context_cache(
+                                            cache_meta
+                                        )
+
+                                        # Create or update repository metadata only
                                         if not repository:
-                                            # Create repository record if it doesn't exist
                                             repository = Repository(
                                                 user_id=user_id,
                                                 name=repo_name,
@@ -312,28 +336,36 @@ class ChatOps:
                                                 repo_url=f"https://github.com/{repo_owner}/{repo_name}",
                                                 html_url=f"https://github.com/{repo_owner}/{repo_name}",
                                                 clone_url=f"https://github.com/{repo_owner}/{repo_name}.git",
-                                                github_context=fetched_context,
+                                                github_context=cache_meta,
                                                 github_context_updated_at=utc_now(),
                                             )
                                             self.db.add(repository)
                                         else:
-                                            # Update existing repository
-                                            repository.github_context = fetched_context
+                                            repository.github_context = cache_meta
                                             repository.github_context_updated_at = utc_now()
 
                                         self.db.commit()
-                                        logger.info(f"Cached GitHub context for {repo_owner}/{repo_name}")
+                                        logger.info(
+                                            f"Cached GitHub context metadata for {repo_owner}/{repo_name} at {cache_meta.get('cache_path')}"
+                                        )
                                     else:
-                                        logger.warning(f"Failed to fetch GitHub context for {repo_owner}/{repo_name}")
+                                        logger.warning(
+                                            f"Failed to fetch GitHub context for {repo_owner}/{repo_name}"
+                                        )
                                 else:
-                                    logger.warning(f"User {user_id} not found for GitHub context fetch")
-
+                                    logger.warning(
+                                        f"User {user_id} not found for GitHub context fetch"
+                                    )
                             except Exception as fetch_error:
-                                logger.warning(f"Failed to fetch/cache GitHub context: {fetch_error}")
+                                logger.warning(
+                                    f"Failed to fetch/cache GitHub context: {fetch_error}"
+                                )
                                 # Continue without GitHub context - non-fatal
 
                     except Exception as db_error:
-                        logger.warning(f"Database error while fetching GitHub context: {db_error}")
+                        logger.warning(
+                            f"Database error while fetching GitHub context: {db_error}"
+                        )
                         # Continue without GitHub context - non-fatal
 
                 # Generate response using LLM service
@@ -476,10 +508,11 @@ class ChatOps:
             # Build the conversation history including the current message
             full_history = history + [("User", message)]
 
-            # Get stored GitHub context from database
+            # Get stored GitHub context from filesystem cache (metadata in DB)
             github_context = None
             if repo_owner and repo_name:
                 from models import Repository
+                from utils import utc_now
 
                 repository = (
                     self.db.query(Repository)
@@ -491,11 +524,20 @@ class ChatOps:
                     .first()
                 )
 
-                if repository and repository.github_context:
-                    github_context = repository.github_context
+                if (
+                    repository
+                    and repository.github_context
+                    and repository.github_context_updated_at
+                    and (utc_now() - repository.github_context_updated_at).total_seconds() < 86400
+                ):
+                    from .llm_service import LLMService as _LLM
+
+                    github_context = _LLM.read_github_context_cache(
+                        repository.github_context
+                    )
                 else:
                     logger.warning(
-                        f"No stored GitHub context found for {repo_owner}/{repo_name}"
+                        f"No recent cached GitHub context found for {repo_owner}/{repo_name}"
                     )
 
             # Generate response using LLM service with stored GitHub context
