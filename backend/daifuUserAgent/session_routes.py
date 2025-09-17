@@ -2053,6 +2053,17 @@ async def create_issue_with_context_for_session(
 
         # Use consolidated issue creation service
         issue_service = IssueOpsService(db)
+        
+        # Fall back to request repository_info if session repo data is incomplete
+        repo_owner = db_session.repo_owner
+        repo_name = db_session.repo_name
+        
+        if not repo_owner or not repo_name:
+            repository_info = request.get("repository_info", {})
+            if repository_info:
+                repo_owner = repository_info.get("owner") or repo_owner
+                repo_name = repository_info.get("name") or repo_name
+        
         result = await issue_service.create_issue_with_context(
             user_id=current_user.id,
             session_id=session_id,
@@ -2060,8 +2071,8 @@ async def create_issue_with_context_for_session(
             description=request.get("description", ""),
             chat_messages=request.get("chat_messages", []),
             file_context=request.get("file_context", []),
-            repo_owner=db_session.repo_owner,
-            repo_name=db_session.repo_name,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
             priority=request.get("priority", "medium"),
             create_github_issue=False,  # We'll create GitHub issue separately in the modal
         )
