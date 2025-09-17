@@ -1125,7 +1125,7 @@ export const useSessionStore = create<SessionState>()(
 
             // Add the message to local state immediately
             const newMessage = {
-              id: response.message_id ? parseInt(response.message_id) : Date.now(),
+              id: response.message_id ? (parseInt(response.message_id) || Date.now()) : Date.now(),
               message_id: response.message_id || `msg_${Date.now()}`,
               message_text: message,
               sender_type: 'user' as const,
