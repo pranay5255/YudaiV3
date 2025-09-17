@@ -5,6 +5,7 @@ node_modules
 .env.dev
 .env.prod
 .env.dev.secrets
+/data/
 ssl/
 *.log
 .DS_Store
