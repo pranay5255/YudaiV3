@@ -773,7 +773,6 @@ async def get_file_dependencies_for_session(
 ):
     """Get file items for a session (matches frontend FileItem interface)"""
     try:
-
         # Ensure session exists and belongs to user
         db_session = SessionService.ensure_owned_session(
             db, current_user.id, session_id
@@ -787,9 +786,12 @@ async def get_file_dependencies_for_session(
             .all()
         )
 
+        logger.info(f"[FileDeps] Found {len(file_items)} file items for session {session_id}")
+
         # Convert to response format
-        return [
-            FileItemResponse(
+        response_items = []
+        for item in file_items:
+            response_item = FileItemResponse(
                 id=str(item.id),
                 name=item.name,
                 path=item.path,
@@ -804,10 +806,13 @@ async def get_file_dependencies_for_session(
                 file_type=item.file_type,
                 content_summary=item.content_summary,
             )
-            for item in file_items
-        ]
+            response_items.append(response_item)
+
+        logger.info(f"[FileDeps] Returning {len(response_items)} file items for session {session_id}")
+        return response_items
 
     except Exception as e:
+        logger.error(f"[FileDeps] Failed to get file dependencies for session {session_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get file dependencies: {str(e)}",
@@ -1542,8 +1547,8 @@ async def _index_repository_for_session_background(
             logger.error(f"[Index] GitIngest error: {raw_repo['error']}")
             return
 
-        processed = _process_gitingest_data(raw_repo)
-        tree = _build_file_tree({"files": processed.get("files", [])}, repo_name)
+        # Use raw_repo files directly since scraper_script.py now returns proper files array
+        files_data = raw_repo.get("files", [])
 
         # Fetch repo metadata (best effort)
         try:
@@ -1574,13 +1579,57 @@ async def _index_repository_for_session_background(
             pushed_at=meta.get("pushed_at"),
         )
 
-        # Create content lookup and persist
-        content_map = {
-            f.get("path"): f.get("content", "") for f in processed.get("files", [])
-        }
-        _save_file_items_and_embeddings(
-            db, repository.id, tree, chat_session.id, content_map
-        )
+        # Save file items directly from files_data
+        saved_file_items = []
+        saved_embeddings = []
+
+        for file_data in files_data:
+            try:
+                # Create FileItem record
+                file_item = FileItem(
+                    session_id=chat_session.id,
+                    repository_id=repository.id,
+                    name=file_data.get("path", "").split("/")[-1] or "unknown",
+                    path=file_data.get("path"),
+                    type=file_data.get("type", "INTERNAL"),
+                    tokens=_estimate_tokens_for_file(
+                        file_data.get("path", ""),
+                        file_data.get("content_size", 0)
+                    ),
+                    category=file_data.get("type", "unknown"),
+                    is_directory=False,
+                    content_size=file_data.get("content_size", 0),
+                    file_name=file_data.get("path", "").split("/")[-1],
+                    file_path=file_data.get("path"),
+                    file_type=file_data.get("type"),
+                )
+                db.add(file_item)
+                db.flush()  # Get the ID
+                saved_file_items.append(file_item)
+
+                # Create embeddings for the file content
+                file_content = file_data.get("content", "")
+                if file_content and len(file_content.strip()) > 0:
+                    try:
+                        embeddings = _create_embeddings_for_file_item(
+                            db,
+                            chat_session.id,
+                            repository.id,
+                            file_item.id,
+                            file_data.get("path", ""),
+                            file_data.get("path", "").split("/")[-1] or "unknown",
+                            file_content,
+                        )
+                        saved_embeddings.extend(embeddings)
+                    except Exception as embed_error:
+                        logger.warning(f"[Index] Failed to create embeddings for {file_data.get('path')}: {embed_error}")
+                        # Continue processing other files
+
+            except Exception as file_error:
+                logger.warning(f"[Index] Failed to process file {file_data.get('path')}: {file_error}")
+                continue
+
+        logger.info(f"[Index] Saved {len(saved_file_items)} file items and {len(saved_embeddings)} embeddings")
         db.commit()
 
         logger.info(f"[Index] Completed indexing for session {session_uuid}")
@@ -2025,6 +2074,58 @@ async def solver_health_for_session(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get solver health: {str(e)}",
         )
+
+
+# ============================================================================
+# DEBUG ENDPOINTS - For testing and debugging
+# ============================================================================
+
+@router.get("/debug/test-gitingest", response_model=dict)
+async def test_gitingest_extraction():
+    """Debug endpoint to test GitIngest extraction without requiring authentication."""
+    try:
+        from repo_processorGitIngest.scraper_script import extract_repository_data
+
+        # Test with a simple public repository
+        test_repo_url = "https://github.com/octocat/Hello-World"
+
+        logger.info(f"[Debug] Testing GitIngest extraction for: {test_repo_url}")
+        result = await extract_repository_data(test_repo_url, max_file_size=50000)
+
+        if "error" in result:
+            logger.error(f"[Debug] GitIngest extraction failed: {result['error']}")
+            return {
+                "success": False,
+                "error": result["error"],
+                "timestamp": result.get("timestamp")
+            }
+
+        files = result.get("files", [])
+        logger.info(f"[Debug] Successfully extracted {len(files)} files")
+
+        return {
+            "success": True,
+            "repository_url": test_repo_url,
+            "files_count": len(files),
+            "files": [
+                {
+                    "path": f["path"],
+                    "type": f["type"],
+                    "content_size": f["content_size"],
+                    "has_content": len(f.get("content", "")) > 0
+                }
+                for f in files[:10]  # Show first 10 files
+            ],
+            "timestamp": result.get("extraction_info", {}).get("timestamp")
+        }
+
+    except Exception as e:
+        logger.error(f"[Debug] Test endpoint failed: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": utc_now().isoformat()
+        }
 
 
 # ============================================================================
