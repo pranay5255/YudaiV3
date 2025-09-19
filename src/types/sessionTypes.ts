@@ -408,7 +408,7 @@ export interface GitHubIssuePreview {
   };
   metadata: {
     chat_messages_count: number;
-    file_context_count: number;
+    files_context_count: number;
     total_tokens: number;
     generated_at: string;
     generation_method: string;
