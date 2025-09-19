@@ -15,7 +15,6 @@ import hashlib
 import httpx
 from fastapi import HTTPException, status
 from models import FileEmbedding
-from pgvector.sqlalchemy import Vector
 from sentence_transformers import SentenceTransformer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -307,7 +306,7 @@ class LLMService:
         stmt = (
             select(FileEmbedding.chunk_text)
             .where(FileEmbedding.session_id == session_id)
-            .order_by(FileEmbedding.embedding.cosine_distance(Vector(query_embedding)))
+            .order_by(FileEmbedding.embedding.cosine_distance(query_embedding))
             .limit(top_k)
         )
 
