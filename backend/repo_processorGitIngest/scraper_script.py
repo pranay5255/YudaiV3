@@ -13,14 +13,16 @@ Example:
 """
 
 import argparse
+import fnmatch
 import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Optional, Any, Tuple
-from utils import utc_now
-import fnmatch
+from typing import Any, Dict, Optional, Tuple
+
 from gitingest import ingest_async as ingest
+
+from utils import utc_now
 
 include_categories = {
     'Source Code': ['*.py', '*.js', '*.ts', '*.jsx', '*.tsx', '*.java', '*.cpp', '*.c', '*.go', '*.rs', '*.php', '*.rb', '*.swift', '*.kt', '*.scala', '*.cs', '*.vb', '*.hs', '*.lua', '*.jl'],
@@ -106,11 +108,12 @@ async def extract_repository_data(
             repo_url,
             max_file_size=max_file_size
         )
-        
+
         # Parse tree structure to get files and directories
         file_categories = {}
         directories = []
-        
+        files = []
+
         if tree:
             lines = tree.strip().split('\n')
             for line in lines:
@@ -124,9 +127,47 @@ async def extract_repository_data(
                         else:
                             # This is a file - categorize with full path
                             category, cat_type = categorize_file(path)
-                            if category:
+                            if category and cat_type == 'include':
                                 file_categories[path] = {'category': category, 'type': cat_type}
-        
+
+        # Extract individual file contents from GitIngest content
+        # GitIngest returns content as a string with file separators
+        file_contents = {}
+        if content:
+            # Split content by file separator markers
+            content_sections = content.split('=' * 50)
+            current_file = None
+            current_content = []
+
+            for section in content_sections:
+                lines = section.strip().split('\n')
+                if lines and lines[0].startswith('File: '):
+                    # Save previous file if exists
+                    if current_file and current_content:
+                        file_contents[current_file] = '\n'.join(current_content)
+
+                    # Start new file
+                    current_file = lines[0][6:].strip()  # Remove 'File: ' prefix
+                    current_content = lines[1:]  # Skip the file header
+                elif current_file:
+                    current_content.extend(lines)
+
+            # Save last file
+            if current_file and current_content:
+                file_contents[current_file] = '\n'.join(current_content)
+
+        # Build files array with content
+        for file_path in file_categories.keys():
+            if file_path in file_contents:
+                file_content = file_contents[file_path]
+                files.append({
+                    'path': file_path,
+                    'content': file_content,
+                    'size': len(file_content),
+                    'content_size': len(file_content),
+                    'type': file_categories[file_path]['category']
+                })
+
         return {
             'extraction_info': {
                 'timestamp': utc_now().isoformat(),
@@ -137,9 +178,10 @@ async def extract_repository_data(
                     'directories': directories
                 }
             },
+            'files': files,
             'raw_response': {
                 'summary': summary,
-                'tree': tree, 
+                'tree': tree,
                 'content': content
             }
         }
@@ -228,6 +270,41 @@ Examples:
     print(f"Output file: {args.output_file}")
 
 
+async def test_extract_repository_data():
+    """Test function to verify repository data extraction works correctly."""
+    # Test with a simple public repository
+    test_repo_url = "https://github.com/octocat/Hello-World"
+    print(f"Testing repository extraction for: {test_repo_url}")
+
+    try:
+        result = await extract_repository_data(test_repo_url, max_file_size=50000)
+        if "error" in result:
+            print(f"Error during extraction: {result['error']}")
+            return False
+
+        files = result.get("files", [])
+        print(f"Successfully extracted {len(files)} files:")
+        for file in files[:5]:  # Show first 5 files
+            print(f"  - {file['path']} ({file['content_size']} chars, type: {file['type']})")
+
+        if files:
+            print(f"Sample content from first file ({files[0]['path']}):")
+            content_preview = files[0]['content'][:200] + "..." if len(files[0]['content']) > 200 else files[0]['content']
+            print(f"    {content_preview}")
+
+        return True
+    except Exception as e:
+        print(f"Test failed with error: {e}")
+        return False
+
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(main())
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "--test":
+        # Run test function
+        success = asyncio.run(test_extract_repository_data())
+        sys.exit(0 if success else 1)
+    else:
+        # Run main function
+        asyncio.run(main())
