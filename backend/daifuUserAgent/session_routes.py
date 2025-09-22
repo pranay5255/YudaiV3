@@ -242,6 +242,9 @@ async def create_session(
     This is a CRITICAL endpoint required for session initialization.
     """
     try:
+        # Debug logging for request data
+        logger.info(f"[Session] Creating session with request data: repo_owner='{request.repo_owner}', repo_name='{request.repo_name}', repo_branch='{request.repo_branch}'")
+
         # Generate unique session ID
         session_id = f"session_{uuid.uuid4().hex[:8]}"
 
@@ -273,7 +276,10 @@ async def create_session(
                 repo_branch = request.repo_branch or "main"
                 max_file_size = getattr(request, "index_max_file_size", None)
 
+                logger.info(f"[Session] Triggering background indexing for session {session_id}: {repo_owner}/{repo_name}")
+
                 async def _run_index():
+                    logger.info(f"[Session] Starting background indexing task for session {session_id}")
                     await _index_repository_for_session_background(
                         session_uuid=db_session.session_id,
                         user_id=current_user.id,
@@ -282,6 +288,7 @@ async def create_session(
                         repo_branch=repo_branch,
                         max_file_size=max_file_size,
                     )
+                    logger.info(f"[Session] Background indexing completed for session {session_id}")
 
                 try:
                     # If inside event loop, schedule directly
@@ -1523,6 +1530,21 @@ async def _index_repository_for_session_background(
             f"[Index] Starting indexing for session={session_uuid} repo={repo_owner}/{repo_name}"
         )
 
+        # Validate repository parameters
+        if not repo_owner or not repo_owner.strip():
+            logger.error(f"[Index] Invalid repo_owner: '{repo_owner}'")
+            return
+
+        if not repo_name or not repo_name.strip():
+            logger.error(f"[Index] Invalid repo_name: '{repo_name}'")
+            return
+
+        # Sanitize repository parameters (remove any leading/trailing whitespace)
+        repo_owner = repo_owner.strip()
+        repo_name = repo_name.strip()
+
+        logger.info(f"[Index] Sanitized repo_owner='{repo_owner}', repo_name='{repo_name}'")
+
         # Verify the session exists and is owned by the user
         chat_session = (
             db.query(ChatSession)
@@ -1537,18 +1559,34 @@ async def _index_repository_for_session_background(
             )
             return
 
+        # Construct repository URL with validation
         repo_url = f"https://github.com/{repo_owner}/{repo_name}"
+        logger.info(f"[Index] Constructed repo URL: {repo_url}")
+
+        # Validate URL format
+        if not repo_url.startswith("https://github.com/"):
+            logger.error(f"[Index] Invalid repo URL format: {repo_url}")
+            return
 
         # Extract repository content via GitIngest
-        raw_repo = await extract_repository_data(
-            repo_url=repo_url, max_file_size=max_file_size
-        )
+        logger.info(f"[Index] Starting GitIngest extraction for: {repo_url}")
+        try:
+            raw_repo = await extract_repository_data(
+                repo_url=repo_url, max_file_size=max_file_size
+            )
+            logger.info(f"[Index] GitIngest extraction completed, response type: {type(raw_repo)}")
+        except Exception as extract_error:
+            logger.error(f"[Index] GitIngest extraction failed with exception: {extract_error}")
+            return
+
         if isinstance(raw_repo, dict) and raw_repo.get("error"):
             logger.error(f"[Index] GitIngest error: {raw_repo['error']}")
+            logger.error(f"[Index] Full error response: {raw_repo}")
             return
 
         # Use raw_repo files directly since scraper_script.py now returns proper files array
         files_data = raw_repo.get("files", [])
+        logger.info(f"[Index] Extracted {len(files_data)} files from repository")
 
         # Fetch repo metadata (best effort)
         try:
@@ -1583,8 +1621,13 @@ async def _index_repository_for_session_background(
         saved_file_items = []
         saved_embeddings = []
 
-        for file_data in files_data:
+        logger.info(f"[Index] Processing {len(files_data)} files for database storage")
+
+        for i, file_data in enumerate(files_data):
             try:
+                file_path = file_data.get("path", "")
+                logger.debug(f"[Index] Processing file {i+1}/{len(files_data)}: {file_path}")
+
                 # Create FileItem record
                 file_item = FileItem(
                     session_id=chat_session.id,
@@ -1606,6 +1649,7 @@ async def _index_repository_for_session_background(
                 db.add(file_item)
                 db.flush()  # Get the ID
                 saved_file_items.append(file_item)
+                logger.debug(f"[Index] Successfully saved file item: {file_path} (ID: {file_item.id})")
 
                 # Create embeddings for the file content
                 file_content = file_data.get("content", "")
@@ -1630,9 +1674,16 @@ async def _index_repository_for_session_background(
                 continue
 
         logger.info(f"[Index] Saved {len(saved_file_items)} file items and {len(saved_embeddings)} embeddings")
-        db.commit()
 
-        logger.info(f"[Index] Completed indexing for session {session_uuid}")
+        try:
+            db.commit()
+            logger.info(f"[Index] Database commit successful for session {session_uuid}")
+        except Exception as commit_error:
+            logger.error(f"[Index] Database commit failed: {commit_error}")
+            db.rollback()
+            return
+
+        logger.info(f"[Index] Completed indexing for session {session_uuid}: {len(saved_file_items)} files processed")
     except Exception as e:
         logger.error(f"[Index] Unexpected indexing error: {e}")
         db.rollback()
