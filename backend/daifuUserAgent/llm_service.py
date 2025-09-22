@@ -3,14 +3,14 @@ Centralized LLM Service for DAifu Agent
 Eliminates duplication and standardizes LLM calls across chat endpoints
 """
 
+import hashlib
+import json
 import logging
 import os
 import time
-from typing import List, Tuple, Optional, Dict
 from datetime import datetime, timezone
 from pathlib import Path
-import json
-import hashlib
+from typing import Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import HTTPException, status
@@ -26,7 +26,7 @@ class LLMService:
     """Centralized service for LLM interactions"""
 
     # Standard model configuration
-    DEFAULT_MODEL = "openrouter/sonoma-sky-alpha"
+    DEFAULT_MODEL = "x-ai/grok-4-fast:free"
     DEFAULT_TEMPERATURE = 0.6
     DEFAULT_MAX_TOKENS = 4000
     DEFAULT_TIMEOUT = 30

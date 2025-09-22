@@ -266,6 +266,7 @@ class ChatOps:
                 if repo_owner and repo_name:
                     try:
                         from models import Repository, User
+
                         from utils import utc_now
 
                         repository = (
@@ -375,7 +376,7 @@ class ChatOps:
                     github_context=github_context,
                     conversation_history=full_history,
                     file_contexts=file_contexts,
-                    model="openrouter/sonoma-sky-alpha",
+                    model="x-ai/grok-4-fast:free",
                     temperature=0.4,
                     max_tokens=2500,
                     timeout=25,
@@ -512,6 +513,7 @@ class ChatOps:
             github_context = None
             if repo_owner and repo_name:
                 from models import Repository
+
                 from utils import utc_now
 
                 repository = (
@@ -547,7 +549,7 @@ class ChatOps:
                 github_context=github_context,
                 conversation_history=full_history,
                 file_contexts=file_contexts,
-                model="openrouter/sonoma-sky-alpha",
+                model="x-ai/grok-4-fast:free",
                 temperature=0.4,
                 max_tokens=2500,
                 timeout=25,

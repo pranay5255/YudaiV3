@@ -1,5 +1,5 @@
 {
-    "openrouter/sonoma-sky-alpha:free": {
+    "x-ai/grok-4-fast:free:free": {
       "max_tokens": 32768,
       "max_input_tokens": 32768,
       "max_output_tokens": 32768,
