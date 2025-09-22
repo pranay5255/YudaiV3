@@ -1041,13 +1041,18 @@ class IssueService:
                     f"Missing repository information for user issue {issue_id}"
                 )
                 raise IssueOpsError(
-                    "Repository information is required to create GitHub issue"
+                    "Repository information is required to create GitHub issue. "
+                    "Please ensure the repository owner and name are properly set."
                 )
 
             # Get user's GitHub token
             github_token = self.get_user_github_token(user_id, self.db)
             if not github_token:
-                raise IssueOpsError("No valid GitHub token available")
+                raise IssueOpsError(
+                    "No valid GitHub token available. "
+                    "Please ensure you have authenticated with GitHub and have the necessary permissions. "
+                    "Required OAuth scopes: repo, public_repo, user:email, read:org"
+                )
 
             # Create the GitHub issue
             github_issue_data = await self._create_github_issue(
@@ -1079,7 +1084,24 @@ class IssueService:
         except Exception as e:
             logger.error(f"Failed to create GitHub issue from user issue: {e}")
             self.db.rollback()
-            raise IssueOpsError(f"Failed to create GitHub issue: {str(e)}")
+
+            # Provide more specific error messages for common issues
+            error_str = str(e).lower()
+            if any(keyword in error_str for keyword in ['403', 'forbidden', 'permission', 'access denied', 'not authorized']):
+                raise IssueOpsError(
+                    f"Permission denied creating GitHub issue. "
+                    f"Please ensure your GitHub App has 'Issues' repository permission enabled "
+                    f"and that you have access to the repository {user_issue.repo_owner}/{user_issue.repo_name}. "
+                    f"Original error: {str(e)}"
+                )
+            elif "404" in error_str or "not found" in error_str:
+                raise IssueOpsError(
+                    f"Repository {user_issue.repo_owner}/{user_issue.repo_name} not found or not accessible. "
+                    f"Please verify the repository exists and you have access to it. "
+                    f"Original error: {str(e)}"
+                )
+            else:
+                raise IssueOpsError(f"Failed to create GitHub issue: {str(e)}")
 
     async def _create_github_issue(
         self, repo_owner: str, repo_name: str, title: str, body: str, user_id: int
@@ -1123,6 +1145,26 @@ class IssueService:
 
         except Exception as e:
             logger.error(f"Error creating GitHub issue: {e}")
+
+            # Provide specific error handling for common GitHub API issues
+            error_str = str(e).lower()
+            if any(keyword in error_str for keyword in ['403', 'forbidden', 'permission', 'access denied', 'not authorized']):
+                logger.error(
+                    f"Permission denied creating GitHub issue in {repo_owner}/{repo_name}. "
+                    f"Ensure the GitHub App has 'Issues' repository permission enabled "
+                    f"and the user has write access to the repository."
+                )
+            elif "404" in error_str or "not found" in error_str:
+                logger.error(
+                    f"Repository {repo_owner}/{repo_name} not found or not accessible. "
+                    f"Verify the repository exists and the user has access to it."
+                )
+            elif "422" in error_str or "validation" in error_str:
+                logger.error(
+                    f"Validation error creating GitHub issue in {repo_owner}/{repo_name}. "
+                    f"Check that the issue title and body are valid and the repository has issues enabled."
+                )
+
             return None
 
     def get_user_issues(

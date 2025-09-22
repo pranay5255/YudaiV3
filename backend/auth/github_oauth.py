@@ -165,7 +165,7 @@ def get_github_oauth_url() -> str:
     params = {
         "client_id": GITHUB_APP_CLIENT_ID,
         "redirect_uri": redirect_uri,
-        "scope": "repo user:email read:org",  # Request permissions for repos, user info, and org access
+        "scope": "repo user:email read:org public_repo",  # Request permissions for repos, user info, org access, and public repo operations
     }
 
     auth_url = f"{GITHUB_AUTH_URL}?{urlencode(params)}"
@@ -291,7 +291,7 @@ async def create_or_update_user(
             user_id=user.id,
             access_token=access_token,
             token_type="bearer",
-            scope="repo user:email read:org",  # GitHub App OAuth scopes
+            scope="repo user:email read:org public_repo",  # GitHub App OAuth scopes
             expires_at=utc_now() + timedelta(hours=8),
             is_active=True,
             # GitHub App specific fields

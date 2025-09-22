@@ -478,6 +478,18 @@ class GitHubOps:
 
         except Exception as e:
             logger.error(f"Error creating GitHub issue in {owner}/{repo}: {e}")
+
+            # Check if it's a permissions-related error and provide helpful guidance
+            error_str = str(e).lower()
+            if any(keyword in error_str for keyword in ['403', 'forbidden', 'permission', 'access denied', 'not authorized']):
+                logger.error(
+                    f"Permission denied creating GitHub issue. "
+                    f"Ensure your GitHub App has 'Issues' repository permission enabled. "
+                    f"Repository: {owner}/{repo}"
+                )
+                # You can also raise a more specific exception here if needed
+                # raise GitHubOpsError(f"Insufficient permissions to create GitHub issues. Please check your GitHub App permissions.")
+
             return None
 
     async def update_github_issue(

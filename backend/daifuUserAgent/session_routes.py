@@ -2556,7 +2556,20 @@ async def create_github_issue_from_user_issue_for_session(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create GitHub issue: {str(e)}",
-        )
+        # Handle specific IssueOps errors with appropriate HTTP status codes
+        error_str = str(e).lower()
+        if any(keyword in error_str for keyword in ['403', 'forbidden', 'permission', 'access denied', 'not authorized']):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=str(e),
+            )
+        elif "404" in error_str or "not found" in error_str:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(e),
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
