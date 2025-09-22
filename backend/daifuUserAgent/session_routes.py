@@ -266,7 +266,7 @@ async def create_session(
         db.refresh(db_session)
 
         # Kick off background indexing of the repository if requested
-        if getattr(request, "index_codebase", False):
+        if getattr(request, "index_codebase", True):
             try:
                 repo_owner = request.repo_owner
                 repo_name = request.repo_name
