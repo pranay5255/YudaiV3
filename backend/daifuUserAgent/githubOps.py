@@ -457,6 +457,11 @@ class GitHubOps:
 
             # Use ghapi to create the issue
             created_issue = client.issues.create(owner, repo, **issue_data)
+            if not created_issue:
+                raise GitHubOpsError(
+                    f"GitHub did not return issue data when creating an issue in {owner}/{repo}. "
+                    "Please verify your repository permissions and retry."
+                )
 
             return {
                 "id": created_issue.get("id"),
@@ -479,18 +484,29 @@ class GitHubOps:
         except Exception as e:
             logger.error(f"Error creating GitHub issue in {owner}/{repo}: {e}")
 
-            # Check if it's a permissions-related error and provide helpful guidance
             error_str = str(e).lower()
             if any(keyword in error_str for keyword in ['403', 'forbidden', 'permission', 'access denied', 'not authorized']):
-                logger.error(
-                    f"Permission denied creating GitHub issue. "
-                    f"Ensure your GitHub App has 'Issues' repository permission enabled. "
-                    f"Repository: {owner}/{repo}"
+                raise GitHubOpsError(
+                    f"Permission denied creating GitHub issue in {owner}/{repo}. "
+                    f"Ensure your GitHub App has 'Issues' repository permission enabled and that the authenticated user has write access. "
+                    f"Original error: {e}"
                 )
-                # You can also raise a more specific exception here if needed
-                # raise GitHubOpsError(f"Insufficient permissions to create GitHub issues. Please check your GitHub App permissions.")
+            if any(keyword in error_str for keyword in ['404', 'not found', 'no such']):
+                raise GitHubOpsError(
+                    f"Repository {owner}/{repo} not found or not accessible. "
+                    f"Verify the repository exists and that the authenticated user or installation can access it. "
+                    f"Original error: {e}"
+                )
+            if any(keyword in error_str for keyword in ['422', 'validation', 'unprocessable']):
+                raise GitHubOpsError(
+                    f"Validation error creating GitHub issue in {owner}/{repo}. "
+                    f"Check that the title/body are valid and that issues are enabled for the repository. "
+                    f"Original error: {e}"
+                )
 
-            return None
+            raise GitHubOpsError(
+                f"Failed to create GitHub issue in {owner}/{repo}: {e}"
+            )
 
     async def update_github_issue(
         self,
