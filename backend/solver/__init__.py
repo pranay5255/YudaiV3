@@ -1,8 +1,11 @@
-"""
-AI Solver package for YudaiV3
-Integrates SWE-agent for automated code solving
-"""
+"""AI Solver package for YudaiV3."""
 
-from .ai_solver import AISolverAdapter
+__all__ = ["AISolverAdapter"]
 
-__all__ = ['AISolverAdapter']
+
+def __getattr__(name: str):
+    if name == "AISolverAdapter":
+        from .ai_solver import AISolverAdapter as _AISolverAdapter
+
+        return _AISolverAdapter
+    raise AttributeError(name)

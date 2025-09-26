@@ -1,7 +1,4 @@
-"""
-AI Solver Adapter for YudaiV3
-Integrates SWE-agent CLI for automated code solving without GitHub PR creation
-"""
+
 
 import asyncio
 import json
@@ -12,8 +9,15 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
-from models import AIModel, AISolveEdit, AISolveSession, Issue, SWEAgentConfig
-from schemas.ai_solver import EditType, SolveStatus
+from models import (
+    AIModel,
+    AISolveEdit,
+    AISolveSession,
+    EditType,
+    Issue,
+    SolveStatus,
+    SWEAgentConfig,
+)
 from sqlalchemy.orm import Session
 
 from utils import utc_now
