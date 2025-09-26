@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useSessionStore } from '../stores/sessionStore';
 
@@ -10,6 +10,20 @@ export const LoginPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const githubAppInstallUrl = useMemo(() => {
+    const explicitUrl = import.meta.env.VITE_GITHUB_APP_INSTALL_URL;
+    if (explicitUrl) {
+      return explicitUrl;
+    }
+
+    const appSlug = import.meta.env.VITE_GITHUB_APP_SLUG;
+    if (appSlug) {
+      return `https://github.com/apps/${appSlug}/installations/new`;
+    }
+
+    return 'https://github.com/apps/yudai/installations/new';
+  }, []);
 
   // Check for error parameters in URL
   useEffect(() => {
@@ -153,9 +167,15 @@ export const LoginPage: React.FC = () => {
             <div className="bg-zinc-800/50 backdrop-blur-sm rounded-xl p-8 border border-zinc-700 shadow-2xl">
 
               {/* Header */}
-              <div className="text-center mb-8">
+              <div className="text-center mb-6">
                 <h2 className="text-2xl font-bold text-white mb-2">Join YudaiV3</h2>
-                <p className="text-zinc-300">Connect your GitHub to start solving issues with AI</p>
+                <p className="text-zinc-300">Complete the two-step GitHub onboarding to unlock AI automations</p>
+              </div>
+
+              {/* Two-step summary */}
+              <div className="mb-6 rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-primary/90">
+                <p className="font-medium text-primary">Two-step setup</p>
+                <p className="text-primary/80">1) Verify your GitHub identity. 2) Install the Yudai GitHub App so the agent can create issues and pull requests on your behalf.</p>
               </div>
 
               {/* Error Display */}
@@ -165,29 +185,69 @@ export const LoginPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Login Button */}
-              <button
-                onClick={handleGitHubLogin}
-                disabled={isLoading}
-                className="w-full bg-primary hover:bg-primary/90 disabled:bg-primary/50 text-white font-medium py-4 px-6 rounded-lg transition-all duration-200 flex items-center justify-center space-x-3 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-              >
-                {isLoading ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    <span>Connecting to GitHub...</span>
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 0C4.477 0 0 4.484 0 10.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0110 4.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.203 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.942.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0020 10.017C20 4.484 15.522 0 10 0z" clipRule="evenodd" />
-                    </svg>
-                    <span>Sign in with GitHub</span>
-                  </>
-                )}
-              </button>
+              {/* Step 1: GitHub OAuth */}
+              <div className="mb-8 space-y-4">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-lg font-semibold text-primary">1</div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Verify your GitHub identity</h3>
+                    <p className="text-sm text-zinc-400">We use GitHub OAuth to confirm who you are and pull profile basics only. You can revoke access anytime from GitHub settings.</p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleGitHubLogin}
+                  disabled={isLoading}
+                  className="w-full bg-primary hover:bg-primary/90 disabled:bg-primary/50 text-white font-medium py-4 px-6 rounded-lg transition-all duration-200 flex items-center justify-center space-x-3 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                >
+                  {isLoading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                      <span>Contacting GitHub...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 0C4.477 0 0 4.484 0 10.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0110 4.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.203 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.942.359.31.678.921.678 1.856 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0020 10.017C20 4.484 15.522 0 10 0z" clipRule="evenodd" />
+                      </svg>
+                      <span>Sign in with GitHub</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Step 2: GitHub App Installation */}
+              <div className="mb-8 space-y-4">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-secondary/40 bg-secondary/10 text-lg font-semibold text-secondary">2</div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">Install the Yudai GitHub App</h3>
+                    <p className="text-sm text-zinc-400">Grant repository access so Yudai can open issues and create pull requests for you. Without this install, automation features stay disabled.</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <a
+                    href={githubAppInstallUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center rounded-lg border border-secondary/40 bg-secondary/20 px-6 py-3 text-sm font-medium text-secondary transition-colors hover:bg-secondary/30"
+                  >
+                    Install GitHub App
+                  </a>
+                  <p className="text-xs text-zinc-500">
+                    You can install on your personal account or an organization (requires admin permissions).
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-amber-400/20 bg-amber-500/5 p-4 text-xs text-amber-200">
+                  <p className="font-medium text-amber-100">Why this matters</p>
+                  <p className="text-amber-200/80">The GitHub App scopes unlock repository triage, automated issue drafting, and pull request preparation. If you skip this step, the app will run in read-only mode.</p>
+                </div>
+              </div>
 
               {/* Features List */}
-              <div className="mt-8 space-y-3">
+              <div className="space-y-3">
                 <div className="flex items-center gap-3 text-sm text-zinc-300">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                   <span>Analyze Python & TypeScript repositories</span>
