@@ -8,6 +8,8 @@ interface ImportMetaEnv {
   readonly DEV: boolean;
   readonly PROD: boolean;
   readonly SSR: boolean;
+  readonly VITE_GITHUB_APP_INSTALL_URL?: string;
+  readonly VITE_GITHUB_APP_SLUG?: string;
 }
 
 interface ImportMeta {
