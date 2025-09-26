@@ -2025,7 +2025,7 @@ async def list_solve_sessions_for_session(
 
         # Apply status filter if provided
         if status_filter:
-            from schemas.ai_solver import SolveStatus
+            from models import SolveStatus
 
             try:
                 status_enum = SolveStatus(status_filter)
