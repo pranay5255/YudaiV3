@@ -439,6 +439,8 @@ class ChatSession(Base):
     repo_context: Mapped[Optional[str]] = mapped_column(
         JSON, nullable=True
     )  # Repository metadata
+    generate_embeddings: Mapped[bool] = mapped_column(Boolean, default=False)
+    generate_facts_memories: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Status and statistics
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -1311,6 +1313,8 @@ class ChatSessionResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     last_activity: Optional[datetime] = None
+    generate_embeddings: bool = False
+    generate_facts_memories: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1345,6 +1349,8 @@ class CreateSessionRequest(BaseModel):
     index_codebase: Optional[bool] = Field(default=True)
     # Optional max file size (in bytes) for repository extraction
     index_max_file_size: Optional[int] = Field(default=None, ge=1)
+    generate_embeddings: bool = Field(default=True)
+    generate_facts_memories: bool = Field(default=False)
 
 
 class UpdateSessionRequest(BaseModel):
@@ -1352,6 +1358,8 @@ class UpdateSessionRequest(BaseModel):
     description: Optional[str] = Field(None)
     repo_branch: Optional[str] = Field(None, max_length=255)
     is_active: Optional[bool] = Field(None)
+    generate_embeddings: Optional[bool] = None
+    generate_facts_memories: Optional[bool] = None
 
 
 class SessionResponse(BaseModel):
@@ -1369,6 +1377,8 @@ class SessionResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     last_activity: Optional[datetime] = None
+    generate_embeddings: bool = False
+    generate_facts_memories: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
