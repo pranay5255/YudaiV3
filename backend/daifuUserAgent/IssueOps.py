@@ -6,55 +6,34 @@ This module provides all issue-related operations including GitHub issue creatio
 management, and integration with the chat system. It consolidates functionality
 previously scattered across multiple files and provides unified issue operations.
 
-TODO: Complete Implementation Tasks
-========================================
+TODO: Implementation Tasks
+==========================
 
-CRITICAL ISSUES:
-1. LLM Integration for Issue Processing
-   - Implement IssueService.update_issue_status() with actual LLM calls
-   - Add agent response generation using OpenRouter/OpenAI
-   - Implement issue steps processing and validation
+HIGH PRIORITY:
 
-2. GitHub Issue Creation & Management
-   - Implement robust GitHub API error handling
-   - Add support for issue labels, assignees, and milestones
-   - Handle GitHub API rate limiting with exponential backoff
-   - Add GitHub webhook integration for issue updates
 
-3. Issue Content Processing
+
+
+
+
+
+6. Issue Content Processing
    - Implement proper chat message to issue conversion
    - Add file context integration in issue descriptions
    - Support multiple issue templates and formats
    - Add issue priority calculation based on content analysis
 
-4. Frontend Integration (@Chat.tsx compatibility)
-   - Ensure createIssueWithContext response matches expected format
-   - Add proper error message formatting for UI display
-   - Support issue preview in chat interface
+LOW PRIORITY:
+7. Issue Workflow Management
+   - Implement issue status transition workflows
+   - Add support for issue templates and checklists
+   - Implement automated issue categorization
+   - Add support for issue dependencies and relationships
 
-5. Database & Session Integration
-   - Implement proper foreign key relationships
-   - Add session-based issue filtering and management
-   - Implement issue archiving and cleanup strategies
-   - Add database constraints and validation
+8. External System Integration
+   - Add webhook support for external integrations
 
-6. Authentication & Authorization
-   - Implement proper GitHub repository access validation
-   - Add user permission checking for issue operations
-   - Support organization-level access controls
-   - Implement issue ownership and collaboration features
-
-14. Issue Workflow Management
-    - Implement issue status transition workflows
-    - Add support for issue templates and checklists
-    - Implement automated issue categorization
-    - Add support for issue dependencies and relationships
-
-15. Integration with External Systems
-    - Add webhook support for external integrations
-    - Implement API for third-party issue management tools
-    - Add support for issue import/export functionality
-    - Create integration points for CI/CD systems
+   - Create integration points for CI/CD systems
 """
 
 import logging
@@ -62,7 +41,14 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from models import CreateUserIssueRequest, User, UserIssue
+from models import (
+    ChatMessage,
+    ChatSession,
+    CreateUserIssueRequest,
+    FileItem,
+    User,
+    UserIssue,
+)
 from sqlalchemy.orm import Session
 
 from utils import utc_now
@@ -352,9 +338,6 @@ class IssueService:
                 description=issue_request.description,
                 session_id=issue_request.session_id,
                 context_card_id=issue_request.context_card_id,
-                # Note: context_cards and ideas fields are commented out in the SQLAlchemy model
-                # context_cards=json.dumps(issue_request.context_cards) if issue_request.context_cards else None,
-                # ideas=json.dumps(issue_request.ideas) if issue_request.ideas else None,
                 repo_owner=issue_request.repo_owner,
                 repo_name=issue_request.repo_name,
                 priority=issue_request.priority,
@@ -1003,7 +986,10 @@ class IssueService:
 
 
     async def create_github_issue_from_user_issue(
-        self, user_id: int, issue_id: str
+        self,
+        user_id: int,
+        issue_id: str,
+        context_bundle: Optional[Dict[str, Any]] = None,
     ) -> Optional[UserIssue]:
         """
         Create a GitHub issue from a user issue
@@ -1011,6 +997,7 @@ class IssueService:
         Args:
             user_id: User ID
             issue_id: User issue ID
+            context_bundle: Optional structured context to augment the issue body
 
         Returns:
             Updated UserIssue object with GitHub issue URL or None if failed
@@ -1056,12 +1043,15 @@ class IssueService:
                     "Required OAuth scopes: repo, public_repo, user:email, read:org"
                 )
 
+            context = self._build_issue_context(user_issue, context_bundle)
+            issue_body = self._compose_issue_body(user_issue.issue_text_raw, context)
+
             # Create the GitHub issue
             github_issue_data = await self._create_github_issue(
                 user_issue.repo_owner,
                 user_issue.repo_name,
                 user_issue.title,
-                user_issue.issue_text_raw,
+                issue_body,
                 user_id,
             )
 
@@ -1122,6 +1112,155 @@ class IssueService:
                 )
 
             raise IssueOpsError(f"Failed to create GitHub issue: {str(e)}")
+
+
+    def _build_issue_context(
+        self,
+        user_issue: UserIssue,
+        context_bundle: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Assemble repository and conversation context for issue body rendering."""
+
+        context: Dict[str, Any] = dict(context_bundle or {})
+        chat_session: Optional[ChatSession] = None
+
+        if user_issue.session_id:
+            chat_session = (
+                self.db.query(ChatSession)
+                .filter(ChatSession.session_id == user_issue.session_id)
+                .first()
+            )
+
+        if chat_session:
+            context.setdefault(
+                "repository_info",
+                {
+                    "owner": chat_session.repo_owner,
+                    "name": chat_session.repo_name,
+                    "branch": chat_session.repo_branch,
+                    "url": f"https://github.com/{chat_session.repo_owner}/{chat_session.repo_name}"
+                    if chat_session.repo_owner and chat_session.repo_name
+                    else None,
+                },
+            )
+
+            if (
+                isinstance(chat_session.repo_context, dict)
+                and "facts_memories" not in context
+            ):
+                fam = chat_session.repo_context.get("facts_and_memories")
+                if isinstance(fam, dict):
+                    context["facts_memories"] = fam
+
+            if "conversation" not in context:
+                messages = (
+                    self.db.query(ChatMessage)
+                    .filter(ChatMessage.session_id == chat_session.id)
+                    .order_by(ChatMessage.created_at.desc())
+                    .limit(8)
+                    .all()
+                )
+                context["conversation"] = [
+                    {
+                        "author": message.sender_type or message.role or "user",
+                        "text": message.message_text,
+                    }
+                    for message in reversed(messages)
+                ]
+
+            if "files" not in context:
+                files = (
+                    self.db.query(FileItem)
+                    .filter(
+                        FileItem.session_id == chat_session.id,
+                        FileItem.is_directory.is_(False),
+                    )
+                    .order_by(FileItem.tokens.desc())
+                    .limit(5)
+                    .all()
+                )
+                context["files"] = [
+                    {
+                        "path": file.path,
+                        "tokens": file.tokens,
+                    }
+                    for file in files
+                    if file.path
+                ]
+
+        return context
+
+    def _compose_issue_body(
+        self, base_body: str, context: Optional[Dict[str, Any]]
+    ) -> str:
+        """Combine base issue description with contextual sections."""
+
+        sections: List[str] = []
+        base = (base_body or "").strip()
+        if base:
+            sections.append(base)
+
+        repo_info = (context or {}).get("repository_info") or {}
+        if repo_info:
+            repo_lines = ["## Repository"]
+            owner = repo_info.get("owner")
+            name = repo_info.get("name")
+            url = repo_info.get("url")
+            branch = repo_info.get("branch")
+            if owner and name:
+                repo_lines.append(f"- **Name**: {owner}/{name}")
+            elif name:
+                repo_lines.append(f"- **Name**: {name}")
+            if branch:
+                repo_lines.append(f"- **Branch**: {branch}")
+            if url:
+                repo_lines.append(f"- **URL**: {url}")
+            sections.append("\n".join(repo_lines))
+
+        facts_memories = (context or {}).get("facts_memories") or {}
+        facts = facts_memories.get("facts") or []
+        memories = facts_memories.get("memories") or []
+        highlights = facts_memories.get("highlights") or []
+        if facts:
+            sections.append(
+                "## Repository Facts\n" + "\n".join(f"- {fact}" for fact in facts)
+            )
+        if memories:
+            sections.append(
+                "## Session Memories\n" + "\n".join(f"- {memory}" for memory in memories)
+            )
+        if highlights:
+            sections.append(
+                "## Highlights\n" + "\n".join(f"- {highlight}" for highlight in highlights)
+            )
+
+        conversation = (context or {}).get("conversation") or []
+        if conversation:
+            convo_lines = ["## Recent Conversation"]
+            for entry in conversation:
+                author = entry.get("author", "user")
+                text = (entry.get("text") or "").strip()
+                if len(text) > 250:
+                    text = f"{text[:247]}..."
+                convo_lines.append(f"- **{author}**: {text}")
+            sections.append("\n".join(convo_lines))
+
+        files = (context or {}).get("files") or []
+        if files:
+            file_lines = ["## Relevant Files"]
+            for entry in files:
+                path = entry.get("path")
+                tokens = entry.get("tokens")
+                if not path:
+                    continue
+                if tokens:
+                    file_lines.append(f"- `{path}` ({tokens} tokens)")
+                else:
+                    file_lines.append(f"- `{path}`")
+            sections.append("\n".join(file_lines))
+
+        sections.append("---\n*Issue generated with DAifu session context.*")
+        return "\n\n".join(section for section in sections if section)
 
 
     async def _create_github_issue(
