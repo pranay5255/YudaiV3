@@ -7,7 +7,7 @@ extracted from the router handlers for better separation of concerns.
 """
 
 import logging
-from typing import List
+from typing import Dict, List, Optional
 
 from fastapi import HTTPException, status
 from models import (
@@ -21,7 +21,6 @@ from models import (
     FileItem,
     SessionContextResponse,
     SessionResponse,
-    User,
 )
 from sqlalchemy.orm import Session
 
@@ -121,6 +120,8 @@ class SessionService:
             created_at=db_session.created_at,
             updated_at=db_session.updated_at,
             last_activity=db_session.last_activity,
+            generate_embeddings=db_session.generate_embeddings,
+            generate_facts_memories=db_session.generate_facts_memories,
         )
 
         message_responses = [
@@ -438,7 +439,12 @@ class IssueService:
         )
 
     @staticmethod
-    async def create_github_issue_from_user_issue(db: Session, user_id: int, issue_id: str, user: User):
+    async def create_github_issue_from_user_issue(
+        db: Session,
+        user_id: int,
+        issue_id: str,
+        context_bundle: Optional[Dict[str, Any]] = None,
+    ):
         """
         Create GitHub issue from user issue using IssueOps.
 
@@ -446,7 +452,7 @@ class IssueService:
             db: Database session
             user_id: User ID
             issue_id: Issue ID
-            user: User object
+            context_bundle: Optional serialized context to enrich the GitHub issue body
 
         Returns:
             Created GitHub issue data
@@ -454,4 +460,8 @@ class IssueService:
         from .IssueOps import IssueService as IssueOpsService
 
         issue_ops = IssueOpsService(db)
-        return await issue_ops.create_github_issue_from_user_issue(user_id, issue_id, user)
+        return await issue_ops.create_github_issue_from_user_issue(
+            user_id,
+            issue_id,
+            context_bundle=context_bundle,
+        )
