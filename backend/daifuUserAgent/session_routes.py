@@ -100,9 +100,7 @@ from models import (
     FileEmbedding,
     FileItem,
     FileItemResponse,
-    FileTreeResponse,
     Repository,
-    RepositoryRequest,
     SessionContextResponse,
     SessionResponse,
     UpdateSessionRequest,
@@ -114,7 +112,7 @@ from sqlalchemy.orm import Session
 
 from utils import utc_now
 
-from .services.facts_and_memories import (
+from .services import (
     EmbeddingPipeline,
     FactsAndMemoriesService,
     RepositoryFile,
@@ -420,12 +418,12 @@ async def get_session_context(
         from .session_service import SessionService
 
         # Ensure session exists and belongs to user
-        db_session = SessionService.ensure_owned_session(
+        _db_session = SessionService.ensure_owned_session(
             db, current_user.id, session_id
         )
 
         # Get complete session context
-        return SessionService.get_context(db, db_session)
+        return SessionService.get_context(db, _db_session)
 
     except Exception as e:
         raise HTTPException(
@@ -609,23 +607,6 @@ async def add_bulk_chat_messages(
         )
 
 
-@router.get("/sessions/{session_id}/export", response_model=dict, deprecated=True)
-async def export_session(
-    session_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Deprecated: exporting sessions is no longer supported."""
-    raise HTTPException(
-        status_code=status.HTTP_410_GONE,
-        detail={
-            "message": "Deprecated: session export is no longer supported.",
-            "error_code": "ENDPOINT_DEPRECATED",
-            "path": f"/daifu/sessions/{session_id}/export",
-        },
-    )
-
-
 @router.get("/sessions/{session_id}/messages", response_model=List[ChatMessageResponse])
 async def get_chat_messages(
     session_id: str,
@@ -641,12 +622,12 @@ async def get_chat_messages(
         from .session_service import SessionService
 
         # Ensure session exists and belongs to user
-        db_session = SessionService.ensure_owned_session(
+        db_session_local = SessionService.ensure_owned_session(
             db, current_user.id, session_id
         )
 
         # Get messages for this session
-        return SessionService.get_session_messages(db, db_session.id, limit)
+        return SessionService.get_session_messages(db, db_session_local.id, limit)
 
     except Exception as e:
         raise HTTPException(
@@ -916,7 +897,9 @@ async def chat_in_session(
         )
 
         # Get updated conversation history for the response
-        history = _get_conversation_history(session_id, 50, db)
+        raw_history = chat_ops._get_conversation_history(db_session.id, 50)
+        # Normalize to ("User"|"DAifu", text) for frontend compatibility
+        history = [("User" if s.lower() == "user" else "DAifu", t) for s, t in raw_history]
 
         # Calculate processing time
         processing_time = (time.time() - start_time) * 1000
@@ -940,93 +923,7 @@ async def chat_in_session(
         )
 
 
-# Helper functions for conversation history management
-def _get_conversation_history(
-    session_id: str, limit: int = 50, db: Session = None
-) -> List[tuple]:
-    """Get conversation history for a session from database"""
-    if not db:
-        return []
-
-    try:
-        # Get the session from database
-        db_session = (
-            db.query(ChatSession).filter(ChatSession.session_id == session_id).first()
-        )
-
-        if not db_session:
-            return []
-
-        # Get messages for this session
-        messages = (
-            db.query(ChatMessage)
-            .filter(ChatMessage.session_id == db_session.id)
-            .order_by(ChatMessage.created_at.asc())
-            .limit(limit)
-            .all()
-        )
-
-        # Convert to tuple format for compatibility
-        history = []
-        for msg in messages:
-            sender = "User" if msg.sender_type == "user" else "DAifu"
-            history.append((sender, msg.message_text))
-
-        return history
-    except Exception as e:
-        print(f"Error getting conversation history: {e}")
-        return []
-
-
-def _add_to_conversation_history(
-    session_id: str,
-    sender: str,
-    message: str,
-    db: Session = None,
-    current_user: User = None,
-):
-    """Add a message to conversation history in database"""
-    if not db or not current_user:
-        return
-
-    try:
-        # Get the session from database
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
-        )
-
-        if not db_session:
-            print(f"Session {session_id} not found for user {current_user.id}")
-            return
-
-        # Create message record
-        sender_type = "user" if sender == "User" else "assistant"
-        message_obj = ChatMessage(
-            session_id=db_session.id,
-            message_id=f"msg_{uuid.uuid4().hex[:8]}",
-            message_text=message,
-            sender_type=sender_type,
-            role=sender_type,
-            is_code=False,
-            tokens=len(message.split()),  # Rough estimation
-        )
-
-        db.add(message_obj)
-
-        # Update session statistics
-        db_session.total_messages += 1
-        db_session.total_tokens += message_obj.tokens
-        db_session.last_activity = utc_now()
-
-        db.commit()
-    except Exception as e:
-        print(f"Error adding to conversation history: {e}")
-        db.rollback()
+# (Removed duplicate conversation history helpers; using ChatOps._get_conversation_history)
 
 
 # FILE DEPENDENCIES ENDPOINTS - Consolidated from filedeps.py
@@ -1148,164 +1045,6 @@ def _get_or_create_repository(
     db.add(repository)
     db.flush()
     return repository
-
-
-@router.post(
-    "/sessions/{session_id}/extract", response_model=FileTreeResponse, deprecated=True
-)
-async def extract_file_dependencies_for_session(
-    session_id: str,
-    request: RepositoryRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> FileTreeResponse:
-    """Deprecated: indexing now starts automatically after session creation."""
-    raise HTTPException(
-        status_code=status.HTTP_410_GONE,
-        detail={
-            "message": "Deprecated: use session creation with index_codebase flag.",
-            "error_code": "ENDPOINT_DEPRECATED",
-            "path": f"/daifu/sessions/{session_id}/extract",
-        },
-    )
-    try:  # Unreachable legacy block retained for reference
-        print(f"Starting session-based extraction for session: {session_id}")
-
-        # First, verify the session exists and belongs to the user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-                ChatSession.is_active,
-            )
-            .first()
-        )
-
-        if not db_session:
-            raise HTTPException(status_code=404, detail="Session not found")
-
-        # Extract repository information from URL
-        repo_name, repo_owner = _extract_repo_info_from_url(request.repo_url)
-        print(f"Extracted repo info - name: {repo_name}, owner: {repo_owner}")
-
-        # Extract repository data using GitIngest
-        print("Calling GitIngest extract_repository_data...")
-        try:
-            snapshot = await RepositorySnapshotService.fetch(
-                repo_url=request.repo_url, max_file_size=request.max_file_size
-            )
-        except Exception as extract_error:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to extract data: {extract_error}",
-            ) from extract_error
-
-        raw_repo_data = snapshot.raw_response
-        repo_data = snapshot.as_processed_payload()
-
-        # Build file tree
-        files_data = {"files": repo_data.get("files", [])}
-        file_tree = _build_file_tree(files_data, repo_name)
-
-        # Calculate statistics
-        total_files = len(repo_data.get("files", []))
-        total_tokens = sum(
-            _estimate_tokens_for_file(f["path"], f["content_size"])
-            for f in repo_data.get("files", [])
-        )
-
-        # Create root FileTree node
-        root_file_item = FileTreeResponse(
-            id="root",
-            name=repo_name,
-            type="INTERNAL",
-            tokens=total_tokens,
-            Category="Source Code",
-            isDirectory=True,
-            children=file_tree,
-            expanded=True,
-        )
-
-        # Save to database with session integration
-        try:
-            # Fetch repository metadata from GitHub API
-            github_ops = GitHubOps(db)
-            try:
-                repo_metadata = await github_ops.fetch_repository_info_detailed(
-                    owner=repo_owner, repo=repo_name, user_id=current_user.id
-                )
-                print(
-                    f"Fetched repository metadata: {repo_metadata.get('name', 'unknown')}"
-                )
-            except Exception as e:
-                print(f"Failed to fetch repository metadata from GitHub API: {e}")
-                repo_metadata = {}
-
-            # Ensure repository metadata exists
-            repository = _get_or_create_repository(
-                db=db,
-                repo_url=request.repo_url,
-                repo_name=repo_name,
-                repo_owner=repo_owner,
-                user_id=current_user.id,
-                html_url=repo_metadata.get("html_url"),
-                clone_url=repo_metadata.get("clone_url"),
-                description=repo_metadata.get("description"),
-                language=repo_metadata.get("language"),
-                stargazers_count=repo_metadata.get("stargazers_count", 0),
-                forks_count=repo_metadata.get("forks_count", 0),
-                open_issues_count=repo_metadata.get("open_issues_count", 0),
-                default_branch=repo_metadata.get("default_branch"),
-                github_created_at=repo_metadata.get("created_at"),
-                github_updated_at=repo_metadata.get("updated_at"),
-                pushed_at=repo_metadata.get("pushed_at"),
-            )
-
-            # Save analysis results
-            _save_file_analysis_to_db(
-                db=db,
-                repository_id=repository.id,
-                raw_data=raw_repo_data,
-                processed_data=repo_data,
-                total_files=total_files,
-                total_tokens=total_tokens,
-                max_file_size=request.max_file_size,
-            )
-
-            # Save file items and create embeddings linked to session
-            content_lookup = {
-                file_entry.get("path"): file_entry.get("content")
-                for file_entry in repo_data.get("files", [])
-                if file_entry.get("path") and file_entry.get("content")
-            }
-            saved_file_items, saved_embeddings = _save_file_items_and_embeddings(
-                db,
-                repository.id,
-                file_tree,
-                db_session.id,
-                content_lookup=content_lookup,
-                generate_embeddings=True,
-            )
-            print(
-                f"Saved {len(saved_file_items)} file items and {len(saved_embeddings)} embeddings"
-            )
-
-        except Exception as db_error:
-            print(f"Database error during save: {db_error}")
-            db.rollback()
-            raise HTTPException(
-                status_code=500, detail=f"Failed to save file data: {str(db_error)}"
-            )
-
-        print(f"Successfully completed extraction for session {session_id}")
-        return root_file_item
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Unexpected error in extract_file_dependencies_for_session: {e}")
-        raise HTTPException(status_code=500, detail=f"File extraction failed: {str(e)}")
 
 
 def _build_file_tree(
@@ -1617,7 +1356,7 @@ async def _index_repository_for_session_background(
             snapshot = await RepositorySnapshotService.fetch(
                 repo_url=repo_url, max_file_size=max_file_size
             )
-            raw_repo = snapshot.raw_response
+            # raw_repo not used; snapshot retains raw_response if needed later
             files_data = snapshot.files
             logger.info(
                 f"[Index] GitIngest extraction completed, {len(files_data)} files returned"
@@ -2610,17 +2349,16 @@ async def create_github_issue_from_user_issue_for_session(
         from .session_service import SessionService
 
         # Ensure session exists and belongs to user
-        db_session = SessionService.ensure_owned_session(
+        _ = SessionService.ensure_owned_session(
             db, current_user.id, session_id
         )
 
-        # Create GitHub issue using consolidated IssueOps
+        # Create GitHub issue using consolidated IssueOps (context assembled internally)
         issue_service = IssueOpsService(db)
-        context_bundle = _collect_issue_context(db, db_session)
         result = await issue_service.create_github_issue_from_user_issue(
             current_user.id,
             issue_id,
-            context_bundle=context_bundle,
+            context_bundle=None,
         )
 
         if not result:

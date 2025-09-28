@@ -7,7 +7,7 @@ extracted from the router handlers for better separation of concerns.
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
 from models import (
@@ -382,31 +382,7 @@ class FileDepsService:
         Returns:
             List of file item dictionaries
         """
-        file_items = (
-            db.query(FileItem)
-            .filter(FileItem.session_id == db_session.id)
-            .order_by(FileItem.created_at.desc())
-            .all()
-        )
-
-        return [
-            {
-                "id": item.id,
-                "name": item.name,
-                "path": item.path,
-                "type": item.type,
-                "tokens": item.tokens,
-                "category": item.category,
-                "is_directory": item.is_directory,
-                "content_size": item.content_size,
-                "created_at": item.created_at,
-                "file_name": item.file_name,
-                "file_path": item.file_path,
-                "file_type": item.file_type,
-                "content_summary": item.content_summary,
-            }
-            for item in file_items
-        ]
+        return FileDepsService.list_for_session(db, db_session)
 
 
 class IssueService:
