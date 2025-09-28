@@ -46,7 +46,6 @@ from models import (
     ChatSession,
     CreateUserIssueRequest,
     FileItem,
-    User,
     UserIssue,
 )
 from sqlalchemy.orm import Session
@@ -78,23 +77,7 @@ class IssueService:
         self.db = db
         self.logger = logging.getLogger(__name__)
 
-    @staticmethod
-    def get_user_from_session_token(session_token: str, db: Session) -> Optional[User]:
-        """Get user from session token"""
-        try:
-            from auth.github_oauth import validate_session_token
-
-            return validate_session_token(db, session_token)
-        except Exception as e:
-            logger.error(f"Failed to validate session token: {e}")
-            return None
-
-    @staticmethod
-    def get_user_github_token(user_id: int, db: Session) -> Optional[str]:
-        """Get user's active GitHub access token"""
-        from .githubOps import GitHubOps
-
-        return GitHubOps.get_user_github_token(user_id, db)
+    # Removed unused token/session helpers; use GitHubOps directly when needed
 
     def generate_github_issue_preview(
         self,
@@ -453,12 +436,15 @@ class IssueService:
         try:
             logger.info(f"Generating issue from context for user {user_id}")
 
-            # Get comprehensive GitHub context from multiple sources
-            repo_context = await self._get_comprehensive_repo_context(
+            # Get comprehensive repository context string using shared utility
+            from .services.context_utils import get_best_repo_context_string
+
+            repo_context = await get_best_repo_context_string(
+                db=self.db,
                 user_id=user_id,
                 session_id=session_id,
                 repo_owner=repo_owner,
-                repo_name=repo_name
+                repo_name=repo_name,
             )
 
             # Get context cards for additional context
@@ -630,231 +616,7 @@ class IssueService:
             logger.error(f"Failed to get context cards content: {e}")
             return ""
 
-    async def _get_comprehensive_repo_context(
-        self, user_id: int, session_id: str, repo_owner: str, repo_name: str
-    ) -> str:
-        """
-        Get comprehensive repository context from multiple sources with fallbacks.
-
-        Priority order:
-        1. Database GitHub context (most complete)
-        2. LLMService cache (cached JSON)
-        3. Gitingest repository structure (fallback)
-        4. Basic repo info (minimal fallback)
-        """
-        try:
-            # 1. Try to get from database first
-            from models import Repository
-
-            repository = (
-                self.db.query(Repository)
-                .filter(
-                    Repository.owner == repo_owner,
-                    Repository.name == repo_name,
-                    Repository.user_id == user_id,
-                )
-                .first()
-            )
-
-            if repository and repository.github_context:
-                logger.info(f"Using database GitHub context for {repo_owner}/{repo_name}")
-                return self._format_github_context_from_db(repository.github_context)
-
-            # 2. Try LLMService cache
-            logger.info(f"Database context not found, trying LLMService cache for {repo_owner}/{repo_name}")
-            cached_context = self._get_github_context_from_cache(user_id, session_id, repo_owner, repo_name)
-            if cached_context:
-                logger.info(f"Using cached GitHub context for {repo_owner}/{repo_name}")
-                return self._format_github_context_from_cache(cached_context)
-
-            # 3. Try gitingest as fallback
-            logger.info(f"Cache not found, trying gitingest for {repo_owner}/{repo_name}")
-            gitingest_context = await self._get_gitingest_repo_context(repo_owner, repo_name)
-            if gitingest_context:
-                logger.info(f"Using gitingest context for {repo_owner}/{repo_name}")
-                return gitingest_context
-
-            # 4. Minimal fallback
-            logger.warning(f"No context found for {repo_owner}/{repo_name}, using minimal info")
-            return f"Repository: {repo_owner}/{repo_name}"
-
-        except Exception as e:
-            logger.error(f"Failed to get comprehensive repo context: {e}")
-            # Reset DB session if a read failed
-            try:
-                self.db.rollback()
-            except Exception:
-                pass
-            return f"Repository: {repo_owner}/{repo_name}"
-
-    def _format_github_context_from_db(self, github_context: dict) -> str:
-        """Format GitHub context from database JSON"""
-        try:
-            repo_data = github_context.get("repository", {})
-            context_parts = []
-
-            # Basic repo info
-            full_name = repo_data.get('full_name', f"{repo_data.get('owner', {}).get('login', 'unknown')}/{repo_data.get('name', 'unknown')}")
-            context_parts.append(f"Repository: {full_name}")
-
-            description = repo_data.get('description')
-            if description:
-                context_parts.append(f"Description: {description}")
-
-            language = repo_data.get('language')
-            if language:
-                context_parts.append(f"Language: {language}")
-
-            open_issues = repo_data.get('open_issues_count', 0)
-            context_parts.append(f"Open Issues: {open_issues}")
-
-            # Recent issues
-            recent_issues = github_context.get("recent_issues", [])
-            if recent_issues:
-                context_parts.append("\nRecent Open Issues:")
-                for issue in recent_issues[:5]:  # Limit to 5
-                    if isinstance(issue, dict):
-                        issue_num = issue.get('number', 'N/A')
-                        issue_title = issue.get('title', 'No title')
-                        context_parts.append(f"- #{issue_num}: {issue_title}")
-
-            # Recent commits
-            recent_commits = github_context.get("recent_commits", [])
-            if recent_commits:
-                context_parts.append("\nRecent Commits:")
-                for commit in recent_commits[:3]:  # Limit to 3
-                    if isinstance(commit, dict):
-                        commit_msg = commit.get('commit', {}).get('message', 'No message')
-                        author = commit.get('commit', {}).get('author', {}).get('name', 'Unknown')
-                        context_parts.append(f"- {commit_msg[:100]}... (by {author})")
-
-            return "\n".join(context_parts)
-
-        except Exception as e:
-            logger.error(f"Failed to format GitHub context from DB: {e}")
-            return f"Repository: {github_context.get('repository', {}).get('full_name', 'unknown')}"
-
-    def _get_github_context_from_cache(self, user_id: int, session_id: str, owner: str, name: str) -> Optional[dict]:
-        """Get GitHub context from LLMService cache"""
-        try:
-            from .llm_service import LLMService
-
-            # Build cache metadata (simulate what would be stored)
-            cache_meta = {
-                "cache_path": LLMService.cache_path_for_repo(user_id, session_id, owner, name),
-                "user_id": user_id,
-                "session_id": session_id,
-                "owner": owner,
-                "name": name
-            }
-
-            return LLMService.read_github_context_cache(cache_meta)
-
-        except Exception as e:
-            logger.error(f"Failed to read GitHub context from cache: {e}")
-            return None
-
-    def _format_github_context_from_cache(self, cached_context: dict) -> str:
-        """Format GitHub context from cached JSON"""
-        try:
-            context_parts = []
-
-            # Repository info
-            repo_info = cached_context.get("repository", {})
-            if repo_info:
-                full_name = repo_info.get("full_name", f"{repo_info.get('owner', {}).get('login', 'unknown')}/{repo_info.get('name', 'unknown')}")
-                context_parts.append(f"Repository: {full_name}")
-
-                description = repo_info.get("description")
-                if description:
-                    context_parts.append(f"Description: {description}")
-
-                language = repo_info.get("language")
-                if language:
-                    context_parts.append(f"Language: {language}")
-
-            # Issues
-            issues = cached_context.get("issues", [])
-            if issues:
-                open_issues = [issue for issue in issues if not issue.get("state", "").lower().startswith("clos")]
-                if open_issues:
-                    context_parts.append(f"Open Issues: {len(open_issues)}")
-                    context_parts.append("\nRecent Open Issues:")
-                    for issue in open_issues[:3]:
-                        number = issue.get("number", "N/A")
-                        title = issue.get("title", "No title")
-                        context_parts.append(f"- #{number}: {title}")
-
-            # Commits
-            commits = cached_context.get("commits", [])
-            if commits:
-                context_parts.append("\nRecent Commits:")
-                for commit in commits[:3]:
-                    message = commit.get("commit", {}).get("message", "No message")
-                    author = commit.get("commit", {}).get("author", {}).get("name", "Unknown")
-                    context_parts.append(f"- {message[:100]}... (by {author})")
-
-            return "\n".join(context_parts) if context_parts else "Repository context available"
-
-        except Exception as e:
-            logger.error(f"Failed to format cached GitHub context: {e}")
-            return "Repository context available (parsing failed)"
-
-    async def _get_gitingest_repo_context(self, repo_owner: str, repo_name: str) -> Optional[str]:
-        """Get repository context using gitingest as fallback"""
-        try:
-            from ..repo_processorGitIngest.scraper_script import extract_repository_data
-
-            repo_url = f"https://github.com/{repo_owner}/{repo_name}"
-
-            # Extract repository data using gitingest
-            repo_data = await extract_repository_data(repo_url)
-
-            if repo_data and "extraction_info" in repo_data and "raw_response" in repo_data:
-                context_parts = []
-
-                # Basic repo info
-                context_parts.append(f"Repository: {repo_owner}/{repo_name}")
-
-                # Use gitingest summary if available
-                raw_response = repo_data.get("raw_response", {})
-                summary = raw_response.get("summary", "")
-                if summary:
-                    # Extract key information from summary
-                    context_parts.append(f"Summary: {summary[:500]}...")
-
-                # Tree structure (directory overview)
-                tree = raw_response.get("tree", "")
-                if tree:
-                    # Extract directory structure info
-                    lines = tree.strip().split('\n')
-                    dirs = [line for line in lines if line.strip().endswith('/')]
-                    if dirs:
-                        context_parts.append(f"\nDirectory Structure ({len(dirs)} directories):")
-                        for dir_name in dirs[:10]:  # Limit to 10
-                            context_parts.append(f"- {dir_name.strip()}")
-
-                # File categories from extraction
-                extraction_info = repo_data.get("extraction_info", {})
-                file_categories = extraction_info.get("parameters", {}).get("file_categories", {})
-                if file_categories:
-                    context_parts.append("\nFile Categories:")
-                    category_counts = {}
-                    for file_info in file_categories.values():
-                        if isinstance(file_info, dict):
-                            category = file_info.get("category", "Other")
-                            category_counts[category] = category_counts.get(category, 0) + 1
-
-                    for category, count in sorted(category_counts.items()):
-                        context_parts.append(f"- {category}: {count} files")
-
-                return "\n".join(context_parts)
-
-            return None
-
-        except Exception as e:
-            logger.error(f"Failed to get gitingest context for {repo_owner}/{repo_name}: {e}")
-            return None
+    # Consolidated repo context helpers moved to services.context_utils
 
     def _build_issue_generation_prompt(
         self,
@@ -1035,7 +797,8 @@ class IssueService:
                 )
 
             # Get user's GitHub token
-            github_token = self.get_user_github_token(user_id, self.db)
+            from .githubOps import GitHubOps as _GitHubOps
+            github_token = _GitHubOps.get_user_github_token(user_id, self.db)
             if not github_token:
                 raise IssueOpsError(
                     "No valid GitHub token available. "
