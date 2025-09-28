@@ -256,6 +256,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     repo_name VARCHAR(255),
     repo_branch VARCHAR(255) DEFAULT 'main',
     repo_context JSON,
+    generate_embeddings BOOLEAN DEFAULT FALSE,
+    generate_facts_memories BOOLEAN DEFAULT FALSE,
     is_active BOOLEAN DEFAULT TRUE,
     total_messages INTEGER DEFAULT 0,
     total_tokens INTEGER DEFAULT 0,
