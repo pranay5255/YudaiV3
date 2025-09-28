@@ -16,11 +16,15 @@ import argparse
 import fnmatch
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from gitingest import ingest_async as ingest
+from gitingest.cloning import clone_repo
+from gitingest.config import MAX_FILE_SIZE
+from gitingest.ingestion import ingest_query
+from gitingest.query_parsing import parse_query
 
 from utils import utc_now
 
@@ -95,6 +99,40 @@ def categorize_file(file_path: str) -> Tuple[Optional[str], Optional[str]]:
     # No match found
     return (None, None)
 
+async def _ingest_repository_with_isolated_cleanup(
+    repo_url: str,
+    max_file_size: Optional[int] = None,
+) -> Tuple[str, str, str]:
+    """Run GitIngest while cleaning up only the repo-specific temp directory."""
+    requested_max = max_file_size if max_file_size is not None else MAX_FILE_SIZE
+
+    parsed_query = await parse_query(
+        source=repo_url,
+        max_file_size=requested_max,
+        from_web=False,
+        include_patterns=None,
+        ignore_patterns=None,
+    )
+
+    cleanup_root: Optional[Path] = None
+    if parsed_query.url:
+        cleanup_root = parsed_query.local_path.parent
+
+    try:
+        if parsed_query.url:
+            await clone_repo(parsed_query.extact_clone_config())
+
+        return ingest_query(parsed_query)
+    finally:
+        if cleanup_root:
+            shutil.rmtree(cleanup_root, ignore_errors=True)
+            parent_dir = cleanup_root.parent
+            try:
+                parent_dir.rmdir()
+            except OSError:
+                pass
+
+
 async def extract_repository_data(
     repo_url: str,
     max_file_size: Optional[int] = None
@@ -103,10 +141,9 @@ async def extract_repository_data(
     print(f"Extracting data from: {repo_url}")
 
     try:
-        # Extract data using GitIngest (await the async function)
-        summary, tree, content = await ingest(
+        summary, tree, content = await _ingest_repository_with_isolated_cleanup(
             repo_url,
-            max_file_size=max_file_size
+            max_file_size=max_file_size,
         )
 
         # Parse tree structure to get files and directories
