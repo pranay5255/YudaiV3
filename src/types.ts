@@ -145,6 +145,7 @@ export interface Message {
   content: string;
   timestamp: Date;
   sessionId: string;
+  role?: 'user' | 'assistant' | 'system';
 }
 
 export interface Toast {

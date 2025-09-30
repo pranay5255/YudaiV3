@@ -193,6 +193,7 @@ export const Chat: React.FC<ChatProps> = ({
     content: msg.message_text,
     timestamp: new Date(msg.created_at),
     sessionId: activeSessionId || 'default',
+    role: msg.role || 'user',
   }));
 
   // Simplified messages state without session management
@@ -514,13 +515,13 @@ export const Chat: React.FC<ChatProps> = ({
         {messages.map((message) => (
           <div
             key={message.id}
-            className={`flex ${message.id === '2' ? 'justify-start' : 'justify-end'}`}
+            className={`flex ${message.role === 'assistant' ? 'justify-start' : 'justify-end'}`}
             onMouseEnter={() => setHoveredMessage(message.id)}
             onMouseLeave={() => setHoveredMessage(null)}
           >
             <div
               className={`max-w-[70%] rounded-lg p-3 ${
-                message.id === '2'
+                message.role === 'assistant'
                   ? 'bg-zinc-800 text-zinc-200'
                   : 'bg-blue-600 text-white'
               }`}
