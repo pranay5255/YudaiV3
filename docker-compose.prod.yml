@@ -110,7 +110,7 @@ services:
       - TRANSFORMERS_CACHE=/tmp/transformers_cache
       - HF_HOME=/tmp/huggingface_cache
       # GitHub Context Cache (filesystem-backed JSON, metadata only in DB)
-      - GITHUB_CONTEXT_CACHE_DIR=/data/github_context_cache
+      - GITHUB_CONTEXT_CACHE_DIR=/tmp/github_context_cache
     ports:
       - "8000:8000"
     depends_on:
@@ -127,8 +127,9 @@ services:
       - ./backend/solver:/app/solver
       - transformers_cache:/tmp/transformers_cache
       - huggingface_cache:/tmp/huggingface_cache
-      # GitHub Context cache volume (host persisted)
-      - github_context_cache:/data/github_context_cache
+    tmpfs:
+      # Ensure tmp fallback path is always writable for non-root user
+      - /tmp/github_context_cache:mode=1777
     networks:
       - yudai-network
     # Enhanced health check
@@ -262,12 +263,6 @@ volumes:
       type: local
       o: bind
       device: ./data/huggingface_cache
-  github_context_cache:
-    driver: local
-    driver_opts:
-      type: local
-      o: bind
-      device: ./data/github_context_cache
 
 networks:
   yudai-network:
