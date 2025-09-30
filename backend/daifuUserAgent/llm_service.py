@@ -55,10 +55,36 @@ class LLMService:
 
     @staticmethod
     def get_github_context_cache_dir() -> str:
-        """Ensure and return the base cache directory for GitHub context JSON files."""
-        base = LLMService.GITHUB_CONTEXT_CACHE_DIR
-        Path(base).mkdir(parents=True, exist_ok=True)
-        return base
+        """Ensure and return a writable cache directory for GitHub context JSON files."""
+        preferred = Path(LLMService.GITHUB_CONTEXT_CACHE_DIR)
+        fallback = Path("/tmp/github_context_cache")
+
+        candidates = [preferred]
+        if fallback != preferred:
+            candidates.append(fallback)
+
+        for candidate in candidates:
+            try:
+                candidate.mkdir(parents=True, exist_ok=True)
+            except (OSError, PermissionError) as exc:
+                logger.warning(
+                    "GitHub context cache directory %s is not usable (mkdir failed): %s",
+                    candidate,
+                    exc,
+                )
+                continue
+
+            if not os.access(str(candidate), os.W_OK | os.X_OK):
+                logger.warning(
+                    "GitHub context cache directory %s exists but is not writable; trying fallback",
+                    candidate,
+                )
+                continue
+
+            LLMService.GITHUB_CONTEXT_CACHE_DIR = str(candidate)
+            return str(candidate)
+
+        raise RuntimeError("No writable directory available for GitHub context cache")
 
     @staticmethod
     def cache_path_for_repo(user_id: int, session_id: str, owner: str, name: str) -> str:
