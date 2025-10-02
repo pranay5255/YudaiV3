@@ -3,11 +3,13 @@ Centralized LLM Service for DAifu Agent
 Eliminates duplication and standardizes LLM calls across chat endpoints
 """
 
+import hashlib
 import json
 import logging
 import os
 import time
-from typing import Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import HTTPException, status
@@ -15,6 +17,9 @@ from models import FileEmbedding
 from sentence_transformers import SentenceTransformer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from .chat_context import CacheMetadata
+from utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -530,6 +535,96 @@ parameters: object,
             logger.error(f"Failed to build prompt from context: {e}")
             # Return a simple fallback prompt
             return f"User: {conversation[-1][1] if conversation else 'Hello'}\nAssistant:"
+
+    @staticmethod
+    def read_github_context_cache(
+        metadata: Optional[Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Load cached GitHub context JSON using persisted metadata."""
+
+        if metadata is None:
+            return None
+
+        cache_meta: Optional[CacheMetadata]
+        if isinstance(metadata, CacheMetadata):
+            cache_meta = metadata
+        elif isinstance(metadata, dict):
+            cache_meta = CacheMetadata.from_dict(metadata)
+        else:
+            return None
+
+        if not cache_meta or not cache_meta.cache_path:
+            return None
+
+        path = Path(cache_meta.cache_path)
+        if not path.exists():
+            return None
+
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                return json.load(handle)
+        except json.JSONDecodeError as decode_error:
+            logger.warning(
+                "Failed to decode GitHub context cache at %s: %s",
+                path,
+                decode_error,
+            )
+            return None
+        except OSError as os_error:
+            logger.warning(
+                "Failed to read GitHub context cache at %s: %s",
+                path,
+                os_error,
+            )
+            return None
+
+    @staticmethod
+    def write_github_context_cache(
+        metadata: Optional[Any], payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Persist GitHub context JSON and return refreshed metadata."""
+
+        if payload is None:
+            raise ValueError("Cache payload must not be None")
+
+        if isinstance(metadata, CacheMetadata):
+            cache_meta = metadata
+            metadata_dict: Dict[str, Any] = metadata.to_dict()
+        elif isinstance(metadata, dict):
+            cache_meta = CacheMetadata.from_dict(metadata)
+            metadata_dict = dict(metadata)
+        else:
+            raise ValueError("Metadata must be a dict or CacheMetadata instance")
+
+        if not cache_meta or not cache_meta.cache_path:
+            raise ValueError("Metadata missing cache path; cannot write cache")
+
+        path = Path(cache_meta.cache_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(8192), b""):
+                digest.update(chunk)
+
+        refreshed_meta = CacheMetadata(
+            cache_path=str(path),
+            owner=cache_meta.owner,
+            name=cache_meta.name,
+            session_id=cache_meta.session_id,
+            user_id=cache_meta.user_id,
+            size=path.stat().st_size,
+            sha256=digest.hexdigest(),
+            cached_at=utc_now().isoformat(),
+            version=cache_meta.version,
+        )
+
+        refreshed_dict = refreshed_meta.to_dict()
+        metadata_dict.update(refreshed_dict)
+        return metadata_dict
 
     @staticmethod
     def embed_text(text: str) -> List[float]:

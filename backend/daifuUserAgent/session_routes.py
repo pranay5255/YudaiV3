@@ -69,6 +69,7 @@ CRITICAL ISSUES:
 
 # Import file dependencies functionality
 import asyncio
+import json
 import logging
 
 # Import chat functionality from chat_api
@@ -112,6 +113,7 @@ from sqlalchemy.orm import Session
 
 from utils import utc_now
 
+from .llm_service import LLMService
 from .services import (
     EmbeddingPipeline,
     FactsAndMemoriesService,
@@ -1048,41 +1050,97 @@ def _get_or_create_repository(
 
 
 def _build_file_tree(
-    files_data: Dict[str, Any], repo_name: str
+    files_data: Any, repo_name: str
 ) -> List[Dict[str, Any]]:
-    """Build hierarchical file tree from processed data."""
-    file_tree = []
+    """Build hierarchical file tree from GitIngest data.
 
-    if "files" not in files_data:
+    The helper accepts the normalised snapshot payload returned by
+    :class:`RepositorySnapshotService` (``RepositoryFile`` instances) or the
+    legacy dict structure containing a ``"files"`` key.  The output is a list
+    of dictionaries compatible with the frontend tree component.
+    """
+
+    def _normalise_entry(entry: Any) -> Optional[Dict[str, Any]]:
+        if isinstance(entry, RepositoryFile):
+            return {
+                "path": entry.path,
+                "type": entry.category or "INTERNAL",
+                "Category": entry.category or "INTERNAL",
+                "content_size": entry.content_size or entry.size,
+                "file_name": entry.file_name,
+            }
+
+        if isinstance(entry, dict):
+            path = entry.get("path") or ""
+            category = (
+                entry.get("type")
+                or entry.get("Category")
+                or entry.get("category")
+                or "INTERNAL"
+            )
+            content_size = entry.get("content_size") or entry.get("size") or 0
+            try:
+                content_size = int(content_size)
+            except (TypeError, ValueError):
+                content_size = 0
+
+            return {
+                "path": path,
+                "type": category,
+                "Category": category,
+                "content_size": content_size,
+                "file_name": entry.get("file_name")
+                or (path.split("/")[-1] if path else ""),
+            }
+
+        return None
+
+    file_tree: List[Dict[str, Any]] = []
+
+    if not files_data:
         return file_tree
 
-    # Group files by directory
-    dir_structure = {}
+    if isinstance(files_data, dict):
+        raw_files = files_data.get("files", [])
+    else:
+        raw_files = files_data
 
-    for file_info in files_data["files"]:
-        path_parts = file_info["path"].split("/")
+    # Group files by directory
+    dir_structure: Dict[str, Any] = {}
+
+    for raw_entry in raw_files:
+        file_info = _normalise_entry(raw_entry)
+        if not file_info:
+            continue
+
+        path = file_info.get("path") or ""
+        if not path:
+            continue
+
+        path_parts = [part for part in path.split("/") if part]
+        if not path_parts:
+            continue
+
         current_dir = dir_structure
 
-        for i, part in enumerate(path_parts[:-1]):  # All parts except the filename
+        for part in path_parts[:-1]:  # All parts except the filename
             if part not in current_dir:
                 current_dir[part] = {"__files__": []}
             current_dir = current_dir[part]
 
         # Add file to the appropriate directory
-        if "__files__" not in current_dir:
-            current_dir["__files__"] = []
+        current_dir.setdefault("__files__", [])
 
         file_name = path_parts[-1]
+        content_size = file_info.get("content_size") or 0
         file_item = {
-            "id": file_info["path"],
+            "id": path,
             "name": file_name,
-            "type": file_info["type"],
-            "Category": file_info["type"],
-            "tokens": _estimate_tokens_for_file(
-                file_info["path"], file_info["content_size"]
-            ),
+            "type": file_info.get("type", "INTERNAL"),
+            "Category": file_info.get("Category", "INTERNAL"),
+            "tokens": _estimate_tokens_for_file(path, content_size),
             "isDirectory": False,
-            "path": file_info["path"],
+            "path": path,
         }
         current_dir["__files__"].append(file_item)
 
@@ -1090,7 +1148,7 @@ def _build_file_tree(
     def convert_to_file_items(
         dir_dict: Dict[str, Any], current_path: str = ""
     ) -> List[Dict[str, Any]]:
-        items = []
+        items: List[Dict[str, Any]] = []
 
         for name, content in dir_dict.items():
             if name == "__files__":
@@ -1395,6 +1453,72 @@ async def _index_repository_for_session_background(
             github_updated_at=meta.get("updated_at"),
             pushed_at=meta.get("pushed_at"),
         )
+
+        # Build and persist file tree context for session and repository caches
+        file_tree = _build_file_tree(files_data, repo_name)
+        file_tree_payload = {
+            "tree": file_tree,
+            "repo": f"{repo_owner}/{repo_name}",
+            "file_count": len(files_data),
+            "source": "gitingest",
+            "generated_at": utc_now().isoformat(),
+        }
+
+        # Update per-session repository context with the tree
+        session_repo_context = chat_session.repo_context
+        if isinstance(session_repo_context, str):
+            try:
+                session_repo_context = json.loads(session_repo_context)
+            except json.JSONDecodeError:
+                session_repo_context = {}
+        if not isinstance(session_repo_context, dict):
+            session_repo_context = {}
+        session_repo_context["file_tree"] = file_tree_payload
+        chat_session.repo_context = session_repo_context
+
+        # Merge the tree into repository cache metadata and on-disk cache
+        repository_github_context = repository.github_context
+        if isinstance(repository_github_context, str):
+            try:
+                repository_github_context = json.loads(repository_github_context)
+            except json.JSONDecodeError:
+                repository_github_context = {}
+        if not isinstance(repository_github_context, dict):
+            repository_github_context = {}
+        repository_github_context["file_tree"] = file_tree_payload
+
+        try:
+            cache_payload = LLMService.read_github_context_cache(
+                repository_github_context
+            )
+        except Exception as cache_read_error:  # pragma: no cover - defensive logging
+            logger.warning(
+                "[Index] Failed to read GitHub context cache for %s/%s: %s",
+                repo_owner,
+                repo_name,
+                cache_read_error,
+            )
+            cache_payload = None
+
+        if cache_payload is not None:
+            cache_payload["file_tree"] = file_tree_payload
+            try:
+                updated_metadata = LLMService.write_github_context_cache(
+                    repository_github_context, cache_payload
+                )
+                if isinstance(updated_metadata, dict):
+                    repository_github_context.update(updated_metadata)
+            except Exception as cache_write_error:  # pragma: no cover - defensive logging
+                logger.warning(
+                    "[Index] Failed to update GitHub context cache for %s/%s: %s",
+                    repo_owner,
+                    repo_name,
+                    cache_write_error,
+                )
+
+        repository_github_context["file_tree"] = file_tree_payload
+        repository.github_context = repository_github_context
+        repository.github_context_updated_at = utc_now()
 
         # Save file items directly from files_data
         saved_file_items = []
