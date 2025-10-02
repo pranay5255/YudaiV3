@@ -4,7 +4,8 @@ import { useSessionStore } from '../stores/sessionStore';
 
 /**
  * LoginPage component handles GitHub OAuth login
- * Displays comprehensive product information and login functionality
+ * Visual + copy refresh to highlight the new Model Marketplace,
+ * Uniswap v4 Hooks, and liquidity provisioning — functionality unchanged.
  */
 export const LoginPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -40,7 +41,7 @@ export const LoginPage: React.FC = () => {
 
       console.log('[LoginPage] Initiating GitHub OAuth login');
 
-      // Use sessionStore login method
+      // Use sessionStore login method (unchanged)
       await useSessionStore.getState().login();
 
     } catch (error) {
@@ -51,27 +52,26 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-900">
+    <div className="min-h-screen bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950">
       {/* Hero Section */}
       <div className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-primary/10 to-secondary/10"></div>
+        <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_0%,rgba(56,189,248,0.12),transparent_60%),radial-gradient(50%_40%_at_100%_20%,rgba(147,51,234,0.12),transparent_60%)]" />
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
           <div className="text-center">
-            <h1 className="text-4xl md:text-6xl font-bold text-white mb-6">
-              Transform Your Code Into
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-secondary">
-                {' '}a Fortress of Reliability
-              </span>
+            <h1 className="text-4xl md:text-6xl font-bold text-white mb-6 leading-tight">
+              Monetize your <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-violet-400">code, data & models</span>
             </h1>
-            <p className="text-xl md:text-2xl text-zinc-300 mb-8 max-w-3xl mx-auto">
-              Solve critical issues instantly with AI-powered agents – perfect for solo-devs building the next web3 mini-app on Farcaster
+            <p className="text-lg md:text-2xl text-zinc-300/90 mb-8 max-w-3xl mx-auto">
+              YudaiV3 turns your GitHub issues & merged PRs into a <span className="font-semibold text-white">Model Marketplace</span>.
+              Finetune after your <span className="text-cyan-300">30 issues created</span> & <span className="text-cyan-300">30 issues merged</span>, mint a model token, and earn via
+              <span className="text-violet-300"> Uniswap v4 Hooks</span> and liquidity provisioning.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <div className="bg-zinc-800/50 backdrop-blur-sm rounded-lg px-6 py-3 border border-zinc-700">
-                <span className="text-zinc-300 text-sm">🚀 Currently supports Python & TypeScript</span>
+              <div className="bg-white/5 backdrop-blur-sm rounded-lg px-6 py-3 border border-white/10">
+                <span className="text-zinc-200 text-sm">🧠 Base models: GPT-5, Claude, Qwen3-Coder, Grok & more</span>
               </div>
-              <div className="bg-primary/10 backdrop-blur-sm rounded-lg px-6 py-3 border border-primary/20">
-                <span className="text-primary text-sm">⚡ Solidity & Deep Agents coming soon</span>
+              <div className="bg-cyan-400/10 backdrop-blur-sm rounded-lg px-6 py-3 border border-cyan-300/20">
+                <span className="text-cyan-200 text-sm">💧 LP fees streamed via v4 Hooks • x402 pay-per-call</span>
               </div>
             </div>
           </div>
@@ -82,127 +82,122 @@ export const LoginPage: React.FC = () => {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="grid lg:grid-cols-2 gap-12 items-start">
 
-          {/* Product Information */}
+          {/* Left: Narrative & Marketplace explainer */}
           <div className="space-y-8">
 
-            {/* The Pain */}
-            <div className="bg-zinc-800/50 backdrop-blur-sm rounded-xl p-8 border border-zinc-700">
-              <h2 className="text-2xl font-bold text-white mb-4">The Developer Struggle</h2>
-              <div className="space-y-4 text-zinc-300">
-                <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-red-500 rounded-full mt-2 flex-shrink-0"></div>
-                  <p>Solo-devs wasting hours debugging critical issues in their repositories</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-red-500 rounded-full mt-2 flex-shrink-0"></div>
-                  <p>Web3 developers facing security vulnerabilities in smart contracts</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-red-500 rounded-full mt-2 flex-shrink-0"></div>
-                  <p>Hackers building mini-apps with complex integrations and rapid iteration needs</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-red-500 rounded-full mt-2 flex-shrink-0"></div>
-                  <p>Manual code review bottlenecks slowing down innovation</p>
-                </div>
-              </div>
+            {/* The Creator Journey */}
+            <div className="bg-zinc-900/60 backdrop-blur-sm rounded-xl p-8 border border-zinc-800">
+              <h2 className="text-2xl font-bold text-white mb-4">Your Path to a Tokenized Coding Agent</h2>
+              <ol className="space-y-5 text-zinc-300">
+                <li className="flex items-start gap-3">
+                  <div className="mt-1 h-2 w-2 rounded-full bg-cyan-400" />
+                  <p><strong>Compose & Solve:</strong> Use YudaiV3 to create GitHub issues and ship PRs with AI assistance. Your dataset grows as issues are merged.</p>
+                </li>
+                <li className="flex items-start gap-3">
+                  <div className="mt-1 h-2 w-2 rounded-full bg-cyan-400" />
+                  <p><strong>Unlock Finetune at 30/30:</strong> Hit <em>30 issues created</em> & <em>30 merged</em> to trigger a guided finetune from your repo-specific history.</p>
+                </li>
+                <li className="flex items-start gap-3">
+                  <div className="mt-1 h-2 w-2 rounded-full bg-violet-400" />
+                  <p><strong>Mint Model Token:</strong> We deploy an ERC-20 for your agent (<span className="text-zinc-200">AGENTx</span>) and pair it with <span className="text-zinc-200">$SOLVE</span> in a Uniswap v4 pool.</p>
+                </li>
+                <li className="flex items-start gap-3">
+                  <div className="mt-1 h-2 w-2 rounded-full bg-violet-400" />
+                  <p><strong>Monetize Usage:</strong> Your hosted model is billed per request via <span className="text-zinc-200">x402</span>. Fees and a slice of LP swaps stream to you through v4 Hooks.</p>
+                </li>
+              </ol>
             </div>
 
-            {/* The Solution */}
-            <div className="bg-zinc-800/50 backdrop-blur-sm rounded-xl p-8 border border-zinc-700">
-              <h2 className="text-2xl font-bold text-white mb-4">How YudaiV3 Solves This</h2>
-              <div className="space-y-4 text-zinc-300">
-                <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mt-2 flex-shrink-0"></div>
-                  <p><strong>AI-Powered Analysis:</strong> Automatically scans your repository for bugs, security issues, and performance bottlenecks</p>
+            {/* Marketplace & Liquidity */}
+            <div className="bg-gradient-to-r from-cyan-400/10 to-violet-400/10 backdrop-blur-sm rounded-xl p-8 border border-cyan-300/20">
+              <h2 className="text-2xl font-bold text-white mb-4">Model Marketplace + Liquidity Flywheel</h2>
+              <div className="grid sm:grid-cols-2 gap-6 text-zinc-300">
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-cyan-200">Uniswap v4 Hooks</p>
+                  <p className="text-sm">Pool-level logic routes a share of swap fees to your creator vault automatically — no manual claims.</p>
                 </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mt-2 flex-shrink-0"></div>
-                  <p><strong>Smart Issue Generation:</strong> Creates actionable GitHub issues with specific file references and solution steps</p>
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-violet-200">LP to Boost Discovery</p>
+                  <p className="text-sm">Provide liquidity in <span className="text-zinc-200">AGENTx / SOLVE</span> to improve depth and earn trading fees while users call your model.</p>
                 </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mt-2 flex-shrink-0"></div>
-                  <p><strong>Automated Resolution:</strong> Prepares detailed execution plans for SWE agents to implement fixes</p>
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-cyan-200">x402 Billing</p>
+                  <p className="text-sm">Per-request receipts with stable settlement; internally mapped to your model token & creator vault.</p>
                 </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-green-500 rounded-full mt-2 flex-shrink-0"></div>
-                  <p><strong>Focus on Innovation:</strong> Spend less time debugging, more time building amazing products</p>
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-violet-200">Creator-First Design</p>
+                  <p className="text-sm">Your repo data → your model → your token. Clear revenue share; transparent vault math.</p>
                 </div>
               </div>
+              <p className="text-xs text-zinc-400 mt-4">Note: All marketplace mechanics are additive to your existing GitHub workflow — no changes to your repos or auth required.</p>
             </div>
 
-            {/* Upcoming Deep Agents */}
-            <div className="bg-gradient-to-r from-primary/10 to-secondary/10 backdrop-blur-sm rounded-xl p-8 border border-primary/20">
-              <h2 className="text-2xl font-bold text-white mb-4">🚀 Upcoming: Deep Agents</h2>
-              <p className="text-zinc-300 mb-4">
-                Our next evolution features advanced AI agents that will revolutionize code analysis:
-              </p>
-              <div className="space-y-3 text-sm text-zinc-300">
+            {/* What you get today */}
+            <div className="bg-zinc-900/60 backdrop-blur-sm rounded-xl p-8 border border-zinc-800">
+              <h2 className="text-2xl font-bold text-white mb-4">What’s Live Today</h2>
+              <div className="space-y-4 text-zinc-300">
                 <div className="flex items-start gap-3">
-                  <div className="w-1.5 h-1.5 bg-primary rounded-full mt-2 flex-shrink-0"></div>
-                  <p><strong>Automated Code Inspection:</strong> LLM-powered analysis of codebase structure and patterns</p>
+                  <div className="w-2 h-2 bg-emerald-500 rounded-full mt-2" />
+                  <p><strong>AI Issue Composer:</strong> Generate crisp, actionable GitHub issues with file diffs & acceptance criteria.</p>
                 </div>
                 <div className="flex items-start gap-3">
-                  <div className="w-1.5 h-1.5 bg-primary rounded-full mt-2 flex-shrink-0"></div>
-                  <p><strong>Intelligent Issue Generation:</strong> Structured GitHub issues with priorities, categories, and acceptance criteria</p>
+                  <div className="w-2 h-2 bg-emerald-500 rounded-full mt-2" />
+                  <p><strong>PR Assist:</strong> Plan and prepare fixes for automated agents — you stay in control of merges.</p>
                 </div>
                 <div className="flex items-start gap-3">
-                  <div className="w-1.5 h-1.5 bg-primary rounded-full mt-2 flex-shrink-0"></div>
-                  <p><strong>SWE Agent Preparation:</strong> Detailed execution plans for automated code fixes</p>
+                  <div className="w-2 h-2 bg-sky-500 rounded-full mt-2" />
+                  <p><strong>Marketplace Preview:</strong> Tokenize models after the 30/30 milestone; LP and x402 settlement paths are scaffolded.</p>
                 </div>
                 <div className="flex items-start gap-3">
-                  <div className="w-1.5 h-1.5 bg-primary rounded-full mt-2 flex-shrink-0"></div>
-                  <p><strong>Scalable Architecture:</strong> Auto-scaling workloads with performance monitoring</p>
+                  <div className="w-2 h-2 bg-zinc-500 rounded-full mt-2" />
+                  <p>Solidity agents & deeper repo orchestration — <em>coming soon</em>.</p>
                 </div>
               </div>
-              <p className="text-xs text-zinc-400 mt-4">
-                Currently scaffolded in backend/daifuUserAgent/architectAgent - coming soon!
-              </p>
             </div>
 
           </div>
 
-          {/* Login Section */}
+          {/* Right: Login & Install (functionality unchanged) */}
           <div className="lg:sticky lg:top-8">
-            <div className="bg-zinc-800/50 backdrop-blur-sm rounded-xl p-8 border border-zinc-700 shadow-2xl">
+            <div className="bg-zinc-900/70 backdrop-blur-sm rounded-xl p-8 border border-zinc-800 shadow-2xl">
 
               {/* Header */}
               <div className="text-center mb-6">
                 <h2 className="text-2xl font-bold text-white mb-2">Join YudaiV3</h2>
-                <p className="text-zinc-300">Complete the two-step GitHub onboarding to unlock AI automations</p>
+                <p className="text-zinc-300">Complete the two-step GitHub onboarding to unlock AI automations & the model marketplace.</p>
               </div>
 
               {/* Two-step summary */}
-              <div className="mb-6 rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-primary/90">
-                <p className="font-medium text-primary">Two-step setup</p>
-                <p className="text-primary/80">1) Verify your GitHub identity. 2) Install the Yudai GitHub App so the agent can create issues and pull requests on your behalf.</p>
+              <div className="mb-6 rounded-lg border border-cyan-300/30 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-200">
+                <p className="font-medium text-cyan-100">Two-step setup</p>
+                <p className="text-cyan-200/90">1) Verify your GitHub identity. 2) Install the Yudai GitHub App so the agent can create issues and pull requests on your behalf.</p>
               </div>
 
-              {/* Error Display */}
+              {/* Error Display (unchanged) */}
               {error && (
                 <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
                   <p className="text-red-500 text-sm">{error}</p>
                 </div>
               )}
 
-              {/* Step 1: GitHub OAuth */}
+              {/* Step 1: GitHub OAuth (button unchanged) */}
               <div className="mb-8 space-y-4">
                 <div className="flex items-start gap-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-primary/40 bg-primary/10 text-lg font-semibold text-primary">1</div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-cyan-300/40 bg-cyan-400/10 text-lg font-semibold text-cyan-200">1</div>
                   <div>
                     <h3 className="text-lg font-semibold text-white">Verify your GitHub identity</h3>
-                    <p className="text-sm text-zinc-400">We use GitHub OAuth to confirm who you are and pull profile basics only. You can revoke access anytime from GitHub settings.</p>
+                    <p className="text-sm text-zinc-400">OAuth lets us securely link your repos. Revoke access anytime in GitHub settings.</p>
                   </div>
                 </div>
 
                 <button
                   onClick={handleGitHubLogin}
                   disabled={isLoading}
-                  className="w-full bg-primary hover:bg-primary/90 disabled:bg-primary/50 text-white font-medium py-4 px-6 rounded-lg transition-all duration-200 flex items-center justify-center space-x-3 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                  className="w-full bg-cyan-500 hover:bg-cyan-500/90 disabled:bg-cyan-500/50 text-white font-medium py-4 px-6 rounded-lg transition-all duration-200 flex items-center justify-center space-x-3 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                 >
                   {isLoading ? (
                     <>
-                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
                       <span>Contacting GitHub...</span>
                     </>
                   ) : (
@@ -216,13 +211,13 @@ export const LoginPage: React.FC = () => {
                 </button>
               </div>
 
-              {/* Step 2: GitHub App Installation */}
+              {/* Step 2: GitHub App Installation (link unchanged) */}
               <div className="mb-8 space-y-4">
                 <div className="flex items-start gap-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-secondary/40 bg-secondary/10 text-lg font-semibold text-secondary">2</div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-violet-300/40 bg-violet-400/10 text-lg font-semibold text-violet-200">2</div>
                   <div>
                     <h3 className="text-lg font-semibold text-white">Install the Yudai GitHub App</h3>
-                    <p className="text-sm text-zinc-400">Grant repository access so Yudai can open issues and create pull requests for you. Without this install, automation features stay disabled.</p>
+                    <p className="text-sm text-zinc-400">Grant repo access so Yudai can create issues & pull requests. This powers your 30/30 milestone and future finetunes.</p>
                   </div>
                 </div>
 
@@ -231,43 +226,45 @@ export const LoginPage: React.FC = () => {
                     href={githubAppInstallUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center rounded-lg border border-secondary/40 bg-secondary/20 px-6 py-3 text-sm font-medium text-secondary transition-colors hover:bg-secondary/30"
+                    className="inline-flex items-center justify-center rounded-lg border border-violet-300/40 bg-violet-400/10 px-6 py-3 text-sm font-medium text-violet-200 transition-colors hover:bg-violet-400/20"
                   >
                     Install GitHub App
                   </a>
                   <p className="text-xs text-zinc-500">
-                    You can install on your personal account or an organization (requires admin permissions).
+                    Install to your personal account or an organization (admin permissions required).
                   </p>
                 </div>
 
                 <div className="rounded-lg border border-amber-400/20 bg-amber-500/5 p-4 text-xs text-amber-200">
                   <p className="font-medium text-amber-100">Why this matters</p>
-                  <p className="text-amber-200/80">The GitHub App scopes unlock repository triage, automated issue drafting, and pull request preparation. If you skip this step, the app will run in read-only mode.</p>
+                  <p className="text-amber-200/80">
+                    The App unlocks repository triage, automated issue drafting, and PR prep. It’s also how we verify your 30/30 milestone for model tokenization.
+                  </p>
                 </div>
               </div>
 
-              {/* Features List */}
+              {/* Feature bullets (kept; copy updated) */}
               <div className="space-y-3">
                 <div className="flex items-center gap-3 text-sm text-zinc-300">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span>Analyze Python & TypeScript repositories</span>
+                  <div className="w-2 h-2 bg-emerald-500 rounded-full" />
+                  <span>AI analysis for Python & TypeScript repos</span>
                 </div>
                 <div className="flex items-center gap-3 text-sm text-zinc-300">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                  <span>Generate actionable GitHub issues</span>
+                  <div className="w-2 h-2 bg-sky-500 rounded-full" />
+                  <span>Generate actionable GitHub issues & acceptance criteria</span>
                 </div>
                 <div className="flex items-center gap-3 text-sm text-zinc-300">
-                  <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
-                  <span>Prepare solutions for automated fixes</span>
+                  <div className="w-2 h-2 bg-violet-500 rounded-full" />
+                  <span>Finetune at 30/30 → mint model token → earn via LP & x402</span>
                 </div>
                 <div className="flex items-center gap-3 text-sm text-zinc-400">
-                  <div className="w-2 h-2 bg-zinc-500 rounded-full"></div>
-                  <span>Solidity & Deep Agents - Coming Soon</span>
+                  <div className="w-2 h-2 bg-zinc-500 rounded-full" />
+                  <span>Solidity & Deep Agents — Coming Soon</span>
                 </div>
               </div>
 
               {/* Footer */}
-              <div className="mt-8 pt-6 border-t border-zinc-700">
+              <div className="mt-8 pt-6 border-t border-zinc-800">
                 <p className="text-xs text-zinc-500 text-center">
                   By signing in, you agree to our terms of service and privacy policy
                 </p>
@@ -279,20 +276,20 @@ export const LoginPage: React.FC = () => {
       </div>
 
       {/* Bottom CTA */}
-      <div className="border-t border-zinc-800">
+      <div className="border-t border-zinc-900">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="text-center">
             <h3 className="text-xl font-semibold text-white mb-4">
-              Ready to transform your development workflow?
+              Ready to list your first model on the marketplace?
             </h3>
             <p className="text-zinc-400 mb-6">
-              Join the future of AI-powered code analysis and focus on what matters: building amazing products.
+              Ship issues faster, hit 30/30, finetune, mint a token, and earn from usage + LP fees with Uniswap v4 Hooks.
             </p>
             <div className="flex flex-wrap justify-center gap-4 text-sm text-zinc-500">
-              <span>• Built for solo-devs & web3 hackers</span>
-              <span>• GitHub-native integration</span>
-              <span>• Privacy-first approach</span>
-              <span>• Continuous improvement</span>
+              <span>• GitHub-native</span>
+              <span>• Creator-first monetization</span>
+              <span>• Uniswap v4 fee streaming</span>
+              <span>• x402 pay-per-request</span>
             </div>
           </div>
         </div>
