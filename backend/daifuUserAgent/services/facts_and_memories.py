@@ -11,6 +11,7 @@ from repo_processorGitIngest.scraper_script import (
     categorize_file,
     extract_repository_data,
 )
+
 from utils.chunking import create_file_chunker
 
 from ..llm_service import LLMService
