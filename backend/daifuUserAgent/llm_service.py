@@ -3,13 +3,10 @@ Centralized LLM Service for DAifu Agent
 Eliminates duplication and standardizes LLM calls across chat endpoints
 """
 
-import hashlib
 import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import httpx
@@ -37,131 +34,6 @@ class LLMService:
 
     # Cache directory configuration
     HF_HOME = os.getenv("HF_HOME", "/tmp/huggingface_cache")
-    # Cache for GitHub context (large JSON) – do not store in DB
-    GITHUB_CONTEXT_CACHE_DIR = os.getenv(
-        "GITHUB_CONTEXT_CACHE_DIR", "/home/yudai/YudaiV3/data/github_context_cache"
-    )
-
-    # ----------------------------------------------------------------------------------
-    # GitHub Context Cache Helpers
-    # ----------------------------------------------------------------------------------
-    @staticmethod
-    def _safe_component(text: str) -> str:
-        """Sanitize path components for filenames."""
-        if not text:
-            return "unknown"
-        # Replace problematic chars with underscores
-        return "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(text))
-
-    @staticmethod
-    def get_github_context_cache_dir() -> str:
-        """Ensure and return a writable cache directory for GitHub context JSON files."""
-        preferred = Path(LLMService.GITHUB_CONTEXT_CACHE_DIR)
-        fallback = Path("/tmp/github_context_cache")
-
-        candidates = [preferred]
-        if fallback != preferred:
-            candidates.append(fallback)
-
-        for candidate in candidates:
-            try:
-                candidate.mkdir(parents=True, exist_ok=True)
-            except (OSError, PermissionError) as exc:
-                logger.warning(
-                    "GitHub context cache directory %s is not usable (mkdir failed): %s",
-                    candidate,
-                    exc,
-                )
-                continue
-
-            if not os.access(str(candidate), os.W_OK | os.X_OK):
-                logger.warning(
-                    "GitHub context cache directory %s exists but is not writable; trying fallback",
-                    candidate,
-                )
-                continue
-
-            LLMService.GITHUB_CONTEXT_CACHE_DIR = str(candidate)
-            return str(candidate)
-
-        raise RuntimeError("No writable directory available for GitHub context cache")
-
-    @staticmethod
-    def cache_path_for_repo(user_id: int, session_id: str, owner: str, name: str) -> str:
-        """Build a stable cache path for a user's session and repository."""
-        base = LLMService.get_github_context_cache_dir()
-        user_dir = Path(base) / LLMService._safe_component(user_id)  # cast to str in _safe_component
-        session_dir = user_dir / LLMService._safe_component(session_id)
-        session_dir.mkdir(parents=True, exist_ok=True)
-        filename = f"{LLMService._safe_component(owner)}__{LLMService._safe_component(name)}.json"
-        return str(session_dir / filename)
-
-    @staticmethod
-    def write_github_context_cache(
-        data: Dict,
-        user_id: int,
-        session_id: str,
-        owner: str,
-        name: str,
-    ) -> Dict[str, object]:
-        """
-        Write GitHub context JSON to cache and return metadata for DB storage.
-
-        Returns a small metadata dict containing cache path and integrity info.
-        """
-        path = LLMService.cache_path_for_repo(user_id, session_id, owner, name)
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"Failed writing GitHub context cache to {path}: {e}")
-            raise
-
-        # Compute metadata
-        try:
-            size = os.path.getsize(path)
-            h = hashlib.sha256()
-            with open(path, "rb") as f:
-                while True:
-                    chunk = f.read(8192)
-                    if not chunk:
-                        break
-                    h.update(chunk)
-            sha256 = h.hexdigest()
-        except Exception as e:
-            logger.warning(f"Failed computing cache metadata for {path}: {e}")
-            size = None
-            sha256 = None
-
-        meta = {
-            "cache_path": path,
-            "owner": owner,
-            "name": name,
-            "session_id": session_id,
-            "user_id": user_id,
-            "size": size,
-            "sha256": sha256,
-            "cached_at": datetime.now(tz=timezone.utc).isoformat(),
-            "version": 1,
-        }
-        return meta
-
-    @staticmethod
-    def read_github_context_cache(meta: Dict[str, object]) -> Optional[Dict]:
-        """
-        Read GitHub context JSON from cache using provided metadata. Returns None on failure.
-        """
-        if not meta or not isinstance(meta, dict):
-            return None
-        path = meta.get("cache_path")
-        if not path or not os.path.exists(path):
-            return None
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"Failed reading GitHub context cache from {path}: {e}")
-            return None
 
     @staticmethod
     def get_api_key() -> str:
@@ -346,6 +218,7 @@ class LLMService:
         github_context: dict = None,
         conversation_history: List[Tuple[str, str]] = None,
         file_contexts: List[str] = None,
+        fallback_repo_summary: Optional[str] = None,
         model: str = None,
         temperature: float = None,
         max_tokens: int = None,
@@ -353,6 +226,20 @@ class LLMService:
     ) -> str:
         """
         Generate response using pre-fetched and stored GitHub context with improved error handling
+
+        Args:
+            db: Database session (unused but retained for signature compatibility)
+            user_id: ID of the user requesting the response
+            github_context: Rich repository context pulled from GitHub APIs
+            conversation_history: Recent conversation turns
+            file_contexts: Supplemental repository snippets
+            fallback_repo_summary: Cached textual summary when GitHub context retrieval fails.
+                Expected to be sourced from ``ChatContext.build_combined_summary`` so it
+                reflects the JSON cache stored in ``/tmp/github_context_cache``.
+            model: Override model identifier
+            temperature: Override generation temperature
+            max_tokens: Maximum tokens for the response
+            timeout: API timeout in seconds
         """
         try:
             # Build prompt using centralized prompt building with error handling
@@ -361,6 +248,7 @@ class LLMService:
                     github_context=github_context,
                     conversation=conversation_history or [],
                     file_contexts=file_contexts,
+                    fallback_repo_summary=fallback_repo_summary,
                 )
             except Exception as prompt_error:
                 logger.warning(f"Failed to build prompt: {prompt_error}")
@@ -391,6 +279,7 @@ class LLMService:
         github_context: dict = None,
         conversation: List[Tuple[str, str]] = None,
         file_contexts: List[str] = None,
+        fallback_repo_summary: Optional[str] = None,
     ) -> str:
         """
         Centralized prompt building using stored GitHub context
@@ -399,6 +288,9 @@ class LLMService:
             github_context: Pre-fetched comprehensive GitHub context dictionary
             conversation: List of (speaker, message) tuples
             file_contexts: Optional list of file context strings
+            fallback_repo_summary: Optional textual summary when GitHub context is unavailable.
+                This should come from :class:`ChatContext` which reads the cached
+                JSON stored in ``/tmp/github_context_cache``.
 
         Returns:
             Complete prompt string with stored GitHub context
@@ -587,6 +479,13 @@ parameters: object,
                     except Exception as branches_error:
                         logger.warning(f"Error processing branches: {branches_error}")
                         branches_str = "Repository Branches: Error loading\n"
+
+                elif fallback_repo_summary:
+                    logger.info("Building prompt using fallback repository summary")
+                    details_str = fallback_repo_summary.strip()
+                    commits_str = "Recent Commits: Not available (cached summary used)"
+                    issues_str = "Open Issues: Not available (cached summary used)"
+                    branches_str = "Repository Branches: Not available (cached summary used)"
 
             except Exception as context_error:
                 logger.warning(f"Error processing GitHub context: {context_error}")

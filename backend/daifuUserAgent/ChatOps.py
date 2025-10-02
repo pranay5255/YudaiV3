@@ -43,7 +43,7 @@ from sqlalchemy.orm import Session
 
 from utils import utc_now
 
-from .services.context_utils import ensure_github_context
+from .chat_context import ChatContext
 from .services.facts_and_memories import (
     FactsAndMemoriesResult,
     FactsAndMemoriesService,
@@ -159,19 +159,46 @@ class ChatOps:
 
                 # Get or refresh GitHub context via shared utility
                 github_context = None
+                fallback_repo_summary: Optional[str] = None
+                chat_context: Optional[ChatContext] = None
                 if repo_owner and repo_name:
+                    chat_context = ChatContext(
+                        db=self.db,
+                        user_id=user_id,
+                        repo_owner=repo_owner,
+                        repo_name=repo_name,
+                        session_obj=session,
+                    )
                     try:
-                        github_context = await ensure_github_context(
-                            db=self.db,
-                            user_id=user_id,
-                            session_obj=session,
-                            repo_owner=repo_owner,
-                            repo_name=repo_name,
-                        )
+                        github_context = await chat_context.ensure_github_context()
+                        if github_context:
+                            logger.info(
+                                "Using fresh GitHub context for %s/%s in session %s",
+                                repo_owner,
+                                repo_name,
+                                session_id,
+                            )
                     except Exception as db_error:
                         logger.warning(
                             f"Failed to ensure GitHub context for {repo_owner}/{repo_name}: {db_error}"
                         )
+
+                    if not github_context and chat_context:
+                        fallback_repo_summary = await chat_context.build_combined_summary()
+                        if fallback_repo_summary:
+                            logger.info(
+                                "Falling back to cached repository summary for %s/%s in session %s",
+                                repo_owner,
+                                repo_name,
+                                session_id,
+                            )
+                        else:
+                            logger.info(
+                                "No cached repository summary available for %s/%s in session %s",
+                                repo_owner,
+                                repo_name,
+                                session_id,
+                            )
 
                 # Generate response using LLM service
                 ai_response = await LLMService.generate_response_with_stored_context(
@@ -180,6 +207,7 @@ class ChatOps:
                     github_context=github_context,
                     conversation_history=full_history,
                     file_contexts=context_inputs,
+                    fallback_repo_summary=fallback_repo_summary,
                     model="x-ai/grok-4-fast:free",
                     temperature=0.4,
                     max_tokens=2500,
