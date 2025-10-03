@@ -4,8 +4,7 @@ import { useSessionStore } from '../stores/sessionStore';
 
 /**
  * LoginPage component handles GitHub OAuth login
- * Visual + copy refresh to highlight the new Model Marketplace,
- * Uniswap v4 Hooks, and liquidity provisioning — functionality unchanged.
+ * Visual + copy refresh to highlight the new model monetization journey — functionality unchanged.
  */
 export const LoginPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -62,16 +61,15 @@ export const LoginPage: React.FC = () => {
               Monetize your <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-violet-400">code, data & models</span>
             </h1>
             <p className="text-lg md:text-2xl text-zinc-300/90 mb-8 max-w-3xl mx-auto">
-              YudaiV3 turns your GitHub issues & merged PRs into a <span className="font-semibold text-white">Model Marketplace</span>.
-              Finetune after your <span className="text-cyan-300">30 issues created</span> & <span className="text-cyan-300">30 issues merged</span>, mint a model token, and earn via
-              <span className="text-violet-300"> Uniswap v4 Hooks</span> and liquidity provisioning.
+              YudaiV3 turns your GitHub issues & merged PRs into a <span className="font-semibold text-white">personal model marketplace</span>.
+              Finetune after your <span className="text-cyan-300">30 issues created</span> & <span className="text-cyan-300">30 issues merged</span> milestone, share your agent with trusted teams, and unlock new ways to earn from the work you already ship.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <div className="bg-white/5 backdrop-blur-sm rounded-lg px-6 py-3 border border-white/10">
                 <span className="text-zinc-200 text-sm">🧠 Base models: GPT-5, Claude, Qwen3-Coder, Grok & more</span>
               </div>
               <div className="bg-cyan-400/10 backdrop-blur-sm rounded-lg px-6 py-3 border border-cyan-300/20">
-                <span className="text-cyan-200 text-sm">💧 LP fees streamed via v4 Hooks • x402 pay-per-call</span>
+                <span className="text-cyan-100 text-sm">💡 Earn when collaborators rely on your personalized agent</span>
               </div>
             </div>
           </div>
@@ -87,7 +85,7 @@ export const LoginPage: React.FC = () => {
 
             {/* The Creator Journey */}
             <div className="bg-zinc-900/60 backdrop-blur-sm rounded-xl p-8 border border-zinc-800">
-              <h2 className="text-2xl font-bold text-white mb-4">Your Path to a Tokenized Coding Agent</h2>
+              <h2 className="text-2xl font-bold text-white mb-4">Your Path to a Monetized Coding Agent</h2>
               <ol className="space-y-5 text-zinc-300">
                 <li className="flex items-start gap-3">
                   <div className="mt-1 h-2 w-2 rounded-full bg-cyan-400" />
@@ -99,34 +97,34 @@ export const LoginPage: React.FC = () => {
                 </li>
                 <li className="flex items-start gap-3">
                   <div className="mt-1 h-2 w-2 rounded-full bg-violet-400" />
-                  <p><strong>Mint Model Token:</strong> We deploy an ERC-20 for your agent (<span className="text-zinc-200">AGENTx</span>) and pair it with <span className="text-zinc-200">$SOLVE</span> in a Uniswap v4 pool.</p>
+                  <p><strong>Share Your Agent:</strong> Package your agent with clear documentation so peers can pull it into their workflows without manual setup.</p>
                 </li>
                 <li className="flex items-start gap-3">
                   <div className="mt-1 h-2 w-2 rounded-full bg-violet-400" />
-                  <p><strong>Monetize Usage:</strong> Your hosted model is billed per request via <span className="text-zinc-200">x402</span>. Fees and a slice of LP swaps stream to you through v4 Hooks.</p>
+                  <p><strong>Monetize Usage:</strong> Earn when others rely on your hosted model, while you keep full visibility into performance and updates.</p>
                 </li>
               </ol>
             </div>
 
-            {/* Marketplace & Liquidity */}
+            {/* Marketplace Momentum */}
             <div className="bg-gradient-to-r from-cyan-400/10 to-violet-400/10 backdrop-blur-sm rounded-xl p-8 border border-cyan-300/20">
-              <h2 className="text-2xl font-bold text-white mb-4">Model Marketplace + Liquidity Flywheel</h2>
-              <div className="grid sm:grid-cols-2 gap-6 text-zinc-300">
+              <h2 className="text-2xl font-bold text-white mb-4">Model Marketplace Momentum</h2>
+              <div className="grid sm:grid-cols-2 gap-6 text-zinc-200">
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold text-cyan-200">Uniswap v4 Hooks</p>
-                  <p className="text-sm">Pool-level logic routes a share of swap fees to your creator vault automatically — no manual claims.</p>
+                  <p className="text-sm font-semibold text-cyan-100">Aligned Incentives</p>
+                  <p className="text-sm">Usage-based payouts keep your agent improving while rewarding the expertise already baked into your repos.</p>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold text-violet-200">LP to Boost Discovery</p>
-                  <p className="text-sm">Provide liquidity in <span className="text-zinc-200">AGENTx / SOLVE</span> to improve depth and earn trading fees while users call your model.</p>
+                  <p className="text-sm font-semibold text-violet-100">Boost Discovery</p>
+                  <p className="text-sm">Highlight your agent inside Yudai’s marketplace so other builders can subscribe and benefit from your playbooks.</p>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold text-cyan-200">x402 Billing</p>
-                  <p className="text-sm">Per-request receipts with stable settlement; internally mapped to your model token & creator vault.</p>
+                  <p className="text-sm font-semibold text-cyan-100">Clear Billing</p>
+                  <p className="text-sm">Simple dashboards help you track usage, payouts, and the repositories your agent supports.</p>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-sm font-semibold text-violet-200">Creator-First Design</p>
-                  <p className="text-sm">Your repo data → your model → your token. Clear revenue share; transparent vault math.</p>
+                  <p className="text-sm font-semibold text-violet-100">Creator-First Design</p>
+                  <p className="text-sm">Your repo data → your model → your monetization plan. You stay in control of access, pricing, and version updates.</p>
                 </div>
               </div>
               <p className="text-xs text-zinc-400 mt-4">Note: All marketplace mechanics are additive to your existing GitHub workflow — no changes to your repos or auth required.</p>
@@ -146,7 +144,7 @@ export const LoginPage: React.FC = () => {
                 </div>
                 <div className="flex items-start gap-3">
                   <div className="w-2 h-2 bg-sky-500 rounded-full mt-2" />
-                  <p><strong>Marketplace Preview:</strong> Tokenize models after the 30/30 milestone; LP and x402 settlement paths are scaffolded.</p>
+                  <p><strong>Marketplace Preview:</strong> Monetize your agent after the 30/30 milestone with ready-to-launch subscription rails.</p>
                 </div>
                 <div className="flex items-start gap-3">
                   <div className="w-2 h-2 bg-zinc-500 rounded-full mt-2" />
@@ -164,29 +162,29 @@ export const LoginPage: React.FC = () => {
               {/* Header */}
               <div className="text-center mb-6">
                 <h2 className="text-2xl font-bold text-white mb-2">Join YudaiV3</h2>
-                <p className="text-zinc-300">Complete the two-step GitHub onboarding to unlock AI automations & the model marketplace.</p>
+                <p className="text-zinc-200">Complete the two-step GitHub onboarding to unlock AI automations & the model marketplace.</p>
               </div>
 
               {/* Two-step summary */}
-              <div className="mb-6 rounded-lg border border-cyan-300/30 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-200">
-                <p className="font-medium text-cyan-100">Two-step setup</p>
-                <p className="text-cyan-200/90">1) Verify your GitHub identity. 2) Install the Yudai GitHub App so the agent can create issues and pull requests on your behalf.</p>
+              <div className="mb-6 rounded-lg border border-cyan-300/30 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-100">
+                <p className="font-medium text-cyan-50">Two-step setup</p>
+                <p className="text-cyan-100/90">1) Verify your GitHub identity. 2) Install the Yudai GitHub App so the agent can create issues and pull requests on your behalf.</p>
               </div>
 
               {/* Error Display (unchanged) */}
               {error && (
                 <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
-                  <p className="text-red-500 text-sm">{error}</p>
+                  <p className="text-red-400 text-sm">{error}</p>
                 </div>
               )}
 
               {/* Step 1: GitHub OAuth (button unchanged) */}
               <div className="mb-8 space-y-4">
                 <div className="flex items-start gap-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-cyan-300/40 bg-cyan-400/10 text-lg font-semibold text-cyan-200">1</div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-cyan-300/40 bg-cyan-400/10 text-lg font-semibold text-cyan-100">1</div>
                   <div>
                     <h3 className="text-lg font-semibold text-white">Verify your GitHub identity</h3>
-                    <p className="text-sm text-zinc-400">OAuth lets us securely link your repos. Revoke access anytime in GitHub settings.</p>
+                    <p className="text-sm text-zinc-200">OAuth lets us securely link your repos. Revoke access anytime in GitHub settings.</p>
                   </div>
                 </div>
 
@@ -214,10 +212,10 @@ export const LoginPage: React.FC = () => {
               {/* Step 2: GitHub App Installation (link unchanged) */}
               <div className="mb-8 space-y-4">
                 <div className="flex items-start gap-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-violet-300/40 bg-violet-400/10 text-lg font-semibold text-violet-200">2</div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-violet-300/40 bg-violet-400/10 text-lg font-semibold text-violet-100">2</div>
                   <div>
                     <h3 className="text-lg font-semibold text-white">Install the Yudai GitHub App</h3>
-                    <p className="text-sm text-zinc-400">Grant repo access so Yudai can create issues & pull requests. This powers your 30/30 milestone and future finetunes.</p>
+                    <p className="text-sm text-zinc-200">Grant repo access so Yudai can create issues & pull requests. This powers your 30/30 milestone and future finetunes.</p>
                   </div>
                 </div>
 
@@ -226,38 +224,38 @@ export const LoginPage: React.FC = () => {
                     href={githubAppInstallUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center rounded-lg border border-violet-300/40 bg-violet-400/10 px-6 py-3 text-sm font-medium text-violet-200 transition-colors hover:bg-violet-400/20"
+                    className="inline-flex items-center justify-center rounded-lg border border-violet-200/50 bg-violet-400/10 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-violet-400/20"
                   >
                     Install GitHub App
                   </a>
-                  <p className="text-xs text-zinc-500">
+                  <p className="text-xs text-zinc-200">
                     Install to your personal account or an organization (admin permissions required).
                   </p>
                 </div>
 
-                <div className="rounded-lg border border-amber-400/20 bg-amber-500/5 p-4 text-xs text-amber-200">
-                  <p className="font-medium text-amber-100">Why this matters</p>
-                  <p className="text-amber-200/80">
-                    The App unlocks repository triage, automated issue drafting, and PR prep. It’s also how we verify your 30/30 milestone for model tokenization.
+                <div className="rounded-lg border border-amber-300/30 bg-amber-500/10 p-4 text-xs text-amber-100">
+                  <p className="font-medium text-amber-50">Why this matters</p>
+                  <p className="text-amber-100/90">
+                    The App unlocks repository triage, automated issue drafting, and PR prep. It’s also how we verify your 30/30 milestone for model monetization.
                   </p>
                 </div>
               </div>
 
               {/* Feature bullets (kept; copy updated) */}
               <div className="space-y-3">
-                <div className="flex items-center gap-3 text-sm text-zinc-300">
+                <div className="flex items-center gap-3 text-sm text-zinc-200">
                   <div className="w-2 h-2 bg-emerald-500 rounded-full" />
                   <span>AI analysis for Python & TypeScript repos</span>
                 </div>
-                <div className="flex items-center gap-3 text-sm text-zinc-300">
+                <div className="flex items-center gap-3 text-sm text-zinc-200">
                   <div className="w-2 h-2 bg-sky-500 rounded-full" />
                   <span>Generate actionable GitHub issues & acceptance criteria</span>
                 </div>
-                <div className="flex items-center gap-3 text-sm text-zinc-300">
+                <div className="flex items-center gap-3 text-sm text-zinc-200">
                   <div className="w-2 h-2 bg-violet-500 rounded-full" />
-                  <span>Finetune at 30/30 → mint model token → earn via LP & x402</span>
+                  <span>Finetune at 30/30 → share your agent → earn from real usage</span>
                 </div>
-                <div className="flex items-center gap-3 text-sm text-zinc-400">
+                <div className="flex items-center gap-3 text-sm text-zinc-300">
                   <div className="w-2 h-2 bg-zinc-500 rounded-full" />
                   <span>Solidity & Deep Agents — Coming Soon</span>
                 </div>
@@ -265,7 +263,7 @@ export const LoginPage: React.FC = () => {
 
               {/* Footer */}
               <div className="mt-8 pt-6 border-t border-zinc-800">
-                <p className="text-xs text-zinc-500 text-center">
+                <p className="text-xs text-zinc-400 text-center">
                   By signing in, you agree to our terms of service and privacy policy
                 </p>
               </div>
@@ -282,14 +280,14 @@ export const LoginPage: React.FC = () => {
             <h3 className="text-xl font-semibold text-white mb-4">
               Ready to list your first model on the marketplace?
             </h3>
-            <p className="text-zinc-400 mb-6">
-              Ship issues faster, hit 30/30, finetune, mint a token, and earn from usage + LP fees with Uniswap v4 Hooks.
+            <p className="text-zinc-300 mb-6">
+              Ship issues faster, hit 30/30, finetune, and monetize a personal agent that reflects how you already build.
             </p>
-            <div className="flex flex-wrap justify-center gap-4 text-sm text-zinc-500">
+            <div className="flex flex-wrap justify-center gap-4 text-sm text-zinc-400">
               <span>• GitHub-native</span>
               <span>• Creator-first monetization</span>
-              <span>• Uniswap v4 fee streaming</span>
-              <span>• x402 pay-per-request</span>
+              <span>• Transparent usage insights</span>
+              <span>• Built for personal workflows</span>
             </div>
           </div>
         </div>
