@@ -409,8 +409,8 @@ export const Chat: React.FC<ChatProps> = ({
   }, [handleCreateGitHubIssue]);
 
   const handleSolveIssue = useCallback(async (issueId: string) => {
-    if (!selectedRepository) {
-      showError('No repository selected for solving issue');
+    if (!selectedRepository || !currentIssuePreview) {
+      showError('No repository or issue selected for solving');
       return;
     }
 
@@ -419,6 +419,7 @@ export const Chat: React.FC<ChatProps> = ({
 
       // Close the preview modal
       setShowIssuePreview(false);
+      const issuePreview = currentIssuePreview;
       setCurrentIssuePreview(null);
 
       // Call the solver endpoint using unified API
@@ -431,7 +432,9 @@ export const Chat: React.FC<ChatProps> = ({
         body: JSON.stringify({
           issue_id: issueId,
           repo_url: `https://github.com/${selectedRepository.repository.full_name}`,
-          branch: selectedRepository.branch || 'main'
+          branch: selectedRepository.branch || 'main',
+          issue_content: issuePreview.body || 'Issue content not available',
+          issue_title: issuePreview.title || 'Untitled Issue',
         }),
       });
 
@@ -442,14 +445,19 @@ export const Chat: React.FC<ChatProps> = ({
       const result = await response.json();
       console.log('[Chat] Solver started successfully:', result);
 
+      // Invalidate messages to show solver status updates
+      await queryClient.invalidateQueries({
+        queryKey: ['messages', activeSessionId]
+      });
+
       // Show success message
-      showError('AI Solver started successfully! Check the solve session status for progress.');
+      showError(`🚀 AI Solver started! Session ID: ${result.solve_session_id}. Watch the chat for progress updates.`);
 
     } catch (error) {
       console.error('[Chat] Failed to start solver:', error);
       showError(`Failed to start solver: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [selectedRepository, activeSessionId, showError]);
+  }, [selectedRepository, activeSessionId, currentIssuePreview, showError, queryClient]);
 
 
 
