@@ -19,7 +19,8 @@
 - [x] Session routes already have solver endpoints in `session_routes.py`
 - [x] Database models already exist (AISolveSession, AIModel, SWEAgentConfig)
 - [x] GitHub credentials handled in `backend/github`
-- [ ] Add missing dependencies to `backend/requirements.txt`
+- [x] Add missing dependencies to `backend/requirements.txt`
+- [x] Minimal solver implementation created for demo purposes
 
 ## 1. Dependency Updates (Day 1 Morning)
 **File: `backend/requirements.txt`**
