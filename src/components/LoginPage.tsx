@@ -61,8 +61,8 @@ export const LoginPage: React.FC = () => {
               Monetize your <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-violet-400">code, data & models</span>
             </h1>
             <p className="text-lg md:text-2xl text-zinc-300/90 mb-8 max-w-3xl mx-auto">
-              YudaiV3 turns your GitHub issues & merged PRs into a <span className="font-semibold text-white">personal model marketplace</span>.
-              Finetune after your <span className="text-cyan-300">30 issues created</span> & <span className="text-cyan-300">30 issues merged</span> milestone, share your agent with trusted teams, and unlock new ways to earn from the work you already ship.
+              YudaiV3 turns your GitHub issues & merged PRs into a <span className="font-semibold text-white">personal model workspace</span>.
+              Build a library of fixes, fine-tune at the <span className="text-cyan-300">30 issues created</span> & <span className="text-cyan-300">30 issues merged</span> milestone to sharpen models for your own projects, keep everything aligned with how you build, and open optional earning paths when collaborators rely on your agent.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <div className="bg-white/5 backdrop-blur-sm rounded-lg px-6 py-3 border border-white/10">
@@ -80,7 +80,7 @@ export const LoginPage: React.FC = () => {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="grid lg:grid-cols-2 gap-12 items-start">
 
-          {/* Left: Narrative & Marketplace explainer */}
+          {/* Left: Narrative & agent explainer */}
           <div className="space-y-8">
 
             {/* The Creator Journey */}
@@ -106,9 +106,9 @@ export const LoginPage: React.FC = () => {
               </ol>
             </div>
 
-            {/* Marketplace Momentum */}
+            {/* Personal model momentum */}
             <div className="bg-gradient-to-r from-cyan-400/10 to-violet-400/10 backdrop-blur-sm rounded-xl p-8 border border-cyan-300/20">
-              <h2 className="text-2xl font-bold text-white mb-4">Model Marketplace Momentum</h2>
+              <h2 className="text-2xl font-bold text-white mb-4">Personal Model Momentum</h2>
               <div className="grid sm:grid-cols-2 gap-6 text-zinc-200">
                 <div className="space-y-2">
                   <p className="text-sm font-semibold text-cyan-100">Aligned Incentives</p>
@@ -116,7 +116,7 @@ export const LoginPage: React.FC = () => {
                 </div>
                 <div className="space-y-2">
                   <p className="text-sm font-semibold text-violet-100">Boost Discovery</p>
-                  <p className="text-sm">Highlight your agent inside Yudai’s marketplace so other builders can subscribe and benefit from your playbooks.</p>
+                  <p className="text-sm">Share your agent with teammates or clients when you're ready so they can benefit from your playbooks.</p>
                 </div>
                 <div className="space-y-2">
                   <p className="text-sm font-semibold text-cyan-100">Clear Billing</p>
@@ -127,7 +127,7 @@ export const LoginPage: React.FC = () => {
                   <p className="text-sm">Your repo data → your model → your monetization plan. You stay in control of access, pricing, and version updates.</p>
                 </div>
               </div>
-              <p className="text-xs text-zinc-400 mt-4">Note: All marketplace mechanics are additive to your existing GitHub workflow — no changes to your repos or auth required.</p>
+              <p className="text-xs text-zinc-400 mt-4">Note: All automation support layers on top of your existing GitHub workflow — no changes to your repos or auth required.</p>
             </div>
 
             {/* What you get today */}
@@ -162,7 +162,7 @@ export const LoginPage: React.FC = () => {
               {/* Header */}
               <div className="text-center mb-6">
                 <h2 className="text-2xl font-bold text-white mb-2">Join YudaiV3</h2>
-                <p className="text-zinc-200">Complete the two-step GitHub onboarding to unlock AI automations & the model marketplace.</p>
+                <p className="text-zinc-200">Complete the two-step GitHub onboarding to unlock AI automations & personal model monetization.</p>
               </div>
 
               {/* Two-step summary */}
@@ -278,7 +278,7 @@ export const LoginPage: React.FC = () => {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="text-center">
             <h3 className="text-xl font-semibold text-white mb-4">
-              Ready to list your first model on the marketplace?
+              Ready to grow your personal coding agent?
             </h3>
             <p className="text-zinc-300 mb-6">
               Ship issues faster, hit 30/30, finetune, and monetize a personal agent that reflects how you already build.
