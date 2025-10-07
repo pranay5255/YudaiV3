@@ -18,8 +18,9 @@ from sentence_transformers import SentenceTransformer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .chat_context import CacheMetadata
 from utils import utc_now
+
+from .chat_context import CacheMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class LLMService:
     """Centralized service for LLM interactions"""
 
     # Standard model configuration
-    DEFAULT_MODEL = "x-ai/grok-4-fast:free"
+    DEFAULT_MODEL = "moonshotai/kimi-dev-72b:free"
     DEFAULT_TEMPERATURE = 0.6
     DEFAULT_MAX_TOKENS = 4000
     DEFAULT_TIMEOUT = 30
