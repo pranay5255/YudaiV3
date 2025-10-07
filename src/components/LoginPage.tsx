@@ -61,8 +61,7 @@ export const LoginPage: React.FC = () => {
               Monetize your <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-violet-400">code, data & models</span>
             </h1>
             <p className="text-lg md:text-2xl text-zinc-300/90 mb-8 max-w-3xl mx-auto">
-              YudaiV3 turns your GitHub issues & merged PRs into a <span className="font-semibold text-white">personal model workspace</span>.
-              Build a library of fixes, fine-tune at the <span className="text-cyan-300">30 issues created</span> & <span className="text-cyan-300">30 issues merged</span> milestone to sharpen models for your own projects, keep everything aligned with how you build, and open optional earning paths when collaborators rely on your agent.
+              Turn GitHub issues & PRs into a <span className="font-semibold text-white">personal AI agent</span>. Fine-tune at <span className="text-cyan-300">30/30 milestone</span>, then monetize when others use your agent.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <div className="bg-white/5 backdrop-blur-sm rounded-lg px-6 py-3 border border-white/10">
@@ -85,70 +84,61 @@ export const LoginPage: React.FC = () => {
 
             {/* The Creator Journey */}
             <div className="bg-zinc-900/60 backdrop-blur-sm rounded-xl p-8 border border-zinc-800">
-              <h2 className="text-2xl font-bold text-white mb-4">Your Path to a Monetized Coding Agent</h2>
-              <ol className="space-y-5 text-zinc-300">
+              <h2 className="text-2xl font-bold text-white mb-4">How It Works</h2>
+              <ol className="space-y-4 text-zinc-300">
                 <li className="flex items-start gap-3">
                   <div className="mt-1 h-2 w-2 rounded-full bg-cyan-400" />
-                  <p><strong>Compose & Solve:</strong> Use YudaiV3 to create GitHub issues and ship PRs with AI assistance. Your dataset grows as issues are merged.</p>
+                  <p><strong>Create & Solve:</strong> Generate GitHub issues and ship PRs with AI assistance.</p>
                 </li>
                 <li className="flex items-start gap-3">
                   <div className="mt-1 h-2 w-2 rounded-full bg-cyan-400" />
-                  <p><strong>Unlock Finetune at 30/30:</strong> Hit <em>30 issues created</em> & <em>30 merged</em> to trigger a guided finetune from your repo-specific history.</p>
+                  <p><strong>Hit 30/30:</strong> Unlock finetuning after 30 issues created & 30 merged.</p>
                 </li>
                 <li className="flex items-start gap-3">
                   <div className="mt-1 h-2 w-2 rounded-full bg-violet-400" />
-                  <p><strong>Share Your Agent:</strong> Package your agent with clear documentation so peers can pull it into their workflows without manual setup.</p>
-                </li>
-                <li className="flex items-start gap-3">
-                  <div className="mt-1 h-2 w-2 rounded-full bg-violet-400" />
-                  <p><strong>Monetize Usage:</strong> Earn when others rely on your hosted model, while you keep full visibility into performance and updates.</p>
+                  <p><strong>Share & Earn:</strong> Package your agent and monetize when others use it.</p>
                 </li>
               </ol>
             </div>
 
-            {/* Personal model momentum */}
+            {/* Key Features */}
             <div className="bg-gradient-to-r from-cyan-400/10 to-violet-400/10 backdrop-blur-sm rounded-xl p-8 border border-cyan-300/20">
-              <h2 className="text-2xl font-bold text-white mb-4">Personal Model Momentum</h2>
-              <div className="grid sm:grid-cols-2 gap-6 text-zinc-200">
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold text-cyan-100">Aligned Incentives</p>
-                  <p className="text-sm">Usage-based payouts keep your agent improving while rewarding the expertise already baked into your repos.</p>
+              <h2 className="text-2xl font-bold text-white mb-4">Key Benefits</h2>
+              <div className="grid sm:grid-cols-2 gap-4 text-zinc-200">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-cyan-100">Usage-Based Payouts</p>
+                  <p className="text-sm">Earn when others use your agent.</p>
                 </div>
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold text-violet-100">Boost Discovery</p>
-                  <p className="text-sm">Share your agent with teammates or clients when you're ready so they can benefit from your playbooks.</p>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-violet-100">Easy Sharing</p>
+                  <p className="text-sm">Share with teammates & clients.</p>
                 </div>
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold text-cyan-100">Clear Billing</p>
-                  <p className="text-sm">Simple dashboards help you track usage, payouts, and the repositories your agent supports.</p>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-cyan-100">Clear Dashboard</p>
+                  <p className="text-sm">Track usage and payouts.</p>
                 </div>
-                <div className="space-y-2">
-                  <p className="text-sm font-semibold text-violet-100">Creator-First Design</p>
-                  <p className="text-sm">Your repo data → your model → your monetization plan. You stay in control of access, pricing, and version updates.</p>
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-violet-100">Full Control</p>
+                  <p className="text-sm">You own your data & pricing.</p>
                 </div>
               </div>
-              <p className="text-xs text-zinc-400 mt-4">Note: All automation support layers on top of your existing GitHub workflow — no changes to your repos or auth required.</p>
             </div>
 
             {/* What you get today */}
             <div className="bg-zinc-900/60 backdrop-blur-sm rounded-xl p-8 border border-zinc-800">
-              <h2 className="text-2xl font-bold text-white mb-4">What’s Live Today</h2>
-              <div className="space-y-4 text-zinc-300">
+              <h2 className="text-2xl font-bold text-white mb-4">What's Available</h2>
+              <div className="space-y-3 text-zinc-300">
                 <div className="flex items-start gap-3">
                   <div className="w-2 h-2 bg-emerald-500 rounded-full mt-2" />
-                  <p><strong>AI Issue Composer:</strong> Generate crisp, actionable GitHub issues with file diffs & acceptance criteria.</p>
+                  <p><strong>AI Issue Creation:</strong> Generate actionable GitHub issues.</p>
                 </div>
                 <div className="flex items-start gap-3">
                   <div className="w-2 h-2 bg-emerald-500 rounded-full mt-2" />
-                  <p><strong>PR Assist:</strong> Plan and prepare fixes for automated agents — you stay in control of merges.</p>
+                  <p><strong>PR Assistance:</strong> Automated fix preparation.</p>
                 </div>
                 <div className="flex items-start gap-3">
                   <div className="w-2 h-2 bg-sky-500 rounded-full mt-2" />
-                  <p><strong>Marketplace Preview:</strong> Monetize your agent after the 30/30 milestone with ready-to-launch subscription rails.</p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-zinc-500 rounded-full mt-2" />
-                  <p>Solidity agents & deeper repo orchestration — <em>coming soon</em>.</p>
+                  <p><strong>Agent Marketplace:</strong> Monetize after 30/30.</p>
                 </div>
               </div>
             </div>
@@ -162,13 +152,13 @@ export const LoginPage: React.FC = () => {
               {/* Header */}
               <div className="text-center mb-6">
                 <h2 className="text-2xl font-bold text-white mb-2">Join YudaiV3</h2>
-                <p className="text-zinc-200">Complete the two-step GitHub onboarding to unlock AI automations & personal model monetization.</p>
+                <p className="text-zinc-200">Complete two-step GitHub setup to unlock AI automations.</p>
               </div>
 
               {/* Two-step summary */}
               <div className="mb-6 rounded-lg border border-cyan-300/30 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-100">
                 <p className="font-medium text-cyan-50">Two-step setup</p>
-                <p className="text-cyan-100/90">1) Verify your GitHub identity. 2) Install the Yudai GitHub App so the agent can create issues and pull requests on your behalf.</p>
+                <p className="text-cyan-100/90">1) Verify GitHub identity. 2) Install Yudai App for issue/PR creation.</p>
               </div>
 
               {/* Error Display (unchanged) */}
@@ -183,8 +173,8 @@ export const LoginPage: React.FC = () => {
                 <div className="flex items-start gap-4">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full border border-cyan-300/40 bg-cyan-400/10 text-lg font-semibold text-cyan-100">1</div>
                   <div>
-                    <h3 className="text-lg font-semibold text-white">Verify your GitHub identity</h3>
-                    <p className="text-sm text-zinc-200">OAuth lets us securely link your repos. Revoke access anytime in GitHub settings.</p>
+                    <h3 className="text-lg font-semibold text-white">Verify GitHub Identity</h3>
+                    <p className="text-sm text-zinc-200">Securely link your repos via OAuth.</p>
                   </div>
                 </div>
 
@@ -210,59 +200,58 @@ export const LoginPage: React.FC = () => {
               </div>
 
               {/* Step 2: GitHub App Installation (link unchanged) */}
-              <div className="mb-8 space-y-4">
+              <div className="mb-6 space-y-4">
                 <div className="flex items-start gap-4">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full border border-violet-300/40 bg-violet-400/10 text-lg font-semibold text-violet-100">2</div>
                   <div>
-                    <h3 className="text-lg font-semibold text-white">Install the Yudai GitHub App</h3>
-                    <p className="text-sm text-zinc-200">Grant repo access so Yudai can create issues & pull requests. This powers your 30/30 milestone and future finetunes.</p>
+                    <h3 className="text-lg font-semibold text-white">Install Yudai GitHub App</h3>
+                    <p className="text-sm text-zinc-200">Grant repo access for issues & PRs.</p>
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <a
-                    href={githubAppInstallUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center rounded-lg border border-violet-200/50 bg-violet-400/10 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-violet-400/20"
-                  >
-                    Install GitHub App
-                  </a>
-                  <p className="text-xs text-zinc-200">
-                    Install to your personal account or an organization (admin permissions required).
-                  </p>
-                </div>
-
-                <div className="rounded-lg border border-amber-300/30 bg-amber-500/10 p-4 text-xs text-amber-100">
-                  <p className="font-medium text-amber-50">Why this matters</p>
-                  <p className="text-amber-100/90">
-                    The App unlocks repository triage, automated issue drafting, and PR prep. It’s also how we verify your 30/30 milestone for model monetization.
-                  </p>
-                </div>
+                <a
+                  href={githubAppInstallUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center w-full rounded-lg border border-violet-200/50 bg-violet-400/10 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-violet-400/20"
+                >
+                  Install GitHub App
+                </a>
               </div>
 
               {/* Feature bullets (kept; copy updated) */}
-              <div className="space-y-3">
+              <div className="space-y-3 mb-6">
                 <div className="flex items-center gap-3 text-sm text-zinc-200">
                   <div className="w-2 h-2 bg-emerald-500 rounded-full" />
-                  <span>AI analysis for Python & TypeScript repos</span>
+                  <span>AI analysis for Python & TypeScript</span>
                 </div>
                 <div className="flex items-center gap-3 text-sm text-zinc-200">
                   <div className="w-2 h-2 bg-sky-500 rounded-full" />
-                  <span>Generate actionable GitHub issues & acceptance criteria</span>
+                  <span>Generate GitHub issues & criteria</span>
                 </div>
                 <div className="flex items-center gap-3 text-sm text-zinc-200">
                   <div className="w-2 h-2 bg-violet-500 rounded-full" />
-                  <span>Finetune at 30/30 → share your agent → earn from real usage</span>
-                </div>
-                <div className="flex items-center gap-3 text-sm text-zinc-300">
-                  <div className="w-2 h-2 bg-zinc-500 rounded-full" />
-                  <span>Solidity & Deep Agents — Coming Soon</span>
+                  <span>30/30 → finetune → monetize</span>
                 </div>
               </div>
 
+              {/* Discord CTA */}
+              <div className="mb-6">
+                <a
+                  href="https://discord.gg/N95tf5Z6"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-3 w-full bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/30 text-white font-medium py-3 px-6 rounded-lg transition-all duration-200"
+                >
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515a.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0a12.64 12.64 0 0 0-.617-1.25a.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057a19.9 19.9 0 0 0 5.993 3.03a.078.078 0 0 0 .084-.028a14.09 14.09 0 0 0 1.226-1.994a.076.076 0 0 0-.041-.106a13.107 13.107 0 0 1-1.872-.892a.077.077 0 0 1-.008-.128a10.2 10.2 0 0 0 .372-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127a12.299 12.299 0 0 1-1.873.892a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028a19.839 19.839 0 0 0 6.002-3.03a.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.956-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.955-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.946 2.418-2.157 2.418z"/>
+                  </svg>
+                  <span>Join our Discord Community</span>
+                </a>
+              </div>
+
               {/* Footer */}
-              <div className="mt-8 pt-6 border-t border-zinc-800">
+              <div className="pt-6 border-t border-zinc-800">
                 <p className="text-xs text-zinc-400 text-center">
                   By signing in, you agree to our terms of service and privacy policy
                 </p>
@@ -278,16 +267,13 @@ export const LoginPage: React.FC = () => {
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="text-center">
             <h3 className="text-xl font-semibold text-white mb-4">
-              Ready to grow your personal coding agent?
+              Build & monetize your AI coding agent
             </h3>
-            <p className="text-zinc-300 mb-6">
-              Ship issues faster, hit 30/30, finetune, and monetize a personal agent that reflects how you already build.
-            </p>
             <div className="flex flex-wrap justify-center gap-4 text-sm text-zinc-400">
               <span>• GitHub-native</span>
-              <span>• Creator-first monetization</span>
-              <span>• Transparent usage insights</span>
-              <span>• Built for personal workflows</span>
+              <span>• Creator-first</span>
+              <span>• Usage insights</span>
+              <span>• Personal workflows</span>
             </div>
           </div>
         </div>
