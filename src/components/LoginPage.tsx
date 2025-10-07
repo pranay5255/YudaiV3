@@ -238,7 +238,7 @@ export const LoginPage: React.FC = () => {
               {/* Discord CTA */}
               <div className="mb-6">
                 <a
-                  href="https://discord.gg/N95tf5Z6"
+                  href="https://discord.gg/U96mwKmJ"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center justify-center gap-3 w-full bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/30 text-white font-medium py-3 px-6 rounded-lg transition-all duration-200"
