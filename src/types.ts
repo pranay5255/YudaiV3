@@ -176,7 +176,6 @@ export interface TabState {
   activeTab: TabType;
   refreshKeys: {
     chat: number;
-    'file-deps': number;
     context: number;
     ideas: number;
   };
@@ -234,7 +233,6 @@ export interface SessionState {
   lastUpdated: Date;
   connectionStatus: 'connected' | 'disconnected' | 'reconnecting';
 }
-
 
 
 

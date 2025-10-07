@@ -3,11 +3,9 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { Chat } from './components/Chat';
-import { FileDependencies } from './components/FileDependencies';
 import { ContextCards } from './components/ContextCards';
 import { IdeasToImplement } from './components/IdeasToImplement';
 import { DiffModal } from './components/DiffModal';
-import { DetailModal } from './components/DetailModal';
 import { ToastContainer } from './components/Toast';
 import { RepositorySelectionToast } from './components/RepositorySelectionToast';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -15,11 +13,11 @@ import { SessionErrorBoundary } from './components/SessionErrorBoundary';
 import { AuthSuccess } from './components/AuthSuccess';
 import { AuthCallback } from './components/AuthCallback';
 import { LoginPage } from './components/LoginPage';
-import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository, FileItem } from './types';
+import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository } from './types';
 import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
 import { useSessionManagement } from './hooks/useSessionManagement';
-import { useSession, useContextCards, useFileDependencies, useAddContextCard, useRemoveContextCard } from './hooks/useSessionQueries';
+import { useSession, useContextCards, useRemoveContextCard } from './hooks/useSessionQueries';
 import { UserIssueResponse } from './types';
 import { ChatContextMessage, FileContextItem } from './types/api';
 
@@ -74,16 +72,23 @@ function AppContent() {
   // React Query hooks for data fetching
   const { data: sessionData, isLoading: isSessionLoading } = useSession(activeSessionId || '');
   const { data: contextCards = [] } = useContextCards(activeSessionId || '');
-  const { data: fileContext = [] } = useFileDependencies(activeSessionId || '');
-  const addContextCardMutation = useAddContextCard();
   const removeContextCardMutation = useRemoveContextCard();
+
+  const isValidTab = (tab: unknown): tab is TabType =>
+    tab === 'chat' || tab === 'context' || tab === 'ideas';
+
+  useEffect(() => {
+    if (!isValidTab(activeTab)) {
+      setActiveTab('chat');
+    }
+  }, [activeTab, setActiveTab]);
+
+  const currentTab: TabType = isValidTab(activeTab) ? activeTab : 'chat';
   
   // Local UI state
   const [currentStep] = useState<ProgressStep>('DAifu');
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [issuePreviewData, setIssuePreviewData] = useState<IssuePreviewData | undefined>(undefined);
   
   // Repository selection state - always show after login if no repository selected
@@ -125,11 +130,10 @@ function AppContent() {
         sessionId: activeSessionId,
         sessionData: sessionData ? 'loaded' : 'loading',
         contextCardsCount: contextCards.length,
-        fileContextCount: fileContext.length,
         isLoading: isSessionLoading
       });
     }
-  }, [activeSessionId, sessionData, contextCards, fileContext, isSessionLoading]);
+  }, [activeSessionId, sessionData, contextCards, isSessionLoading]);
 
   const handleRepositoryConfirm = async (selection: SelectedRepository) => {
     try {
@@ -164,26 +168,6 @@ function AppContent() {
     setIsDiffModalOpen(true);
   };
 
-  const addFileToContext = (file: FileItem) => {
-    if (!activeSessionId) {
-      addToast('Please select a repository to start a session first', 'error');
-      return;
-    }
-
-    addContextCardMutation.mutate({
-      sessionId: activeSessionId,
-      card: {
-        title: file.name || file.file_name || 'File',
-        description: file.path || '',
-        source: 'file-deps',
-        tokens: file.tokens,
-      }
-    }, {
-      onSuccess: () => addToast(`Added ${file.name || file.file_name} to context`, 'success'),
-      onError: () => addToast('Failed to add file to context', 'error'),
-    });
-  };
-
   const removeContextCardHandler = (id: string) => {
     if (!activeSessionId) {
       addToast('No active session to remove context from', 'error');
@@ -199,11 +183,6 @@ function AppContent() {
     });
   };
 
-  const handleShowFileDetails = (file: FileItem) => {
-    setSelectedFile(file);
-    setIsDetailModalOpen(true);
-  };
-
   const handleCreateIdeaIssue = (idea: IdeaItem) => {
     // Simplified idea issue creation
     console.log('Creating idea issue:', idea);
@@ -215,18 +194,11 @@ function AppContent() {
   };
 
   const renderTabContent = () => {
-    switch (activeTab) {
+    switch (currentTab) {
       case 'chat':
         return (
           <Chat
             onShowIssuePreview={handleShowIssuePreview}
-            onShowError={addToast}
-          />
-        );
-      case 'file-deps':
-        return (
-          <FileDependencies
-            onShowDetails={handleShowFileDetails}
             onShowError={addToast}
           />
         );
@@ -254,7 +226,7 @@ function AppContent() {
       <Sidebar
         isCollapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        activeTab={activeTab}
+        activeTab={currentTab}
         onTabChange={handleTabChange}
       />
 
@@ -276,13 +248,6 @@ function AppContent() {
         isOpen={isDiffModalOpen}
         onClose={() => setIsDiffModalOpen(false)}
         issuePreview={issuePreviewData}
-      />
-
-      <DetailModal
-        isOpen={isDetailModalOpen}
-        onClose={() => setIsDetailModalOpen(false)}
-        file={selectedFile}
-        onAddToContext={addFileToContext}
       />
 
       {/* Toast Container */}

@@ -530,13 +530,12 @@ export interface FileDependencyMutationContext {
 // UI & STATE TYPES
 // ============================================================================
 
-export type TabType = 'chat' | 'file-deps' | 'context' | 'ideas';
+export type TabType = 'chat' | 'context' | 'ideas';
 
 export interface TabState {
   activeTab: TabType;
   refreshKeys: {
     chat: number;
-    'file-deps': number;
     context: number;
     ideas: number;
   };
