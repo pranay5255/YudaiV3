@@ -3733,6 +3733,7 @@ source = { editable = "." }
 dependencies = [
     { name = "black" },
     { name = "cryptography" },
+    { name = "e2b" },
     { name = "e2b-code-interpreter" },
     { name = "fastapi" },
     { name = "ghapi" },
@@ -3793,6 +3794,7 @@ requires-dist = [
     { name = "black", specifier = ">=25.1.0" },
     { name = "cryptography", specifier = ">=45.0.5" },
     { name = "datasets", marker = "extra == 'dev'", specifier = ">=2.16.0" },
+    { name = "e2b", specifier = ">=2.2.1" },
     { name = "e2b-code-interpreter", specifier = ">=2.0.0" },
     { name = "fastapi", specifier = ">=0.109.0" },
     { name = "flask", marker = "extra == 'dev'", specifier = ">=3.0.0" },
