@@ -71,6 +71,7 @@ CRITICAL ISSUES:
 import asyncio
 import json
 import logging
+import os
 
 # Import chat functionality from chat_api
 import time
@@ -87,8 +88,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 
 # Import from filedeps.py
 from models import (
-    AISolveSession,
     APIError,
+    AuthToken,
     ChatMessage,
     ChatMessageResponse,
     ChatRequest,
@@ -104,12 +105,21 @@ from models import (
     Repository,
     SessionContextResponse,
     SessionResponse,
+    Solve,
+    SolveDetailOut,
+    SolveOut,
+    SolveRun,
+    SolveRunOut,
+    SolveStatus,
     UpdateSessionRequest,
     User,
     UserIssueResponse,
 )
 from pgvector.sqlalchemy import Vector
-from sqlalchemy.orm import Session
+from pydantic import ValidationError
+from solver.models import ExperimentMatrix, Limits
+from solver.services import SolveRunner
+from sqlalchemy.orm import Session, selectinload
 
 from utils import utc_now
 
@@ -1659,488 +1669,290 @@ async def _index_repository_for_session_background(
 # SOLVER ENDPOINTS - Consolidated under sessions context
 # ============================================================================
 
+DEFAULT_MATRIX_CONFIG = {
+    "models": ["gpt-4.1"],
+    "temps": [0.2, 0.6],
+    "max_edits": [3, 5],
+    "evolution": ["test-first", "small-steps"],
+    #TODO: remove evolutions from the matrix
+}
+
+
+def _resolve_template_id() -> str:
+    template_id = os.getenv("E2B_TEMPLATE_ID")
+    if not template_id:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="E2B template not configured",
+        )
+    return template_id
+
+
+def _resolve_github_token_for_user(db: Session, user_id: int) -> str:
+    token = (
+        db.query(AuthToken)
+        .filter(AuthToken.user_id == user_id, AuthToken.is_active.is_(True))
+        .order_by(AuthToken.created_at.desc())
+        .first()
+    )
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GitHub token not available for this user",
+        )
+    return token.access_token
+
+
+def _build_matrix(matrix_data: Optional[Dict[str, Any]]) -> ExperimentMatrix:
+    payload = matrix_data or DEFAULT_MATRIX_CONFIG
+    try:
+        return ExperimentMatrix.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=exc.errors(),
+        ) from exc
+
+
+def _build_limits(limits_data: Optional[Dict[str, Any]]) -> Optional[Limits]:
+    if not limits_data:
+        return None
+    try:
+        return Limits.model_validate(limits_data)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=exc.errors(),
+        ) from exc
+
+
+def _derive_repo_url(chat_session: ChatSession, override: Optional[str]) -> str:
+    if override:
+        return override
+    if chat_session.repo_owner and chat_session.repo_name:
+        return f"https://github.com/{chat_session.repo_owner}/{chat_session.repo_name}"
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Repository context is required to launch the solver",
+    )
+
+
+def _summarize_runs(runs: List[SolveRun]) -> Dict[str, int]:
+    total = len(runs)
+    passed = sum(1 for run in runs if run.tests_passed)
+    running = sum(1 for run in runs if run.status == SolveStatus.RUNNING.value)
+    failed = sum(1 for run in runs if run.status == SolveStatus.FAILED.value)
+    return {
+        "total": total,
+        "passed": passed,
+        "running": running,
+        "failed": failed,
+    }
 
 @router.post("/sessions/{session_id}/solve/start", response_model=dict)
 async def start_solve_session_for_session(
     session_id: str,
-    request: Optional[dict] = None,
-    background_tasks: BackgroundTasks = BackgroundTasks(),
+    payload: Optional[Dict[str, Any]] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Start AI solver for a session - supports both database issues and direct content
-    """
-    try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
-        )
+    """Launch the solver fan-out flow for a chat session."""
+    chat_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    data = payload or {}
 
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
-
-        # Extract parameters from request
-        issue_id = request.get("issue_id") if request else None
-        repo_url = request.get("repo_url") if request else None
-        branch = request.get("branch", "main")
-        issue_content = request.get("issue_content") if request else None
-        issue_title = request.get("issue_title") if request else None
-        ai_model_id = request.get("ai_model_id") if request else None
-        swe_config_id = request.get("swe_config_id") if request else None
-
-        # Validate required parameters
-        if not repo_url:
-            repo_url = (
-                f"https://github.com/{db_session.repo_owner}/{db_session.repo_name}"
-            )
-
-        # Import solver adapter
-        from solver.ai_solver import AISolverAdapter
-
-        # Create solver adapter
-        solver = AISolverAdapter(db)
-
-        # Start solver with appropriate parameters
-        session_id_num = await solver.run_solver(
-            issue_id=issue_id,
-            user_id=current_user.id,
-            repo_url=repo_url,
-            branch=branch,
-            issue_content=issue_content,
-            issue_title=issue_title,
-            ai_model_id=ai_model_id,
-            swe_config_id=swe_config_id,
-        )
-
-        return {
-            "message": "AI Solver started successfully",
-            "session_id": session_id_num,
-            "solve_session_id": session_id_num,
-            "status": "started",
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
+    issue_number = data.get("issue_number")
+    if issue_number is None:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start solver: {str(e)}",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="issue_number is required to launch the solver",
         )
+    try:
+        issue_number_int = int(issue_number)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="issue_number must be an integer",
+        ) from exc
+
+    repo_url = _derive_repo_url(chat_session, data.get("repo_url"))
+    base_branch = data.get("base_branch") or chat_session.repo_branch or "main"
+    matrix = _build_matrix(data.get("matrix"))
+    limits = _build_limits(data.get("limits"))
+
+    solve = Solve(
+        id=str(uuid.uuid4()),
+        user_id=current_user.id,
+        session_id=chat_session.id,
+        repo_url=repo_url,
+        issue_number=issue_number_int,
+        base_branch=base_branch,
+        status=SolveStatus.PENDING.value,
+        matrix=matrix.model_dump(),
+        limits=limits.model_dump() if limits else None,
+        requested_by=current_user.github_username,
+    )
+    db.add(solve)
+    db.commit()
+    db.refresh(solve)
+
+    template_id = _resolve_template_id()
+    gh_token = _resolve_github_token_for_user(db, current_user.id)
+    base_cfg = {
+        "repo_url": repo_url,
+        "issue_number": issue_number_int,
+        "base_branch": base_branch,
+    }
+    runner = SolveRunner(SessionLocal, gh_token, template_id)
+    asyncio.create_task(runner.run(solve.id, base_cfg, matrix, limits))
+
+    return {
+        "solve_id": solve.id,
+        "session_id": session_id,
+        "status": solve.status,
+    }
 
 
 @router.get(
-    "/sessions/{session_id}/solve/sessions/{solve_session_id}", response_model=dict
+    "/sessions/{session_id}/solve/sessions/{solve_id}", response_model=SolveDetailOut
 )
 async def get_solve_session_for_session(
     session_id: str,
-    solve_session_id: int,
+    solve_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Get solve session details for a session - Consolidated from solve_router.py
-    """
-    try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
+    """Fetch detailed solve information for a session."""
+    chat_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    solve = (
+        db.query(Solve)
+        .options(selectinload(Solve.runs), selectinload(Solve.champion_run))
+        .filter(
+            Solve.id == solve_id,
+            Solve.user_id == current_user.id,
+            Solve.session_id == chat_session.id,
         )
+        .one_or_none()
+    )
 
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
-
-        # Get solve session with authorization check
-        solve_session = (
-            db.query(AISolveSession)
-            .filter(
-                AISolveSession.id == solve_session_id,
-                AISolveSession.user_id == current_user.id,
-            )
-            .first()
-        )
-
-        if not solve_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Solve session not found or access denied",
-            )
-
-        return {
-            "id": solve_session.id,
-            "user_id": solve_session.user_id,
-            "issue_id": solve_session.issue_id,
-            "ai_model_id": solve_session.ai_model_id,
-            "swe_config_id": solve_session.swe_config_id,
-            "status": solve_session.status,
-            "repo_url": solve_session.repo_url,
-            "branch_name": solve_session.branch_name,
-            "started_at": solve_session.started_at,
-            "completed_at": solve_session.completed_at,
-            "error_message": solve_session.error_message,
-            "trajectory_data": solve_session.trajectory_data,
-            "created_at": solve_session.created_at,
-            "updated_at": solve_session.updated_at,
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
+    if not solve:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get solve session: {str(e)}",
+            status_code=status.HTTP_404_NOT_FOUND, detail="Solve not found"
         )
+
+    detail = SolveDetailOut.model_validate(solve)
+    detail.runs = [SolveRunOut.model_validate(run) for run in solve.runs]
+    if solve.champion_run:
+        detail.champion_run = SolveRunOut.model_validate(solve.champion_run)
+    return detail
 
 
 @router.get(
-    "/sessions/{session_id}/solve/sessions/{solve_session_id}/stats",
+    "/sessions/{session_id}/solve/sessions/{solve_id}/stats",
     response_model=dict,
 )
 async def get_solve_session_stats_for_session(
     session_id: str,
-    solve_session_id: int,
+    solve_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Get solve session statistics for a session - Consolidated from solve_router.py
-    """
-    try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
+    """Return aggregate run statistics for a solve."""
+    chat_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    solve = (
+        db.query(Solve)
+        .options(selectinload(Solve.runs))
+        .filter(
+            Solve.id == solve_id,
+            Solve.user_id == current_user.id,
+            Solve.session_id == chat_session.id,
         )
+        .one_or_none()
+    )
 
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
-
-        # Verify solve session exists and user has access
-        solve_session = (
-            db.query(AISolveSession)
-            .filter(
-                AISolveSession.id == solve_session_id,
-                AISolveSession.user_id == current_user.id,
-            )
-            .first()
-        )
-
-        if not solve_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Solve session not found or access denied",
-            )
-
-        # Import solver adapter for stats
-        from solver.ai_solver import AISolverAdapter
-
-        solver = AISolverAdapter(db)
-        stats = solver.get_session_status(solve_session_id)
-
-        if not stats:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to retrieve session statistics",
-            )
-
-        return stats
-
-    except HTTPException:
-        raise
-    except Exception as e:
+    if not solve:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get solve session stats: {str(e)}",
+            status_code=status.HTTP_404_NOT_FOUND, detail="Solve not found"
         )
+
+    summary = _summarize_runs(solve.runs)
+    return {
+        "solve_id": solve.id,
+        "status": solve.status,
+        "started_at": solve.started_at,
+        "completed_at": solve.completed_at,
+        "champion_run_id": solve.champion_run_id,
+        "error_message": solve.error_message,
+        "runs": summary,
+    }
 
 
 @router.post(
-    "/sessions/{session_id}/solve/sessions/{solve_session_id}/cancel",
+    "/sessions/{session_id}/solve/sessions/{solve_id}/cancel",
     response_model=dict,
 )
 async def cancel_solve_session_for_session(
     session_id: str,
-    solve_session_id: int,
+    solve_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Cancel a running solve session for a session - Consolidated from solve_router.py
-    """
-    try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
+    """Placeholder cancellation endpoint."""
+    chat_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    solve = (
+        db.query(Solve)
+        .filter(
+            Solve.id == solve_id,
+            Solve.user_id == current_user.id,
+            Solve.session_id == chat_session.id,
         )
-
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
-
-        # Import solver adapter
-        from solver.ai_solver import AISolverAdapter
-
-        solver = AISolverAdapter(db)
-
-        # Attempt to cancel session
-        cancelled = await solver.cancel_session(solve_session_id, current_user.id)
-
-        if not cancelled:
-            # Check if session exists to provide better error message
-            solve_session = (
-                db.query(AISolveSession)
-                .filter(
-                    AISolveSession.id == solve_session_id,
-                    AISolveSession.user_id == current_user.id,
-                )
-                .first()
-            )
-
-            if not solve_session:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Solve session not found or access denied",
-                )
-            elif solve_session.status != "RUNNING":
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Cannot cancel session with status: {solve_session.status}",
-                )
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to cancel session",
-                )
-
-        return {
-            "message": "Solve session cancelled successfully",
-            "session_id": solve_session_id,
-            "status": "cancelled",
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
+        .one_or_none()
+    )
+    if not solve:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to cancel solve session: {str(e)}",
+            status_code=status.HTTP_404_NOT_FOUND, detail="Solve not found"
         )
 
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Solver cancellation is not yet supported",
+    )
 
-@router.get("/sessions/{session_id}/solve/sessions", response_model=list)
+
+@router.get(
+    "/sessions/{session_id}/solve/sessions", response_model=List[SolveOut]
+)
 async def list_solve_sessions_for_session(
     session_id: str,
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     status_filter: Optional[str] = Query(None, alias="status"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    List solve sessions for a session - Consolidated from solve_router.py
-    """
-    try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
-        )
+    """List solves for the given session."""
+    chat_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
 
-        if not db_session:
+    query = (
+        db.query(Solve)
+        .filter(
+            Solve.user_id == current_user.id,
+            Solve.session_id == chat_session.id,
+        )
+        .order_by(Solve.created_at.desc())
+    )
+
+    if status_filter:
+        try:
+            status_enum = SolveStatus(status_filter)
+        except ValueError as exc:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid status: {status_filter}",
+            ) from exc
+        query = query.filter(Solve.status == status_enum.value)
 
-        # Build query
-        query = db.query(AISolveSession).filter(
-            AISolveSession.user_id == current_user.id
-        )
-
-        # Apply status filter if provided
-        if status_filter:
-            from models import SolveStatus
-
-            try:
-                status_enum = SolveStatus(status_filter)
-                query = query.filter(AISolveSession.status == status_enum)
-            except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid status: {status_filter}",
-                )
-
-        # Apply pagination and ordering
-        solve_sessions = (
-            query.order_by(AISolveSession.created_at.desc())
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
-
-        return [
-            {
-                "id": session.id,
-                "user_id": session.user_id,
-                "issue_id": session.issue_id,
-                "ai_model_id": session.ai_model_id,
-                "swe_config_id": session.swe_config_id,
-                "status": session.status,
-                "repo_url": session.repo_url,
-                "branch_name": session.branch_name,
-                "started_at": session.started_at,
-                "completed_at": session.completed_at,
-                "error_message": session.error_message,
-                "created_at": session.created_at,
-                "updated_at": session.updated_at,
-            }
-            for session in solve_sessions
-        ]
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list solve sessions: {str(e)}",
-        )
-
-
-@router.get("/sessions/{session_id}/solve/health", response_model=dict)
-async def solver_health_for_session(
-    session_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Health check for the AI solver system within session context - Consolidated from solve_router.py
-    """
-    try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
-        )
-
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
-
-        # TODO: Add actual health checks
-        # - Check SWE-agent availability
-        # - Check Docker daemon connection
-        # - Check disk space for solve data
-        # - Check AI model API connectivity
-        # - Check database connectivity
-
-        return {
-            "status": "healthy",
-            "service": "ai-solver",
-            "version": "1.0.0",
-            "timestamp": utc_now().isoformat(),
-            "session_id": session_id,
-            "checks": {
-                "database": "ok",  # TODO: Actual DB health check
-                "swe_agent": "ok",  # TODO: Actual SWE-agent health check
-                "docker": "ok",  # TODO: Actual Docker health check
-                "storage": "ok",  # TODO: Actual storage health check
-            },
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get solver health: {str(e)}",
-        )
-
-
-# ============================================================================
-# DEBUG ENDPOINTS - For testing and debugging
-# ============================================================================
-
-@router.get("/debug/test-gitingest", response_model=dict)
-async def test_gitingest_extraction():
-    """Debug endpoint to test GitIngest extraction without requiring authentication."""
-    try:
-        from repo_processorGitIngest.scraper_script import extract_repository_data
-
-        # Test with a simple public repository
-        test_repo_url = "https://github.com/octocat/Hello-World"
-
-        logger.info(f"[Debug] Testing GitIngest extraction for: {test_repo_url}")
-        result = await extract_repository_data(test_repo_url, max_file_size=50000)
-
-        if "error" in result:
-            logger.error(f"[Debug] GitIngest extraction failed: {result['error']}")
-            return {
-                "success": False,
-                "error": result["error"],
-                "timestamp": result.get("timestamp")
-            }
-
-        files = result.get("files", [])
-        logger.info(f"[Debug] Successfully extracted {len(files)} files")
-
-        return {
-            "success": True,
-            "repository_url": test_repo_url,
-            "files_count": len(files),
-            "files": [
-                {
-                    "path": f["path"],
-                    "type": f["type"],
-                    "content_size": f["content_size"],
-                    "has_content": len(f.get("content", "")) > 0
-                }
-                for f in files[:10]  # Show first 10 files
-            ],
-            "timestamp": result.get("extraction_info", {}).get("timestamp")
-        }
-
-    except Exception as e:
-        logger.error(f"[Debug] Test endpoint failed: {str(e)}")
-        return {
-            "success": False,
-            "error": str(e),
-            "timestamp": utc_now().isoformat()
-        }
+    solves = query.offset(offset).limit(limit).all()
+    return [SolveOut.model_validate(item) for item in solves]
 
 
 # ============================================================================
