@@ -209,9 +209,9 @@ class ChatOps:
                     file_contexts=context_inputs,
                     fallback_repo_summary=fallback_repo_summary,
                     model="moonshotai/kimi-dev-72b:free",
-                    temperature=0.4,
+                    temperature=0.2,
                     max_tokens=2500,
-                    timeout=25,
+                    timeout=55,
                 )
 
             except Exception as llm_error:
