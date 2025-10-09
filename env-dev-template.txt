@@ -1,0 +1,41 @@
+# Development Environment Variables Template
+# Copy this file to .env.dev and customize for your development setup
+
+# Database Configuration
+DATABASE_URL=postgresql://yudai_user:yudai_password@db:5432/yudai_dev
+DB_ECHO=true
+
+# GitHub App OAuth Configuration (REQUIRED)
+# Get these from: https://github.com/settings/apps
+GITHUB_APP_CLIENT_ID=your_github_app_client_id_here
+GITHUB_APP_CLIENT_SECRET=your_github_app_client_secret_here
+GITHUB_APP_ID=your_github_app_id_here
+GITHUB_APP_INSTALLATION_ID=your_github_app_installation_id_here
+
+# API Keys
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+
+# Development Settings
+NODE_ENV=development
+DEBUG=true
+SECRET_KEY=dev-secret-key-change-in-production
+JWT_SECRET=dev-jwt-secret-change-in-production
+
+# Frontend Configuration
+FRONTEND_BASE_URL=http://localhost:3000
+GITHUB_REDIRECT_URI=http://localhost:8001/auth/callback
+ALLOW_ORIGINS=http://localhost:3000,http://localhost:5173
+
+# API Configuration
+API_DOMAIN=localhost:8001
+DEV_DOMAIN=localhost:3000
+
+# SWE-agent Configuration
+SWEAGENT_CONFIG_PATH=/app/solver/config.yaml
+SWEAGENT_DATA_PATH=/data/swe_runs
+MAX_SOLVE_TIME_MINUTES=10
+MAX_CONCURRENT_SOLVES=1
+SOLVER_TIMEOUT_SECONDS=600
+
+# E2B Configuration (for solver)
+E2B_TEMPLATE_ID=your_e2b_template_id_here

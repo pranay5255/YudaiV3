@@ -145,22 +145,10 @@ volumes:
     driver: local
   postgres_backups_dev:
     driver: local
-    driver_opts:
-      type: local
-      o: bind
-      device: ./backups/postgres/dev
   app_logs_dev:
     driver: local
-    driver_opts:
-      type: local
-      o: bind
-      device: ./logs/dev
   swe_runs_dev:
     driver: local
-    driver_opts:
-      type: local
-      o: bind
-      device: ./data/swe_runs_dev
 
 networks:
   yudai-dev-network:
