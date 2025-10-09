@@ -896,7 +896,9 @@ class Solve(Base):
     user: Mapped["User"] = relationship(back_populates="solves")
     session: Mapped[Optional["ChatSession"]] = relationship(back_populates="solves")
     runs: Mapped[List["SolveRun"]] = relationship(
-        back_populates="solve", cascade="all, delete-orphan"
+        back_populates="solve",
+        cascade="all, delete-orphan",
+        foreign_keys="SolveRun.solve_id",
     )
     champion_run: Mapped[Optional["SolveRun"]] = relationship(
         "SolveRun",
@@ -945,7 +947,10 @@ class SolveRun(Base):
     )
 
     # Relationships
-    solve: Mapped["Solve"] = relationship(back_populates="runs")
+    solve: Mapped["Solve"] = relationship(
+        back_populates="runs",
+        foreign_keys=[solve_id],
+    )
 
 
 class AISolveSession(Base):
