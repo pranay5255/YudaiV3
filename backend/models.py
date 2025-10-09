@@ -37,7 +37,16 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pgvector.sqlalchemy import Vector
 from pydantic import BaseModel, ConfigDict, Field, validator
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -154,6 +163,9 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     chat_sessions: Mapped[List["ChatSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    solves: Mapped[List["Solve"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     ai_solve_sessions: Mapped[List["AISolveSession"]] = relationship(
@@ -470,6 +482,9 @@ class ChatSession(Base):
         back_populates="session", cascade="all, delete-orphan"
     )
     file_items: Mapped[List["FileItem"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+    solves: Mapped[List["Solve"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
 
@@ -839,6 +854,100 @@ class SWEAgentConfig(Base):
     )
 
 
+class Solve(Base):
+    """Top-level solve job tracking a fan-out of experiments."""
+
+    __tablename__ = "solves"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    session_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("chat_sessions.id"), nullable=True, index=True
+    )
+    repo_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    issue_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    base_branch: Mapped[str] = mapped_column(String(255), default="main")
+    status: Mapped[str] = mapped_column(
+        String(50), default=SolveStatus.PENDING.value, index=True
+    )
+    matrix: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
+    limits: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    requested_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    champion_run_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("solve_runs.id"), nullable=True
+    )
+    max_parallel: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    time_budget_s: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship(back_populates="solves")
+    session: Mapped[Optional["ChatSession"]] = relationship(back_populates="solves")
+    runs: Mapped[List["SolveRun"]] = relationship(
+        back_populates="solve", cascade="all, delete-orphan"
+    )
+    champion_run: Mapped[Optional["SolveRun"]] = relationship(
+        "SolveRun",
+        foreign_keys=[champion_run_id],
+        post_update=True,
+    )
+
+
+class SolveRun(Base):
+    """Individual experiment run executed inside an E2B sandbox."""
+
+    __tablename__ = "solve_runs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    solve_id: Mapped[str] = mapped_column(
+        ForeignKey("solves.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    temperature: Mapped[float] = mapped_column(Float, nullable=False)
+    max_edits: Mapped[int] = mapped_column(Integer, nullable=False)
+    evolution: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(50), default=SolveStatus.PENDING.value, index=True
+    )
+    sandbox_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    pr_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    tests_passed: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    loc_changed: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    files_changed: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    tokens: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    logs_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    diagnostics: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )
+
+    # Relationships
+    solve: Mapped["Solve"] = relationship(back_populates="runs")
+
+
 class AISolveSession(Base):
     """AI solve sessions tracking solver progress"""
 
@@ -924,154 +1033,73 @@ class AISolveEdit(Base):
 
 
 # ============================================================================
-# AI SOLVER PYDANTIC SCHEMAS
+# AI SOLVER PYDANTIC SCHEMAS (Simplified - Only Used Models)
 # ============================================================================
 
-# Output schemas for API responses
-class AIModelOut(BaseModel):
-    """AI Model output schema"""
-    id: int
-    name: str
-    provider: str
-    model_id: str
-    config: Optional[Dict[str, Any]] = None
-    is_active: bool
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class SWEAgentConfigOut(BaseModel):
-    """SWE-agent Configuration output schema"""
-    id: int
-    name: str
-    config_path: str
-    parameters: Optional[Dict[str, Any]] = None
-    is_default: bool
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class SolveEditOut(BaseModel):
-    """AI Solve Edit output schema"""
-    id: int
-    session_id: int
-    file_path: str
-    edit_type: EditType
-    original_content: Optional[str] = None
-    new_content: Optional[str] = None
-    line_start: Optional[int] = None
-    line_end: Optional[int] = None
-    edit_metadata: Optional[Dict[str, Any]] = None
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class SolveSessionOut(BaseModel):
-    """AI Solve Session output schema"""
-    id: int
-    user_id: int
-    issue_id: int
-    ai_model_id: Optional[int] = None
-    swe_config_id: Optional[int] = None
+# Core solver response schemas
+class SolveRunOut(BaseModel):
+    """Solve run response schema."""
+    id: str
+    solve_id: str
+    model: str
+    temperature: float
+    max_edits: int
+    evolution: str
     status: SolveStatus
-    repo_url: Optional[str] = None
-    branch_name: str
-    trajectory_data: Optional[Dict[str, Any]] = None
+    sandbox_id: Optional[str] = None
+    pr_url: Optional[str] = None
+    tests_passed: Optional[bool] = None
+    loc_changed: Optional[int] = None
+    files_changed: Optional[int] = None
+    tokens: Optional[int] = None
+    latency_ms: Optional[int] = None
+    logs_url: Optional[str] = None
+    diagnostics: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
+    created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    created_at: datetime
     updated_at: Optional[datetime] = None
 
-    # Related data (populated via relationships)
-    edits: List[SolveEditOut] = []
-    ai_model: Optional[AIModelOut] = None
-    swe_config: Optional[SWEAgentConfigOut] = None
-
     model_config = ConfigDict(from_attributes=True)
 
 
-class SolveSessionStatsOut(BaseModel):
-    """AI Solve Session statistics output schema"""
-    session_id: int
+class SolveOut(BaseModel):
+    """Top-level solve response schema."""
+    id: str
+    user_id: int
+    session_id: Optional[int] = None
+    repo_url: str
+    issue_number: int
+    base_branch: str
     status: SolveStatus
-    total_edits: int
-    files_modified: int
-    lines_added: int
-    lines_removed: int
-    duration_seconds: Optional[int] = None
-    last_activity: Optional[datetime] = None
-    trajectory_steps: int
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-# Input schemas for API requests
-class StartSolveRequest(BaseModel):
-    """Request to start AI solver"""
-    repo_url: Optional[str] = None
-    branch_name: str = "main"
-    ai_model_id: Optional[int] = None
-    swe_config_id: Optional[int] = None
-
-
-class StartSolveResponse(BaseModel):
-    """Response when starting AI solver"""
-    message: str
-    session_id: int
-    issue_id: int
-    status: str
-
-
-# Solver progress tracking schemas
-class SolverProgressUpdate(BaseModel):
-    """Real-time solver progress update"""
-    session_id: int
-    status: SolveStatus
-    current_step: Optional[str] = None
-    progress_percentage: Optional[float] = None
-    files_processed: int = 0
-    edits_made: int = 0
-    estimated_completion: Optional[datetime] = None
-    last_action: Optional[str] = None
-
-
-class SolverTrajectoryStep(BaseModel):
-    """Individual step in solver trajectory"""
-    step_index: int
-    timestamp: datetime
-    action: str
-    command: Optional[str] = None
-    result: Optional[str] = None
-    file_path: Optional[str] = None
-    success: bool = True
+    matrix: Dict[str, Any]
+    limits: Optional[Dict[str, Any]] = None
+    requested_by: Optional[str] = None
+    champion_run_id: Optional[str] = None
+    max_parallel: Optional[int] = None
+    time_budget_s: Optional[int] = None
     error_message: Optional[str] = None
-
-
-class SolverTrajectoryOut(BaseModel):
-    """Complete solver trajectory output"""
-    session_id: int
-    total_steps: int
-    steps: List[SolverTrajectoryStep]
-    final_status: SolveStatus
-    summary: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
-# ============================================================================
-# ERROR MODELS & VALIDATION
-# ============================================================================
+class SolveDetailOut(SolveOut):
+    """Solve detail response including experiment runs."""
+    runs: List[SolveRunOut] = Field(default_factory=list)
+    champion_run: Optional[SolveRunOut] = None
 
+
+# ============================================================================
+# ERROR MODELS & VALIDATION (Simplified)
+# ============================================================================
 
 class APIError(BaseModel):
     """Standardized API error response"""
-
     detail: Optional[str] = None
     message: Optional[str] = None
     status: Optional[int] = None
@@ -1083,92 +1111,13 @@ class APIError(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class StandardizedErrorCodes:
-    """Standardized error codes for consistent error handling"""
-
-    # Authentication errors
-    AUTH_INVALID_TOKEN = "AUTH_INVALID_TOKEN"
-    AUTH_EXPIRED_TOKEN = "AUTH_EXPIRED_TOKEN"
-    AUTH_MISSING_TOKEN = "AUTH_MISSING_TOKEN"
-    AUTH_INSUFFICIENT_PERMISSIONS = "AUTH_INSUFFICIENT_PERMISSIONS"
-
-    # Session errors
-    SESSION_NOT_FOUND = "SESSION_NOT_FOUND"
-    SESSION_ACCESS_DENIED = "SESSION_ACCESS_DENIED"
-    SESSION_INVALID_DATA = "SESSION_INVALID_DATA"
-    SESSION_ALREADY_EXISTS = "SESSION_ALREADY_EXISTS"
-
-    # Message errors
-    MESSAGE_NOT_FOUND = "MESSAGE_NOT_FOUND"
-    MESSAGE_INVALID_DATA = "MESSAGE_INVALID_DATA"
-    MESSAGE_TOO_LONG = "MESSAGE_TOO_LONG"
-
-    # File errors
-    FILE_NOT_FOUND = "FILE_NOT_FOUND"
-    FILE_ACCESS_DENIED = "FILE_ACCESS_DENIED"
-    FILE_INVALID_FORMAT = "FILE_INVALID_FORMAT"
-    FILE_TOO_LARGE = "FILE_TOO_LARGE"
-
-    # Repository errors
-    REPO_NOT_FOUND = "REPO_NOT_FOUND"
-    REPO_ACCESS_DENIED = "REPO_ACCESS_DENIED"
-    REPO_INVALID_URL = "REPO_INVALID_URL"
-
-    # AI/Model errors
-    AI_MODEL_ERROR = "AI_MODEL_ERROR"
-    AI_PROCESSING_FAILED = "AI_PROCESSING_FAILED"
-    AI_RATE_LIMIT_EXCEEDED = "AI_RATE_LIMIT_EXCEEDED"
-
-    # Database errors
-    DB_CONNECTION_ERROR = "DB_CONNECTION_ERROR"
-    DB_INTEGRITY_ERROR = "DB_INTEGRITY_ERROR"
-    DB_TIMEOUT_ERROR = "DB_TIMEOUT_ERROR"
-
-    # General errors
-    VALIDATION_ERROR = "VALIDATION_ERROR"
-    INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR"
-    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
-    BAD_REQUEST = "BAD_REQUEST"
-
-
-class APIResponse(BaseModel):
-    """Standardized API response wrapper"""
-
-    success: bool
-    data: Optional[Any] = None
-    error: Optional[APIError] = None
-    message: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 # ============================================================================
-# PYDANTIC MODELS (API Request/Response)
+# PYDANTIC MODELS (API Request/Response) - Essential Only
 # ============================================================================
 
-
-# Base Pydantic models with SQLAlchemy compatibility
-class ProjectConfig(BaseModel):
-    project_name: str = Field(..., alias="projectName")
-    repo_path: str = Field(..., alias="repoPath")
-    cli_config: Optional[Dict[str, Any]] = Field(None, alias="cliConfig")
-
-    model_config = ConfigDict(populate_by_name=True)
-
-
-class PromptContext(BaseModel):
-    prompt: str = Field(...)
-    tokens: int = Field(..., ge=0)
-    generated_code: Optional[str] = Field(None, alias="generatedCode")
-
-    model_config = ConfigDict(populate_by_name=True)
-
-
-# Core User Input Models
+# Core input models
 class ChatMessageInput(BaseModel):
-    message_text: str = Field(
-        ..., min_length=1, max_length=10000
-    )  # Match frontend field name
+    message_text: str = Field(..., min_length=1, max_length=10000)
     is_code: bool = Field(default=False)
 
     @validator("message_text")
@@ -1208,31 +1157,6 @@ class FileItemInput(BaseModel):
         return v.strip()
 
 
-class IdeaItemInput(BaseModel):
-    title: str = Field(..., min_length=1, max_length=200)
-    description: str = Field(..., min_length=1, max_length=1000)
-    complexity: ComplexityLevel = Field(default=ComplexityLevel.M)
-
-    @validator("title")
-    def validate_title(cls, v):
-        if not v.strip():
-            raise ValueError("Idea title cannot be empty")
-        return v.strip()
-
-
-class CLICommandInput(BaseModel):
-    command: str = Field(..., min_length=1)
-    description: str = Field(..., min_length=1, max_length=500)
-    arguments: Optional[List[str]] = Field(default_factory=list)
-
-    @validator("command")
-    def validate_command(cls, v):
-        if not v.strip():
-            raise ValueError("CLI command cannot be empty")
-        return v.strip()
-
-
-
 class RepositoryRequest(BaseModel):
     repo_url: str = Field(..., min_length=1)
     max_file_size: Optional[int] = Field(None, ge=1)
@@ -1244,26 +1168,7 @@ class RepositoryRequest(BaseModel):
         return v.strip()
 
 
-# Request/Response Models
-class CreateContextRequest(BaseModel):
-    context_card: ContextCardInput
-
-
-class CreateIdeaRequest(BaseModel):
-    idea: IdeaItemInput
-
-
-class ProcessFileRequest(BaseModel):
-    file: FileItemInput
-
-
 # Chat Models
-class CreateChatSessionRequest(BaseModel):
-    session_id: str = Field(..., min_length=1, max_length=255)
-    title: Optional[str] = Field(None, max_length=255)
-    description: Optional[str] = Field(None)
-
-
 class CreateChatMessageRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=255)
     message_id: str = Field(..., min_length=1, max_length=255)
@@ -1289,17 +1194,6 @@ class CreateChatMessageRequest(BaseModel):
         if not v.strip():
             raise ValueError("Session ID cannot be empty")
         return v.strip()
-
-
-class UpdateChatMessageRequest(BaseModel):
-    message_text: Optional[str] = Field(None, min_length=1)
-    is_code: Optional[bool] = Field(None)
-    tokens: Optional[int] = Field(None, ge=0)
-    model_used: Optional[str] = Field(None, max_length=100)
-    processing_time: Optional[float] = Field(None, ge=0)
-    context_cards: Optional[List[str]] = Field(None)
-    referenced_files: Optional[List[str]] = Field(None)
-    error_message: Optional[str] = Field(None)
 
 
 class ChatSessionResponse(BaseModel):
@@ -1345,9 +1239,7 @@ class CreateSessionRequest(BaseModel):
     repo_branch: Optional[str] = Field("main", max_length=255)
     title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = Field(None)
-    #NOTE: bool default turned on to trigger background code indexing and embeddings creation
     index_codebase: Optional[bool] = Field(default=True)
-    # Optional max file size (in bytes) for repository extraction
     index_max_file_size: Optional[int] = Field(default=None, ge=1)
     generate_embeddings: bool = Field(default=True)
     generate_facts_memories: bool = Field(default=False)
@@ -1385,7 +1277,6 @@ class SessionResponse(BaseModel):
 
 class SessionContextResponse(BaseModel):
     """Complete session context including messages, context cards, and unified state"""
-
     session: SessionResponse
     messages: List[ChatMessageResponse]
     context_cards: List[str] = Field(default_factory=list)
@@ -1393,9 +1284,7 @@ class SessionContextResponse(BaseModel):
     file_embeddings_count: int = 0
     statistics: Optional[Dict[str, Any]] = Field(default_factory=dict)
     user_issues: Optional[List["UserIssueResponse"]] = Field(default_factory=list)
-    file_embeddings: Optional[List["FileEmbeddingResponse"]] = Field(
-        default_factory=list
-    )
+    file_embeddings: Optional[List["FileEmbeddingResponse"]] = Field(default_factory=list)
 
 
 # Context Card Models
@@ -1407,61 +1296,7 @@ class CreateContextCardRequest(BaseModel):
     tokens: int = Field(default=0, ge=0)
 
 
-class UpdateContextCardRequest(BaseModel):
-    title: Optional[str] = Field(None, min_length=1, max_length=255)
-    description: Optional[str] = Field(None, min_length=1)
-    content: Optional[str] = Field(None, min_length=1)
-    source: Optional[str] = Field(None, pattern="^(chat|file-deps|upload)$")
-    tokens: Optional[int] = Field(None, ge=0)
-    is_active: Optional[bool] = Field(None)
-
-
 # File Embedding Models
-class CreateFileEmbeddingResponse(BaseModel):
-    id: int
-    session_id: int
-    file_path: str
-    file_name: str 
-    file_type: str
-    file_content: Optional[str] = None
-    chunk_text: str
-    chunk_index: int
-    tokens: int
-    file_metadata: Optional[Dict[str, Any]] = None
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class UpdateFileEmbeddingRequest(BaseModel):
-    """Request model for updating file embedding properties"""
-    file_path: Optional[str] = Field(None)
-    file_name: Optional[str] = Field(None)
-    file_type: Optional[str] = Field(None)
-    file_content: Optional[str] = Field(None)
-    chunk_text: Optional[str] = Field(None)
-    chunk_index: Optional[int] = Field(None, ge=0)
-    tokens: Optional[int] = Field(None, ge=0)
-    file_metadata: Optional[Dict[str, Any]] = Field(None)
-
-
-class UpdateFileEmbeddingResponse(BaseModel):
-    id: int
-    session_id: int
-    file_path: str
-    file_name: str
-    file_type: str
-    file_content: Optional[str] = None
-    chunk_text: str
-    chunk_index: int
-    tokens: int
-    file_metadata: Optional[Dict[str, Any]] = None
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 class FileEmbeddingResponse(BaseModel):
     """Response model for embedding operations - excludes vector data"""
     id: int
@@ -1480,7 +1315,7 @@ class FileEmbeddingResponse(BaseModel):
 
 # Frontend UI Response Models
 class FileItemResponse(BaseModel):
-    """Response model for frontend UI display in FileDependencies component - simplified for UI interactions"""
+    """Response model for frontend UI display in FileDependencies component"""
     id: str
     name: str
     path: Optional[str] = None
@@ -1500,34 +1335,6 @@ class FileItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class FileTreeResponse(BaseModel):
-    """Response model for file tree structure in repository analysis - matches frontend FileTreeResponse interface"""
-    id: str
-    name: str
-    type: str
-    Category: str  # Matches TypeScript interface with capital C
-    tokens: int
-    isDirectory: bool
-    children: Optional[List["FileTreeResponse"]] = None
-    path: Optional[str] = None
-    expanded: Optional[bool] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class SessionFileDependencyResponse(BaseModel):
-    """Response model for session file dependencies"""
-    id: int
-    file_name: str
-    file_path: str
-    file_type: str
-    tokens: int
-    category: Optional[str] = None
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 # User Issue Models
 class CreateUserIssueRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
@@ -1535,8 +1342,6 @@ class CreateUserIssueRequest(BaseModel):
     description: Optional[str] = Field(None)
     session_id: Optional[str] = Field(None, max_length=255)
     context_card_id: Optional[int] = Field(None)
-    # context_cards: Optional[List[str]] = Field(default_factory=list)
-    # ideas: Optional[List[str]] = Field(default_factory=list)
     repo_owner: Optional[str] = Field(None, max_length=255)
     repo_name: Optional[str] = Field(None, max_length=255)
     priority: Literal["low", "medium", "high"] = Field(default="medium")
@@ -1572,9 +1377,7 @@ class UserIssueResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    session_id: str = Field(
-        ..., min_length=1, max_length=255
-    )  # Remove alias to match frontend
+    session_id: str = Field(..., min_length=1, max_length=255)
     message: ChatMessageInput
     context_cards: Optional[List[str]] = Field(default_factory=list)
     repository: Optional[Dict[str, Any]] = None
@@ -1596,24 +1399,6 @@ class ChatResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
-class CreateIssueRequest(BaseModel):
-    title: str = Field(..., min_length=1, max_length=200)
-    description: str = Field(..., min_length=1)
-    context_cards: List[str] = Field(default_factory=list)
-    ideas: List[str] = Field(default_factory=list)
-    priority: Literal["low", "medium", "high"] = Field(default="medium")
-
-
-class ProcessUploadRequest(BaseModel):
-    file_name: str = Field(...)
-    file_type: str = Field(...)
-    content: str = Field(...)
-    max_tokens: int = Field(default=10000, ge=1, le=100000)
-
-
-# Response Models
-
-
 class ContextCardResponse(BaseModel):
     id: int = Field(...)
     session_id: Optional[int] = Field(None)
@@ -1629,31 +1414,11 @@ class ContextCardResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class IssueResponse(BaseModel):
-    issue_id: str = Field(...)
-    issue_url: str = Field(...)
-    title: str = Field(...)
-    status: str = Field(...)
-
-
-# Database Response Models (for API responses from database)
-class RepositoryResponse(BaseModel):
-    id: int = Field(...)
-    repo_url: str = Field(...)
-    name: str = Field(...)
-    owner: str = Field(...)
-    created_at: datetime = Field(...)
-    updated_at: Optional[datetime] = Field(None)
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 
 
 # ============================================================================
-# AUTHENTICATION MODELS
+# AUTHENTICATION MODELS (Essential Only)
 # ============================================================================
-
 
 class UserProfile(BaseModel):
     id: int
@@ -1684,35 +1449,9 @@ class SessionTokenRequest(BaseModel):
     session_token: str
 
 
-class CreateSessionTokenRequest(BaseModel):
-    user_id: int
-    expires_in_hours: int = Field(default=24, ge=1, le=168)  # 1 hour to 1 week
-
-
-class CreateSessionFromGitHubRequest(BaseModel):
-    github_token: str = Field(
-        ..., min_length=1, description="GitHub access token from OAuth"
-    )
-
-
 # ============================================================================
-# GITHUB API MODELS
+# GITHUB API MODELS (Essential Only)
 # ============================================================================
-
-
-class GitHubUser(BaseModel):
-    login: str
-    id: int
-    avatar_url: Optional[str] = None
-    html_url: Optional[str] = None
-
-
-class GitHubLabel(BaseModel):
-    id: int
-    name: str
-    color: str
-    description: Optional[str] = None
-
 
 class GitHubRepo(BaseModel):
     id: int
@@ -1741,70 +1480,6 @@ class GitHubRepo(BaseModel):
         return v
 
 
-class GitHubIssue(BaseModel):
-    id: int
-    number: int
-    html_url: str
-    title: str
-    body: Optional[str] = None
-    state: str
-    user: Optional[GitHubUser] = None
-    labels: List[GitHubLabel] = []
-    assignees: List[GitHubUser] = []
-    created_at: datetime
-    updated_at: datetime
-    closed_at: Optional[datetime] = None
-
-
-class GitHubPullRequest(BaseModel):
-    id: int
-    number: int
-    html_url: str
-    title: str
-    body: Optional[str] = None
-    state: str
-    user: Optional[GitHubUser] = None
-    labels: List[GitHubLabel] = []
-    assignees: List[GitHubUser] = []
-    created_at: datetime
-    updated_at: datetime
-    closed_at: Optional[datetime] = None
-    merged_at: Optional[datetime] = None
-    head: Optional[Dict[str, Any]] = None
-    base: Optional[Dict[str, Any]] = None
-
-
-class GitHubCommitAuthor(BaseModel):
-    name: Optional[str] = None
-    email: Optional[str] = None
-    date: Optional[datetime] = None
-
-
-class GitHubCommit(BaseModel):
-    sha: str
-    html_url: str
-    message: str
-    author: Optional[GitHubCommitAuthor] = None
-    committer: Optional[GitHubCommitAuthor] = None
-    parents: Optional[List[Dict[str, Any]]] = []
-
-
-class GitHubBranch(BaseModel):
-    name: str
-    commit: Dict[str, Any]
-    protected: bool
-
-
-class GitHubSearchResponse(BaseModel):
-    total_count: int
-    incomplete_results: bool
-    items: List[GitHubRepo]
-
-
-# ============================================================================
-# GITHUB APP OAUTH MODELS
-# ============================================================================
-
 class GitHubAppInstallationResponse(BaseModel):
     """Response model for GitHub App installation information"""
     id: int
@@ -1822,34 +1497,3 @@ class GitHubAppInstallationResponse(BaseModel):
     updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class GitHubAppOAuthTokenResponse(BaseModel):
-    """Response model for GitHub App OAuth token information"""
-    id: int
-    user_id: int
-    token_type: str
-    github_app_id: Optional[str] = None
-    installation_id: Optional[int] = None
-    permissions: Optional[Dict[str, Any]] = None
-    scope: Optional[str] = None
-    expires_at: Optional[datetime] = None
-    is_active: bool
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class GitHubAppInstallationRequest(BaseModel):
-    """Request model for creating GitHub App installation"""
-    installation_id: int
-    setup_action: Optional[str] = None  # "install" or "update"
-
-
-class GitHubAppOAuthCallbackRequest(BaseModel):
-    """Request model for GitHub App OAuth callback"""
-    code: str
-    state: Optional[str] = None
-    installation_id: Optional[int] = None
-    setup_action: Optional[str] = None
