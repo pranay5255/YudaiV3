@@ -14,12 +14,14 @@ Example:
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
 import shutil
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
+from urllib.parse import urlparse
 
 from gitingest.cloning import clone_repo
 from gitingest.config import MAX_FILE_SIZE
@@ -98,6 +100,27 @@ def categorize_file(file_path: str) -> Tuple[Optional[str], Optional[str]]:
     
     # No match found
     return (None, None)
+
+
+def _extract_owner_repo(repo_url: str) -> Tuple[str, str]:
+    """
+    Parse owner and repository name from a GitHub URL.
+
+    Returns empty strings if parsing fails so callers can handle gracefully.
+    """
+
+    try:
+        parsed = urlparse(repo_url)
+        path_parts = [segment for segment in parsed.path.split("/") if segment]
+        if len(path_parts) < 2:
+            return "", ""
+
+        owner, raw_name = path_parts[0], path_parts[1]
+        if raw_name.endswith(".git"):
+            raw_name = raw_name[:-4]
+        return owner, raw_name
+    except Exception:
+        return "", ""
 
 async def _ingest_repository_with_isolated_cleanup(
     repo_url: str,
@@ -205,6 +228,26 @@ async def extract_repository_data(
                     'type': file_categories[file_path]['category']
                 })
 
+        owner, name = _extract_owner_repo(repo_url)
+
+        summary_blob = (summary or "") + (tree or "") + (content or "")
+        sha_payload = summary_blob.encode("utf-8", errors="ignore")
+        sha_hex = hashlib.sha256(sha_payload).hexdigest() if sha_payload else None
+        total_size = sum(len(file.get("content", "") or "") for file in files)
+
+        cache_metadata = {
+            "cache_path": "",
+            "owner": owner,
+            "name": name,
+            "session_id": "",
+            "user_id": 0,
+            "size": total_size,
+            "sha256": sha_hex,
+            "cached_at": utc_now().isoformat(),
+            "version": 2,
+            "source": "gitingest",
+        }
+
         return {
             'extraction_info': {
                 'timestamp': utc_now().isoformat(),
@@ -215,12 +258,18 @@ async def extract_repository_data(
                     'directories': directories
                 }
             },
+            'repository': {
+                'owner': owner,
+                'name': name,
+                'full_name': f"{owner}/{name}" if owner and name else None,
+            },
             'files': files,
             'raw_response': {
                 'summary': summary,
                 'tree': tree,
                 'content': content
-            }
+            },
+            'cache_metadata': cache_metadata,
         }
 
     except Exception as e:
