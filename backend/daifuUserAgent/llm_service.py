@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from utils import utc_now
 
-from .chat_context import CacheMetadata
+from .cache_metadata import CacheMetadata
 
 logger = logging.getLogger(__name__)
 
