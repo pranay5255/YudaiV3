@@ -43,7 +43,7 @@
 #         if not self.api_key:
 #             raise ValueError("OPENROUTER_API_KEY is required")
         
-#         self.model = "moonshotai/kimi-dev-72b:free:free"
+#         self.model = "x-ai/grok-4-fast:free"
 #         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
         
 #     def _make_llm_call(self, prompt: str, max_tokens: int = 4000) -> str:

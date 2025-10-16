@@ -208,7 +208,7 @@ class ChatOps:
                     conversation_history=full_history,
                     file_contexts=context_inputs,
                     fallback_repo_summary=fallback_repo_summary,
-                    model="moonshotai/kimi-dev-72b:free",
+                    model="x-ai/grok-4-fast",
                     temperature=0.2,
                     max_tokens=2500,
                     timeout=55,

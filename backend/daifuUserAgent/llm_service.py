@@ -29,7 +29,7 @@ class LLMService:
     """Centralized service for LLM interactions"""
 
     # Standard model configuration
-    DEFAULT_MODEL = "moonshotai/kimi-dev-72b:free"
+    DEFAULT_MODEL = "x-ai/grok-4-fast"
     DEFAULT_TEMPERATURE = 0.6
     DEFAULT_MAX_TOKENS = 4000
     DEFAULT_TIMEOUT = 30
