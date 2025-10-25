@@ -572,6 +572,7 @@ export interface CreateGitHubIssueResponse {
   success: boolean;
   github_url: string;
   message: string;
+  issue?: UserIssue;
 }
 
 // ============================================================================

@@ -201,6 +201,7 @@ export const Chat: React.FC<ChatProps> = ({
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isCreatingIssue, setIsCreatingIssue] = useState(false);
+  const [createdIssueUrl, setCreatedIssueUrl] = useState<string | null>(null);
   // Extraction deprecated; indexing happens automatically.
 
   // Count user messages (messages that are not the initial system messages)
@@ -313,6 +314,7 @@ export const Chat: React.FC<ChatProps> = ({
       return;
     }
 
+    setCreatedIssueUrl(null);
     setIsCreatingIssue(true);
 
     try {
@@ -390,6 +392,9 @@ export const Chat: React.FC<ChatProps> = ({
         const result = await createGitHubIssueMutation.mutateAsync(currentIssuePreview.userIssue.issue_id);
         if (result?.success) {
           console.log('[Chat] GitHub issue created successfully');
+          if (result.github_url) {
+            setCreatedIssueUrl(result.github_url);
+          }
           setShowIssuePreview(false);
           setCurrentIssuePreview(null);
         }
@@ -560,6 +565,30 @@ export const Chat: React.FC<ChatProps> = ({
           </div>
         )}
       </div>
+
+      {createdIssueUrl && (
+        <div className="mx-4 mb-4 bg-green-600/10 border border-green-600/40 rounded-lg p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-green-300 text-sm font-medium">
+            GitHub issue created successfully.
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <a
+              href={createdIssueUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-green-200 underline break-all"
+            >
+              {createdIssueUrl}
+            </a>
+            <button
+              onClick={() => window.open(createdIssueUrl, '_blank', 'noopener,noreferrer')}
+              className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm"
+            >
+              Open Issue
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Input Area */}
       <div className="border-t border-zinc-700 p-4">
