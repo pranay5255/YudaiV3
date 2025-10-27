@@ -140,6 +140,7 @@ class IssueService:
             body = "\n".join(body_parts)
 
             # Determine labels based on content
+            #TODO: Add more labels based on content
             labels = ["chat-generated"]
             if "bug" in title.lower() or "fix" in title.lower():
                 labels.append("bug")
@@ -633,26 +634,33 @@ class IssueService:
         prompt_parts = [
             "You are an expert at creating clear, actionable GitHub issues from chat conversations.",
             "",
-            "Your task is to analyze the provided chat conversation, file context, and repository information",
-            "to create a well-structured GitHub issue that captures the user's intent and provides enough",
-            "context for developers to understand and implement the requested changes.",
+            "Goal: Produce a machine-actionable GitHub issue that a code agent (mini-swe-agent) can execute to completion.",
+            "The issue must include a deterministic Runbook with exact non-interactive commands, concrete file targets,",
+            "and verification steps. Prefer repo-native tooling and include dependency discovery fallbacks.",
             "",
-            "INSTRUCTIONS:",
-            "1. Create a clear, descriptive title that summarizes the issue",
-            "2. Write a detailed body that includes:",
-            "   - Problem description",
-            "   - Context from the conversation",
-            "   - Relevant files and code sections",
-            "   - Implementation suggestions if mentioned",
-            "   - Acceptance criteria",
-            "3. Suggest appropriate labels based on the content",
-            "4. Use proper GitHub issue formatting with sections and code blocks",
+            "INSTRUCTIONS (CRITICAL):",
+            "1) Craft a precise title summarizing the task.",
+            "2) Write a detailed body using the following sections in order:",
+            "   - Summary (one paragraph of the problem/goal)",
+            "   - Repository context (short, derived from provided context)",
+            "   - Files in scope (bullet list of specific file paths to modify/create)",
+            "   - Steps to reproduce (one bash block, minimal commands)",
+            "   - Environment setup (one bash block; detect package manager/tooling from context; prefer non-interactive flags)",
+            "   - Implementation plan (ordered list; concrete edits with file paths; include fallback discovery e.g. `pnpm search onchainkit` if package unclear)",
+            "   - Verification (one bash block to build/run/tests; include expected outputs)",
+            "   - Acceptance criteria (checkbox list; binary verifiable)",
+            "   - Risks / Rollback (brief)",
+            "   - Labels (suggested labels)",
+            "3) When suggesting installs or commands, use repo-native tooling (e.g., pnpm if pnpm lock is present) and include non-interactive flags.",
+            "4) Provide concise code snippets only where essential.",
+            "5) Keep the Runbook safe for CI: no interactive prompts, no background daemons, avoid long-running servers unless necessary.",
+            "6) If a dependency/package name is ambiguous or missing, first add a discovery step (search command) before install.",
             "",
             f"ORIGINAL TITLE: {title}",
             f"DESCRIPTION: {description}",
             f"PRIORITY: {priority}",
             "",
-            "REPOSITORY CONTEXT:",
+            "REPOSITORY CONTEXT (summary/snippet):",
             f"{repo_context}",
             "",
         ]
@@ -672,9 +680,9 @@ class IssueService:
         if file_context:
             prompt_parts.extend(
                 [
-                    "RELEVANT FILES:",
+                    "RELEVANT FILES (top candidates):",
                     *[
-                        f"- {file.get('name', file.get('file_name', 'Unknown'))} ({file.get('tokens', 0)} tokens)"
+                        f"- {file.get('path', file.get('name', file.get('file_name', 'Unknown')))} (tokens: {file.get('tokens', 0)})"
                         for file in file_context
                     ],
                     "",
@@ -705,16 +713,24 @@ class IssueService:
 
         prompt_parts.extend(
             [
+                "AGENT CONSTRAINTS:",
+                "- Commands must be non-interactive (add flags like --yes, --legacy-peer-deps, or equivalent where safe).",
+                "- Prefer repo-native tooling (e.g., pnpm over npm if pnpm lock exists).",
+                "- Include an explicit discovery step before installing ambiguous packages.",
+                "- Keep bash blocks minimal and directly executable.",
+                "",
                 "OUTPUT FORMAT:",
-                "Return a JSON object with the following structure:",
+                "Return a JSON object with the following structure (extra keys allowed):",
                 "{",
                 '  "title": "Clear, descriptive issue title",',
-                '  "body": "Detailed issue description with sections and formatting",',
+                '  "body": "Detailed issue description with sections (Summary, Repository context, Files in scope, Steps to reproduce, Environment setup, Implementation plan, Verification, Acceptance criteria, Risks / Rollback, Labels)",',
                 '  "labels": ["label1", "label2"],',
                 '  "assignees": []',
                 "}",
                 "",
-                "Make the body comprehensive but focused. Use GitHub's markdown formatting.",
+                "Notes:",
+                "- You may include additional keys like \"mswea\": {\"runbook\": {...}} if useful. The system will ignore unknown keys.",
+                "- Ensure the body contains exactly one bash block for each of: Steps to reproduce, Environment setup, Verification.",
             ]
         )
 

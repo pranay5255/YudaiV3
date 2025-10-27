@@ -1,4 +1,4 @@
-Perfect—let’s drop Anyscale entirely and still **steal the parallel-experiments pattern**. Below is a concrete, FastAPI-native plan that runs **mini-SWE-agent** inside **E2B sandboxes**, fanned out in parallel with simple Python concurrency (and optional workers) so every GitHub issue can spawn multiple experiments (different LLMs / prompts / “evolution” tweaks) at once.
+Perfect—let’s drop Anyscale entirely and still **steal the parallel-experiments pattern**. Below is a concrete, FastAPI-native plan that runs **mini-SWE-agent** inside **Prime Sandboxes**, fanned out in parallel with simple Python concurrency (and optional workers) so every GitHub issue can spawn multiple experiments (different LLMs / prompts / “evolution” tweaks) at once. ([Prime Sandboxes Overview][1])
 
 ---
 
@@ -7,12 +7,28 @@ Perfect—let’s drop Anyscale entirely and still **steal the parallel-experime
 **FastAPI (YudaiV3 backend)**
 
 * `POST /solve`: accepts repo + issue + experiment matrix → enqueues a “Solve” record.
-* `SolveRunner`: expands the matrix and launches **N parallel E2B sandboxes** (bounded by a concurrency limit) where each run executes **mini-SWE-agent** against that issue and validates with tests.
+* `SolveRunner`: expands the matrix and launches **N parallel Prime Sandboxes** (bounded by a concurrency limit) where each run executes **mini-SWE-agent** against that issue and validates with tests.
 * `ResultReducer`: selects the best result (tests green, smallest diff, shortest latency), opens/links the PR, stores per-run metrics.
 
-**E2B Sandboxes**
+**Prime Sandboxes**
 
-* Each experiment creates a fresh sandbox from your **custom E2B template** built on `e2bdev/code-interpreter` (so git, gh CLI, pytest/jest, build tools are available). You start/stop sandboxes, run shell commands, and read/write files via the E2B Python SDK. ([E2B][1])
+* Each experiment creates a fresh sandbox using the **Prime CLI** (disposable Docker environment). You create/list/run/delete sandboxes via CLI and execute arbitrary commands inside them. Example:
+
+```
+# Create
+prime sandbox create python:3.11-slim --timeout-minutes 120
+
+# See what is active
+prime sandbox list
+
+# Try a quick command
+prime sandbox run <sandbox-id> "python --version"
+
+# Clean up when you're done
+prime sandbox delete <sandbox-id>
+```
+
+See pricing (CPU/mem/disk) and current GPU status in docs. ([Prime Sandboxes Overview][1])
 
 **mini-SWE-agent**
 
@@ -20,27 +36,17 @@ Perfect—let’s drop Anyscale entirely and still **steal the parallel-experime
 
 ---
 
-# 2) E2B template (one-time setup)
+# 2) Prime Sandbox setup (one-time)
 
-Create `e2b.Dockerfile`:
+Prime Sandboxes are disposable Docker environments. Use an image like `python:3.11-slim` and install needed tools per run. Ensure you have an API key and are logged in (`prime login`). Pricing at the time of writing: CPU $0.05/core/hr, Memory $0.01/GB/hr, Disk $0.001/GB/hr; GPU support is on the roadmap. ([Prime Sandboxes Overview][1])
 
-```dockerfile
-FROM e2bdev/code-interpreter:latest
-# essentials
-RUN apt-get update && apt-get install -y git gh build-essential jq ripgrep curl && rm -rf /var/lib/apt/lists/*
-# python & node test tooling (keep lean; rely on repo’s lockfiles)
-RUN pip install -U pip pytest && npm -g i npm && npm -g i pnpm
-# (optional) install mini-swe-agent deps if any; otherwise just git-clone per run
+Minimal bootstrap inside a newly created sandbox:
+
+```bash
+prime sandbox run <sandbox-id> "bash -lc 'apt-get update && apt-get install -y git gh build-essential jq ripgrep curl && rm -rf /var/lib/apt/lists/*'"
+prime sandbox run <sandbox-id> "bash -lc 'python -m pip install -U pip pytest'"
+prime sandbox run <sandbox-id> "bash -lc 'npm -g i npm && npm -g i pnpm || true'"
 ```
-
-Build & publish your template (E2B turns this image into a micro-VM template):
-`e2b template build -c "/root/.jupyter/start-up.sh"` ([GitHub][3])
-
-Notes:
-
-* `e2bdev/code-interpreter` is the official base and exposes the SDK entrypoints/filesystem/commands you need. ([GitHub][4])
-* You can pin a Python variant image like `python-3.12.8` if you need. ([Docker Hub][5])
-* A **start command** is supported if you want background processes running on spawn. ([E2B][6])
 
 ---
 
@@ -73,68 +79,96 @@ POST /solve
 
 # 4) Parallel execution pattern (pure Python, no external queue required)
 
-Use **`asyncio` + a semaphore** in your FastAPI worker to bound parallelism; each task controls its own E2B sandbox.
+Use **`asyncio` + a semaphore** in your FastAPI worker to bound parallelism; each task controls its own Prime Sandbox via the Prime CLI.
 
-**Skeleton (Python)**
+**Skeleton (Python, using Prime CLI)**
 
 ```python
-import asyncio, os, time
-from e2b_code_interpreter import Sandbox  # pip install e2b-code-interpreter
-E2B_API_KEY = os.environ["E2B_API_KEY"]  # set from env per docs
+import asyncio, os, time, json, shlex
 
-async def run_experiment(cfg, gh_token, template_id):
+PRIME_BIN = os.environ.get("PRIME_BIN", "prime")  # path to prime CLI
+
+async def run_shell(cmd: str) -> dict:
+    proc = await asyncio.create_subprocess_shell(
+        cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    return {"code": proc.returncode, "out": stdout.decode(), "err": stderr.decode()}
+
+async def prime_create(image: str, timeout_minutes: int) -> str:
+    res = await run_shell(f"{PRIME_BIN} sandbox create {shlex.quote(image)} --timeout-minutes {timeout_minutes}")
+    if res["code"] != 0:
+        raise RuntimeError(f"prime create failed: {res['err'] or res['out']}")
+    # assume last non-empty line contains the sandbox id
+    lines = [l.strip() for l in res["out"].splitlines() if l.strip()]
+    return lines[-1]
+
+async def prime_run(sbx_id: str, command: str) -> dict:
+    return await run_shell(f"{PRIME_BIN} sandbox run {shlex.quote(sbx_id)} \"bash -lc {shlex.quote(command)}\"")
+
+async def prime_delete(sbx_id: str) -> None:
+    await run_shell(f"{PRIME_BIN} sandbox delete {shlex.quote(sbx_id)}")
+
+async def run_experiment(cfg, gh_token: str, timeout_minutes: int = 120) -> dict:
     t0 = time.time()
-    sbx = await Sandbox.create(template_id=template_id, api_key=E2B_API_KEY)  # spawn sandbox
+    sbx_id = await prime_create("python:3.11-slim", timeout_minutes)
     try:
-        await sbx.files.write("/root/.env", f"GITHUB_TOKEN={gh_token}")
-        # 1) pull repo/checkout
-        await sbx.commands.run(f"git clone {cfg.repo_url} repo && cd repo && git checkout {cfg.base_branch}")
-        # 2) install deps (python OR node auto-detect)
-        await sbx.commands.run("cd repo && if [ -f requirements.txt ]; then pip install -r requirements.txt; fi")
-        await sbx.commands.run("cd repo && if [ -f package.json ]; then npm ci || pnpm i; fi")
-        # 3) quick smoke tests
-        smoke = await sbx.commands.run("cd repo && (pytest -q || npm test --silent || true)")
-        # 4) mini-SWE-agent: fetch & run
-        await sbx.commands.run("cd / && rm -rf mini && git clone https://github.com/SWE-agent/mini-swe-agent mini")
-        cmd = (
-          f'cd repo && ../mini/bin/mini-swe '
-          f'--issue {cfg.issue_number} '
-          f'--model "{cfg.model}" --temperature {cfg.temp} '
-          f'--max-edits {cfg.max_edits} --strategy "{cfg.evolution}" '
-          f'--base "{cfg.base_branch}" --branch "ai/fix-{cfg.issue_number}-{cfg.run_id}"'
-        )
-        agent_res = await sbx.commands.run(cmd)
-        # 5) validate
-        tests = await sbx.commands.run("cd repo && (pytest -q || npm test --silent)")
-        passed = tests.exit_code == 0
+        # bootstrap tools
+        await prime_run(sbx_id, "apt-get update && apt-get install -y git gh build-essential jq ripgrep curl && rm -rf /var/lib/apt/lists/*")
+        await prime_run(sbx_id, "python -m pip install -U pip pytest")
+        await prime_run(sbx_id, "bash -lc 'command -v npm >/dev/null 2>&1 || curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs' || true")
+        await prime_run(sbx_id, "npm -g i npm && npm -g i pnpm || true")
+
+        # clone repo and prepare
+        await prime_run(sbx_id, f"git clone {shlex.quote(cfg.repo_url)} repo && cd repo && git checkout {shlex.quote(cfg.base_branch)}")
+        await prime_run(sbx_id, "cd repo && if [ -f requirements.txt ]; then pip install -r requirements.txt; fi")
+        await prime_run(sbx_id, "cd repo && if [ -f package.json ]; then (pnpm i || npm ci); fi")
+
+        # smoke tests
+        smoke = await prime_run(sbx_id, "cd repo && (pytest -q || npm test --silent || true)")
+
+        # mini-SWE-agent
+        await prime_run(sbx_id, "cd / && rm -rf mini && git clone https://github.com/SWE-agent/mini-swe-agent mini && cd mini && pip install -e .")
+        agent_cmd = (
+            "cd repo && "
+            "MSWEA_MODEL_NAME=\"%s\" "
+            "GITHUB_TOKEN=\"%s\" "
+            "../mini/bin/mini -m \"%s\" -- "
+            "--issue %s --base \"%s\" --branch \"ai/fix-%s-%s\""
+        ) % (cfg.model, gh_token, cfg.model, cfg.issue_number, cfg.base_branch, cfg.issue_number, cfg.run_id)
+        agent_res = await prime_run(sbx_id, agent_cmd)
+
+        # validate
+        tests = await prime_run(sbx_id, "cd repo && (pytest -q || npm test --silent)")
+        passed = tests["code"] == 0
         pr_url = ""
         if passed:
-            # 6) publish PR
-            await sbx.commands.run("cd repo && git config user.email bot@yudai.app && git config user.name yudai-bot")
-            await sbx.commands.run("cd repo && git add -A && git commit -m '[AI] Fix from mini-SWE-agent'")
-            await sbx.commands.run("cd repo && git push origin HEAD")
-            pr = await sbx.commands.run(f'cd repo && gh pr create -t "[AI] Fix: #{cfg.issue_number}" -b "Automated fix" -B {cfg.base_branch}')
-            pr_url = pr.stdout.strip()
-        # 7) metrics
+            await prime_run(sbx_id, "cd repo && git config user.email bot@yudai.app && git config user.name yudai-bot")
+            await prime_run(sbx_id, "cd repo && git add -A && git commit -m '[AI] Fix from mini-SWE-agent' || true")
+            await prime_run(sbx_id, "cd repo && git push origin HEAD")
+            pr = await prime_run(sbx_id, f"cd repo && gh pr create -t '[AI] Fix: #{cfg.issue_number}' -b 'Automated fix' -B {shlex.quote(cfg.base_branch)}")
+            pr_url = (pr["out"].strip() if pr["out"].strip() else pr["err"].strip())
+
         return {
-            "passed": passed, "pr_url": pr_url,
-            "latency_ms": int((time.time()-t0)*1000),
-            "logs": {"smoke": smoke.stdout[-2000:], "agent": agent_res.stdout[-4000:], "tests": tests.stdout[-2000:]}
+            "passed": passed,
+            "pr_url": pr_url,
+            "latency_ms": int((time.time() - t0) * 1000),
+            "logs": {
+                "smoke": smoke["out"][-2000:],
+                "agent": agent_res["out"][-4000:] or agent_res["err"][-4000:],
+                "tests": tests["out"][-2000:] or tests["err"][-2000:],
+            },
         }
     finally:
-        await sbx.close()
-```
+        await prime_delete(sbx_id)
 
-Key E2B behaviors used above: **create sandbox, run commands, read/write files, kill/timeouts if needed**—all first-class SDK features. ([E2B][1])
-
-Then orchestrate runs:
-
-```python
-async def run_matrix(matrix, limit, gh_token, template_id):
+async def run_matrix(matrix, limit: int, gh_token: str):
     sem = asyncio.Semaphore(limit)
     async def guarded(cfg):
         async with sem:
-            return await run_experiment(cfg, gh_token, template_id)
+            return await run_experiment(cfg, gh_token)
     tasks = [guarded(cfg) for cfg in expand_matrix(matrix)]
     return await asyncio.gather(*tasks, return_exceptions=False)
 ```
@@ -147,6 +181,45 @@ async def run_matrix(matrix, limit, gh_token, template_id):
 
 * The project is purposefully **minimal**—great for your evolutionary variants and per-run tweaks. It targets “solve a GitHub issue” and works anywhere with bash/container runtime. ([mini-swe-agent.com][2])
 * For heavier features (multi-tool orchestration, broader config), you can later swap to **SWE-agent**; its CLI & docs cover config, PR automation, etc., but keep V1 on mini for speed. ([swe-agent.com][7])
+
+### Simple mini-SWE-agent script and plan
+
+Plan:
+
+1. Install and configure mini-SWE-agent defaults once (`mini-extra config setup`) and set `MSWEA_MODEL_NAME` or pass `-m` per run. ([mini-swe-agent quickstart][10])
+2. Provide a tiny script that clones the repo, runs mini against a GitHub issue, and exits non-zero if tests fail.
+3. Use the script inside each Prime Sandbox run to standardize invocation.
+
+Script (bash):
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_URL="$1"          # e.g., https://github.com/owner/repo
+ISSUE_NUMBER="$2"      # e.g., 123
+BASE_BRANCH="${3:-main}"
+MODEL_NAME="${4:-${MSWEA_MODEL_NAME:-openai/gpt-5-mini}}"
+
+echo "[mini-run] repo=$REPO_URL issue=$ISSUE_NUMBER base=$BASE_BRANCH model=$MODEL_NAME"
+
+git clone "$REPO_URL" repo
+cd repo
+git checkout "$BASE_BRANCH"
+
+if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+if [ -f package.json ]; then (pnpm i || npm ci); fi
+
+cd /
+rm -rf mini && git clone https://github.com/SWE-agent/mini-swe-agent mini && cd mini && pip install -e .
+
+cd /repo
+../mini/bin/mini -m "$MODEL_NAME" -- --issue "$ISSUE_NUMBER" --base "$BASE_BRANCH" --branch "ai/fix-$ISSUE_NUMBER-$(date +%s)"
+
+# Validate
+cd /repo
+pytest -q || npm test --silent
+```
 
 ---
 
@@ -161,11 +234,12 @@ Reducer heuristic (simple, effective):
 
 # 7) Ops, security, and cost controls
 
-* **Concurrency & TTL**: bound parallel sandboxes per user/solve; destroy sandboxes as soon as runs finish. E2B gives you precise lifecycle control. ([E2B][8])
+* **Concurrency & TTL**: bound parallel sandboxes per user/solve; destroy sandboxes as soon as runs finish. Prime sandboxes are billed while running; keep TTLs tight. ([Prime Sandboxes Overview][1])
 * **Secrets**: inject GH / model keys as env at runtime; never bake into the template.
-* **Isolation**: sandboxes run as **isolated micro-VMs** with an exposed filesystem/command API—ideal for untrusted, AI-generated code. ([E2B][1])
+* **Isolation**: sandboxes are disposable Docker environments—ideal for untrusted, AI-generated code. ([Prime Sandboxes Overview][1])
 * **Monitoring**: store the last N KB of stdout/stderr for smoke/tests/agent; when failures happen, show these in YudaiV3’s UI.
-* **Budgets**: enforce per-run timeouts (E2B lets you kill commands by PID) and per-solve max runtime. ([E2B][9])
+* **Budgets**: enforce per-run timeouts via sandbox `--timeout-minutes` and job-level deadlines. ([Prime Sandboxes Overview][1])
+* **Pricing/GPU**: CPU $0.05/core/hr; Memory $0.01/GB/hr; Disk $0.001/GB/hr. GPU support is on the roadmap; current sandboxes are CPU-only. ([Prime Sandboxes Overview][1])
 
 ---
 
@@ -178,13 +252,13 @@ Reducer heuristic (simple, effective):
 
 ---
 
-# 9) E2B SDK snippets you’ll actually use
+# 9) Prime CLI snippets you’ll actually use
 
-* **Create a sandbox**: `Sandbox.create(template_id="tmpl_...")`
-* **Run a shell command**: `await sbx.commands.run("git clone ...")`
-* **Write files**: `await sbx.files.write(path, content)`
-* **Run Python code directly** (optional): `await sbx.run_code("print('hi')")`
-  All are documented in E2B’s quickstart, commands, python-SDK, and language pages. ([E2B][8])
+* **Create a sandbox**: `prime sandbox create python:3.11-slim --timeout-minutes 120`
+* **List sandboxes**: `prime sandbox list`
+* **Run a shell command**: `prime sandbox run <sandbox-id> "bash -lc 'git clone ...'"`
+* **Delete a sandbox**: `prime sandbox delete <sandbox-id>`
+  See the Sandboxes Overview and CLI guide links there. ([Prime Sandboxes Overview][1])
 
 ---
 
@@ -206,9 +280,9 @@ Include a tiny scorecard:
 
 ## TL;DR
 
-* **FastAPI** receives “Solve” → **async fan-out** N experiments → each experiment spins an **E2B sandbox** → runs **mini-SWE-agent** → tests → publishes a PR if green → reducer picks a champion → YudaiV3 shows results.
-* No Anyscale, no Ray—just **E2B** + **mini-SWE-agent** + a **lean asyncio semaphore** (and you can later drop the same runner into Celery/RQ if you outgrow a single node).
-* Everything above is directly supported by E2B’s SDK (create sandboxes, run commands, manage files, kill long-running commands) and mini-SWE-agent’s portability. ([E2B][1])
+* **FastAPI** receives “Solve” → **async fan-out** N experiments → each experiment spins a **Prime Sandbox** → runs **mini-SWE-agent** → tests → publishes a PR if green → reducer picks a champion → YudaiV3 shows results.
+* No Anyscale, no Ray—just **Prime Sandboxes (CLI)** + **mini-SWE-agent** + a **lean asyncio semaphore** (and you can later drop the same runner into Celery/RQ if you outgrow a single node).
+* Everything above is directly supported by Prime’s Sandboxes (create/list/run/delete via CLI) and mini-SWE-agent’s portability. ([Prime Sandboxes Overview][1])
 
 If you want, I can turn this into:
 
@@ -216,12 +290,7 @@ If you want, I can turn this into:
 * a **production-ready `SolveRunner` module** (with retries, timeouts, and metrics)
   —just say “code it (Python).”
 
-[1]: https://e2b.dev/docs?utm_source=chatgpt.com "E2B Documentation - Code Interpreting for AI apps"
+[1]: https://docs.primeintellect.ai/sandboxes/overview "Prime Sandboxes Overview"
 [2]: https://mini-swe-agent.com/?utm_source=chatgpt.com "Overview - mini-SWE-agent documentation"
-[3]: https://github.com/e2b-dev/code-interpreter/blob/main/template/README.md?utm_source=chatgpt.com "code-interpreter/template/README.md at main - GitHub"
-[4]: https://github.com/e2b-dev/code-interpreter?utm_source=chatgpt.com "e2b-dev/code-interpreter: Python & JS/TS SDK for running ... - GitHub"
-[5]: https://hub.docker.com/layers/e2bdev/code-interpreter/python-3.12.8/images/sha256-9d5f81fff62a6ada2fcb1b7fcf14d08f6f2fcfd4706476057af7c4905eba614f?utm_source=chatgpt.com "Image Layer Details - e2bdev/code-interpreter:python ... - Docker Hub"
-[6]: https://e2b.dev/docs/sandbox-template/start-cmd?utm_source=chatgpt.com "Start command - E2B - Code Interpreting for AI apps"
 [7]: https://swe-agent.com/latest/usage/?utm_source=chatgpt.com "User guides"
-[8]: https://e2b.dev/docs/quickstart?utm_source=chatgpt.com "Running your first Sandbox"
-[9]: https://e2b.dev/docs/sdk-reference/python-sdk/v1.0.2/sandbox_sync?utm_source=chatgpt.com "E2B - Code Interpreting for AI apps"
+[10]: https://mini-swe-agent.com/latest/models/quickstart/#__tabbed_1_3 "Model setup quickstart - mini-SWE-agent"
