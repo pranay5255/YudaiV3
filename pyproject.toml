@@ -29,6 +29,7 @@ dependencies = [
     "e2b-code-interpreter>=2.0.0",
     "e2b>=2.2.1",
     "pytest>=8.4.1",
+    "mini-swe-agent>=1.14.4",
 ]
 
 [project.optional-dependencies]

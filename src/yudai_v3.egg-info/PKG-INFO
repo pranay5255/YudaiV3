@@ -21,6 +21,10 @@ Requires-Dist: pyjwt>=2.10.1
 Requires-Dist: cryptography>=45.0.5
 Requires-Dist: pgvector>=0.4.1
 Requires-Dist: sentence-transformers>=5.1.0
+Requires-Dist: e2b-code-interpreter>=2.0.0
+Requires-Dist: e2b>=2.2.1
+Requires-Dist: pytest>=8.4.1
+Requires-Dist: mini-swe-agent>=1.14.4
 Provides-Extra: dev
 Requires-Dist: datasets>=2.16.0; extra == "dev"
 Requires-Dist: numpy>=1.26.0; extra == "dev"
