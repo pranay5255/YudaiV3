@@ -140,7 +140,7 @@ class IssueService:
             body = "\n".join(body_parts)
 
             # Determine labels based on content
-            #TODO: Add more labels based on content
+            # TODO: Add more labels based on content
             labels = ["chat-generated"]
             if "bug" in title.lower() or "fix" in title.lower():
                 labels.append("bug")
@@ -438,7 +438,7 @@ class IssueService:
             logger.info(f"Generating issue from context for user {user_id}")
 
             # Get comprehensive repository context string using shared utility
-            from .services.context_utils import get_best_repo_context_string
+            from backend.context.context_utils import get_best_repo_context_string
 
             repo_context = await get_best_repo_context_string(
                 db=self.db,
@@ -595,9 +595,7 @@ class IssueService:
                 pass
             return []
 
-    def _get_session_context_cards_content(
-        self, session_id: str, user_id: int
-    ) -> str:
+    def _get_session_context_cards_content(self, session_id: str, user_id: int) -> str:
         """Get concatenated content from all context cards for a session"""
         try:
             cards = self._get_session_context_cards(session_id, user_id)
@@ -729,7 +727,7 @@ class IssueService:
                 "}",
                 "",
                 "Notes:",
-                "- You may include additional keys like \"mswea\": {\"runbook\": {...}} if useful. The system will ignore unknown keys.",
+                '- You may include additional keys like "mswea": {"runbook": {...}} if useful. The system will ignore unknown keys.',
                 "- Ensure the body contains exactly one bash block for each of: Steps to reproduce, Environment setup, Verification.",
             ]
         )
@@ -761,7 +759,6 @@ class IssueService:
                 "labels": ["chat-generated"],
                 "assignees": [],
             }
-
 
     async def create_github_issue_from_user_issue(
         self,
@@ -795,7 +792,9 @@ class IssueService:
 
             if not user_issue:
                 logger.warning(f"User issue {issue_id} not found for user {user_id}")
-                raise IssueOpsError("User issue not found for this session or it may have been removed.")
+                raise IssueOpsError(
+                    "User issue not found for this session or it may have been removed."
+                )
 
             # Check if issue already has GitHub URL
             if user_issue.github_issue_url:
@@ -814,6 +813,7 @@ class IssueService:
 
             # Get user's GitHub token
             from .githubOps import GitHubOps as _GitHubOps
+
             github_token = _GitHubOps.get_user_github_token(user_id, self.db)
             if not github_token:
                 raise IssueOpsError(
@@ -850,9 +850,7 @@ class IssueService:
 
             self.db.commit()
 
-            logger.info(
-                f"Successfully created GitHub issue for user issue {issue_id}"
-            )
+            logger.info(f"Successfully created GitHub issue for user issue {issue_id}")
             return user_issue
 
         except IssueOpsError as e:
@@ -865,8 +863,8 @@ class IssueService:
 
             repo_ref = None
             if user_issue:
-                repo_owner = getattr(user_issue, 'repo_owner', None)
-                repo_name = getattr(user_issue, 'repo_name', None)
+                repo_owner = getattr(user_issue, "repo_owner", None)
+                repo_name = getattr(user_issue, "repo_name", None)
                 if repo_owner and repo_name:
                     repo_ref = f"{repo_owner}/{repo_name}"
             if not repo_ref:
@@ -874,8 +872,13 @@ class IssueService:
 
             error_str = str(e).lower()
             if any(
-                keyword in error_str for keyword in [
-                    '403', 'forbidden', 'permission', 'access denied', 'not authorized'
+                keyword in error_str
+                for keyword in [
+                    "403",
+                    "forbidden",
+                    "permission",
+                    "access denied",
+                    "not authorized",
                 ]
             ):
                 raise IssueOpsError(
@@ -883,7 +886,7 @@ class IssueService:
                     f"Please ensure your GitHub App has 'Issues' repository permission enabled and that you have write access. "
                     f"Original error: {str(e)}"
                 )
-            if any(keyword in error_str for keyword in ['404', 'not found']):
+            if any(keyword in error_str for keyword in ["404", "not found"]):
                 raise IssueOpsError(
                     f"Repository {repo_ref} not found or not accessible. "
                     f"Please verify the repository exists and you have access to it. "
@@ -891,7 +894,6 @@ class IssueService:
                 )
 
             raise IssueOpsError(f"Failed to create GitHub issue: {str(e)}")
-
 
     def _build_issue_context(
         self,
@@ -1006,11 +1008,13 @@ class IssueService:
             )
         if memories:
             sections.append(
-                "## Session Memories\n" + "\n".join(f"- {memory}" for memory in memories)
+                "## Session Memories\n"
+                + "\n".join(f"- {memory}" for memory in memories)
             )
         if highlights:
             sections.append(
-                "## Highlights\n" + "\n".join(f"- {highlight}" for highlight in highlights)
+                "## Highlights\n"
+                + "\n".join(f"- {highlight}" for highlight in highlights)
             )
 
         conversation = (context or {}).get("conversation") or []
@@ -1041,7 +1045,6 @@ class IssueService:
         sections.append("---\n*Issue generated with DAifu session context.*")
         return "\n\n".join(section for section in sections if section)
 
-
     async def _create_github_issue(
         self, repo_owner: str, repo_name: str, title: str, body: str, user_id: int
     ) -> Optional[Dict[str, Any]]:
@@ -1062,7 +1065,9 @@ class IssueService:
             from .githubOps import GitHubOps, GitHubOpsError
         except ImportError as import_error:
             logger.error(f"GitHub operations module unavailable: {import_error}")
-            raise IssueOpsError("GitHub integration is not available. Please verify the backend deployment.") from import_error
+            raise IssueOpsError(
+                "GitHub integration is not available. Please verify the backend deployment."
+            ) from import_error
 
         try:
             github_ops = GitHubOps(self.db)
@@ -1133,9 +1138,7 @@ class IssueService:
             logger.error(f"Failed to get user issues: {e}")
             return []
 
-    def get_user_issue(
-        self, user_id: int, issue_id: str
-    ) -> Optional[UserIssue]:
+    def get_user_issue(self, user_id: int, issue_id: str) -> Optional[UserIssue]:
         """
         Get a specific user issue
 

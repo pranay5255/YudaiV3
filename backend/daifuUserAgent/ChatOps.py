@@ -41,14 +41,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from models import ChatMessage, ChatSession
 from sqlalchemy.orm import Session
 
-from utils import utc_now
-
-from .chat_context import ChatContext
-from .services.facts_and_memories import (
+from backend.context.chat_context import ChatContext
+from backend.context.facts_and_memories import (
     FactsAndMemoriesResult,
     FactsAndMemoriesService,
     RepositorySnapshot,
 )
+from utils import utc_now
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -75,7 +74,6 @@ class ChatOps:
         self.db = db
         self.logger = logging.getLogger(__name__)
         self._facts_service = FactsAndMemoriesService()
-
 
     async def process_chat_message(
         self,
@@ -124,11 +122,14 @@ class ChatOps:
                     if cards_text:
                         context_inputs.append(cards_text)
                 except Exception as card_error:
-                    logger.warning(f"Failed to collect context card content: {card_error}")
+                    logger.warning(
+                        f"Failed to collect context card content: {card_error}"
+                    )
 
             # Get file contexts (with error handling)
             try:
                 from .llm_service import LLMService
+
                 retrieved_contexts = await LLMService.get_relevant_file_contexts(
                     db=self.db, session_id=session.id, query_text=message_text, top_k=5
                 )
@@ -184,7 +185,9 @@ class ChatOps:
                         )
 
                     if not github_context and chat_context:
-                        fallback_repo_summary = await chat_context.build_combined_summary()
+                        fallback_repo_summary = (
+                            await chat_context.build_combined_summary()
+                        )
                         if fallback_repo_summary:
                             logger.info(
                                 "Falling back to cached repository summary for %s/%s in session %s",
@@ -408,11 +411,14 @@ class ChatOps:
         existing_facts = repo_context.get("facts_and_memories")
         if isinstance(existing_facts, dict) and existing_facts.get("facts"):
             summary_lines.append(
-                "Existing Facts: "
-                + "; ".join(existing_facts.get("facts", [])[:3])
+                "Existing Facts: " + "; ".join(existing_facts.get("facts", [])[:3])
             )
 
-        summary_text = "\n".join(summary_lines) if summary_lines else "No repository summary available."
+        summary_text = (
+            "\n".join(summary_lines)
+            if summary_lines
+            else "No repository summary available."
+        )
 
         raw_response = {
             "raw_response": {
@@ -436,13 +442,13 @@ class ChatOps:
                 if isinstance(parsed, dict):
                     return parsed
             except json.JSONDecodeError:
-                logger.debug("Unable to parse repo_context JSON string, defaulting to dict")
+                logger.debug(
+                    "Unable to parse repo_context JSON string, defaulting to dict"
+                )
 
         return {}
 
-    def _format_internal_facts_context(
-        self, result: FactsAndMemoriesResult
-    ) -> str:
+    def _format_internal_facts_context(self, result: FactsAndMemoriesResult) -> str:
         """Prepare a hidden context string for the LLM prompt."""
 
         parts = [
@@ -453,10 +459,14 @@ class ChatOps:
             parts.append("Facts:\n" + "\n".join(f"- {fact}" for fact in result.facts))
 
         if result.memories:
-            parts.append("Memories:\n" + "\n".join(f"- {memory}" for memory in result.memories))
+            parts.append(
+                "Memories:\n" + "\n".join(f"- {memory}" for memory in result.memories)
+            )
 
         if result.highlights:
-            parts.append("Highlights:\n" + "\n".join(f"- {highlight}" for highlight in result.highlights))
+            parts.append(
+                "Highlights:\n"
+                + "\n".join(f"- {highlight}" for highlight in result.highlights)
+            )
 
         return "\n\n".join(parts)
-
