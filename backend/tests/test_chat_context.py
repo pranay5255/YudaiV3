@@ -2,7 +2,7 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from backend.daifuUserAgent.chat_context import ChatContext
+from backend.context.chat_context import ChatContext
 from utils import utc_now
 
 
@@ -18,8 +18,12 @@ class DummyQuery:
 
 
 def test_chat_context_summary_uses_cached_json(tmp_path, monkeypatch):
-    session = SimpleNamespace(session_id="sess-1", repo_context={}, description="Session description")
-    repository = SimpleNamespace(github_context=None, github_context_updated_at=utc_now())
+    session = SimpleNamespace(
+        session_id="sess-1", repo_context={}, description="Session description"
+    )
+    repository = SimpleNamespace(
+        github_context=None, github_context_updated_at=utc_now()
+    )
 
     db = MagicMock()
     db.query.return_value = DummyQuery(repository)
