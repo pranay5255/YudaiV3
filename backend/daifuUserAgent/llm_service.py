@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
+from context import CacheMetadata
 from fastapi import HTTPException, status
 from models import FileEmbedding
 from sentence_transformers import SentenceTransformer
@@ -19,8 +20,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from utils import utc_now
-
-from .cache_metadata import CacheMetadata
 
 logger = logging.getLogger(__name__)
 
