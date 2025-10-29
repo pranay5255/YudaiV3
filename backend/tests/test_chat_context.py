@@ -2,7 +2,8 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from backend.context.chat_context import ChatContext
+from context.chat_context import ChatContext
+
 from utils import utc_now
 
 
