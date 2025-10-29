@@ -16,14 +16,14 @@ from urllib.parse import urlencode
 
 import httpx
 from cryptography.hazmat.primitives import serialization
-from db.database import get_db
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import encode as jwt_encode
-from models import AuthToken, SessionToken, User
 from sqlalchemy.orm import Session
 
-from utils import utc_now
+from backend.db.database import get_db
+from backend.models import AuthToken, SessionToken, User
+from backend.utils import utc_now
 
 # GitHub App OAuth Configuration - single source of truth
 GITHUB_APP_CLIENT_ID = os.getenv("GITHUB_APP_CLIENT_ID")

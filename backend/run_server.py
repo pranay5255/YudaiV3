@@ -9,16 +9,16 @@ import os
 from contextlib import asynccontextmanager
 
 import uvicorn
-
-# Import routers
-from auth import auth_router
-from daifuUserAgent.session_routes import router as session_router
-
-# Import database
-from db.database import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from github import github_router
+
+# Import routers
+from backend.auth import auth_router
+from backend.daifuUserAgent.session_routes import router as session_router
+
+# Import database
+from backend.db.database import init_db
+from backend.github import github_router
 
 # Import routes
 

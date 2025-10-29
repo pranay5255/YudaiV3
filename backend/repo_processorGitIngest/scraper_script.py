@@ -28,7 +28,7 @@ from gitingest.config import MAX_FILE_SIZE
 from gitingest.ingestion import ingest_query
 from gitingest.query_parsing import parse_query
 
-from utils import utc_now
+from backend.utils import utc_now
 
 include_categories = {
     'Source Code': ['*.py', '*.js', '*.ts', '*.jsx', '*.tsx', '*.java', '*.cpp', '*.c', '*.go', '*.rs', '*.php', '*.rb', '*.swift', '*.kt', '*.scala', '*.cs', '*.vb', '*.hs', '*.lua', '*.jl'],
