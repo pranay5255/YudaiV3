@@ -101,6 +101,7 @@ from models import (
     FileItem,
     FileItemResponse,
     Repository,
+    SaveTrajectoryRequest,
     SessionContextResponse,
     SessionResponse,
     UpdateSessionRequest,
@@ -119,7 +120,7 @@ from .services import (
     RepositoryFile,
     RepositorySnapshotService,
 )
-from .session_service import SessionService
+from .session_service import SessionService, TrajectoryService
 
 router = APIRouter(tags=["sessions"])
 
@@ -431,6 +432,51 @@ async def get_session_context(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get session context: {str(e)}",
         )
+
+
+@router.post(
+    "/sessions/{session_id}/trajectory",
+    response_model=SessionTrajectoryResponse,
+)
+async def upsert_session_trajectory(
+    session_id: str,
+    request: SaveTrajectoryRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Import or update a trajectory for a session from the mini-swe-agent output."""
+
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+
+    try:
+        return TrajectoryService.save_for_session(db, db_session, request)
+    except HTTPException:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to persist trajectory: {exc}",
+        ) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/trajectory",
+    response_model=SessionTrajectoryResponse,
+)
+async def get_session_trajectory(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Fetch the stored trajectory for the session."""
+
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    trajectory = TrajectoryService.get_for_session(db, db_session)
+    if not trajectory:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Trajectory not found"
+        )
+    return trajectory
 
 
 # HIGH PRIORITY ENDPOINTS
