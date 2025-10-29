@@ -81,6 +81,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from auth.github_oauth import get_current_user
+from context import (
+    EmbeddingPipeline,
+    FactsAndMemoriesService,
+    RepositoryFile,
+    RepositorySnapshotService,
+)
 from daifuUserAgent.githubOps import GitHubOps
 from db.database import SessionLocal, get_db
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -113,12 +119,6 @@ from sqlalchemy.orm import Session
 from utils import utc_now
 
 from .llm_service import LLMService
-from .services import (
-    EmbeddingPipeline,
-    FactsAndMemoriesService,
-    RepositoryFile,
-    RepositorySnapshotService,
-)
 from .session_service import SessionService
 
 router = APIRouter(tags=["sessions"])
