@@ -38,15 +38,15 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from models import ChatMessage, ChatSession
-from sqlalchemy.orm import Session
-
-from backend.context.chat_context import ChatContext
-from backend.context.facts_and_memories import (
+from context.chat_context import ChatContext
+from context.facts_and_memories import (
     FactsAndMemoriesResult,
     FactsAndMemoriesService,
     RepositorySnapshot,
 )
+from models import ChatMessage, ChatSession
+from sqlalchemy.orm import Session
+
 from utils import utc_now
 
 # Configure logging
