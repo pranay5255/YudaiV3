@@ -71,7 +71,6 @@ CRITICAL ISSUES:
 import asyncio
 import json
 import logging
-import os
 
 # Import chat functionality from chat_api
 import time
@@ -89,7 +88,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 # Import from filedeps.py
 from models import (
     APIError,
-    AuthToken,
     ChatMessage,
     ChatMessageResponse,
     ChatRequest,
@@ -105,21 +103,12 @@ from models import (
     Repository,
     SessionContextResponse,
     SessionResponse,
-    Solve,
-    SolveDetailOut,
-    SolveOut,
-    SolveRun,
-    SolveRunOut,
-    SolveStatus,
     UpdateSessionRequest,
     User,
     UserIssueResponse,
 )
 from pgvector.sqlalchemy import Vector
-from pydantic import ValidationError
-from solver.models import ExperimentMatrix, Limits
-from solver.services import SolveRunner
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from utils import utc_now
 
@@ -1663,296 +1652,6 @@ async def _index_repository_for_session_background(
         db.rollback()
     finally:
         db.close()
-
-
-# ============================================================================
-# SOLVER ENDPOINTS - Consolidated under sessions context
-# ============================================================================
-
-DEFAULT_MATRIX_CONFIG = {
-    "models": ["gpt-4.1"],
-    "temps": [0.2, 0.6],
-    "max_edits": [3, 5],
-    "evolution": ["test-first", "small-steps"],
-    #TODO: remove evolutions from the matrix
-}
-
-
-def _resolve_template_id() -> str:
-    template_id = os.getenv("E2B_TEMPLATE_ID")
-    if not template_id:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="E2B template not configured",
-        )
-    return template_id
-
-
-def _resolve_github_token_for_user(db: Session, user_id: int) -> str:
-    token = (
-        db.query(AuthToken)
-        .filter(AuthToken.user_id == user_id, AuthToken.is_active.is_(True))
-        .order_by(AuthToken.created_at.desc())
-        .first()
-    )
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="GitHub token not available for this user",
-        )
-    return token.access_token
-
-
-def _build_matrix(matrix_data: Optional[Dict[str, Any]]) -> ExperimentMatrix:
-    payload = matrix_data or DEFAULT_MATRIX_CONFIG
-    try:
-        return ExperimentMatrix.model_validate(payload)
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=exc.errors(),
-        ) from exc
-
-
-def _build_limits(limits_data: Optional[Dict[str, Any]]) -> Optional[Limits]:
-    if not limits_data:
-        return None
-    try:
-        return Limits.model_validate(limits_data)
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=exc.errors(),
-        ) from exc
-
-
-def _derive_repo_url(chat_session: ChatSession, override: Optional[str]) -> str:
-    if override:
-        return override
-    if chat_session.repo_owner and chat_session.repo_name:
-        return f"https://github.com/{chat_session.repo_owner}/{chat_session.repo_name}"
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Repository context is required to launch the solver",
-    )
-
-
-def _summarize_runs(runs: List[SolveRun]) -> Dict[str, int]:
-    total = len(runs)
-    passed = sum(1 for run in runs if run.tests_passed)
-    running = sum(1 for run in runs if run.status == SolveStatus.RUNNING.value)
-    failed = sum(1 for run in runs if run.status == SolveStatus.FAILED.value)
-    return {
-        "total": total,
-        "passed": passed,
-        "running": running,
-        "failed": failed,
-    }
-
-@router.post("/sessions/{session_id}/solve/start", response_model=dict)
-async def start_solve_session_for_session(
-    session_id: str,
-    payload: Optional[Dict[str, Any]] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Launch the solver fan-out flow for a chat session."""
-    chat_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
-    data = payload or {}
-
-    issue_number = data.get("issue_number")
-    if issue_number is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="issue_number is required to launch the solver",
-        )
-    try:
-        issue_number_int = int(issue_number)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="issue_number must be an integer",
-        ) from exc
-
-    repo_url = _derive_repo_url(chat_session, data.get("repo_url"))
-    base_branch = data.get("base_branch") or chat_session.repo_branch or "main"
-    matrix = _build_matrix(data.get("matrix"))
-    limits = _build_limits(data.get("limits"))
-
-    solve = Solve(
-        id=str(uuid.uuid4()),
-        user_id=current_user.id,
-        session_id=chat_session.id,
-        repo_url=repo_url,
-        issue_number=issue_number_int,
-        base_branch=base_branch,
-        status=SolveStatus.PENDING.value,
-        matrix=matrix.model_dump(),
-        limits=limits.model_dump() if limits else None,
-        requested_by=current_user.github_username,
-    )
-    db.add(solve)
-    db.commit()
-    db.refresh(solve)
-
-    template_id = _resolve_template_id()
-    gh_token = _resolve_github_token_for_user(db, current_user.id)
-    base_cfg = {
-        "repo_url": repo_url,
-        "issue_number": issue_number_int,
-        "base_branch": base_branch,
-    }
-    runner = SolveRunner(SessionLocal, gh_token, template_id)
-    asyncio.create_task(runner.run(solve.id, base_cfg, matrix, limits))
-
-    return {
-        "solve_id": solve.id,
-        "session_id": session_id,
-        "status": solve.status,
-    }
-
-
-@router.get(
-    "/sessions/{session_id}/solve/sessions/{solve_id}", response_model=SolveDetailOut
-)
-async def get_solve_session_for_session(
-    session_id: str,
-    solve_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Fetch detailed solve information for a session."""
-    chat_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
-    solve = (
-        db.query(Solve)
-        .options(selectinload(Solve.runs), selectinload(Solve.champion_run))
-        .filter(
-            Solve.id == solve_id,
-            Solve.user_id == current_user.id,
-            Solve.session_id == chat_session.id,
-        )
-        .one_or_none()
-    )
-
-    if not solve:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Solve not found"
-        )
-
-    detail = SolveDetailOut.model_validate(solve)
-    detail.runs = [SolveRunOut.model_validate(run) for run in solve.runs]
-    if solve.champion_run:
-        detail.champion_run = SolveRunOut.model_validate(solve.champion_run)
-    return detail
-
-
-@router.get(
-    "/sessions/{session_id}/solve/sessions/{solve_id}/stats",
-    response_model=dict,
-)
-async def get_solve_session_stats_for_session(
-    session_id: str,
-    solve_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Return aggregate run statistics for a solve."""
-    chat_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
-    solve = (
-        db.query(Solve)
-        .options(selectinload(Solve.runs))
-        .filter(
-            Solve.id == solve_id,
-            Solve.user_id == current_user.id,
-            Solve.session_id == chat_session.id,
-        )
-        .one_or_none()
-    )
-
-    if not solve:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Solve not found"
-        )
-
-    summary = _summarize_runs(solve.runs)
-    return {
-        "solve_id": solve.id,
-        "status": solve.status,
-        "started_at": solve.started_at,
-        "completed_at": solve.completed_at,
-        "champion_run_id": solve.champion_run_id,
-        "error_message": solve.error_message,
-        "runs": summary,
-    }
-
-
-@router.post(
-    "/sessions/{session_id}/solve/sessions/{solve_id}/cancel",
-    response_model=dict,
-)
-async def cancel_solve_session_for_session(
-    session_id: str,
-    solve_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Placeholder cancellation endpoint."""
-    chat_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
-    solve = (
-        db.query(Solve)
-        .filter(
-            Solve.id == solve_id,
-            Solve.user_id == current_user.id,
-            Solve.session_id == chat_session.id,
-        )
-        .one_or_none()
-    )
-    if not solve:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Solve not found"
-        )
-
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Solver cancellation is not yet supported",
-    )
-
-
-@router.get(
-    "/sessions/{session_id}/solve/sessions", response_model=List[SolveOut]
-)
-async def list_solve_sessions_for_session(
-    session_id: str,
-    limit: int = Query(20, ge=1, le=100),
-    offset: int = Query(0, ge=0),
-    status_filter: Optional[str] = Query(None, alias="status"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """List solves for the given session."""
-    chat_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
-
-    query = (
-        db.query(Solve)
-        .filter(
-            Solve.user_id == current_user.id,
-            Solve.session_id == chat_session.id,
-        )
-        .order_by(Solve.created_at.desc())
-    )
-
-    if status_filter:
-        try:
-            status_enum = SolveStatus(status_filter)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid status: {status_filter}",
-            ) from exc
-        query = query.filter(Solve.status == status_enum.value)
-
-    solves = query.offset(offset).limit(limit).all()
-    return [SolveOut.model_validate(item) for item in solves]
 
 
 # ============================================================================
