@@ -71,7 +71,6 @@ CRITICAL ISSUES:
 import asyncio
 import json
 import logging
-import os
 
 # Import chat functionality from chat_api
 import time
@@ -89,7 +88,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 # Import from filedeps.py
 from models import (
     APIError,
-    AuthToken,
     ChatMessage,
     ChatMessageResponse,
     ChatRequest,
@@ -106,8 +104,6 @@ from models import (
     SaveTrajectoryRequest,
     SessionContextResponse,
     SessionResponse,
-    SessionTrajectoryResponse,
-    # Solver-related imports removed
     UpdateSessionRequest,
     User,
     UserIssueResponse,
@@ -1705,53 +1701,9 @@ async def _index_repository_for_session_background(
 
 
 # ============================================================================
-# SOLVER ENDPOINTS - Consolidated under sessions context
+# ISSUES ENDPOINTS - Consolidated under sessions context
 # ============================================================================
 
-DEFAULT_MATRIX_CONFIG = {
-    "models": ["gpt-4.1"],
-    "temps": [0.2, 0.6],
-    "max_edits": [3, 5],
-    "evolution": ["test-first", "small-steps"],
-    #TODO: remove evolutions from the matrix
-}
-
-
-def _resolve_template_id() -> str:
-    template_id = os.getenv("E2B_TEMPLATE_ID")
-    if not template_id:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="E2B template not configured",
-        )
-    return template_id
-
-
-def _resolve_github_token_for_user(db: Session, user_id: int) -> str:
-    token = (
-        db.query(AuthToken)
-        .filter(AuthToken.user_id == user_id, AuthToken.is_active.is_(True))
-        .order_by(AuthToken.created_at.desc())
-        .first()
-    )
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="GitHub token not available for this user",
-        )
-    return token.access_token
-
-
-
-def _derive_repo_url(chat_session: ChatSession, override: Optional[str]) -> str:
-    if override:
-        return override
-    if chat_session.repo_owner and chat_session.repo_name:
-        return f"https://github.com/{chat_session.repo_owner}/{chat_session.repo_name}"
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Repository context is required to launch the solver",
-    )
 
 @router.post("/sessions/{session_id}/issues/create-with-context", response_model=dict)
 async def create_issue_with_context_for_session(
