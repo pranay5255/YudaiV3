@@ -15,10 +15,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+from models import ChatSession, Repository
 from sqlalchemy.orm import Session
 
-from backend.models import ChatSession, Repository
-from backend.utils import utc_now
+from utils import utc_now
 
 from .cache_metadata import CacheMetadata
 from .facts_and_memories import (
