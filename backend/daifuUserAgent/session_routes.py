@@ -5,65 +5,6 @@ Session Management Routes for DAifu Agent
 This module provides FastAPI routes for session management,
 including session creation, context management, messages, and file dependencies.
 
-TODO: Complete Implementation Tasks
-========================================
-
-CRITICAL ISSUES:
-1. LLM Service Integration
-   - Chat endpoint uses ChatOps.process_chat_message() with LLMService.generate_response_with_stored_context()
-   - Issue endpoints use IssueOps.create_issue_with_context() with LLMService.generate_response()
-   - Add proper error handling for LLM service failures
-   - Implement streaming responses for real-time chat
-
-2. Frontend Integration (@Chat.tsx compatibility)
-   - Ensure all API responses match frontend expectations
-   - Implement proper error message formatting for UI display
-   - Add real-time WebSocket support for chat updates
-   - Support context card operations from frontend
-
-3. Session Management Enhancements
-   - Add session timeout and cleanup mechanisms
-   - Implement session persistence across browser sessions
-   - Add session export/import functionality
-   - Implement session collaboration features
-
-4. File Dependencies Integration
-   - Complete the file extraction endpoint integration
-   - Add support for large repository processing
-   - Implement file dependency caching
-   - Add file content preview and search capabilities
-
-5. Database Optimization
-   - Add proper indexing for all query operations
-   - Implement database connection pooling
-   - Add query result caching (Redis)
-   - Optimize bulk operations for messages and context cards
-
-
-
-7. Authentication & Authorization
-   - Ensure all endpoints properly validate user access
-   - Add role-based access control where needed
-   - Implement proper session token validation
-   - Add audit logging for sensitive operations
-
-13. Session Context Management
-    - Implement proper context window management
-    - Add context relevance scoring
-    - Support multiple context sources (files, chat, external)
-    - Implement context persistence and retrieval
-
-14. Message Management
-    - Add message search and filtering capabilities
-    - Implement message threading and conversation management
-    - Add message export/import functionality
-    - Support message attachments and rich content
-
-17. Deployment & Configuration
-    - Add environment-specific configuration
-    - Implement proper logging configuration
-    - Add health checks and startup validation
-    - Support containerized deployment
 
 """
 
@@ -101,9 +42,10 @@ from models import (
     FileItem,
     FileItemResponse,
     Repository,
-    SaveTrajectoryRequest,
     SessionContextResponse,
     SessionResponse,
+    TrajectoryResponse,
+    TrajectoryUpsertRequest,
     UpdateSessionRequest,
     User,
     UserIssueResponse,
@@ -435,50 +377,86 @@ async def get_session_context(
 
 
 @router.post(
-    "/sessions/{session_id}/trajectory",
-    response_model=SessionTrajectoryResponse,
+    "/sessions/{session_id}/trajectory", response_model=TrajectoryResponse
 )
 async def upsert_session_trajectory(
     session_id: str,
-    request: SaveTrajectoryRequest,
+    payload: TrajectoryUpsertRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Import or update a trajectory for a session from the mini-swe-agent output."""
+    """Persist the latest SWE trajectory for the given session."""
 
     db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
 
-    try:
-        return TrajectoryService.save_for_session(db, db_session, request)
-    except HTTPException:
-        raise
-    except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to persist trajectory: {exc}",
-        ) from exc
+    trajectory = TrajectoryService.persist_from_request(
+        db,
+        user=current_user,
+        session=db_session,
+        payload=payload,
+    )
+
+    response = TrajectoryService.serialize(trajectory, session=db_session)
+    if not response:
+        raise create_standardized_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "TRAJECTORY_SAVE_FAILED",
+            "Failed to persist trajectory",
+            path=f"/daifu/sessions/{session_id}/trajectory",
+        )
+
+    return response
 
 
 @router.get(
-    "/sessions/{session_id}/trajectory",
-    response_model=SessionTrajectoryResponse,
+    "/sessions/{session_id}/trajectory", response_model=TrajectoryResponse
 )
 async def get_session_trajectory(
     session_id: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Fetch the stored trajectory for the session."""
+    """Retrieve the stored trajectory for a session."""
 
     db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
-    trajectory = TrajectoryService.get_for_session(db, db_session)
+    trajectory = TrajectoryService.get_for_session(db, db_session.id)
+
     if not trajectory:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Trajectory not found"
+        raise create_standardized_error(
+            status.HTTP_404_NOT_FOUND,
+            "TRAJECTORY_NOT_FOUND",
+            "No trajectory stored for this session",
+            path=f"/daifu/sessions/{session_id}/trajectory",
         )
-    return trajectory
+
+    response = TrajectoryService.serialize(trajectory, session=db_session)
+    if not response:
+        raise create_standardized_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "TRAJECTORY_SERIALIZE_FAILED",
+            "Failed to serialize trajectory",
+            path=f"/daifu/sessions/{session_id}/trajectory",
+        )
+
+    return response
 
 
+@router.get("/sessions/trajectories", response_model=List[TrajectoryResponse])
+async def list_user_trajectories(
+    limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List trajectories associated with the authenticated user."""
+
+    trajectories = TrajectoryService.list_for_user(db, current_user.id)
+    responses = [
+        TrajectoryService.serialize(traj)
+        for traj in trajectories[:limit]
+        if traj
+    ]
+
+    return [resp for resp in responses if resp]
 # HIGH PRIORITY ENDPOINTS
 
 

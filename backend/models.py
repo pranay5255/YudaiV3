@@ -32,6 +32,7 @@ BACKEND MODIFICATION PLAN FOR UNIFIED STATE MANAGEMENT:
 """
 
 from datetime import datetime
+from pathlib import Path
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
@@ -169,6 +170,9 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     ai_solve_sessions: Mapped[List["AISolveSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    trajectories: Mapped[List["Trajectory"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -356,6 +360,11 @@ class Issue(Base):
     ai_solve_sessions: Mapped[List["AISolveSession"]] = relationship(
         back_populates="issue", cascade="all, delete-orphan"
     )
+    trajectory: Mapped[Optional["Trajectory"]] = relationship(
+        back_populates="issue",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
 
 class PullRequest(Base):
@@ -486,6 +495,11 @@ class ChatSession(Base):
     )
     solves: Mapped[List["Solve"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
+    )
+    trajectory: Mapped[Optional["Trajectory"]] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+        uselist=False,
     )
 
 
@@ -1005,6 +1019,11 @@ class AISolveSession(Base):
     edits: Mapped[List["AISolveEdit"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
+    trajectory: Mapped[Optional["Trajectory"]] = relationship(
+        back_populates="solve_session",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
 
 
 class AISolveEdit(Base):
@@ -1035,6 +1054,43 @@ class AISolveEdit(Base):
 
     # Relationships
     session: Mapped["AISolveSession"] = relationship(back_populates="edits")
+
+
+# ============================================================================
+# TRAJECTORY MODELS
+# ============================================================================
+
+
+class Trajectory(Base):
+    """Stored AI trajectory data for a session and related issue."""
+
+    __tablename__ = "trajectories"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    issue_id: Mapped[Optional[int]] = mapped_column(ForeignKey("issues.id"), nullable=True, unique=True)
+    solve_session_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("ai_solve_sessions.id"), nullable=True, unique=True
+    )
+    source_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    trajectory_data: Mapped[Dict[str, Any]] = mapped_column(JSON, nullable=False)
+    summary: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship(back_populates="trajectories")
+    session: Mapped["ChatSession"] = relationship(back_populates="trajectory")
+    issue: Mapped[Optional["Issue"]] = relationship(back_populates="trajectory")
+    solve_session: Mapped[Optional["AISolveSession"]] = relationship(back_populates="trajectory")
 
 
 # ============================================================================
@@ -1290,6 +1346,7 @@ class SessionContextResponse(BaseModel):
     statistics: Optional[Dict[str, Any]] = Field(default_factory=dict)
     user_issues: Optional[List["UserIssueResponse"]] = Field(default_factory=list)
     file_embeddings: Optional[List["FileEmbeddingResponse"]] = Field(default_factory=list)
+    trajectory: Optional["TrajectoryResponse"] = None
 
 
 # Context Card Models
@@ -1316,6 +1373,37 @@ class FileEmbeddingResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TrajectoryResponse(BaseModel):
+    """Response model for stored trajectory data."""
+
+    id: int
+    user_id: int
+    session_id: int
+    session_identifier: str
+    issue_id: Optional[int] = None
+    issue_number: Optional[int] = None
+    solve_session_id: Optional[int] = None
+    source_path: Optional[str] = None
+    trajectory_data: Dict[str, Any]
+    summary: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    repository: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TrajectoryUpsertRequest(BaseModel):
+    source_path: Optional[str] = Field(
+        default=str(Path.home() / ".config/mini-swe-agent/last_mini_run.traj.json")
+    )
+    issue_id: Optional[int] = None
+    issue_number: Optional[int] = None
+    solve_session_id: Optional[int] = None
+    summary: Optional[Dict[str, Any]] = None
+    trajectory_data: Optional[Dict[str, Any]] = None
 
 
 # Frontend UI Response Models
