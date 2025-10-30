@@ -4,7 +4,7 @@ import { useSessionStore } from '../stores/sessionStore';
 
 /**
  * LoginPage component handles GitHub OAuth login
- * Visual + copy refresh to highlight the new model monetization journey — functionality unchanged.
+ * Redesigned to emphasize synthetic datasets, distillation, and benchmarking.
  */
 export const LoginPage: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -51,24 +51,24 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       {/* Hero Section */}
       <div className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_0%,rgba(56,189,248,0.12),transparent_60%),radial-gradient(50%_40%_at_100%_20%,rgba(147,51,234,0.12),transparent_60%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(80%_60%_at_50%_0%,rgba(99,102,241,0.10),transparent_60%),radial-gradient(50%_40%_at_100%_20%,rgba(59,130,246,0.08),transparent_60%)]" />
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
           <div className="text-center">
             <h1 className="text-4xl md:text-6xl font-bold text-white mb-6 leading-tight">
-              Monetize your <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-violet-400">code, data & models</span>
+              Create <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-400">coding datasets for your model</span>
             </h1>
-            <p className="text-lg md:text-2xl text-zinc-300/90 mb-8 max-w-3xl mx-auto">
-              Turn GitHub issues & PRs into a <span className="font-semibold text-white">personal AI agent</span>. Fine-tune at <span className="text-cyan-300">30/30 milestone</span>, then monetize when others use your agent.
+            <p className="text-lg md:text-xl text-slate-300/90 mb-8 max-w-3xl mx-auto">
+              Yudai generates CI-verified synthetic datasets from your GitHub issues—perfect for training, distilling, and benchmarking your coding models.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
               <div className="bg-white/5 backdrop-blur-sm rounded-lg px-6 py-3 border border-white/10">
-                <span className="text-zinc-200 text-sm">🧠 Base models: GPT-5, Claude, Qwen3-Coder, Grok & more</span>
+                <span className="text-slate-200 text-sm">🎯 High-quality training data from real repos</span>
               </div>
-              <div className="bg-cyan-400/10 backdrop-blur-sm rounded-lg px-6 py-3 border border-cyan-300/20">
-                <span className="text-cyan-100 text-sm">💡 Earn when collaborators rely on your personalized agent</span>
+              <div className="bg-blue-400/10 backdrop-blur-sm rounded-lg px-6 py-3 border border-blue-300/20">
+                <span className="text-blue-100 text-sm">🧬 Best-of-N sampling + test verification</span>
               </div>
             </div>
           </div>
@@ -79,66 +79,74 @@ export const LoginPage: React.FC = () => {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
         <div className="grid lg:grid-cols-2 gap-12 items-start">
 
-          {/* Left: Narrative & agent explainer */}
+          {/* Left: Core pillars and features */}
           <div className="space-y-8">
 
-            {/* The Creator Journey */}
-            <div className="bg-zinc-900/60 backdrop-blur-sm rounded-xl p-8 border border-zinc-800">
-              <h2 className="text-2xl font-bold text-white mb-4">How It Works</h2>
-              <ol className="space-y-4 text-zinc-300">
-                <li className="flex items-start gap-3">
-                  <div className="mt-1 h-2 w-2 rounded-full bg-cyan-400" />
-                  <p><strong>Create & Solve:</strong> Generate GitHub issues and ship PRs with AI assistance.</p>
-                </li>
-                <li className="flex items-start gap-3">
-                  <div className="mt-1 h-2 w-2 rounded-full bg-cyan-400" />
-                  <p><strong>Hit 30/30:</strong> Unlock finetuning after 30 issues created & 30 merged.</p>
-                </li>
-                <li className="flex items-start gap-3">
-                  <div className="mt-1 h-2 w-2 rounded-full bg-violet-400" />
-                  <p><strong>Share & Earn:</strong> Package your agent and monetize when others use it.</p>
-                </li>
-              </ol>
-            </div>
-
-            {/* Key Features */}
-            <div className="bg-gradient-to-r from-cyan-400/10 to-violet-400/10 backdrop-blur-sm rounded-xl p-8 border border-cyan-300/20">
-              <h2 className="text-2xl font-bold text-white mb-4">Key Benefits</h2>
-              <div className="grid sm:grid-cols-2 gap-4 text-zinc-200">
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-cyan-100">Usage-Based Payouts</p>
-                  <p className="text-sm">Earn when others use your agent.</p>
+            {/* Three Pillars */}
+            <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl p-8 border border-slate-800">
+              <h2 className="text-2xl font-bold text-white mb-6">Build Your Training Dataset</h2>
+              <div className="space-y-4 text-slate-300">
+                <div className="flex items-start gap-3">
+                  <div className="mt-1 h-2 w-2 rounded-full bg-emerald-400" />
+                  <p><strong className="text-emerald-300">Generate Datasets</strong> — Teacher LLMs produce multiple candidate fixes; CI keeps only passing diffs with step-by-step reasoning traces.</p>
                 </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-violet-100">Easy Sharing</p>
-                  <p className="text-sm">Share with teammates & clients.</p>
+                <div className="flex items-start gap-3">
+                  <div className="mt-1 h-2 w-2 rounded-full bg-blue-400" />
+                  <p><strong className="text-blue-300">Distill Models</strong> — Use your dataset for supervised KD (forward KL) → on-policy refinement (reverse KL) → balanced Jeffreys.</p>
                 </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-cyan-100">Clear Dashboard</p>
-                  <p className="text-sm">Track usage and payouts.</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-violet-100">Full Control</p>
-                  <p className="text-sm">You own your data & pricing.</p>
+                <div className="flex items-start gap-3">
+                  <div className="mt-1 h-2 w-2 rounded-full bg-indigo-400" />
+                  <p><strong className="text-indigo-300">Benchmark Performance</strong> — Track pass rate, reasoning alignment, and code quality across runs—against your own repos.</p>
                 </div>
               </div>
             </div>
 
-            {/* What you get today */}
-            <div className="bg-zinc-900/60 backdrop-blur-sm rounded-xl p-8 border border-zinc-800">
-              <h2 className="text-2xl font-bold text-white mb-4">What's Available</h2>
-              <div className="space-y-3 text-zinc-300">
+            {/* How it works */}
+            <div className="bg-slate-900/60 backdrop-blur-sm rounded-xl p-8 border border-slate-800">
+              <h2 className="text-2xl font-bold text-white mb-4">How it works</h2>
+              <ol className="space-y-3 text-slate-300">
+                <li className="flex items-start gap-3">
+                  <span className="font-mono text-blue-400 font-semibold min-w-[1.5rem]">1.</span>
+                  <p><strong>Ingest</strong> your repo + issues → generate N candidate patches per issue.</p>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="font-mono text-blue-400 font-semibold min-w-[1.5rem]">2.</span>
+                  <p><strong>Verify & select</strong> via tests, lint/style, and reasoning coherence.</p>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="font-mono text-blue-400 font-semibold min-w-[1.5rem]">3.</span>
+                  <p><strong>Train & evaluate</strong> the student; iterate where it fails (teacher-guided).</p>
+                </li>
+              </ol>
+            </div>
+
+            {/* Feature Grid */}
+            <div className="bg-gradient-to-r from-blue-400/10 to-indigo-400/10 backdrop-blur-sm rounded-xl p-8 border border-blue-300/20">
+              <h2 className="text-2xl font-bold text-white mb-4">Dataset Creation Features</h2>
+              <div className="space-y-3 text-slate-200">
                 <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-emerald-500 rounded-full mt-2" />
-                  <p><strong>AI Issue Creation:</strong> Generate actionable GitHub issues.</p>
+                  <div className="w-2 h-2 bg-blue-400 rounded-full mt-2" />
+                  <p className="text-sm"><strong>Automated dataset generation</strong> from issues → PR diffs (CI-verified)</p>
                 </div>
                 <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-emerald-500 rounded-full mt-2" />
-                  <p><strong>PR Assistance:</strong> Automated fix preparation.</p>
+                  <div className="w-2 h-2 bg-blue-400 rounded-full mt-2" />
+                  <p className="text-sm"><strong>Reasoning traces included</strong> for better model training</p>
                 </div>
                 <div className="flex items-start gap-3">
-                  <div className="w-2 h-2 bg-sky-500 rounded-full mt-2" />
-                  <p><strong>Agent Marketplace:</strong> Monetize after 30/30.</p>
+                  <div className="w-2 h-2 bg-indigo-400 rounded-full mt-2" />
+                  <p className="text-sm"><strong>Best-of-N sampling</strong> ensures highest quality examples</p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-2 h-2 bg-indigo-400 rounded-full mt-2" />
+                  <p className="text-sm"><strong>Ready for distillation</strong> (forward KL, reverse KL, Jeffreys)</p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-2 h-2 bg-emerald-400 rounded-full mt-2" />
+                  <p className="text-sm"><strong>On-policy feedback loops</strong> for continuous improvement</p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-2 h-2 bg-emerald-400 rounded-full mt-2" />
+                  <p className="text-sm"><strong>Quality metrics</strong>: test pass rate, style checks, trace alignment</p>
                 </div>
               </div>
             </div>
@@ -147,18 +155,18 @@ export const LoginPage: React.FC = () => {
 
           {/* Right: Login & Install (functionality unchanged) */}
           <div className="lg:sticky lg:top-8">
-            <div className="bg-zinc-900/70 backdrop-blur-sm rounded-xl p-8 border border-zinc-800 shadow-2xl">
+            <div className="bg-slate-900/70 backdrop-blur-sm rounded-xl p-8 border border-slate-800 shadow-2xl">
 
               {/* Header */}
               <div className="text-center mb-6">
-                <h2 className="text-2xl font-bold text-white mb-2">Join YudaiV3</h2>
-                <p className="text-zinc-200">Complete two-step GitHub setup to unlock AI automations.</p>
+                <h2 className="text-2xl font-bold text-white mb-2">Start Creating Datasets</h2>
+                <p className="text-slate-200">Two-step GitHub setup to generate coding datasets from your repos.</p>
               </div>
 
               {/* Two-step summary */}
-              <div className="mb-6 rounded-lg border border-cyan-300/30 bg-cyan-400/10 px-4 py-3 text-sm text-cyan-100">
-                <p className="font-medium text-cyan-50">Two-step setup</p>
-                <p className="text-cyan-100/90">1) Verify GitHub identity. 2) Install Yudai App for issue/PR creation.</p>
+              <div className="mb-6 rounded-lg border border-blue-300/30 bg-blue-400/10 px-4 py-3 text-sm text-blue-100">
+                <p className="font-medium text-blue-50">Two-step setup</p>
+                <p className="text-blue-100/90">1) Authenticate with GitHub. 2) Install Yudai App for repo access.</p>
               </div>
 
               {/* Error Display (unchanged) */}
@@ -171,17 +179,17 @@ export const LoginPage: React.FC = () => {
               {/* Step 1: GitHub OAuth (button unchanged) */}
               <div className="mb-8 space-y-4">
                 <div className="flex items-start gap-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-cyan-300/40 bg-cyan-400/10 text-lg font-semibold text-cyan-100">1</div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-blue-300/40 bg-blue-400/10 text-lg font-semibold text-blue-100">1</div>
                   <div>
-                    <h3 className="text-lg font-semibold text-white">Verify GitHub Identity</h3>
-                    <p className="text-sm text-zinc-200">Securely link your repos via OAuth.</p>
+                    <h3 className="text-lg font-semibold text-white">Sign in with GitHub</h3>
+                    <p className="text-sm text-slate-200">Authenticate and link your repositories.</p>
                   </div>
                 </div>
 
                 <button
                   onClick={handleGitHubLogin}
                   disabled={isLoading}
-                  className="w-full bg-cyan-500 hover:bg-cyan-500/90 disabled:bg-cyan-500/50 text-white font-medium py-4 px-6 rounded-lg transition-all duration-200 flex items-center justify-center space-x-3 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                  className="w-full bg-blue-500 hover:bg-blue-500/90 disabled:bg-blue-500/50 text-white font-medium py-4 px-6 rounded-lg transition-all duration-200 flex items-center justify-center space-x-3 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                 >
                   {isLoading ? (
                     <>
@@ -202,10 +210,10 @@ export const LoginPage: React.FC = () => {
               {/* Step 2: GitHub App Installation (link unchanged) */}
               <div className="mb-6 space-y-4">
                 <div className="flex items-start gap-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-violet-300/40 bg-violet-400/10 text-lg font-semibold text-violet-100">2</div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full border border-indigo-300/40 bg-indigo-400/10 text-lg font-semibold text-indigo-100">2</div>
                   <div>
-                    <h3 className="text-lg font-semibold text-white">Install Yudai GitHub App</h3>
-                    <p className="text-sm text-zinc-200">Grant repo access for issues & PRs.</p>
+                    <h3 className="text-lg font-semibold text-white">Install GitHub App</h3>
+                    <p className="text-sm text-slate-200">Grant Yudai access to create issues & PRs.</p>
                   </div>
                 </div>
 
@@ -213,25 +221,25 @@ export const LoginPage: React.FC = () => {
                   href={githubAppInstallUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center w-full rounded-lg border border-violet-200/50 bg-violet-400/10 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-violet-400/20"
+                  className="inline-flex items-center justify-center w-full rounded-lg border border-indigo-200/50 bg-indigo-400/10 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-indigo-400/20"
                 >
                   Install GitHub App
                 </a>
               </div>
 
-              {/* Feature bullets (kept; copy updated) */}
+              {/* Feature bullets */}
               <div className="space-y-3 mb-6">
-                <div className="flex items-center gap-3 text-sm text-zinc-200">
-                  <div className="w-2 h-2 bg-emerald-500 rounded-full" />
-                  <span>AI analysis for Python & TypeScript</span>
+                <div className="flex items-center gap-3 text-sm text-slate-200">
+                  <div className="w-2 h-2 bg-emerald-400 rounded-full" />
+                  <span>Auto-generate training datasets from your code</span>
                 </div>
-                <div className="flex items-center gap-3 text-sm text-zinc-200">
-                  <div className="w-2 h-2 bg-sky-500 rounded-full" />
-                  <span>Generate GitHub issues & criteria</span>
+                <div className="flex items-center gap-3 text-sm text-slate-200">
+                  <div className="w-2 h-2 bg-blue-400 rounded-full" />
+                  <span>CI-verified quality for model training</span>
                 </div>
-                <div className="flex items-center gap-3 text-sm text-zinc-200">
-                  <div className="w-2 h-2 bg-violet-500 rounded-full" />
-                  <span>30/30 → finetune → monetize</span>
+                <div className="flex items-center gap-3 text-sm text-slate-200">
+                  <div className="w-2 h-2 bg-indigo-400 rounded-full" />
+                  <span>Reasoning traces for better distillation</span>
                 </div>
               </div>
 
@@ -246,13 +254,13 @@ export const LoginPage: React.FC = () => {
                   <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515a.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0a12.64 12.64 0 0 0-.617-1.25a.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057a19.9 19.9 0 0 0 5.993 3.03a.078.078 0 0 0 .084-.028a14.09 14.09 0 0 0 1.226-1.994a.076.076 0 0 0-.041-.106a13.107 13.107 0 0 1-1.872-.892a.077.077 0 0 1-.008-.128a10.2 10.2 0 0 0 .372-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127a12.299 12.299 0 0 1-1.873.892a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028a19.839 19.839 0 0 0 6.002-3.03a.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.956-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.955-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.946 2.418-2.157 2.418z"/>
                   </svg>
-                  <span>Join our Discord Community</span>
+                  <span>Join Discord Community</span>
                 </a>
               </div>
 
               {/* Footer */}
-              <div className="pt-6 border-t border-zinc-800">
-                <p className="text-xs text-zinc-400 text-center">
+              <div className="pt-6 border-t border-slate-800">
+                <p className="text-xs text-slate-400 text-center">
                   By signing in, you agree to our terms of service and privacy policy
                 </p>
               </div>
@@ -263,17 +271,17 @@ export const LoginPage: React.FC = () => {
       </div>
 
       {/* Bottom CTA */}
-      <div className="border-t border-zinc-900">
+      <div className="border-t border-slate-900">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="text-center">
-            <h3 className="text-xl font-semibold text-white mb-4">
-              Build & monetize your AI coding agent
-            </h3>
-            <div className="flex flex-wrap justify-center gap-4 text-sm text-zinc-400">
-              <span>• GitHub-native</span>
-              <span>• Creator-first</span>
-              <span>• Usage insights</span>
-              <span>• Personal workflows</span>
+            <p className="text-slate-300 mb-4">
+              Create <strong className="text-white">high-quality coding datasets for training your models</strong>—automatically generated from your repos, no manual labeling required.
+            </p>
+            <div className="flex flex-wrap justify-center gap-4 text-sm text-slate-400">
+              <span>• GitHub-native dataset generation</span>
+              <span>• CI-verified quality</span>
+              <span>• Reasoning traces included</span>
+              <span>• Ready for training & distillation</span>
             </div>
           </div>
         </div>
