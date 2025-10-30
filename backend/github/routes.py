@@ -11,13 +11,12 @@ Backed by daifuUserAgent.githubOps.GitHubOps using the logged-in user's token.
 
 from typing import List
 
+from auth.github_oauth import get_current_user
+from daifuUserAgent.githubOps import GitHubOps
+from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, status
+from models import User
 from sqlalchemy.orm import Session
-
-from backend.auth.github_oauth import get_current_user
-from backend.daifuUserAgent.githubOps import GitHubOps
-from backend.db.database import get_db
-from backend.models import User
 
 router = APIRouter(tags=["github"])
 

@@ -7,12 +7,7 @@ import logging
 import os
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import RedirectResponse
-from fastapi.security import HTTPBearer
-from sqlalchemy.orm import Session
-
-from backend.auth.github_oauth import (
+from auth.github_oauth import (
     GitHubOAuthError,
     create_or_update_user,
     create_session_token,
@@ -23,13 +18,18 @@ from backend.auth.github_oauth import (
     validate_github_app_config,
     validate_session_token,
 )
-from backend.db.database import get_db
-from backend.models import (
+from db.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPBearer
+from models import (
     # CreateSessionTokenRequest,
     SessionTokenRequest,
     # SessionTokenResponse,
 )
-from backend.utils import utc_now
+from sqlalchemy.orm import Session
+
+from utils import utc_now
 
 # Configure logger for this module
 logger = logging.getLogger(__name__)

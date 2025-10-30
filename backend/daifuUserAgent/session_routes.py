@@ -80,22 +80,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
+from auth.github_oauth import get_current_user
+from daifuUserAgent.githubOps import GitHubOps
+from db.database import SessionLocal, get_db
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from pgvector.sqlalchemy import Vector
-from sqlalchemy.orm import Session
-
-from backend.auth.github_oauth import get_current_user
-from backend.context import (
-    EmbeddingPipeline,
-    FactsAndMemoriesService,
-    RepositoryFile,
-    RepositorySnapshotService,
-)
-from backend.daifuUserAgent.githubOps import GitHubOps
-from backend.db.database import SessionLocal, get_db
 
 # Import from filedeps.py
-from backend.models import (
+from models import (
     APIError,
     ChatMessage,
     ChatMessageResponse,
@@ -116,7 +107,16 @@ from backend.models import (
     User,
     UserIssueResponse,
 )
-from backend.utils import utc_now
+from pgvector.sqlalchemy import Vector
+from sqlalchemy.orm import Session
+
+from backend.context import (
+    EmbeddingPipeline,
+    FactsAndMemoriesService,
+    RepositoryFile,
+    RepositorySnapshotService,
+)
+from utils import utc_now
 
 from .llm_service import LLMService
 from .session_service import SessionService
