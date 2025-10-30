@@ -6,12 +6,12 @@ import os
 import uuid
 from datetime import timedelta
 
+# Import Base from unified models
+from models import Base
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
-# Import Base from unified models
-from backend.models import Base
-from backend.utils import utc_now
+from utils import utc_now
 
 # Database URL from environment variables
 DATABASE_URL = os.getenv("DATABASE_URL")

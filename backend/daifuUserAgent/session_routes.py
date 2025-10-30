@@ -81,6 +81,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from auth.github_oauth import get_current_user
+from context import (
+    EmbeddingPipeline,
+    FactsAndMemoriesService,
+    RepositoryFile,
+    RepositorySnapshotService,
+)
 from daifuUserAgent.githubOps import GitHubOps
 from db.database import SessionLocal, get_db
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -110,12 +116,6 @@ from models import (
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import Session
 
-from backend.context import (
-    EmbeddingPipeline,
-    FactsAndMemoriesService,
-    RepositoryFile,
-    RepositorySnapshotService,
-)
 from utils import utc_now
 
 from .llm_service import LLMService
@@ -164,7 +164,7 @@ async def daifu_github_list_user_repositories(
     List repositories accessible by the authenticated user using their GitHub token.
     """
     try:
-        from backend.daifuUserAgent.githubOps import GitHubOps
+        from daifuUserAgent.githubOps import GitHubOps
 
         github_ops = GitHubOps(db)
         repositories = await github_ops.get_user_repositories(user_id=current_user.id)
@@ -195,7 +195,7 @@ async def daifu_github_list_repository_branches(
     List branches for a specific repository the authenticated user can access.
     """
     try:
-        from backend.daifuUserAgent.githubOps import GitHubOps
+        from daifuUserAgent.githubOps import GitHubOps
 
         github_ops = GitHubOps(db)
         branches = await github_ops.fetch_repository_branches(

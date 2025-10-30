@@ -12,14 +12,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
+from context import CacheMetadata
 from fastapi import HTTPException, status
+from models import FileEmbedding
 from sentence_transformers import SentenceTransformer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.context import CacheMetadata
-from backend.models import FileEmbedding
-from backend.utils import utc_now
+from utils import utc_now
 
 logger = logging.getLogger(__name__)
 

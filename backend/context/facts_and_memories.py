@@ -7,12 +7,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from backend.daifuUserAgent.llm_service import LLMService
-from backend.repo_processorGitIngest.scraper_script import (
+from daifuUserAgent.llm_service import LLMService
+from repo_processorGitIngest.scraper_script import (
     categorize_file,
     extract_repository_data,
 )
-from backend.utils.chunking import create_file_chunker
+
+from utils.chunking import create_file_chunker
 
 logger = logging.getLogger(__name__)
 

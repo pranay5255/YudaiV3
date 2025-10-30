@@ -2,7 +2,7 @@
 Database package for YudaiV3
 """
 
-from backend.models import (
+from models import (
     AuthToken,
     Repository,
     SessionToken,
