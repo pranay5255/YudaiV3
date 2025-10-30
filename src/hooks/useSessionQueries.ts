@@ -9,6 +9,7 @@ import {
   ChatMessage,
   ContextCard,
   FileItem,
+  Trajectory,
   CreateSessionMutationData,
   AddContextCardMutationData,
   RemoveContextCardMutationData,
@@ -103,6 +104,8 @@ export const QueryKeys = {
   messages: (sessionId: string) => ['messages', sessionId] as const,
   contextCards: (sessionId: string) => ['context-cards', sessionId] as const,
   fileDependencies: (sessionId: string) => ['file-deps', sessionId] as const,
+  trajectory: (sessionId: string) => ['trajectory', sessionId] as const,
+  trajectories: ['trajectories'] as const,
   repositories: ['repositories'] as const,
 };
 
@@ -342,7 +345,43 @@ export const useFileDependencies = (sessionId: string) => {
   });
 };
 
+// ============================================================================
+// TRAJECTORY QUERIES - Unified with Zustand Store
+// ============================================================================
 
+export const useTrajectories = () => {
+  const { sessionToken, loadTrajectories } = useSessionStore();
+
+  return useQuery({
+    queryKey: QueryKeys.trajectories,
+    queryFn: async (): Promise<Trajectory[]> => {
+      await loadTrajectories();
+      return useSessionStore.getState().trajectories;
+    },
+    enabled: !!sessionToken,
+    retry: retryWithBackoff,
+    retryDelay: getRetryDelay,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+};
+
+
+export const useSessionTrajectory = (sessionId: string) => {
+  const { sessionToken, loadSessionTrajectory } = useSessionStore();
+
+  return useQuery({
+    queryKey: QueryKeys.trajectory(sessionId),
+    queryFn: async (): Promise<Trajectory | null> => {
+      const trajectory = await loadSessionTrajectory(sessionId);
+      return trajectory;
+    },
+    enabled: !!sessionId && !!sessionToken,
+    retry: retryWithBackoff,
+    retryDelay: getRetryDelay,
+    refetchOnWindowFocus: false,
+  });
+};
 
 // ============================================================================
 // SESSION MANAGEMENT MUTATIONS - Unified with Zustand Store

@@ -23,6 +23,8 @@ export const API = {
     CONTEXT_CARD_DETAIL: `${API_BASE}/daifu/sessions/{sessionId}/context-cards/{cardId}`,
     FILE_DEPS_SESSION: `${API_BASE}/daifu/sessions/{sessionId}/file-deps/session`,
     EXTRACT: `${API_BASE}/daifu/sessions/{sessionId}/extract`,
+    TRAJECTORY: `${API_BASE}/daifu/sessions/{sessionId}/trajectory`,
+    TRAJECTORIES: `${API_BASE}/daifu/sessions/trajectories`,
     ISSUES: {
       CREATE: `${API_BASE}/daifu/sessions/{sessionId}/issues/create-with-context`,
       LIST: `${API_BASE}/daifu/sessions/{sessionId}/issues`,
