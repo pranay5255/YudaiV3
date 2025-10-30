@@ -6,7 +6,9 @@ This module provides all session-related business logic and operations,
 extracted from the router handlers for better separation of concerns.
 """
 
+import json
 import logging
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
@@ -19,9 +21,17 @@ from models import (
     FileEmbedding,
     FileEmbeddingResponse,
     FileItem,
+    AISolveSession,
+    Issue,
+    Repository,
     SessionContextResponse,
     SessionResponse,
+    User,
+    Trajectory,
+    TrajectoryResponse,
+    TrajectoryUpsertRequest,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from utils import utc_now
@@ -104,6 +114,12 @@ class SessionService:
             .all()
         )
 
+        trajectory = (
+            db.query(Trajectory)
+            .filter(Trajectory.session_id == db_session.id)
+            .first()
+        )
+
         # Convert to response models
         session_response = SessionResponse(
             id=db_session.id,
@@ -176,6 +192,11 @@ class SessionService:
             for fe in file_embeddings
         ]
 
+        trajectory_response = TrajectoryService.serialize(
+            trajectory,
+            session=db_session,
+        )
+
         context_response = SessionContextResponse(
             session=session_response,
             messages=message_responses,
@@ -201,6 +222,7 @@ class SessionService:
             },
             user_issues=[],
             file_embeddings=file_embedding_responses,
+            trajectory=trajectory_response,
         )
 
         return context_response
@@ -323,6 +345,247 @@ class SessionService:
         }
 
         return stats
+
+
+class TrajectoryService:
+    """Helpers for loading and storing trajectory data."""
+
+    DEFAULT_TRAJECTORY_PATH = Path.home() / ".config/mini-swe-agent/last_mini_run.traj.json"
+
+    @staticmethod
+    def serialize(
+        trajectory: Optional[Trajectory],
+        session: Optional[ChatSession] = None,
+    ) -> Optional[TrajectoryResponse]:
+        if not trajectory:
+            return None
+
+        session = session or trajectory.session
+        session_identifier = (
+            session.session_id if session else str(trajectory.session_id)
+        )
+
+        repository_info: Optional[Dict[str, Any]] = None
+        if session and session.repo_owner and session.repo_name:
+            repository_info = {
+                "owner": session.repo_owner,
+                "name": session.repo_name,
+                "branch": session.repo_branch,
+                "full_name": f"{session.repo_owner}/{session.repo_name}",
+                "html_url": f"https://github.com/{session.repo_owner}/{session.repo_name}",
+            }
+
+        issue_number = trajectory.issue.number if trajectory.issue else None
+
+        return TrajectoryResponse(
+            id=trajectory.id,
+            user_id=trajectory.user_id,
+            session_id=trajectory.session_id,
+            session_identifier=session_identifier,
+            issue_id=trajectory.issue_id,
+            issue_number=issue_number,
+            solve_session_id=trajectory.solve_session_id,
+            source_path=trajectory.source_path,
+            trajectory_data=trajectory.trajectory_data,
+            summary=trajectory.summary,
+            created_at=trajectory.created_at,
+            updated_at=trajectory.updated_at,
+            repository=repository_info,
+        )
+
+    @staticmethod
+    def persist_from_request(
+        db: Session,
+        *,
+        user: "User",
+        session: ChatSession,
+        payload: TrajectoryUpsertRequest,
+    ) -> Trajectory:
+        source_path = payload.source_path or str(TrajectoryService.DEFAULT_TRAJECTORY_PATH)
+        path_obj = Path(source_path).expanduser()
+
+        trajectory_data = payload.trajectory_data
+        if trajectory_data is None:
+            if not path_obj.exists():
+                raise HTTPException(
+                    status.HTTP_404_NOT_FOUND,
+                    detail=f"Trajectory file not found at {path_obj}",
+                )
+            try:
+                with path_obj.open("r", encoding="utf-8") as handle:
+                    trajectory_data = json.load(handle)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Failed to parse trajectory file: {exc}",
+                ) from exc
+
+        issue = TrajectoryService._resolve_issue(db, session, payload)
+        solve_session = TrajectoryService._resolve_solve_session(db, user, payload)
+
+        existing = (
+            db.query(Trajectory)
+            .filter(Trajectory.session_id == session.id)
+            .first()
+        )
+
+        summary = payload.summary or TrajectoryService._build_summary(trajectory_data)
+
+        if existing:
+            logger.info("Updating existing trajectory for session %s", session.session_id)
+            existing.trajectory_data = trajectory_data
+            existing.summary = summary
+            existing.source_path = str(path_obj)
+            existing.issue_id = issue.id if issue else None
+            existing.solve_session_id = (
+                solve_session.id if solve_session else payload.solve_session_id
+            )
+        else:
+            logger.info("Creating trajectory for session %s", session.session_id)
+            existing = Trajectory(
+                user_id=user.id,
+                session_id=session.id,
+                issue_id=issue.id if issue else None,
+                solve_session_id=(
+                    solve_session.id if solve_session else payload.solve_session_id
+                ),
+                source_path=str(path_obj),
+                trajectory_data=trajectory_data,
+                summary=summary,
+            )
+            db.add(existing)
+
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail="Trajectory already exists for the provided session or issue",
+            ) from exc
+
+        db.refresh(existing)
+        return existing
+
+    @staticmethod
+    def list_for_user(db: Session, user_id: int) -> List[Trajectory]:
+        return (
+            db.query(Trajectory)
+            .join(ChatSession, Trajectory.session_id == ChatSession.id)
+            .filter(Trajectory.user_id == user_id)
+            .order_by(Trajectory.created_at.desc())
+            .all()
+        )
+
+    @staticmethod
+    def get_for_session(db: Session, session_id: int) -> Optional[Trajectory]:
+        return (
+            db.query(Trajectory)
+            .filter(Trajectory.session_id == session_id)
+            .first()
+        )
+
+    @staticmethod
+    def _resolve_issue(
+        db: Session,
+        session: ChatSession,
+        payload: TrajectoryUpsertRequest,
+    ) -> Optional[Issue]:
+        if payload.issue_id:
+            issue = db.query(Issue).filter(Issue.id == payload.issue_id).first()
+            if not issue:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Issue not found")
+            return issue
+
+        if (
+            payload.issue_number is None
+            or not session.repo_owner
+            or not session.repo_name
+        ):
+            return None
+
+        repository = (
+            db.query(Repository)
+            .filter(
+                Repository.owner == session.repo_owner,
+                Repository.name == session.repo_name,
+            )
+            .first()
+        )
+        if not repository:
+            return None
+
+        issue = (
+            db.query(Issue)
+            .filter(
+                Issue.repository_id == repository.id,
+                Issue.number == payload.issue_number,
+            )
+            .first()
+        )
+
+        if not issue:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, detail="Issue not found for repository"
+            )
+
+        return issue
+
+    @staticmethod
+    def _resolve_solve_session(
+        db: Session,
+        user: "User",
+        payload: TrajectoryUpsertRequest,
+    ) -> Optional[AISolveSession]:
+        if not payload.solve_session_id:
+            return None
+
+        solve_session = (
+            db.query(AISolveSession)
+            .filter(
+                AISolveSession.id == payload.solve_session_id,
+                AISolveSession.user_id == user.id,
+            )
+            .first()
+        )
+
+        if not solve_session:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Solve session not found")
+
+        return solve_session
+
+    @staticmethod
+    def _build_summary(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        summary: Dict[str, Any] = {}
+
+        steps_obj = (
+            data.get("steps")
+            or data.get("trajectory")
+            or data.get("events")
+            or []
+        )
+
+        if isinstance(steps_obj, list):
+            summary["step_count"] = len(steps_obj)
+        elif isinstance(steps_obj, dict):
+            summary["step_count"] = len(steps_obj)
+
+        for key in ("model", "agent", "solver", "runtime"):
+            if key in data and isinstance(data[key], (str, int, float, bool)):
+                summary[f"metadata_{key}"] = data[key]
+
+        for key in ("generated_at", "timestamp", "created_at"):
+            if key in data and isinstance(data[key], str):
+                summary["generated_at"] = data[key]
+                break
+
+        error = data.get("error")
+        if error:
+            summary["has_error"] = True
+            if isinstance(error, dict) and error.get("message"):
+                summary["error_message"] = error["message"]
+
+        return summary or None
 
 
 class FileDepsService:
