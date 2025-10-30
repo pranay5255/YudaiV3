@@ -5,6 +5,7 @@ import {
   TabType,
   ContextCard,
   FileItem,
+  Trajectory,
   ChatMessage,
   GitHubRepository,
   User,
@@ -109,6 +110,14 @@ interface SessionState {
   isLoadingFileContext: boolean;
   fileContextError: string | null;
 
+  // ==========================================================================
+  // TRAJECTORY STATE (matches Trajectory model)
+  // ==========================================================================
+  trajectories: Trajectory[];
+  activeTrajectory: Trajectory | null;
+  isLoadingTrajectories: boolean;
+  trajectoryError: string | null;
+
   // ============================================================================
   // USER ISSUES STATE (matches UserIssue model)
   // ============================================================================
@@ -199,6 +208,16 @@ interface SessionState {
   setFileContext: (files: FileItem[]) => void;
   setFileContextLoading: (loading: boolean) => void;
   setFileContextError: (error: string | null) => void;
+
+  // ==========================================================================
+  // TRAJECTORY ACTIONS (matches Trajectory APIs)
+  // ==========================================================================
+  loadTrajectories: () => Promise<void>;
+  loadSessionTrajectory: (sessionId: string) => Promise<Trajectory | null>;
+  setTrajectories: (trajectories: Trajectory[]) => void;
+  setActiveTrajectory: (trajectory: Trajectory | null) => void;
+  setTrajectoryLoading: (loading: boolean) => void;
+  setTrajectoryError: (error: string | null) => void;
 
   // ============================================================================
   // USER ISSUE ACTIONS (matches UserIssue APIs)
@@ -308,6 +327,12 @@ export const useSessionStore = create<SessionState>()(
         fileContext: [],
         isLoadingFileContext: false,
         fileContextError: null,
+
+        // Trajectory state
+        trajectories: [],
+        activeTrajectory: null,
+        isLoadingTrajectories: false,
+        trajectoryError: null,
 
         // User issues state
         userIssues: [],
@@ -466,6 +491,10 @@ export const useSessionStore = create<SessionState>()(
               currentIssue: null,
               totalTokens: 0,
               lastActivity: null,
+              trajectories: [],
+              activeTrajectory: null,
+              isLoadingTrajectories: false,
+              trajectoryError: null,
             });
             window.location.href = '/auth/login';
           }
@@ -571,6 +600,15 @@ export const useSessionStore = create<SessionState>()(
               })
             );
 
+            const existingTrajectories = get().trajectories;
+            const contextTrajectory = context.trajectory ?? null;
+            const mergedTrajectories = contextTrajectory
+              ? [
+                  contextTrajectory,
+                  ...existingTrajectories.filter((t) => t.id !== contextTrajectory.id),
+                ]
+              : existingTrajectories;
+
             // Update all session state from context
             set({
               activeSessionId: sessionId,
@@ -585,6 +623,9 @@ export const useSessionStore = create<SessionState>()(
               isLoading: false,
               error: null,
               lastActivity: new Date(),
+              activeTrajectory: contextTrajectory,
+              trajectories: mergedTrajectories,
+              isLoadingTrajectories: false,
             });
 
             return true;
@@ -1047,6 +1088,93 @@ export const useSessionStore = create<SessionState>()(
         clearAgentHistory: () => set({ agentHistory: [] }),
 
         // ============================================================================
+        // TRAJECTORY ACTIONS (matches Trajectory APIs)
+        // ============================================================================
+
+        loadTrajectories: async () => {
+          const { sessionToken } = get();
+
+          if (!sessionToken) {
+            console.warn('[SessionStore] Attempted to load trajectories without session token');
+            return;
+          }
+
+          try {
+            set({ isLoadingTrajectories: true, trajectoryError: null });
+
+            const trajectories = await handleApiResponse<Trajectory[]>(
+              await fetch(buildApiUrl(API.SESSIONS.TRAJECTORIES), {
+                method: 'GET',
+                headers: getAuthHeaders(sessionToken),
+              })
+            );
+
+            set({
+              trajectories,
+              isLoadingTrajectories: false,
+              trajectoryError: null,
+            });
+          } catch (error) {
+            console.error('Failed to load trajectories:', error);
+            set({
+              isLoadingTrajectories: false,
+              trajectoryError: error instanceof Error ? error.message : 'Failed to load trajectories',
+            });
+          }
+        },
+
+        loadSessionTrajectory: async (sessionId: string) => {
+          const { sessionToken } = get();
+
+          if (!sessionToken) {
+            throw new Error('No session token available');
+          }
+
+          try {
+            set({ isLoadingTrajectories: true, trajectoryError: null });
+
+            const trajectory = await handleApiResponse<Trajectory>(
+              await fetch(buildApiUrl(API.SESSIONS.TRAJECTORY, { sessionId }), {
+                method: 'GET',
+                headers: getAuthHeaders(sessionToken),
+              })
+            );
+
+            set((state) => {
+              const existingIndex = state.trajectories.findIndex((t) => t.id === trajectory.id);
+              const trajectories = existingIndex >= 0
+                ? state.trajectories.map((t, idx) => (idx === existingIndex ? trajectory : t))
+                : [trajectory, ...state.trajectories];
+
+              return {
+                trajectories,
+                activeTrajectory: trajectory,
+                isLoadingTrajectories: false,
+              };
+            });
+
+            return trajectory;
+          } catch (error) {
+            console.error('Failed to load trajectory:', error);
+            const message = error instanceof Error ? error.message : 'Failed to load trajectory';
+            const isNotFound = message.toLowerCase().includes('404') || message.toLowerCase().includes('not found');
+
+            set((state) => ({
+              isLoadingTrajectories: false,
+              trajectoryError: isNotFound ? null : message,
+              activeTrajectory: isNotFound ? null : state.activeTrajectory,
+            }));
+
+            return null;
+          }
+        },
+
+        setTrajectories: (trajectories: Trajectory[]) => set({ trajectories }),
+        setActiveTrajectory: (trajectory: Trajectory | null) => set({ activeTrajectory: trajectory }),
+        setTrajectoryLoading: (loading: boolean) => set({ isLoadingTrajectories: loading }),
+        setTrajectoryError: (error: string | null) => set({ trajectoryError: error }),
+
+        // ============================================================================
         // CORE ACTIONS
         // ============================================================================
 
@@ -1070,6 +1198,10 @@ export const useSessionStore = create<SessionState>()(
             lastActivity: null,
             agentStatus: null,
             agentHistory: [],
+            trajectories: [],
+            activeTrajectory: null,
+            isLoadingTrajectories: false,
+            trajectoryError: null,
           });
         },
 

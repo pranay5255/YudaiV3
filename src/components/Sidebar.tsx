@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageCircle, CreditCard, Lightbulb, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MessageCircle, CreditCard, Lightbulb, Route, ChevronLeft, ChevronRight } from 'lucide-react';
 import { TabType } from '../types';
 
 interface SidebarProps {
@@ -12,6 +12,7 @@ interface SidebarProps {
 const tabs = [
   { id: 'chat' as TabType, label: 'Chat', icon: MessageCircle },
   { id: 'context' as TabType, label: 'Context for Issue', icon: CreditCard },
+  { id: 'trajectories' as TabType, label: 'Trajectories', icon: Route },
   { id: 'ideas' as TabType, label: 'Ideas to Implement', icon: Lightbulb },
 ];
 

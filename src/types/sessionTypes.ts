@@ -33,6 +33,7 @@ export interface SessionContext {
   statistics?: SessionStatistics;
   user_issues?: UserIssue[];
   file_embeddings?: FileItem[];
+  trajectory?: Trajectory;
 }
 
 // ============================================================================
@@ -88,6 +89,28 @@ export interface FileItem {
   file_path?: string;
   file_type?: string;
   content_summary?: string;
+}
+
+export interface Trajectory {
+  id: number;
+  user_id: number;
+  session_id: number;
+  session_identifier: string;
+  issue_id?: number;
+  issue_number?: number;
+  solve_session_id?: number;
+  source_path?: string;
+  trajectory_data: Record<string, unknown>;
+  summary?: Record<string, unknown>;
+  repository?: {
+    owner?: string;
+    name?: string;
+    branch?: string;
+    full_name?: string;
+    html_url?: string;
+  };
+  created_at: string;
+  updated_at?: string;
 }
 
 // ============================================================================
@@ -530,7 +553,7 @@ export interface FileDependencyMutationContext {
 // UI & STATE TYPES
 // ============================================================================
 
-export type TabType = 'chat' | 'context' | 'ideas';
+export type TabType = 'chat' | 'context' | 'ideas' | 'trajectories';
 
 export interface TabState {
   activeTab: TabType;
@@ -538,6 +561,7 @@ export interface TabState {
     chat: number;
     context: number;
     ideas: number;
+    trajectories: number;
   };
   tabHistory: TabType[];
 }

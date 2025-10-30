@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
@@ -13,11 +13,18 @@ import { SessionErrorBoundary } from './components/SessionErrorBoundary';
 import { AuthSuccess } from './components/AuthSuccess';
 import { AuthCallback } from './components/AuthCallback';
 import { LoginPage } from './components/LoginPage';
-import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository } from './types';
+import { Trajectories } from './components/Trajectories';
+import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository, Trajectory } from './types';
 import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
 import { useSessionManagement } from './hooks/useSessionManagement';
-import { useSession, useContextCards, useRemoveContextCard } from './hooks/useSessionQueries';
+import {
+  useSession,
+  useContextCards,
+  useRemoveContextCard,
+  useTrajectories,
+  useSessionTrajectory,
+} from './hooks/useSessionQueries';
 import { UserIssueResponse } from './types';
 import { ChatContextMessage, FileContextItem } from './types/api';
 
@@ -66,16 +73,19 @@ function AppContent() {
     activeTab,
     setActiveTab,
     sidebarCollapsed,
-    setSidebarCollapsed
+    setSidebarCollapsed,
+    setSession,
   } = useSessionManagement();
   
   // React Query hooks for data fetching
   const { data: sessionData, isLoading: isSessionLoading } = useSession(activeSessionId || '');
   const { data: contextCards = [] } = useContextCards(activeSessionId || '');
+  const { data: trajectoriesData = [], isLoading: isTrajectoriesLoading } = useTrajectories();
+  useSessionTrajectory(activeSessionId || '');
   const removeContextCardMutation = useRemoveContextCard();
 
   const isValidTab = (tab: unknown): tab is TabType =>
-    tab === 'chat' || tab === 'context' || tab === 'ideas';
+    tab === 'chat' || tab === 'context' || tab === 'ideas' || tab === 'trajectories';
 
   useEffect(() => {
     if (!isValidTab(activeTab)) {
@@ -183,6 +193,15 @@ function AppContent() {
     });
   };
 
+  const handleTrajectorySelect = useCallback((trajectory: Trajectory) => {
+    if (!trajectory?.session_identifier) {
+      return;
+    }
+
+    setSession(trajectory.session_identifier);
+    setActiveTab('chat');
+  }, [setSession, setActiveTab]);
+
   const handleCreateIdeaIssue = (idea: IdeaItem) => {
     // Simplified idea issue creation
     console.log('Creating idea issue:', idea);
@@ -207,6 +226,15 @@ function AppContent() {
           <ContextCards
             cards={contextCards}
             onRemoveCard={removeContextCardHandler}
+          />
+        );
+      case 'trajectories':
+        return (
+          <Trajectories
+            trajectories={trajectoriesData}
+            isLoading={isTrajectoriesLoading}
+            activeSessionId={activeSessionId}
+            onSelect={handleTrajectorySelect}
           />
         );
       case 'ideas':
