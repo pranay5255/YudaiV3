@@ -268,6 +268,38 @@ def create_tables_standalone(engine):
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS ai_solve_sessions (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            issue_id INTEGER REFERENCES issues(id),
+            ai_model_id INTEGER,
+            swe_config_id INTEGER,
+            status VARCHAR(50) DEFAULT 'pending',
+            repo_url VARCHAR(1000),
+            branch_name VARCHAR(255) DEFAULT 'main',
+            trajectory_data JSONB,
+            error_message TEXT,
+            started_at TIMESTAMP WITH TIME ZONE,
+            completed_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS trajectories (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            session_id INTEGER UNIQUE REFERENCES chat_sessions(id) ON DELETE CASCADE,
+            issue_id INTEGER UNIQUE REFERENCES issues(id),
+            solve_session_id INTEGER UNIQUE REFERENCES ai_solve_sessions(id),
+            source_path VARCHAR(1024),
+            trajectory_data JSONB NOT NULL,
+            summary JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS chat_messages (
             id SERIAL PRIMARY KEY,
             session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
@@ -352,6 +384,13 @@ def create_tables_standalone(engine):
         "CREATE INDEX IF NOT EXISTS idx_file_embeddings_file_path ON file_embeddings(file_path)",
         # Vector index for similarity search (using IVFFlat for cosine distance)
         "CREATE INDEX IF NOT EXISTS idx_file_embeddings_embedding ON file_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)",
+        # AI solve session indexes (minimal)
+        "CREATE INDEX IF NOT EXISTS idx_ai_solve_sessions_user_id ON ai_solve_sessions(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ai_solve_sessions_issue_id ON ai_solve_sessions(issue_id)",
+        # Trajectory indexes
+        "CREATE INDEX IF NOT EXISTS idx_trajectories_user_id ON trajectories(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_trajectories_issue_id ON trajectories(issue_id)",
+        "CREATE INDEX IF NOT EXISTS idx_trajectories_created_at ON trajectories(created_at)",
         
         # Chat session indexes
         "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)",
@@ -538,7 +577,7 @@ def check_database_health():
             expected_tables = [
                 'users', 'auth_tokens', 'session_tokens', 'repositories',
                 'issues', 'pull_requests', 'commits', 'user_issues', 'file_embeddings', 'oauth_states',
-                'chat_sessions', 'chat_messages', 'context_cards'
+                'chat_sessions', 'chat_messages', 'context_cards', 'trajectories'
             ]
             missing_tables = [table for table in expected_tables if table not in tables]
             

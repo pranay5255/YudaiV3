@@ -338,6 +338,38 @@ CREATE TABLE IF NOT EXISTS file_embeddings (
     updated_at TIMESTAMP WITH TIME ZONE
 );
 
+-- AI solve sessions table (minimal definition for trajectory linkage)
+CREATE TABLE IF NOT EXISTS ai_solve_sessions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    issue_id INTEGER REFERENCES issues(id),
+    ai_model_id INTEGER,
+    swe_config_id INTEGER,
+    status VARCHAR(50) DEFAULT 'pending',
+    repo_url VARCHAR(1000),
+    branch_name VARCHAR(255) DEFAULT 'main',
+    trajectory_data JSONB,
+    error_message TEXT,
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Trajectories table (NEW - stores AI run trajectories per session and issue)
+CREATE TABLE IF NOT EXISTS trajectories (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    session_id INTEGER UNIQUE REFERENCES chat_sessions(id) ON DELETE CASCADE,
+    issue_id INTEGER UNIQUE REFERENCES issues(id),
+    solve_session_id INTEGER UNIQUE REFERENCES ai_solve_sessions(id),
+    source_path VARCHAR(1024),
+    trajectory_data JSONB NOT NULL,
+    summary JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE
+);
+
 -- OAuth states table
 CREATE TABLE IF NOT EXISTS oauth_states (
     state VARCHAR(255) PRIMARY KEY,
@@ -441,6 +473,15 @@ CREATE INDEX IF NOT EXISTS idx_file_embeddings_file_path ON file_embeddings(file
 -- Vector index for similarity search (using IVFFlat for cosine distance)
 CREATE INDEX IF NOT EXISTS idx_file_embeddings_embedding ON file_embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
+-- AI solve session indexes (minimal for linkage)
+CREATE INDEX IF NOT EXISTS idx_ai_solve_sessions_user_id ON ai_solve_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_ai_solve_sessions_issue_id ON ai_solve_sessions(issue_id);
+
+-- Trajectory indexes
+CREATE INDEX IF NOT EXISTS idx_trajectories_user_id ON trajectories(user_id);
+CREATE INDEX IF NOT EXISTS idx_trajectories_issue_id ON trajectories(issue_id);
+CREATE INDEX IF NOT EXISTS idx_trajectories_created_at ON trajectories(created_at);
+
 -- OAuth state indexes
 CREATE INDEX IF NOT EXISTS idx_oauth_states_expires_at ON oauth_states(expires_at);
 CREATE INDEX IF NOT EXISTS idx_oauth_states_is_used ON oauth_states(is_used);
@@ -526,6 +567,12 @@ SELECT create_trigger_if_not_exists(
     'update_file_embeddings_updated_at',
     'file_embeddings',
     'CREATE TRIGGER update_file_embeddings_updated_at BEFORE UPDATE ON file_embeddings FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
+
+SELECT create_trigger_if_not_exists(
+    'update_trajectories_updated_at',
+    'trajectories',
+    'CREATE TRIGGER update_trajectories_updated_at BEFORE UPDATE ON trajectories FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
 );
 
 SELECT create_trigger_if_not_exists(
