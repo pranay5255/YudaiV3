@@ -5,6 +5,7 @@
 import type {
   ContextCard,
   FileItem,
+  Trajectory,
   User,
   GitHubRepository,
   GitHubBranch,
@@ -105,6 +106,7 @@ export interface IssueOpsContext {
 export type {
   ContextCard,
   FileItem,
+  Trajectory,
   User,
   GitHubRepository,
   GitHubBranch,
