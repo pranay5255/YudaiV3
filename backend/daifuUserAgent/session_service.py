@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
 from models import (
+    AISolveSession,
     ChatMessage,
     ChatMessageResponse,
     ChatSession,
@@ -21,15 +22,14 @@ from models import (
     FileEmbedding,
     FileEmbeddingResponse,
     FileItem,
-    AISolveSession,
     Issue,
     Repository,
     SessionContextResponse,
     SessionResponse,
-    User,
     Trajectory,
     TrajectoryResponse,
     TrajectoryUpsertRequest,
+    User,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
