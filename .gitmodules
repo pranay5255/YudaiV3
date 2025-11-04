@@ -1,7 +1,6 @@
-[submodule "Yudai-SWE-agent"]
-	path = Yudai-SWE-agent
-	url = https://github.com/pranay5255/Yudai-SWE-agent.git
-[submodule "backend/context/op-grep"]
-	path = backend/context/op-grep
-	url = https://github.com/pranay5255/op-grep.git
-	branch = main
+[submodule "backend/context/yudai-grep"]
+	path = backend/context/yudai-grep
+	url = https://github.com/pranay5255/yudai-grep.git
+[submodule "backend/solver/mswea"]
+	path = backend/solver/mswea
+	url = https://github.com/pranay5255/yudai-swe-agent.git
