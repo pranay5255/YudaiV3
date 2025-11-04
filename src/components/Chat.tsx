@@ -508,16 +508,6 @@ export const Chat: React.FC<ChatProps> = ({
         </div>
       )}
 
-      {/* File Dependencies Info (no manual extraction) */}
-      {selectedRepository && fileContext.length === 0 && (
-        <div className="bg-blue-600/20 border border-blue-600/30 rounded-lg p-4 mx-4 mb-4">
-          <div className="text-blue-400 font-medium mb-2">📁 No File Dependencies Found</div>
-          <div className="text-blue-300 text-sm">
-            Indexing happens automatically after repository selection. File context will appear once ready.
-          </div>
-        </div>
-      )}
-
       {/* Messages Container */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((message) => (
