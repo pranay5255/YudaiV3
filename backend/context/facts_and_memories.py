@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from daifuUserAgent.llm_service import LLMService
@@ -16,6 +17,24 @@ from repo_processorGitIngest.scraper_script import (
 from utils.chunking import create_file_chunker
 
 logger = logging.getLogger(__name__)
+
+# Yudai-grep integration
+try:
+    import sys
+
+    yudai_grep_path = Path(__file__).parent / "yudai-grep"
+    if yudai_grep_path.exists():
+        sys.path.insert(0, str(yudai_grep_path))
+    from main import predict_action
+
+    from src.runtime import load_model
+
+    YUDAI_GREP_AVAILABLE = True
+except (ImportError, FileNotFoundError) as e:
+    logger.debug(f"Yudai-grep not available: {e}")
+    YUDAI_GREP_AVAILABLE = False
+    predict_action = None
+    load_model = None
 
 
 # ---------------------------------------------------------------------------
@@ -201,10 +220,99 @@ class FactsAndMemoriesResult:
 
 
 class FactsAndMemoriesService:
-    """Generates high-signal repository facts and conversational memories."""
+    """Generates high-signal repository facts and conversational memories using yudai-grep."""
 
     def __init__(self, model: Optional[str] = None) -> None:
         self.model = model
+        self._grep_model = None
+
+    def _get_grep_model(self):
+        """Lazy load yudai-grep model."""
+        if not YUDAI_GREP_AVAILABLE:
+            return None
+        if self._grep_model is None:
+            try:
+                self._grep_model = load_model()
+            except Exception as e:
+                logger.warning(f"Failed to load yudai-grep model: {e}")
+                return None
+        return self._grep_model
+
+    def _analyze_repository_structure(
+        self, snapshot: RepositorySnapshot, queries: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Use yudai-grep to identify key files and folders based on repository queries."""
+        grep_model = self._get_grep_model()
+        if not grep_model:
+            return {"key_files": [], "key_folders": [], "predictions": []}
+
+        # Extract queries from conversation or use default repository analysis queries
+        if not queries:
+            queries = [
+                "What are the main entry points and configuration files?",
+                "Where is the core business logic implemented?",
+                "What are the key test files and documentation?",
+            ]
+
+        predictions = []
+        key_files = set()
+        key_folders = set()
+
+        for query in queries:
+            try:
+                prediction = predict_action(grep_model, query)
+                if prediction:
+                    predictions.append(
+                        {
+                            "query": query,
+                            "tool": prediction.tool,
+                            "path": prediction.path,
+                        }
+                    )
+                    # Extract file paths and folder paths
+                    if prediction.path:
+                        path_obj = Path(prediction.path)
+                        key_files.add(prediction.path)
+                        # Add parent folders
+                        for parent in path_obj.parents:
+                            if str(parent) != ".":
+                                key_folders.add(str(parent))
+            except Exception as e:
+                logger.debug(f"Yudai-grep prediction failed for query '{query}': {e}")
+
+        # Also analyze directory structure from snapshot files
+        dir_structure = RepositorySnapshotService.build_directory_index(snapshot.files)
+
+        return {
+            "key_files": list(key_files),
+            "key_folders": list(key_folders),
+            "predictions": predictions,
+            "directory_structure": self._summarize_directory_structure(dir_structure),
+        }
+
+    @staticmethod
+    def _summarize_directory_structure(
+        dir_dict: Dict[str, Any], max_depth: int = 3
+    ) -> str:
+        """Summarize directory structure for facts generation."""
+
+        def _walk(node: Dict[str, Any], prefix: str = "", depth: int = 0) -> List[str]:
+            if depth > max_depth:
+                return []
+            lines = []
+            for key, value in node.items():
+                if key == "__files__":
+                    file_count = len(value)
+                    if file_count > 0:
+                        lines.append(f"{prefix}├── {key}: {file_count} files")
+                else:
+                    lines.append(f"{prefix}├── {key}/")
+                    if isinstance(value, dict):
+                        lines.extend(_walk(value, prefix + "│   ", depth + 1))
+            return lines
+
+        lines = _walk(dir_dict)
+        return "\n".join(lines[:50])  # Limit to 50 lines
 
     async def generate(
         self,
@@ -212,7 +320,23 @@ class FactsAndMemoriesService:
         conversation: Optional[Sequence[Dict[str, Any]]] = None,
         max_messages: int = 10,
     ) -> FactsAndMemoriesResult:
-        prompt = self._build_prompt(snapshot, conversation, max_messages=max_messages)
+        # Extract queries from conversation for yudai-grep analysis
+        queries = []
+        if conversation:
+            for msg in conversation[-max_messages:]:
+                text = (msg.get("text") or msg.get("content") or "").strip()
+                if text and len(text) > 10:  # Filter out very short messages
+                    queries.append(text)
+
+        # Analyze repository structure using yudai-grep
+        repo_analysis = self._analyze_repository_structure(snapshot, queries)
+
+        prompt = self._build_prompt(
+            snapshot,
+            conversation,
+            max_messages=max_messages,
+            repo_analysis=repo_analysis,
+        )
         response = await LLMService.generate_response(
             prompt,
             model=self.model,
@@ -226,6 +350,7 @@ class FactsAndMemoriesService:
         snapshot: RepositorySnapshot,
         conversation: Optional[Sequence[Dict[str, Any]]],
         max_messages: int,
+        repo_analysis: Optional[Dict[str, Any]] = None,
     ) -> str:
         summary = snapshot.raw_response.get("raw_response", {}).get(
             "summary", "No summary available."
@@ -235,6 +360,29 @@ class FactsAndMemoriesService:
         convo_preview = self._render_conversation(
             conversation, max_messages=max_messages
         )
+
+        # Add yudai-grep analysis if available
+        grep_analysis = ""
+        if repo_analysis:
+            key_files = repo_analysis.get("key_files", [])
+            key_folders = repo_analysis.get("key_folders", [])
+            predictions = repo_analysis.get("predictions", [])
+            dir_structure = repo_analysis.get("directory_structure", "")
+
+            grep_analysis = f"""
+## Yudai-Grep Analysis (Intelligent File/Folder Detection)
+### Key Files Identified:
+{chr(10).join(f"- {f}" for f in key_files[:10]) if key_files else "- No key files identified"}
+
+### Key Folders Identified:
+{chr(10).join(f"- {f}" for f in key_folders[:10]) if key_folders else "- No key folders identified"}
+
+### Query-Based Predictions:
+{chr(10).join(f"- Query: {p['query']} → {p['tool']}:{p['path']}" for p in predictions[:5]) if predictions else "- No predictions available"}
+
+### Directory Structure:
+{dir_structure[:800] if dir_structure else "Not available"}
+"""
 
         prompt = f"""
 You are an analytical assistant. Convert the repository information and recent chat into two buckets: FACTS (grounded, file-backed statements) and MEMORIES (useful conversation takeaways). Output valid JSON with keys "facts", "memories", and "highlights".
@@ -247,15 +395,16 @@ You are an analytical assistant. Convert the repository information and recent c
 
 ## Key Files
 {files_preview}
+{grep_analysis}
 
 ## Recent Conversation
 {convo_preview}
 
 ## Instructions
 - Use bullet-point style sentences.
-- Facts MUST cite specific files when possible.
+- Facts MUST cite specific files when possible (prioritize files identified by yudai-grep analysis).
 - Memories should capture goals or unresolved threads from the chat.
-- Highlights can include noteworthy files or TODOs worth surfacing.
+- Highlights should focus on key files and folders identified by yudai-grep.
 - Respond ONLY with JSON.
 """
         return prompt.strip()

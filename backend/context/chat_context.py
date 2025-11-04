@@ -65,7 +65,6 @@ class ChatContext:
     """Central coordinator for fetching and caching repository context."""
 
     CACHE_ROOT = Path("/tmp/github_context_cache")
-    CACHE_TTL_SECONDS = 86400  # 24 hours
     MAX_FILES_FOR_EMBEDDING = 25
     MAX_CHUNKS_FOR_CONTEXT = 6
     MAX_CONTEXT_STRING_LENGTH = 4000
@@ -415,37 +414,23 @@ class ChatContext:
         return payload
 
     async def ensure_github_context(self) -> Optional[Dict[str, Any]]:
-        """Ensure cached repository context is available and up to date."""
+        """Fetch and cache repository context using GitIngest."""
 
         if not self.repo_owner or not self.repo_name:
             return None
 
+        # Check for existing cache first
         repository = self._load_repository()
-        existing_meta = (
-            CacheMetadata.from_dict(getattr(repository, "github_context", None))
-            if repository
-            else None
-        )
-        updated_at = (
-            getattr(repository, "github_context_updated_at", None)
-            if repository
-            else None
-        )
-
-        if existing_meta and updated_at:
-            age_seconds = (utc_now() - updated_at).total_seconds()
-            if age_seconds < self.CACHE_TTL_SECONDS:
+        if repository:
+            existing_meta = CacheMetadata.from_dict(
+                getattr(repository, "github_context", None)
+            )
+            if existing_meta:
                 cached = self.read_cache(existing_meta)
                 if cached:
                     return cached
-            else:
-                self.logger.info(
-                    "Cached GitIngest context for %s/%s is stale (%ds old); refreshing",
-                    self.repo_owner,
-                    self.repo_name,
-                    int(age_seconds),
-                )
 
+        # Fetch fresh context
         try:
             fetched_context = await self._build_gitingest_context()
         except Exception as exc:
@@ -457,8 +442,10 @@ class ChatContext:
             )
             return None
 
+        # Cache the result
         cache_meta = self.write_cache(fetched_context)
 
+        # Update repository record
         repo_url = self._build_repo_url()
         if repository is None:
             repository = Repository(
@@ -479,7 +466,7 @@ class ChatContext:
 
         try:
             self.db.commit()
-        except Exception as commit_err:  # pragma: no cover - defensive logging
+        except Exception as commit_err:
             self.logger.warning("Failed to commit repository metadata: %s", commit_err)
             self.db.rollback()
 
@@ -626,6 +613,47 @@ class ChatContext:
         if summary:
             return summary
         return "Repository context unavailable"
+
+    # ------------------------------------------------------------------
+    # Static utility methods (moved from context_utils.py)
+    # ------------------------------------------------------------------
+    @staticmethod
+    async def ensure_github_context_async(
+        db: Session,
+        user_id: int,
+        session_obj,
+        repo_owner: str,
+        repo_name: str,
+    ) -> Optional[dict]:
+        """Async utility function for refreshing GitHub repository context."""
+
+        context = ChatContext(
+            db=db,
+            user_id=user_id,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            session_obj=session_obj,
+        )
+        return await context.ensure_github_context()
+
+    @staticmethod
+    async def get_best_repo_context_string(
+        db: Session,
+        user_id: int,
+        session_id: str,
+        repo_owner: str,
+        repo_name: str,
+    ) -> str:
+        """Return the best available repository context summary."""
+
+        context = ChatContext(
+            db=db,
+            user_id=user_id,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            session_id=session_id,
+        )
+        return await context.get_best_context_string()
 
 
 __all__ = ["ChatContext"]

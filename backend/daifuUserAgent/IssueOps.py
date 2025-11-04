@@ -437,10 +437,10 @@ class IssueService:
         try:
             logger.info(f"Generating issue from context for user {user_id}")
 
-            # Get comprehensive repository context string using shared utility
-            from context.context_utils import get_best_repo_context_string
+            # Get comprehensive repository context string using ChatContext
+            from context.chat_context import ChatContext
 
-            repo_context = await get_best_repo_context_string(
+            repo_context = await ChatContext.get_best_repo_context_string(
                 db=self.db,
                 user_id=user_id,
                 session_id=session_id,
