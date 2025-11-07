@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "yudai-v3"
 version = "1.0.0"
-description = "AI-powered code generation backend with SWE-agent integration"
+description = "AI-powered code generation backend with mini-SWE-agent integration"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.109.0",
@@ -29,8 +29,7 @@ dependencies = [
     "e2b-code-interpreter>=2.0.0",
     "e2b>=2.2.1",
     "pytest>=8.4.1",
-    "mini-swe-agent>=1.14.4",
-    "prime>=0.4.11",
+ 
 ]
 
 [project.optional-dependencies]
