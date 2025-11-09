@@ -1,7 +1,7 @@
 Metadata-Version: 2.4
 Name: yudai-v3
 Version: 1.0.0
-Summary: AI-powered code generation backend with SWE-agent integration
+Summary: AI-powered code generation backend with mini-SWE-agent integration
 Requires-Python: >=3.11
 Requires-Dist: fastapi>=0.109.0
 Requires-Dist: uvicorn[standard]>=0.27.0
@@ -24,8 +24,6 @@ Requires-Dist: sentence-transformers>=5.1.0
 Requires-Dist: e2b-code-interpreter>=2.0.0
 Requires-Dist: e2b>=2.2.1
 Requires-Dist: pytest>=8.4.1
-Requires-Dist: mini-swe-agent>=1.14.4
-Requires-Dist: prime>=0.4.11
 Provides-Extra: dev
 Requires-Dist: datasets>=2.16.0; extra == "dev"
 Requires-Dist: numpy>=1.26.0; extra == "dev"

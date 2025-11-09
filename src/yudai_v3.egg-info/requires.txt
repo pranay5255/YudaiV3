@@ -19,8 +19,6 @@ sentence-transformers>=5.1.0
 e2b-code-interpreter>=2.0.0
 e2b>=2.2.1
 pytest>=8.4.1
-mini-swe-agent>=1.14.4
-prime>=0.4.11
 
 [dev]
 datasets>=2.16.0
