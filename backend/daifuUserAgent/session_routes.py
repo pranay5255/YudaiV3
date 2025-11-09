@@ -2041,8 +2041,6 @@ async def create_github_issue_from_user_issue_for_session(
                 "issue_steps": result.issue_steps,
                 "session_id": result.session_id,
                 "context_card_id": result.context_card_id,
-                "context_cards": result.context_cards,
-                "ideas": result.ideas,
                 "repo_owner": result.repo_owner,
                 "repo_name": result.repo_name,
                 "priority": result.priority,

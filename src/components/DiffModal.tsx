@@ -55,17 +55,28 @@ export const DiffModal: React.FC<DiffModalProps> = ({
     try {
       const response = await createGitHubIssueFromUserIssue(issuePreview.userIssue.issue_id);
       
-      if (response.success) {
+      // Check for success or if github_url exists (issue was created even if response parsing failed)
+      if (response?.success || response?.github_url) {
         setGithubIssueCreated(true);
         setGithubIssueUrl(response.github_url);
       } else {
-        showError(response.message || 'Failed to create GitHub issue');
+        showError(response?.message || 'Failed to create GitHub issue');
       }
       
     } catch (error) {
       console.error('Failed to create GitHub issue:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      showError(`Failed to create GitHub issue: ${errorMessage}`);
+      
+      // Check if error response contains github_url (issue was created despite error)
+      const errorResponse = error as { response?: { data?: { github_url?: string } }; github_url?: string };
+      const githubUrl = errorResponse?.response?.data?.github_url || errorResponse?.github_url;
+      if (githubUrl) {
+        console.log('GitHub issue created successfully despite error:', githubUrl);
+        setGithubIssueCreated(true);
+        setGithubIssueUrl(githubUrl);
+      } else {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        showError(`Failed to create GitHub issue: ${errorMessage}`);
+      }
     } finally {
       setIsCreatingGitHubIssue(false);
     }

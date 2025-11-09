@@ -1246,15 +1246,44 @@ export const useSessionStore = create<SessionState>()(
           }
 
           try {
-            const response = await handleApiResponse<CreateGitHubIssueResponse>(
-              await fetch(buildApiUrl(API.SESSIONS.ISSUES.CREATE_GITHUB_ISSUE, { sessionId: activeSessionId, issueId }), {
-                method: 'POST',
-                headers: getAuthHeaders(sessionToken || ''),
-              })
-            );
-            return response;
+            const fetchResponse = await fetch(buildApiUrl(API.SESSIONS.ISSUES.CREATE_GITHUB_ISSUE, { sessionId: activeSessionId, issueId }), {
+              method: 'POST',
+              headers: getAuthHeaders(sessionToken || ''),
+            });
+
+            // Try to parse response even if status is not OK
+            const responseData = await fetchResponse.json();
+
+            if (!fetchResponse.ok) {
+              // If error but github_url exists, issue was created successfully
+              if (responseData.github_url) {
+                return {
+                  success: true,
+                  github_url: responseData.github_url,
+                  message: responseData.message || 'GitHub issue created successfully',
+                } as CreateGitHubIssueResponse;
+              }
+              // Otherwise throw error with message
+              const errorMessage = responseData.detail || responseData.message || `HTTP error! status: ${fetchResponse.status}`;
+              throw new Error(errorMessage);
+            }
+
+            return responseData as CreateGitHubIssueResponse;
           } catch (error) {
             console.error('Failed to create GitHub issue from user issue:', error);
+            
+            // If error is not already an Error object, try to extract github_url from it
+            if (error && typeof error === 'object' && 'response' in error) {
+              const errorResponse = error as { response?: { data?: { github_url?: string; message?: string } } };
+              if (errorResponse.response?.data?.github_url) {
+                return {
+                  success: true,
+                  github_url: errorResponse.response.data.github_url,
+                  message: errorResponse.response.data.message ?? 'GitHub issue created successfully',
+                } as CreateGitHubIssueResponse;
+              }
+            }
+            
             throw error;
           }
         },
