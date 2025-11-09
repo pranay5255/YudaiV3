@@ -389,34 +389,18 @@ export const Chat: React.FC<ChatProps> = ({
       if (currentIssuePreview.userIssue?.issue_id) {
         const result = await createGitHubIssueMutation.mutateAsync(currentIssuePreview.userIssue.issue_id);
         
-        // Check for success or if github_url exists (issue was created even if response parsing failed)
-        if (result?.success || result?.github_url) {
-          console.log('[Chat] GitHub issue created successfully:', result?.github_url);
+        if (result?.success && result?.github_url) {
+          console.log('[Chat] GitHub issue created successfully:', result.github_url);
           setShowIssuePreview(false);
           setCurrentIssuePreview(null);
-          
-          // Show success message if github_url is available
-          if (result?.github_url) {
-            showError(`✓ GitHub issue created successfully! ${result.github_url}`);
-          }
+          showError(`✓ GitHub issue created successfully! ${result.github_url}`);
         } else {
           showError(result?.message || 'Failed to create GitHub issue');
         }
       }
     } catch (error) {
       console.error('[Chat] Failed to create GitHub issue:', error);
-      
-      // Check if error response contains github_url (issue was created despite error)
-      const errorResponse = error as { response?: { data?: { github_url?: string } }; github_url?: string };
-      if (errorResponse?.response?.data?.github_url || errorResponse?.github_url) {
-        const githubUrl = errorResponse?.response?.data?.github_url || errorResponse?.github_url;
-        console.log('[Chat] GitHub issue created successfully despite error:', githubUrl);
-        setShowIssuePreview(false);
-        setCurrentIssuePreview(null);
-        showError(`✓ GitHub issue created successfully! ${githubUrl}`);
-      } else {
-        showError(`Failed to create GitHub issue: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      }
+      showError(`Failed to create GitHub issue: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }, [currentIssuePreview, showError, createGitHubIssueMutation]);
 
