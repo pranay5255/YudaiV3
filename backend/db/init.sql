@@ -338,6 +338,85 @@ CREATE TABLE IF NOT EXISTS file_embeddings (
     updated_at TIMESTAMP WITH TIME ZONE
 );
 
+-- AI models table
+CREATE TABLE IF NOT EXISTS ai_models (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    provider VARCHAR(100) NOT NULL,
+    model_id VARCHAR(255) NOT NULL,
+    config JSON,
+    description TEXT,
+    input_price_per_million_tokens DOUBLE PRECISION,
+    output_price_per_million_tokens DOUBLE PRECISION,
+    currency VARCHAR(10) DEFAULT 'USD',
+    last_price_refresh_at TIMESTAMP WITH TIME ZONE,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Solve orchestration tables
+CREATE TABLE IF NOT EXISTS solves (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    session_id INTEGER REFERENCES chat_sessions(id),
+    repo_url VARCHAR(1000) NOT NULL,
+    issue_number INTEGER NOT NULL,
+    base_branch VARCHAR(255) DEFAULT 'main',
+    status VARCHAR(50) DEFAULT 'pending',
+    matrix JSON NOT NULL,
+    limits JSON,
+    requested_by VARCHAR(255),
+    champion_run_id VARCHAR(64),
+    max_parallel INTEGER,
+    time_budget_s INTEGER,
+    error_message TEXT,
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE TABLE IF NOT EXISTS solve_runs (
+    id VARCHAR(64) PRIMARY KEY,
+    solve_id VARCHAR(64) REFERENCES solves(id) ON DELETE CASCADE,
+    model VARCHAR(255) NOT NULL,
+    temperature FLOAT NOT NULL,
+    max_edits INTEGER NOT NULL,
+    evolution VARCHAR(255) NOT NULL,
+    status VARCHAR(50) DEFAULT 'pending',
+    sandbox_id VARCHAR(255),
+    pr_url VARCHAR(1000),
+    tests_passed BOOLEAN,
+    loc_changed INTEGER,
+    files_changed INTEGER,
+    tokens INTEGER,
+    latency_ms INTEGER,
+    logs_url VARCHAR(1000),
+    diagnostics JSON,
+    error_message TEXT,
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM information_schema.table_constraints
+        WHERE constraint_name = 'fk_solves_champion_run_id'
+    ) THEN
+        ALTER TABLE solves
+            ADD CONSTRAINT fk_solves_champion_run_id
+            FOREIGN KEY (champion_run_id)
+            REFERENCES solve_runs(id)
+            ON DELETE SET NULL;
+    END IF;
+END;
+$$;
+
 -- OAuth states table
 CREATE TABLE IF NOT EXISTS oauth_states (
     state VARCHAR(255) PRIMARY KEY,
@@ -398,6 +477,14 @@ CREATE INDEX IF NOT EXISTS idx_pull_requests_repository_id ON pull_requests(repo
 -- Commit indexes
 CREATE INDEX IF NOT EXISTS idx_commits_sha ON commits(sha);
 CREATE INDEX IF NOT EXISTS idx_commits_repository_id ON commits(repository_id);
+
+-- AI solver indexes
+CREATE INDEX IF NOT EXISTS idx_ai_models_is_active ON ai_models(is_active);
+CREATE INDEX IF NOT EXISTS idx_solves_user_id ON solves(user_id);
+CREATE INDEX IF NOT EXISTS idx_solves_session_id ON solves(session_id);
+CREATE INDEX IF NOT EXISTS idx_solves_status ON solves(status);
+CREATE INDEX IF NOT EXISTS idx_solve_runs_solve_id ON solve_runs(solve_id);
+CREATE INDEX IF NOT EXISTS idx_solve_runs_status ON solve_runs(status);
 
 
 -- User issue indexes
@@ -532,6 +619,24 @@ SELECT create_trigger_if_not_exists(
     'update_github_app_installations_updated_at',
     'github_app_installations',
     'CREATE TRIGGER update_github_app_installations_updated_at BEFORE UPDATE ON github_app_installations FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
+
+SELECT create_trigger_if_not_exists(
+    'update_ai_models_updated_at',
+    'ai_models',
+    'CREATE TRIGGER update_ai_models_updated_at BEFORE UPDATE ON ai_models FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
+
+SELECT create_trigger_if_not_exists(
+    'update_solves_updated_at',
+    'solves',
+    'CREATE TRIGGER update_solves_updated_at BEFORE UPDATE ON solves FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
+);
+
+SELECT create_trigger_if_not_exists(
+    'update_solve_runs_updated_at',
+    'solve_runs',
+    'CREATE TRIGGER update_solve_runs_updated_at BEFORE UPDATE ON solve_runs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()'
 );
 
 -- Add missing columns to repositories table
