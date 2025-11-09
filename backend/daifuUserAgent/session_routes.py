@@ -102,6 +102,7 @@ from models import (
     ContextCard,
     ContextCardResponse,
     CreateContextCardRequest,
+    CreateGitHubIssueResponse,
     CreateSessionRequest,
     FileEmbedding,
     FileItem,
@@ -1997,7 +1998,8 @@ async def update_issue_status_for_session(
 
 
 @router.post(
-    "/sessions/{session_id}/issues/{issue_id}/create-github-issue", response_model=dict
+    "/sessions/{session_id}/issues/{issue_id}/create-github-issue",
+    response_model=CreateGitHubIssueResponse,
 )
 async def create_github_issue_from_user_issue_for_session(
     session_id: str,
@@ -2030,33 +2032,17 @@ async def create_github_issue_from_user_issue_for_session(
                 detail="Issue not found or missing repository information",
             )
 
-        return {
-            "success": True,
-            "issue": {
-                "id": result.id,
-                "issue_id": result.issue_id,
-                "title": result.title,
-                "description": result.description,
-                "issue_text_raw": result.issue_text_raw,
-                "issue_steps": result.issue_steps,
-                "session_id": result.session_id,
-                "context_card_id": result.context_card_id,
-                "repo_owner": result.repo_owner,
-                "repo_name": result.repo_name,
-                "priority": result.priority,
-                "status": result.status,
-                "agent_response": result.agent_response,
-                "processing_time": result.processing_time,
-                "tokens_used": result.tokens_used,
-                "github_issue_url": result.github_issue_url,
-                "github_issue_number": result.github_issue_number,
-                "created_at": result.created_at,
-                "updated_at": result.updated_at,
-                "processed_at": result.processed_at,
-            },
-            "github_url": result.github_issue_url,
-            "message": f"GitHub issue created successfully: {result.github_issue_url}",
-        }
+        if not result.github_issue_url:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="GitHub issue was created but no URL was returned",
+            )
+
+        return CreateGitHubIssueResponse(
+            success=True,
+            github_url=result.github_issue_url,
+            message=f"GitHub issue created successfully: {result.github_issue_url}",
+        )
 
     except HTTPException:
         raise

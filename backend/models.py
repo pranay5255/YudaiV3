@@ -1367,6 +1367,14 @@ class UserIssueResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CreateGitHubIssueResponse(BaseModel):
+    """Response model for GitHub issue creation endpoint"""
+
+    success: bool
+    github_url: str
+    message: str
+
+
 class ChatRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=255)
     message: ChatMessageInput
