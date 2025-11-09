@@ -8,6 +8,12 @@ from typing import Optional, Tuple
 
 import requests
 import yaml
+from minisweagent.agents.interactive import InteractiveAgent
+from minisweagent.config import get_config_path
+from minisweagent.environments.local import LocalEnvironment
+from minisweagent.models import get_model
+from minisweagent.run.extra.config import configure_if_first_time
+from minisweagent.run.utils.save import save_traj
 from rich.console import Console
 
 # Add mswea/src to Python path for local imports
@@ -16,12 +22,6 @@ mswea_src_path = script_dir / "mswea" / "src"
 if mswea_src_path.exists() and str(mswea_src_path) not in sys.path:
     sys.path.insert(0, str(mswea_src_path))
 
-from minisweagent.agents.interactive import InteractiveAgent
-from minisweagent.config import get_config_path
-from minisweagent.environments.local import LocalEnvironment
-from minisweagent.models import get_model
-from minisweagent.run.extra.config import configure_if_first_time
-from minisweagent.run.utils.save import save_traj
 
 console = Console(highlight=False)
 
