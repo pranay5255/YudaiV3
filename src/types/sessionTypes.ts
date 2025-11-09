@@ -530,7 +530,7 @@ export interface FileDependencyMutationContext {
 // UI & STATE TYPES
 // ============================================================================
 
-export type TabType = 'chat' | 'context' | 'ideas';
+export type TabType = 'chat' | 'context' | 'ideas' | 'solve';
 
 export interface TabState {
   activeTab: TabType;
