@@ -101,6 +101,8 @@ services:
       - SALT=${SALT:-yudai-salt}
       - PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
       - PYTHONDONTWRITEBYTECODE=${PYTHONDONTWRITEBYTECODE:-1}
+      # E2B Sandbox Configuration
+      - E2B_API_KEY=${E2B_API_KEY}
       # SWE-agent Configuration
       - SWEAGENT_CONFIG_PATH=/app/solver/config.yaml
       - SWEAGENT_DATA_PATH=/data/swe_runs
