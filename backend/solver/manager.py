@@ -58,13 +58,26 @@ model:
 """
 
 
-def build_tfbd_template(model_name: str) -> str:
+def build_tfbd_template(
+    model_name: str,
+    small_change: bool = False,
+    best_effort: bool = False,
+    max_iterations: int = 50,
+    max_cost: float = 10.0,
+) -> str:
     """
-    Build a tfbd.yaml-style template with the requested model.
+    Build a tfbd.yaml-style template with the requested model and options.
 
     The sandbox expects both the execution script and the YAML control file,
     so we lazily load the repository template, update the model stanza, and
     fall back to a minimal configuration when the template is missing.
+
+    Args:
+        model_name: Model identifier for the solver
+        small_change: Limit scope to minimal code changes
+        best_effort: Continue solving even if tests fail
+        max_iterations: Maximum iterations for the agent
+        max_cost: Maximum cost in USD for the solve session
     """
 
     try:
@@ -86,15 +99,120 @@ def build_tfbd_template(model_name: str) -> str:
     if replacements == 0:
         # Append a model block if the template did not contain one.
         appended_block = (
-            f'\nmodel:\n'
+            f"\nmodel:\n"
             f'    model_name: "{model_name}"\n'
             f'    model_class: "openrouter"\n'
-            f'    model_kwargs:\n'
-            f'        temperature: 0.4\n'
+            f"    model_kwargs:\n"
+            f"        temperature: 0.4\n"
         )
         updated_template = base_template.rstrip() + appended_block
 
+    # Add agent configuration based on user options
+    agent_config = generate_agent_config(
+        small_change=small_change,
+        best_effort=best_effort,
+        max_iterations=max_iterations,
+        max_cost=max_cost,
+    )
+
+    # Append agent configuration
+    updated_template = updated_template.rstrip() + "\n" + agent_config
+
     return updated_template
+
+
+def generate_agent_config(
+    small_change: bool = False,
+    best_effort: bool = False,
+    max_iterations: int = 50,
+    max_cost: float = 10.0,
+) -> str:
+    """
+    Generate agent configuration YAML block based on user options.
+
+    Args:
+        small_change: Limit scope to minimal code changes
+        best_effort: Continue solving even if tests fail
+        max_iterations: Maximum iterations for the agent
+        max_cost: Maximum cost in USD for the solve session
+
+    Returns:
+        YAML configuration string for agent settings
+    """
+
+    # Adjust iterations based on small_change option
+    if small_change:
+        max_iterations = min(max_iterations, 20)
+        max_cost = min(max_cost, 5.0)
+
+    # Configure mode based on best_effort option
+    mode = "best_effort" if best_effort else "yolo"
+
+    config = f"""
+agent:
+  mode: "{mode}"
+  max_iterations: {max_iterations}
+  max_cost: {max_cost}
+  small_change: {str(small_change).lower()}
+  best_effort: {str(best_effort).lower()}
+"""
+
+    return config
+
+
+def generate_solve_config_file(
+    model_name: str,
+    issue_url: str,
+    repo_url: str,
+    branch_name: str = "main",
+    small_change: bool = False,
+    best_effort: bool = False,
+    max_iterations: int = 50,
+    max_cost: float = 10.0,
+) -> Dict[str, str]:
+    """
+    Generate complete configuration files for a solve session.
+
+    Args:
+        model_name: Model identifier for the solver
+        issue_url: GitHub issue URL to solve
+        repo_url: Repository URL
+        branch_name: Branch to work on
+        small_change: Limit scope to minimal code changes
+        best_effort: Continue solving even if tests fail
+        max_iterations: Maximum iterations for the agent
+        max_cost: Maximum cost in USD for the solve session
+
+    Returns:
+        Dictionary containing file paths and contents for configuration files
+    """
+
+    # Generate YAML configuration
+    yaml_config = build_tfbd_template(
+        model_name=model_name,
+        small_change=small_change,
+        best_effort=best_effort,
+        max_iterations=max_iterations,
+        max_cost=max_cost,
+    )
+
+    # Generate metadata file
+    metadata = {
+        "issue_url": issue_url,
+        "repo_url": repo_url,
+        "branch_name": branch_name,
+        "model_name": model_name,
+        "small_change": small_change,
+        "best_effort": best_effort,
+        "max_iterations": max_iterations,
+        "max_cost": max_cost,
+        "created_at": utc_now().isoformat(),
+    }
+
+    return {
+        "tfbd.yaml": yaml_config,
+        "solve_metadata.json": json.dumps(metadata, indent=2),
+    }
 
 
 # ============================================================================
@@ -175,7 +293,7 @@ class HeadlessSandboxExecutor:
         Raises:
             SandboxExecutionError: If execution fails
         """
-        start_time = datetime.utcnow()
+        start_time = utc_now()
 
         try:
             # Get required environment variables
@@ -217,14 +335,22 @@ class HeadlessSandboxExecutor:
             # Fetch GitHub issue content
             issue_text = await self._fetch_github_issue(request.issue_url, github_token)
 
-            # Create tfbd.yaml config with the selected model for traceability
+            # Create tfbd.yaml config with the selected model and user options for traceability
             tfbd_path = "/home/user/tfbd.yaml"
-            tfbd_config = build_tfbd_template(request.model_name)
+            tfbd_config = build_tfbd_template(
+                model_name=request.model_name,
+                small_change=request.env.get("SMALL_CHANGE", "false").lower() == "true",
+                best_effort=request.env.get("BEST_EFFORT", "false").lower() == "true",
+                max_iterations=int(request.env.get("MAX_ITERATIONS", "50")),
+                max_cost=float(request.env.get("MAX_COST", "10.0")),
+            )
             self._sandbox.files.write(tfbd_path, tfbd_config)
             logger.info(
-                "Uploaded tfbd.yaml template to sandbox %s for model %s",
+                "Uploaded tfbd.yaml template to sandbox %s for model %s (small_change=%s, best_effort=%s)",
                 sandbox_id,
                 request.model_name,
+                request.env.get("SMALL_CHANGE", "false"),
+                request.env.get("BEST_EFFORT", "false"),
             )
 
             # Create mini-swe-agent Python script using bindings
@@ -255,7 +381,7 @@ class HeadlessSandboxExecutor:
             )
 
             # Calculate duration
-            end_time = datetime.utcnow()
+            end_time = utc_now()
             duration_ms = int((end_time - start_time).total_seconds() * 1000)
 
             # Check for cancellation
@@ -349,15 +475,15 @@ class HeadlessSandboxExecutor:
         logger.info(f"Cloning repository: {repo_url}")
 
         # Add GitHub token to URL if available
-        clone_url = repo_url
         if github_token and "github.com" in repo_url:
-            clone_url = repo_url.replace(
-                "https://github.com/", f"https://{github_token}@github.com/"
+            repo_path = repo_url.rstrip("/").replace("https://github.com/", "")
+            if repo_path.endswith(".git"):
+                repo_path = repo_path[:-4]
+            clone_url = (
+                f"https://x-access-token:{github_token}@github.com/{repo_path}.git"
             )
-            if not clone_url.endswith(".git"):
-                clone_url += ".git"
-        elif not clone_url.endswith(".git"):
-            clone_url += ".git"
+        else:
+            clone_url = repo_url if repo_url.endswith(".git") else f"{repo_url}.git"
 
         # Clone repository
         clone_cmd = f"cd /home/user && git clone {clone_url} testbed"
@@ -684,7 +810,13 @@ class DefaultSolverManager(SolverManager):
                 issue_number=issue.number,
                 base_branch=request.branch_name,
                 status=SolveStatus.PENDING.value,
-                matrix={"experiments": experiments},
+                matrix={
+                    "experiments": experiments,
+                    "small_change": request.small_change,
+                    "best_effort": request.best_effort,
+                    "max_iterations": request.max_iterations,
+                    "max_cost": request.max_cost,
+                },
                 limits={
                     "max_parallel": max_parallel,
                     "time_budget_s": self._time_budget_s,
@@ -693,6 +825,12 @@ class DefaultSolverManager(SolverManager):
                 max_parallel=max_parallel,
                 time_budget_s=self._time_budget_s,
             )
+
+            # Store user options as attributes for easy access
+            solve.small_change = request.small_change
+            solve.best_effort = request.best_effort
+            solve.max_iterations = request.max_iterations
+            solve.max_cost = request.max_cost
 
             db.add(solve)
             for solve_run in solve_runs:
@@ -922,7 +1060,14 @@ class DefaultSolverManager(SolverManager):
                 repo_url=repo_url,
                 branch_name=branch_name,
                 model_name=model_name,
-                env={"SOLVE_ID": solve_id, "SOLVE_RUN_ID": run_id},
+                env={
+                    "SOLVE_ID": solve_id,
+                    "SOLVE_RUN_ID": run_id,
+                    "SMALL_CHANGE": str(getattr(solve, "small_change", False)),
+                    "BEST_EFFORT": str(getattr(solve, "best_effort", False)),
+                    "MAX_ITERATIONS": str(getattr(solve, "max_iterations", 50)),
+                    "MAX_COST": str(getattr(solve, "max_cost", 10.0)),
+                },
                 verbose=True,
             )
 
@@ -1092,9 +1237,7 @@ class DefaultSolverManager(SolverManager):
         base_query = db.query(AIModel).filter(AIModel.is_active.is_(True))
 
         if ai_model_ids:
-            models = (
-                base_query.filter(AIModel.id.in_(ai_model_ids)).all()
-            )
+            models = base_query.filter(AIModel.id.in_(ai_model_ids)).all()
             found_by_id = {model.id: model for model in models}
             ordered_models: List[AIModel] = []
             missing_ids: List[int] = []
@@ -1132,9 +1275,7 @@ class DefaultSolverManager(SolverManager):
                 )
             return [model]
 
-        default_model = (
-            base_query.order_by(AIModel.id.asc()).first()
-        )
+        default_model = base_query.order_by(AIModel.id.asc()).first()
         if not default_model:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,

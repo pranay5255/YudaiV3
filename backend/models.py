@@ -1025,6 +1025,10 @@ class StartSolveRequest(BaseModel):
     branch_name: str = "main"
     ai_model_id: Optional[int] = None
     ai_model_ids: Optional[List[int]] = None
+    small_change: bool = False
+    best_effort: bool = False
+    max_iterations: int = 50
+    max_cost: float = 10.0
 
     @validator("repo_url")
     def validate_repo_url(cls, value: str) -> str:
