@@ -5,7 +5,7 @@ import { Sidebar } from './components/Sidebar';
 import { Chat } from './components/Chat';
 import { ContextCards } from './components/ContextCards';
 import { IdeasToImplement } from './components/IdeasToImplement';
-import { DiffModal } from './components/DiffModal';
+import { SolveIssues } from './components/SolveIssues';
 import { ToastContainer } from './components/Toast';
 import { RepositorySelectionToast } from './components/RepositorySelectionToast';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -18,37 +18,6 @@ import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
 import { useSessionManagement } from './hooks/useSessionManagement';
 import { useSession, useContextCards, useRemoveContextCard } from './hooks/useSessionQueries';
-import { UserIssueResponse } from './types';
-import { ChatContextMessage, FileContextItem } from './types/api';
-
-// Interface for issue preview data (matching DiffModal expectations)
-interface IssuePreviewData {
-  title: string;
-  body: string;
-  labels: string[];
-  assignees: string[];
-  repository_info?: {
-    owner: string;
-    name: string;
-    branch?: string;
-  };
-  metadata: {
-    chat_messages_count: number;
-    file_context_count: number;
-    total_tokens: number;
-    generated_at: string;
-    generation_method: string;
-  };
-  userIssue?: UserIssueResponse;
-  conversationContext: ChatContextMessage[];
-  fileContext: FileContextItem[];
-  canCreateGitHubIssue: boolean;
-  repositoryInfo?: {
-    owner: string;
-    name: string;
-    branch?: string;
-  };
-}
 
 /**
  * Main App Content Component
@@ -75,7 +44,7 @@ function AppContent() {
   const removeContextCardMutation = useRemoveContextCard();
 
   const isValidTab = (tab: unknown): tab is TabType =>
-    tab === 'chat' || tab === 'context' || tab === 'ideas';
+    tab === 'chat' || tab === 'context' || tab === 'ideas' || tab === 'solve';
 
   useEffect(() => {
     if (!isValidTab(activeTab)) {
@@ -88,8 +57,6 @@ function AppContent() {
   // Local UI state
   const [currentStep] = useState<ProgressStep>('DAifu');
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [isDiffModalOpen, setIsDiffModalOpen] = useState(false);
-  const [issuePreviewData, setIssuePreviewData] = useState<IssuePreviewData | undefined>(undefined);
   
   // Repository selection state - always show after login if no repository selected
   const [showRepositorySelection, setShowRepositorySelection] = useState(false);
@@ -163,11 +130,6 @@ function AppContent() {
     setToasts(prev => prev.filter(toast => toast.id !== id));
   };
 
-  const handleShowIssuePreview = (previewData: IssuePreviewData) => {
-    setIssuePreviewData(previewData);
-    setIsDiffModalOpen(true);
-  };
-
   const removeContextCardHandler = (id: string) => {
     if (!activeSessionId) {
       addToast('No active session to remove context from', 'error');
@@ -198,7 +160,6 @@ function AppContent() {
       case 'chat':
         return (
           <Chat
-            onShowIssuePreview={handleShowIssuePreview}
             onShowError={addToast}
           />
         );
@@ -215,6 +176,8 @@ function AppContent() {
             onCreateIssue={handleCreateIdeaIssue}
           />
         );
+      case 'solve':
+        return <SolveIssues />;
       default:
         return null;
     }
@@ -242,13 +205,6 @@ function AppContent() {
           {renderTabContent()}
         </main>
       </div>
-
-      {/* Modals */}
-      <DiffModal
-        isOpen={isDiffModalOpen}
-        onClose={() => setIsDiffModalOpen(false)}
-        issuePreview={issuePreviewData}
-      />
 
       {/* Toast Container */}
       <ToastContainer toasts={toasts} onRemoveToast={removeToast} />

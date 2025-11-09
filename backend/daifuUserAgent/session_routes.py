@@ -229,6 +229,144 @@ async def daifu_github_list_repository_branches(
         )
 
 
+@router.get(
+    "/github/repositories/{owner}/{repo}/issues",
+    response_model=List[Dict[str, Any]],
+)
+async def daifu_github_list_repository_issues(
+    owner: str,
+    repo: str,
+    limit: int = Query(100, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    List issues for a specific repository the authenticated user can access.
+    """
+    try:
+        from daifuUserAgent.githubOps import GitHubOps
+
+        github_ops = GitHubOps(db)
+        issues = await github_ops.fetch_repository_issues(
+            owner, repo, current_user.id, limit
+        )
+
+        # Store issues in database if not already present
+        from models import Issue, Repository
+
+        # Get or create repository record
+        repository = (
+            db.query(Repository)
+            .filter(
+                Repository.owner == owner,
+                Repository.name == repo,
+                Repository.user_id == current_user.id,
+            )
+            .first()
+        )
+
+        if not repository:
+            repository = Repository(
+                user_id=current_user.id,
+                name=repo,
+                owner=owner,
+                full_name=f"{owner}/{repo}",
+                repo_url=f"https://github.com/{owner}/{repo}",
+                html_url=f"https://github.com/{owner}/{repo}",
+                clone_url=f"https://github.com/{owner}/{repo}.git",
+            )
+            db.add(repository)
+            db.flush()
+
+        # Store issues in database
+        for issue_data in issues:
+            issue = (
+                db.query(Issue)
+                .filter(
+                    Issue.repository_id == repository.id,
+                    Issue.number == issue_data.get("number"),
+                )
+                .first()
+            )
+
+            if not issue:
+                issue = Issue(
+                    github_issue_id=issue_data.get("number", 0),
+                    repository_id=repository.id,
+                    number=issue_data.get("number", 0),
+                    title=issue_data.get("title", ""),
+                    body=issue_data.get("body", ""),
+                    state=issue_data.get("state", "open"),
+                    html_url=issue_data.get("html_url", ""),
+                    author_username=issue_data.get("user", {}).get("login")
+                    if isinstance(issue_data.get("user"), dict)
+                    else None,
+                    github_created_at=datetime.fromisoformat(
+                        issue_data.get("created_at", utc_now().isoformat()).replace(
+                            "Z", "+00:00"
+                        )
+                    ),
+                    github_updated_at=datetime.fromisoformat(
+                        issue_data.get("updated_at", utc_now().isoformat()).replace(
+                            "Z", "+00:00"
+                        )
+                    )
+                    if issue_data.get("updated_at")
+                    else None,
+                )
+                db.add(issue)
+
+            # Add issue ID to response
+            issue_data["id"] = issue.id if hasattr(issue, "id") else None
+
+        db.commit()
+
+        return issues
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch issues for {owner}/{repo}: {e}")
+        raise create_standardized_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "GITHUB_ISSUES_FETCH_FAILED",
+            "Failed to fetch issues",
+            detail=str(e),
+            path=f"/daifu/github/repositories/{owner}/{repo}/issues",
+        )
+
+
+@router.get("/ai-models", response_model=List[Dict[str, Any]])
+async def get_available_ai_models(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get list of available AI models for solving issues.
+    """
+    # TODO: Add models from openrouter to db for display and queryability
+    try:
+        from models import AIModel
+
+        models = db.query(AIModel).filter(AIModel.is_active.is_(True)).all()
+
+        return [
+            {
+                "id": model.id,
+                "name": model.name,
+                "provider": model.provider,
+                "model_id": model.model_id,
+                "description": model.description,
+            }
+            for model in models
+        ]
+    except Exception as e:
+        logger.error(f"Failed to fetch AI models: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch AI models: {str(e)}",
+        )
+
+
 # CRITICAL PRIORITY ENDPOINTS
 
 
