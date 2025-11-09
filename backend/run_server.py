@@ -19,6 +19,7 @@ from db.database import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from github import github_router
+from solver.solver import router as solver_router
 
 
 @asynccontextmanager
@@ -59,6 +60,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(github_router, prefix="/github", tags=["github"])
 app.include_router(session_router, prefix="/daifu", tags=["sessions"])
+app.include_router(solver_router, prefix="/daifu", tags=["solver"])
 
 
 # Root endpoint

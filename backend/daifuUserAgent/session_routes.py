@@ -114,6 +114,7 @@ from models import (
     UserIssueResponse,
 )
 from pgvector.sqlalchemy import Vector
+from solver.solver import router as solver_api_router
 from sqlalchemy.orm import Session
 
 from utils import utc_now
@@ -122,6 +123,7 @@ from .llm_service import LLMService
 from .session_service import SessionService
 
 router = APIRouter(tags=["sessions"])
+router.include_router(solver_api_router)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -242,7 +244,9 @@ async def create_session(
     """
     try:
         # Debug logging for request data
-        logger.info(f"[Session] Creating session with request data: repo_owner='{request.repo_owner}', repo_name='{request.repo_name}', repo_branch='{request.repo_branch}'")
+        logger.info(
+            f"[Session] Creating session with request data: repo_owner='{request.repo_owner}', repo_name='{request.repo_name}', repo_branch='{request.repo_branch}'"
+        )
 
         # Generate unique session ID
         session_id = f"session_{uuid.uuid4().hex[:8]}"
@@ -277,10 +281,14 @@ async def create_session(
                 repo_branch = request.repo_branch or "main"
                 max_file_size = getattr(request, "index_max_file_size", None)
 
-                logger.info(f"[Session] Triggering background indexing for session {session_id}: {repo_owner}/{repo_name}")
+                logger.info(
+                    f"[Session] Triggering background indexing for session {session_id}: {repo_owner}/{repo_name}"
+                )
 
                 async def _run_index():
-                    logger.info(f"[Session] Starting background indexing task for session {session_id}")
+                    logger.info(
+                        f"[Session] Starting background indexing task for session {session_id}"
+                    )
                     await _index_repository_for_session_background(
                         session_uuid=db_session.session_id,
                         user_id=current_user.id,
@@ -291,7 +299,9 @@ async def create_session(
                         generate_embeddings=request.generate_embeddings,
                         generate_facts_memories=request.generate_facts_memories,
                     )
-                    logger.info(f"[Session] Background indexing completed for session {session_id}")
+                    logger.info(
+                        f"[Session] Background indexing completed for session {session_id}"
+                    )
 
                 try:
                     # If inside event loop, schedule directly
@@ -431,7 +441,6 @@ async def get_session_context(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get session context: {str(e)}",
         )
-
 
 
 # HIGH PRIORITY ENDPOINTS
@@ -788,7 +797,9 @@ async def get_file_dependencies_for_session(
             .all()
         )
 
-        logger.info(f"[FileDeps] Found {len(file_items)} file items for session {session_id}")
+        logger.info(
+            f"[FileDeps] Found {len(file_items)} file items for session {session_id}"
+        )
 
         # Convert to response format
         response_items = []
@@ -810,11 +821,15 @@ async def get_file_dependencies_for_session(
             )
             response_items.append(response_item)
 
-        logger.info(f"[FileDeps] Returning {len(response_items)} file items for session {session_id}")
+        logger.info(
+            f"[FileDeps] Returning {len(response_items)} file items for session {session_id}"
+        )
         return response_items
 
     except Exception as e:
-        logger.error(f"[FileDeps] Failed to get file dependencies for session {session_id}: {str(e)}")
+        logger.error(
+            f"[FileDeps] Failed to get file dependencies for session {session_id}: {str(e)}"
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get file dependencies: {str(e)}",
@@ -901,7 +916,9 @@ async def chat_in_session(
         # Get updated conversation history for the response
         raw_history = chat_ops._get_conversation_history(db_session.id, 50)
         # Normalize to ("User"|"DAifu", text) for frontend compatibility
-        history = [("User" if s.lower() == "user" else "DAifu", t) for s, t in raw_history]
+        history = [
+            ("User" if s.lower() == "user" else "DAifu", t) for s, t in raw_history
+        ]
 
         # Calculate processing time
         processing_time = (time.time() - start_time) * 1000
@@ -1049,9 +1066,7 @@ def _get_or_create_repository(
     return repository
 
 
-def _build_file_tree(
-    files_data: Any, repo_name: str
-) -> List[Dict[str, Any]]:
+def _build_file_tree(files_data: Any, repo_name: str) -> List[Dict[str, Any]]:
     """Build hierarchical file tree from GitIngest data.
 
     The helper accepts the normalised snapshot payload returned by
@@ -1332,7 +1347,9 @@ def _collect_issue_context(db: Session, chat_session: ChatSession) -> Dict[str, 
 
     files = (
         db.query(FileItem)
-        .filter(FileItem.session_id == chat_session.id, FileItem.is_directory.is_(False))
+        .filter(
+            FileItem.session_id == chat_session.id, FileItem.is_directory.is_(False)
+        )
         .order_by(FileItem.tokens.desc())
         .limit(5)
         .all()
@@ -1383,7 +1400,9 @@ async def _index_repository_for_session_background(
         repo_owner = repo_owner.strip()
         repo_name = repo_name.strip()
 
-        logger.info(f"[Index] Sanitized repo_owner='{repo_owner}', repo_name='{repo_name}'")
+        logger.info(
+            f"[Index] Sanitized repo_owner='{repo_owner}', repo_name='{repo_name}'"
+        )
 
         # Verify the session exists and is owned by the user
         chat_session = (
@@ -1508,7 +1527,9 @@ async def _index_repository_for_session_background(
                 )
                 if isinstance(updated_metadata, dict):
                     repository_github_context.update(updated_metadata)
-            except Exception as cache_write_error:  # pragma: no cover - defensive logging
+            except (
+                Exception
+            ) as cache_write_error:  # pragma: no cover - defensive logging
                 logger.warning(
                     "[Index] Failed to update GitHub context cache for %s/%s: %s",
                     repo_owner,
@@ -1532,7 +1553,7 @@ async def _index_repository_for_session_background(
             try:
                 file_path = repo_file.path
                 logger.debug(
-                    f"[Index] Processing file {i+1}/{len(files_data)}: {file_path}"
+                    f"[Index] Processing file {i + 1}/{len(files_data)}: {file_path}"
                 )
 
                 # Create FileItem record
@@ -1556,7 +1577,9 @@ async def _index_repository_for_session_background(
                 db.add(file_item)
                 db.flush()  # Get the ID
                 saved_file_items.append(file_item)
-                logger.debug(f"[Index] Successfully saved file item: {file_path} (ID: {file_item.id})")
+                logger.debug(
+                    f"[Index] Successfully saved file item: {file_path} (ID: {file_item.id})"
+                )
 
                 # Create embeddings for the file content when requested
                 if (
@@ -1594,11 +1617,15 @@ async def _index_repository_for_session_background(
                 )
                 continue
 
-        logger.info(f"[Index] Saved {len(saved_file_items)} file items and {len(saved_embeddings)} embeddings")
+        logger.info(
+            f"[Index] Saved {len(saved_file_items)} file items and {len(saved_embeddings)} embeddings"
+        )
 
         try:
             db.commit()
-            logger.info(f"[Index] Database commit successful for session {session_uuid}")
+            logger.info(
+                f"[Index] Database commit successful for session {session_uuid}"
+            )
         except Exception as commit_error:
             logger.error(f"[Index] Database commit failed: {commit_error}")
             db.rollback()
@@ -1647,7 +1674,9 @@ async def _index_repository_for_session_background(
                 )
                 db.rollback()
 
-        logger.info(f"[Index] Completed indexing for session {session_uuid}: {len(saved_file_items)} files processed")
+        logger.info(
+            f"[Index] Completed indexing for session {session_uuid}: {len(saved_file_items)} files processed"
+        )
     except Exception as e:
         logger.error(f"[Index] Unexpected indexing error: {e}")
         db.rollback()
@@ -1681,17 +1710,17 @@ async def create_issue_with_context_for_session(
 
         # Use consolidated issue creation service
         issue_service = IssueOpsService(db)
-        
+
         # Fall back to request repository_info if session repo data is incomplete
         repo_owner = db_session.repo_owner
         repo_name = db_session.repo_name
-        
+
         if not repo_owner or not repo_name:
             repository_info = request.get("repository_info", {})
             if repository_info:
                 repo_owner = repository_info.get("owner") or repo_owner
                 repo_name = repository_info.get("name") or repo_name
-        
+
         result = await issue_service.create_issue_with_context(
             user_id=current_user.id,
             session_id=session_id,
@@ -1985,9 +2014,7 @@ async def create_github_issue_from_user_issue_for_session(
         from .session_service import SessionService
 
         # Ensure session exists and belongs to user
-        _ = SessionService.ensure_owned_session(
-            db, current_user.id, session_id
-        )
+        _ = SessionService.ensure_owned_session(db, current_user.id, session_id)
 
         # Create GitHub issue using consolidated IssueOps (context assembled internally)
         issue_service = IssueOpsService(db)
@@ -2038,7 +2065,16 @@ async def create_github_issue_from_user_issue_for_session(
     except Exception as e:
         # Handle specific IssueOps errors with appropriate HTTP status codes
         error_str = str(e).lower()
-        if any(keyword in error_str for keyword in ['403', 'forbidden', 'permission', 'access denied', 'not authorized']):
+        if any(
+            keyword in error_str
+            for keyword in [
+                "403",
+                "forbidden",
+                "permission",
+                "access denied",
+                "not authorized",
+            ]
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=str(e),

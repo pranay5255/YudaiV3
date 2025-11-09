@@ -8,7 +8,7 @@ BACKEND MODIFICATION PLAN FOR UNIFIED STATE MANAGEMENT:
 1. Session management models (ChatSession, ChatMessage, ContextCard, FileEmbedding)
 2. Authentication models (User, AuthToken, SessionToken)
 3. Repository models (Repository, Issue, PullRequest, Commit)
-4. AI Solver models (AIModel, SWEAgentConfig, AISolveSession, AISolveEdit)
+4. AI Solver models (AIModel, Solve, SolveRun)
 
 🔄 IN PROGRESS:
 1. Model consolidation (FileItem → FileEmbedding, FileAnalysis → Repository metadata)
@@ -36,7 +36,7 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pgvector.sqlalchemy import Vector
-from pydantic import BaseModel, ConfigDict, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, validator
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -54,6 +54,7 @@ from sqlalchemy.sql import func
 # Import JSON type for PostgreSQL
 try:
     from sqlalchemy.dialects.postgresql import JSON as PG_JSON
+
     JSON_TYPE = PG_JSON
 except ImportError:
     JSON_TYPE = JSON
@@ -168,9 +169,6 @@ class User(Base):
     solves: Mapped[List["Solve"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
-    ai_solve_sessions: Mapped[List["AISolveSession"]] = relationship(
-        back_populates="user", cascade="all, delete-orphan"
-    )
 
 
 class AuthToken(Base):
@@ -191,17 +189,23 @@ class AuthToken(Base):
     installation_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("github_app_installations.github_installation_id"), nullable=True
     )
-    permissions: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=True)  # GitHub App permissions
+    permissions: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )  # GitHub App permissions
 
     # Token metadata
-    scope: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # OAuth scopes
+    scope: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # OAuth scopes
     expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # GitHub App installation context
-    repositories_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # API URL for accessible repos
+    repositories_url: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )  # API URL for accessible repos
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -322,7 +326,6 @@ class Repository(Base):
     )
 
 
-
 class Issue(Base):
     """Issues from a repository"""
 
@@ -353,9 +356,6 @@ class Issue(Base):
     )
 
     repository: Mapped["Repository"] = relationship(back_populates="issues")
-    ai_solve_sessions: Mapped[List["AISolveSession"]] = relationship(
-        back_populates="issue", cascade="all, delete-orphan"
-    )
 
 
 class PullRequest(Base):
@@ -415,12 +415,6 @@ class Commit(Base):
     )
 
     repository: Mapped["Repository"] = relationship(back_populates="commits")
-
-
-
-
-
-
 
 
 class ChatSession(Base):
@@ -566,8 +560,6 @@ class ContextCard(Base):
     session: Mapped[Optional["ChatSession"]] = relationship(
         back_populates="context_cards"
     )
-
-
 
 
 class UserIssue(Base):
@@ -736,20 +728,28 @@ class GitHubAppInstallation(Base):
     __tablename__ = "github_app_installations"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    github_installation_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
+    github_installation_id: Mapped[int] = mapped_column(
+        Integer, unique=True, nullable=False, index=True
+    )
     github_app_id: Mapped[str] = mapped_column(String(50), nullable=False)
 
     # Installation details
-    account_type: Mapped[str] = mapped_column(String(20), nullable=False)  # "User" or "Organization"
+    account_type: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # "User" or "Organization"
     account_login: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     account_id: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # Installation permissions and events
-    permissions: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=True)
+    permissions: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
     events: Mapped[Optional[List[str]]] = mapped_column(JSON_TYPE, nullable=True)
 
     # Repository access
-    repository_selection: Mapped[str] = mapped_column(String(20), default="all")  # "all" or "selected"
+    repository_selection: Mapped[str] = mapped_column(
+        String(20), default="all"
+    )  # "all" or "selected"
     single_file_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     # Installation status
@@ -792,7 +792,9 @@ class OAuthState(Base):
 
     # GitHub App OAuth specific fields
     github_app_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
 
     def __repr__(self):
         return f"<OAuthState(state={self.state}, expires_at={self.expires_at})>"
@@ -813,6 +815,17 @@ class AIModel(Base):
     provider: Mapped[str] = mapped_column(String(100), nullable=False)
     model_id: Mapped[str] = mapped_column(String(255), nullable=False)
     config: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    input_price_per_million_tokens: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
+    output_price_per_million_tokens: Mapped[Optional[float]] = mapped_column(
+        Float, nullable=True
+    )
+    currency: Mapped[str] = mapped_column(String(10), default="USD")
+    last_price_refresh_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Timestamps
@@ -821,36 +834,6 @@ class AIModel(Base):
     )
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), onupdate=func.now()
-    )
-
-    # Relationships
-    solve_sessions: Mapped[List["AISolveSession"]] = relationship(
-        back_populates="ai_model", cascade="all, delete-orphan"
-    )
-
-
-class SWEAgentConfig(Base):
-    """SWE-agent configuration settings"""
-
-    __tablename__ = "swe_agent_configs"
-
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    config_path: Mapped[str] = mapped_column(String(500), nullable=False)
-    parameters: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
-    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
-
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now()
-    )
-
-    # Relationships
-    solve_sessions: Mapped[List["AISolveSession"]] = relationship(
-        back_populates="swe_config", cascade="all, delete-orphan"
     )
 
 
@@ -932,6 +915,9 @@ class SolveRun(Base):
     latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     logs_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     diagnostics: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    trajectory_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON, nullable=True
+    )  # Agent trajectory data
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     started_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -953,97 +939,15 @@ class SolveRun(Base):
     )
 
 
-class AISolveSession(Base):
-    """AI solve sessions tracking solver progress"""
-
-    __tablename__ = "ai_solve_sessions"
-
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    issue_id: Mapped[int] = mapped_column(ForeignKey("issues.id"), nullable=False)
-    ai_model_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("ai_models.id"), nullable=True
-    )
-    swe_config_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("swe_agent_configs.id"), nullable=True
-    )
-
-    # Session status and metadata
-    status: Mapped[str] = mapped_column(
-        String(50), default="pending", index=True
-    )  # SolveStatus enum values
-    repo_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
-    branch_name: Mapped[str] = mapped_column(String(255), default="main")
-    trajectory_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(
-        JSON, nullable=True
-    )
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    # Timestamps
-    started_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    completed_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), index=True
-    )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now()
-    )
-
-    # Relationships
-    user: Mapped["User"] = relationship()
-    issue: Mapped["Issue"] = relationship()
-    ai_model: Mapped[Optional["AIModel"]] = relationship(
-        back_populates="solve_sessions"
-    )
-    swe_config: Mapped[Optional["SWEAgentConfig"]] = relationship(
-        back_populates="solve_sessions"
-    )
-    edits: Mapped[List["AISolveEdit"]] = relationship(
-        back_populates="session", cascade="all, delete-orphan"
-    )
-
-
-class AISolveEdit(Base):
-    """Individual edits made by the AI solver"""
-
-    __tablename__ = "ai_solve_edits"
-
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    session_id: Mapped[int] = mapped_column(
-        ForeignKey("ai_solve_sessions.id"), nullable=False
-    )
-
-    # Edit details
-    file_path: Mapped[str] = mapped_column(String(1000), nullable=False)
-    edit_type: Mapped[str] = mapped_column(
-        String(50), nullable=False
-    )  # EditType enum values
-    original_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    new_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    line_start: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    line_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    edit_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
-
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-
-    # Relationships
-    session: Mapped["AISolveSession"] = relationship(back_populates="edits")
-
-
 # ============================================================================
 # AI SOLVER PYDANTIC SCHEMAS (Simplified - Only Used Models)
 # ============================================================================
 
+
 # Core solver response schemas
 class SolveRunOut(BaseModel):
     """Solve run response schema."""
+
     id: str
     solve_id: str
     model: str
@@ -1060,6 +964,7 @@ class SolveRunOut(BaseModel):
     latency_ms: Optional[int] = None
     logs_url: Optional[str] = None
     diagnostics: Optional[Dict[str, Any]] = None
+    trajectory_data: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
     created_at: datetime
     started_at: Optional[datetime] = None
@@ -1071,6 +976,7 @@ class SolveRunOut(BaseModel):
 
 class SolveOut(BaseModel):
     """Top-level solve response schema."""
+
     id: str
     user_id: int
     session_id: Optional[int] = None
@@ -1095,16 +1001,90 @@ class SolveOut(BaseModel):
 
 class SolveDetailOut(SolveOut):
     """Solve detail response including experiment runs."""
+
     runs: List[SolveRunOut] = Field(default_factory=list)
     champion_run: Optional[SolveRunOut] = None
+
+
+class SolveProgress(BaseModel):
+    """Aggregate progress metrics for a solve session."""
+
+    runs_total: int = 0
+    runs_completed: int = 0
+    runs_failed: int = 0
+    runs_running: int = 0
+    last_update: Optional[datetime] = None
+    message: Optional[str] = None
+
+
+class StartSolveRequest(BaseModel):
+    """Request payload for launching a solver run."""
+
+    issue_id: int
+    repo_url: str
+    branch_name: str = "main"
+    ai_model_id: Optional[int] = None
+    ai_model_ids: Optional[List[int]] = None
+
+    @validator("repo_url")
+    def validate_repo_url(cls, value: str) -> str:
+        if not value or "github.com" not in value:
+            raise ValueError("repo_url must be a valid GitHub repository URL")
+        return value.strip()
+
+    @model_validator(mode="after")
+    def validate_model_selection(self):
+        if self.ai_model_id and self.ai_model_ids:
+            raise ValueError("Provide either ai_model_id or ai_model_ids, not both")
+        if self.ai_model_ids:
+            filtered_ids = [model_id for model_id in self.ai_model_ids if model_id]
+            if not filtered_ids:
+                raise ValueError("ai_model_ids cannot be empty")
+            # Remove duplicates while preserving order
+            seen: set[int] = set()
+            deduped: List[int] = []
+            for model_id in filtered_ids:
+                if model_id not in seen:
+                    seen.add(model_id)
+                    deduped.append(model_id)
+            self.ai_model_ids = deduped
+        return self
+
+
+class StartSolveResponse(BaseModel):
+    """Response payload returned after launching a solve session."""
+
+    solve_session_id: str
+    status: SolveStatus
+
+
+class SolveStatusResponse(BaseModel):
+    """Status payload returned for solve session polling."""
+
+    solve_session_id: str
+    status: SolveStatus
+    progress: SolveProgress = Field(default_factory=SolveProgress)
+    runs: List[SolveRunOut] = Field(default_factory=list)
+    champion_run: Optional[SolveRunOut] = None
+    error_message: Optional[str] = None
+
+
+class CancelSolveResponse(BaseModel):
+    """Response payload for cancellation requests."""
+
+    solve_session_id: str
+    status: SolveStatus
+    message: str
 
 
 # ============================================================================
 # ERROR MODELS & VALIDATION (Simplified)
 # ============================================================================
 
+
 class APIError(BaseModel):
     """Standardized API error response"""
+
     detail: Optional[str] = None
     message: Optional[str] = None
     status: Optional[int] = None
@@ -1119,6 +1099,7 @@ class APIError(BaseModel):
 # ============================================================================
 # PYDANTIC MODELS (API Request/Response) - Essential Only
 # ============================================================================
+
 
 # Core input models
 class ChatMessageInput(BaseModel):
@@ -1282,6 +1263,7 @@ class SessionResponse(BaseModel):
 
 class SessionContextResponse(BaseModel):
     """Complete session context including messages, context cards, and unified state"""
+
     session: SessionResponse
     messages: List[ChatMessageResponse]
     context_cards: List[str] = Field(default_factory=list)
@@ -1289,7 +1271,9 @@ class SessionContextResponse(BaseModel):
     file_embeddings_count: int = 0
     statistics: Optional[Dict[str, Any]] = Field(default_factory=dict)
     user_issues: Optional[List["UserIssueResponse"]] = Field(default_factory=list)
-    file_embeddings: Optional[List["FileEmbeddingResponse"]] = Field(default_factory=list)
+    file_embeddings: Optional[List["FileEmbeddingResponse"]] = Field(
+        default_factory=list
+    )
 
 
 # Context Card Models
@@ -1304,6 +1288,7 @@ class CreateContextCardRequest(BaseModel):
 # File Embedding Models
 class FileEmbeddingResponse(BaseModel):
     """Response model for embedding operations - excludes vector data"""
+
     id: int
     session_id: int
     repository_id: Optional[int] = None
@@ -1321,6 +1306,7 @@ class FileEmbeddingResponse(BaseModel):
 # Frontend UI Response Models
 class FileItemResponse(BaseModel):
     """Response model for frontend UI display in FileDependencies component"""
+
     id: str
     name: str
     path: Optional[str] = None
@@ -1419,11 +1405,10 @@ class ContextCardResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-
-
 # ============================================================================
 # AUTHENTICATION MODELS (Essential Only)
 # ============================================================================
+
 
 class UserProfile(BaseModel):
     id: int
@@ -1458,6 +1443,7 @@ class SessionTokenRequest(BaseModel):
 # GITHUB API MODELS (Essential Only)
 # ============================================================================
 
+
 class GitHubRepo(BaseModel):
     id: int
     name: str
@@ -1487,6 +1473,7 @@ class GitHubRepo(BaseModel):
 
 class GitHubAppInstallationResponse(BaseModel):
     """Response model for GitHub App installation information"""
+
     id: int
     github_installation_id: int
     github_app_id: str
