@@ -251,6 +251,7 @@ class GitHubOps:
                             "title": issue.get("title", "")[
                                 :100
                             ],  # Truncate long titles
+                            "body": issue.get("body", ""),
                             "state": issue.get("state"),
                             "created_at": issue.get("created_at"),
                             "updated_at": issue.get("updated_at"),
@@ -485,19 +486,31 @@ class GitHubOps:
             logger.error(f"Error creating GitHub issue in {owner}/{repo}: {e}")
 
             error_str = str(e).lower()
-            if any(keyword in error_str for keyword in ['403', 'forbidden', 'permission', 'access denied', 'not authorized']):
+            if any(
+                keyword in error_str
+                for keyword in [
+                    "403",
+                    "forbidden",
+                    "permission",
+                    "access denied",
+                    "not authorized",
+                ]
+            ):
                 raise GitHubOpsError(
                     f"Permission denied creating GitHub issue in {owner}/{repo}. "
                     f"Ensure your GitHub App has 'Issues' repository permission enabled and that the authenticated user has write access. "
                     f"Original error: {e}"
                 )
-            if any(keyword in error_str for keyword in ['404', 'not found', 'no such']):
+            if any(keyword in error_str for keyword in ["404", "not found", "no such"]):
                 raise GitHubOpsError(
                     f"Repository {owner}/{repo} not found or not accessible. "
                     f"Verify the repository exists and that the authenticated user or installation can access it. "
                     f"Original error: {e}"
                 )
-            if any(keyword in error_str for keyword in ['422', 'validation', 'unprocessable']):
+            if any(
+                keyword in error_str
+                for keyword in ["422", "validation", "unprocessable"]
+            ):
                 raise GitHubOpsError(
                     f"Validation error creating GitHub issue in {owner}/{repo}. "
                     f"Check that the title/body are valid and that issues are enabled for the repository. "

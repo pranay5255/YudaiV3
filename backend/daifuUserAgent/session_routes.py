@@ -315,9 +315,10 @@ async def daifu_github_list_repository_issues(
                     else None,
                 )
                 db.add(issue)
+                db.flush()  # Ensure ID is available
 
             # Add issue ID to response
-            issue_data["id"] = issue.id if hasattr(issue, "id") else None
+            issue_data["id"] = issue.id
 
         db.commit()
 
