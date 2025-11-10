@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useRepository } from '../hooks/useRepository';
 import { useSessionManagement } from '../hooks/useSessionManagement';
+import type { 
+  SolveStatusResponse, 
+  StartSolveResponse 
+} from '../types/sessionTypes';
 
 // Simple API helper
 const apiCall = async (url: string, options?: RequestInit) => {
@@ -49,33 +53,22 @@ interface AIModel {
   description?: string;
 }
 
-interface SolveProgress {
-  runs_total: number;
-  runs_completed: number;
-  runs_failed: number;
-  runs_running: number;
-  last_update: string;
-  message: string;
-}
+// Helper function to convert backend status (lowercase) to display format (uppercase)
+const toDisplayStatus = (status: string): string => {
+  return status.toUpperCase();
+};
 
-interface SolveRun {
-  id: string;
-  model: string;
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
-  started_at?: string;
-  completed_at?: string;
-  pr_url?: string;
-  error_message?: string;
-}
+// Helper function to check if status is complete
+const isCompleteStatus = (status: string): boolean => {
+  const upper = status.toUpperCase();
+  return ['COMPLETED', 'FAILED', 'CANCELLED'].includes(upper);
+};
 
-interface SolveStatus {
-  solve_session_id: string;
-  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
-  progress: SolveProgress;
-  runs: SolveRun[];
-  champion_run?: SolveRun;
-  error_message?: string;
-}
+// Helper function to check if status can be cancelled
+const canCancelStatus = (status: string): boolean => {
+  const upper = status.toUpperCase();
+  return ['PENDING', 'RUNNING'].includes(upper);
+};
 
 interface IssueModalProps {
   issue: GitHubIssue;
@@ -239,14 +232,14 @@ function IssueModal({ issue, onClose, onStartSolve, availableModels, isLoading }
 }
 
 interface SolveProgressModalProps {
-  solveStatus: SolveStatus;
+  solveStatus: SolveStatusResponse;
   onClose: () => void;
   onCancel: () => void;
 }
 
 function SolveProgressModal({ solveStatus, onClose, onCancel }: SolveProgressModalProps) {
-  const isComplete = ['COMPLETED', 'FAILED', 'CANCELLED'].includes(solveStatus.status);
-  const canCancel = ['PENDING', 'RUNNING'].includes(solveStatus.status);
+  const isComplete = isCompleteStatus(solveStatus.status);
+  const canCancel = canCancelStatus(solveStatus.status);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -303,8 +296,8 @@ function SolveProgressModal({ solveStatus, onClose, onCancel }: SolveProgressMod
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-lg font-semibold text-fg">Overall Status</h3>
-                <p className={`text-sm font-medium ${getStatusColor(solveStatus.status)}`}>
-                  {solveStatus.status}
+                <p className={`text-sm font-medium ${getStatusColor(toDisplayStatus(solveStatus.status))}`}>
+                  {toDisplayStatus(solveStatus.status)}
                 </p>
               </div>
               {!isComplete && (
@@ -368,13 +361,13 @@ function SolveProgressModal({ solveStatus, onClose, onCancel }: SolveProgressMod
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-3">
-                      <span className={`text-2xl ${getStatusColor(run.status)}`}>
-                        {getStatusIcon(run.status)}
+                      <span className={`text-2xl ${getStatusColor(toDisplayStatus(run.status))}`}>
+                        {getStatusIcon(toDisplayStatus(run.status))}
                       </span>
                       <div>
                         <p className="font-medium text-fg">{run.model}</p>
-                        <p className={`text-sm ${getStatusColor(run.status)}`}>
-                          {run.status}
+                        <p className={`text-sm ${getStatusColor(toDisplayStatus(run.status))}`}>
+                          {toDisplayStatus(run.status)}
                         </p>
                       </div>
                     </div>
@@ -440,7 +433,7 @@ export function SolveIssues() {
   const [availableModels, setAvailableModels] = useState<AIModel[]>([]);
   const [selectedIssue, setSelectedIssue] = useState<GitHubIssue | null>(null);
   const [activeSolveId, setActiveSolveId] = useState<string | null>(null);
-  const [solveStatus, setSolveStatus] = useState<SolveStatus | null>(null);
+  const [solveStatus, setSolveStatus] = useState<SolveStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filterYudai, setFilterYudai] = useState<'all' | 'yudai' | 'others'>('all');
@@ -495,7 +488,7 @@ export function SolveIssues() {
         setSolveStatus(data);
 
         // Stop polling if solve is complete
-        if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(data.status)) {
+        if (isCompleteStatus(data.status)) {
           setActiveSolveId(null);
         }
       } catch (err) {
@@ -539,10 +532,11 @@ export function SolveIssues() {
         }
       );
 
-      setActiveSolveId(data.solve_session_id);
+      const response = data as StartSolveResponse;
+      setActiveSolveId(response.solve_session_id);
       setSolveStatus({
-        solve_session_id: data.solve_session_id,
-        status: data.status,
+        solve_session_id: response.solve_session_id,
+        status: response.status,
         progress: {
           runs_total: 0,
           runs_completed: 0,

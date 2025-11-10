@@ -423,7 +423,6 @@ export const Chat: React.FC<ChatProps> = ({
 
       // Close the preview modal
       setShowIssuePreview(false);
-      const issuePreview = currentIssuePreview;
       setCurrentIssuePreview(null);
 
       // Call the solver endpoint using unified API
@@ -436,9 +435,7 @@ export const Chat: React.FC<ChatProps> = ({
         body: JSON.stringify({
           issue_id: issueId,
           repo_url: `https://github.com/${selectedRepository.repository.full_name}`,
-          branch: selectedRepository.branch || 'main',
-          issue_content: issuePreview.body || 'Issue content not available',
-          issue_title: issuePreview.title || 'Untitled Issue',
+          branch_name: selectedRepository.branch || 'main',
         }),
       });
 

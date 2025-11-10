@@ -579,10 +579,69 @@ export interface CreateGitHubIssueResponse {
 // ============================================================================
 
 export interface StartSolveRequest {
-  repo_url?: string;
+  issue_id: number;
+  repo_url: string;
   branch_name?: string;
   ai_model_id?: number;
-  swe_config_id?: number;
+  ai_model_ids?: number[];
+  small_change?: boolean;
+  best_effort?: boolean;
+  max_iterations?: number;
+  max_cost?: number;
+}
+
+export interface StartSolveResponse {
+  solve_session_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+}
+
+export interface SolveRunOut {
+  id: string;
+  solve_id: string;
+  model: string;
+  temperature: number;
+  max_edits: number;
+  evolution: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  sandbox_id?: string;
+  pr_url?: string;
+  tests_passed?: boolean;
+  loc_changed?: number;
+  files_changed?: number;
+  tokens?: number;
+  latency_ms?: number;
+  logs_url?: string;
+  diagnostics?: Record<string, unknown>;
+  trajectory_data?: Record<string, unknown>;
+  error_message?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  updated_at?: string;
+}
+
+export interface SolveProgress {
+  runs_total: number;
+  runs_completed: number;
+  runs_failed: number;
+  runs_running: number;
+  last_update?: string;
+  message?: string;
+}
+
+export interface SolveStatusResponse {
+  solve_session_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  progress: SolveProgress;
+  runs: SolveRunOut[];
+  champion_run?: SolveRunOut;
+  error_message?: string;
+}
+
+export interface CancelSolveResponse {
+  solve_session_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  message: string;
 }
 
 export interface SolveSessionOut {
