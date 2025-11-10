@@ -2,9 +2,8 @@
 Solver API router exposing start/status/cancel endpoints.
 """
 
-from fastapi import APIRouter, Depends
-
 from auth.github_oauth import get_current_user
+from fastapi import APIRouter, Depends
 from models import (
     CancelSolveResponse,
     SolveStatusResponse,
@@ -24,7 +23,7 @@ router = APIRouter(tags=["solver"])
     status_code=201,
 )
 async def start_solve(
-    session_id: int,
+    session_id: str,
     request: StartSolveRequest,
     current_user: User = Depends(get_current_user),
 ) -> StartSolveResponse:
@@ -43,7 +42,7 @@ async def start_solve(
     response_model=SolveStatusResponse,
 )
 async def get_solve_status(
-    session_id: int,
+    session_id: str,
     solve_id: str,
     current_user: User = Depends(get_current_user),
 ) -> SolveStatusResponse:
@@ -62,7 +61,7 @@ async def get_solve_status(
     response_model=CancelSolveResponse,
 )
 async def cancel_solve(
-    session_id: int,
+    session_id: str,
     solve_id: str,
     current_user: User = Depends(get_current_user),
 ) -> CancelSolveResponse:

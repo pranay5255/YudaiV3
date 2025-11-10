@@ -692,17 +692,17 @@ class SolverManager(ABC):
 
     @abstractmethod
     async def start_solve(
-        self, *, session_id: int, request: StartSolveRequest, user: User
+        self, *, session_id: str, request: StartSolveRequest, user: User
     ) -> StartSolveResponse: ...
 
     @abstractmethod
     async def get_status(
-        self, *, session_id: int, solve_id: str, user: User
+        self, *, session_id: str, solve_id: str, user: User
     ) -> SolveStatusResponse: ...
 
     @abstractmethod
     async def cancel_solve(
-        self, *, session_id: int, solve_id: str, user: User
+        self, *, session_id: str, solve_id: str, user: User
     ) -> CancelSolveResponse: ...
 
 
@@ -719,7 +719,7 @@ class DefaultSolverManager(SolverManager):
         self._time_budget_s = int(os.getenv("SOLVER_TIME_BUDGET_SECONDS", "5400"))
 
     async def start_solve(
-        self, *, session_id: int, request: StartSolveRequest, user: User
+        self, *, session_id: str, request: StartSolveRequest, user: User
     ) -> StartSolveResponse:
         await self._assert_capacity()
 
@@ -731,7 +731,9 @@ class DefaultSolverManager(SolverManager):
         try:
             chat_session = (
                 db.query(ChatSession)
-                .filter(ChatSession.id == session_id, ChatSession.user_id == user.id)
+                .filter(
+                    ChatSession.session_id == session_id, ChatSession.user_id == user.id
+                )
                 .first()
             )
             if not chat_session:
@@ -805,7 +807,7 @@ class DefaultSolverManager(SolverManager):
             solve = Solve(
                 id=solve_id,
                 user_id=user.id,
-                session_id=session_id,
+                session_id=chat_session.id,
                 repo_url=repo_url,
                 issue_number=issue.number,
                 base_branch=request.branch_name,
@@ -922,15 +924,29 @@ class DefaultSolverManager(SolverManager):
             raise
 
     async def get_status(
-        self, *, session_id: int, solve_id: str, user: User
+        self, *, session_id: str, solve_id: str, user: User
     ) -> SolveStatusResponse:
         db = self._session_factory()
         try:
+            # Look up ChatSession by string session_id
+            chat_session = (
+                db.query(ChatSession)
+                .filter(
+                    ChatSession.session_id == session_id, ChatSession.user_id == user.id
+                )
+                .first()
+            )
+            if not chat_session:
+                raise HTTPException(
+                    status.HTTP_404_NOT_FOUND, detail="Session not found for user"
+                )
+
+            # Query Solve using integer chat_session.id
             solve = (
                 db.query(Solve)
                 .filter(
                     Solve.id == solve_id,
-                    Solve.session_id == session_id,
+                    Solve.session_id == chat_session.id,
                     Solve.user_id == user.id,
                 )
                 .first()
@@ -961,7 +977,7 @@ class DefaultSolverManager(SolverManager):
             db.close()
 
     async def cancel_solve(
-        self, *, session_id: int, solve_id: str, user: User
+        self, *, session_id: str, solve_id: str, user: User
     ) -> CancelSolveResponse:
         state: Optional[SolveTaskState] = None
         async with self._lock:
@@ -976,11 +992,25 @@ class DefaultSolverManager(SolverManager):
 
         db = self._session_factory()
         try:
+            # Look up ChatSession by string session_id
+            chat_session = (
+                db.query(ChatSession)
+                .filter(
+                    ChatSession.session_id == session_id, ChatSession.user_id == user.id
+                )
+                .first()
+            )
+            if not chat_session:
+                raise HTTPException(
+                    status.HTTP_404_NOT_FOUND, detail="Session not found for user"
+                )
+
+            # Query Solve using integer chat_session.id
             solve = (
                 db.query(Solve)
                 .filter(
                     Solve.id == solve_id,
-                    Solve.session_id == session_id,
+                    Solve.session_id == chat_session.id,
                     Solve.user_id == user.id,
                 )
                 .first()
