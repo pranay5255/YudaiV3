@@ -446,8 +446,12 @@ export function SolveIssues() {
       try {
         setIsLoading(true);
         setError(null);
+        // Extract owner correctly - owner is an object, need to use .login or fallback to full_name
+        const repoOwner = selectedRepository.repository.owner?.login || 
+                          selectedRepository.repository.full_name.split('/')[0];
+        const repoName = selectedRepository.repository.name;
         const data = await apiCall(
-          `/api/daifu/github/repositories/${selectedRepository.repository.owner}/${selectedRepository.repository.name}/issues`
+          `/api/daifu/github/repositories/${repoOwner}/${repoName}/issues`
         );
         setIssues(data);
       } catch (err) {
@@ -517,6 +521,11 @@ export function SolveIssues() {
       setIsLoading(true);
       setError(null);
 
+      // Extract owner correctly - owner is an object, need to use .login or fallback to full_name
+      const repoOwner = selectedRepository.repository.owner?.login || 
+                        selectedRepository.repository.full_name.split('/')[0];
+      const repoName = selectedRepository.repository.name;
+
       const data = await apiCall(
         `/api/daifu/sessions/${activeSessionId}/solve/start`,
         {
@@ -524,7 +533,7 @@ export function SolveIssues() {
           body: JSON.stringify({
             issue_id: issueId,
             ai_model_id: modelId,
-            repo_url: `https://github.com/${selectedRepository.repository.owner}/${selectedRepository.repository.name}`,
+            repo_url: `https://github.com/${repoOwner}/${repoName}`,
             branch_name: selectedRepository.branch || 'main',
             small_change: smallChange,
             best_effort: bestEffort,
