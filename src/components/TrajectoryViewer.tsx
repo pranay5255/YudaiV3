@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, ChevronRight, ChevronDown, DollarSign, MessageSquare, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import trajectoryData from '../data/last_mini_run.traj.json';
 
 interface TrajectoryMessage {
   role: string;
@@ -45,16 +46,9 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({ sessionId })
     setError(null);
 
     try {
-      // For now, load the fixed trajectory file
-      // TODO: Replace with API call when backend is ready
-      const response = await fetch('/last_mini_run.traj.json');
-      
-      if (!response.ok) {
-        throw new Error('Failed to load trajectory file');
-      }
-
-      const data = await response.json();
-      setTrajectory(data);
+      // Import JSON file directly as a module (Vite supports this)
+      // This is more reliable than fetching from public directory
+      setTrajectory(trajectoryData as TrajectoryData);
     } catch (err) {
       console.error('Failed to load trajectory:', err);
       setError(err instanceof Error ? err.message : 'Failed to load trajectory');
