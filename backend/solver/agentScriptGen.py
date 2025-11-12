@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from string import Template
-from textwrap import dedent
 from typing import Any, Mapping, Optional
 
 
@@ -158,330 +157,329 @@ class AgentScriptParams:
         }
 
 
-SCRIPT_TEMPLATE = Template(
-    dedent(
-        """\
-        #!/usr/bin/env python3
-        '''
-        Mini-SWE-Agent execution script using Python bindings.
-        Generated automatically by YudaiV3 solver manager.
-        '''
-        import contextlib
-        import json
-        import logging
-        import os
-        import shutil
-        import subprocess
-        import sys
-        from pathlib import Path
-        from typing import Dict, List, Optional
+_SCRIPT_TEMPLATE_STR = """#!/usr/bin/env python3
+'''
+Mini-SWE-Agent execution script for headless sandbox execution.
+Generated automatically by YudaiV3 solver manager.
+'''
+import json
+import logging
+import os
+import subprocess
+import sys
+import traceback
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-        from minisweagent.agents.default import DefaultAgent
-        from minisweagent.environments.local import LocalEnvironment
-        from minisweagent.models import get_model
-        from minisweagent.run.utils.save import save_traj
-        from urllib.error import HTTPError, URLError
-        from urllib.request import Request, urlopen
+import requests
+import yaml
+from minisweagent.agents.default import DefaultAgent
+from minisweagent.environments.local import LocalEnvironment
+from minisweagent.models import get_model
+from minisweagent.run.utils.save import save_traj
 
-        logging.basicConfig(
-            level=logging.$log_level,
-            format="[%(levelname)s] %(message)s"
-        )
-
-        LOG_LEVEL = logging.$log_level
-        TFBD_PATH = Path("/home/user/tfbd.yaml")
-        TESTBED_PATH = Path("/home/user/testbed")
-        MINI_SWE_ROOT = Path("/home/user/mini-swe-agent")
-        TRAJECTORY_PATH = Path("/home/user/trajectory.json")
-
-        REPO_URL = $repo_literal
-        BRANCH_NAME = $branch_literal
-        ISSUE_URL = $issue_url_literal
-        MODEL_NAME = "$model_name"
-        ISSUE_TEXT_LITERAL = $task_literal
-
-        TEMPERATURE = $temperature
-        MAX_TOKENS = $max_tokens
-        MAX_ITERATIONS = $max_iterations
-        MAX_COST = $max_cost
-        SMALL_CHANGE = $small_change
-        BEST_EFFORT = $best_effort
-
-        SOLVE_PAYLOAD = {
-            "small_change": SMALL_CHANGE,
-            "best_effort": BEST_EFFORT,
-            "max_iterations": MAX_ITERATIONS,
-            "max_cost": MAX_COST,
-        }
-
-        logger = logging.getLogger("yudai.solver.script")
-
-
-        def _log_command_output(result: subprocess.CompletedProcess) -> None:
-            stdout = (result.stdout or "").strip()
-            if stdout:
-                logger.debug("stdout:\\n%s", stdout)
-            stderr = (result.stderr or "").strip()
-            if stderr:
-                logger.debug("stderr:\\n%s", stderr)
-
-
-        def _run_command(
-            command: List[str],
-            *,
-            cwd: Optional[Path] = None,
-        ) -> subprocess.CompletedProcess:
-            logger.info("Running command: %s", " ".join(command))
-            result = subprocess.run(
-                command,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            _log_command_output(result)
-            if result.returncode != 0:
-                raise RuntimeError(
-                    f"Command {' '.join(command)} failed with exit code {result.returncode}"
-                )
-            return result
-
-
-        def _prepare_clone_url(repo_url: str, token: Optional[str]) -> str:
-            sanitized = repo_url.rstrip("/")
-            if token and "github.com" in sanitized:
-                repo_path = sanitized.split("github.com/", 1)[-1]
-                if repo_path.endswith(".git"):
-                    repo_path = repo_path[:-4]
-                return f"https://x-access-token:{token}@github.com/{repo_path}.git"
-            if sanitized.endswith(".git"):
-                return sanitized
-            return f"{sanitized}.git"
-
-
-        def _install_mini_swe_agent() -> None:
-            logger.info("Ensuring mini-swe-agent repository is available")
-            if not MINI_SWE_ROOT.exists():
-                _run_command(
-                    [
-                        "git",
-                        "clone",
-                        "--depth",
-                        "1",
-                        "https://github.com/pranay5255/yudai-swe-agent.git",
-                        str(MINI_SWE_ROOT),
-                    ],
-                    cwd=MINI_SWE_ROOT.parent,
-                )
-            _run_command(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "--no-cache-dir",
-                    "-e",
-                    ".",
-                ],
-                cwd=MINI_SWE_ROOT,
-            )
-
-
-        def _clone_repository(
-            *,
-            repo_url: str,
-            branch_name: str,
-            token: Optional[str],
-        ) -> None:
-            if TESTBED_PATH.exists():
-                shutil.rmtree(TESTBED_PATH)
-            clone_url = _prepare_clone_url(repo_url, token)
-            command = ["git", "clone", "--depth", "1"]
-            if branch_name:
-                command.extend(["--branch", branch_name])
-            command.extend([clone_url, str(TESTBED_PATH)])
-            _run_command(command, cwd=TESTBED_PATH.parent)
-
-
-        def _fetch_issue_text(issue_url: str, token: Optional[str]) -> Optional[str]:
-            if not issue_url:
-                return None
-            api_url = issue_url.replace(
-                "https://github.com/", "https://api.github.com/repos/"
-            )
-            headers = {"Accept": "application/vnd.github+json"}
-            if token:
-                headers["Authorization"] = f"token {token}"
-            request = Request(api_url, headers=headers)
-            try:
-                with urlopen(request, timeout=30) as response:
-                    payload = json.loads(response.read().decode("utf-8"))
-            except (HTTPError, URLError, TimeoutError, ValueError) as exc:
-                logger.warning("Failed to fetch GitHub issue: %s", exc)
-                return None
-            title = payload.get("title", "No title")
-            body = payload.get("body", "")
-            return f"GitHub Issue: {title}\\n\\n{body}"
-
-
-        def _resolve_issue_text(token: Optional[str]) -> str:
-            if isinstance(ISSUE_TEXT_LITERAL, str) and ISSUE_TEXT_LITERAL.strip():
-                return ISSUE_TEXT_LITERAL
-            fetched = _fetch_issue_text(ISSUE_URL, token)
-            if fetched:
-                return fetched
-            raise RuntimeError("Issue text not available for mini-swe-agent execution")
-
-
-        def _assert_capacity() -> None:
-            if not os.getenv("OPENROUTER_API_KEY"):
-                raise RuntimeError("OPENROUTER_API_KEY environment variable required")
-            if not TFBD_PATH.exists():
-                raise RuntimeError(f"Expected tfbd.yaml at {TFBD_PATH}")
-
-
-        def _select_models(model_name: str) -> Dict[str, str]:
-            if not model_name:
-                raise RuntimeError("Model name missing")
-            logger.info("Selected model: %s", model_name)
-            return {"model_name": model_name}
-
-
-        def _record_success(result: Dict[str, str]) -> None:
-            payload = {
-                "exit_status": result["exit_status"],
-                "result": result["result"],
-                "trajectory_file": str(TRAJECTORY_PATH),
-                "tfbd_path": str(TFBD_PATH),
-                "repository_path": str(TESTBED_PATH),
-                "solve_payload": SOLVE_PAYLOAD,
-            }
-            Path("/home/user/solve_success.json").write_text(
-                json.dumps(payload, indent=2)
-            )
-            logger.info("Recorded success payload to /home/user/solve_success.json")
-
-
-        def _record_failure(error: Exception) -> Dict[str, str]:
-            payload = {"error": str(error)}
-            Path("/home/user/solve_failure.json").write_text(
-                json.dumps(payload, indent=2)
-            )
-            logger.error("Solve run failed: %s", error)
-            return payload
-
-
-        def _finalize_solve_if_complete(payload: Dict[str, int]) -> None:
-            summary = {
-                "exit_code": payload["exit_code"],
-                "completed": payload["exit_code"] == 0,
-            }
-            Path("/home/user/solve_final_state.json").write_text(
-                json.dumps(summary, indent=2)
-            )
-            logger.info("Solve final state written to /home/user/solve_final_state.json")
-
-
-        @contextlib.contextmanager
-        def _workspace(path: Path):
-            if not path.exists():
-                raise RuntimeError(f"Workspace missing at {path}")
-            original = Path.cwd()
-            os.chdir(path)
-            try:
-                yield
-            finally:
-                os.chdir(original)
-
-
-        def _execute_run(
-            *,
-            issue_text: str,
-            model_name: str,
-        ) -> Dict[str, str]:
-            if not issue_text:
-                raise RuntimeError("Issue text required for execution")
-            config = {
-                "model_name": model_name,
-                "temperature": TEMPERATURE,
-                "max_tokens": MAX_TOKENS,
-            }
-            agent_config = {
-                "mode": "yolo",
-                "max_iterations": MAX_ITERATIONS,
-                "max_cost": MAX_COST,
-            }
-            with _workspace(TESTBED_PATH):
-                agent = DefaultAgent(
-                    get_model(model_name=model_name, config=config),
-                    LocalEnvironment(),
-                    **agent_config,
-                )
-                exit_status, result = agent.run(issue_text)
-                save_traj(agent, TRAJECTORY_PATH, exit_status=exit_status, result=result)
-            logger.info("Trajectory saved to %s", TRAJECTORY_PATH)
-            serialized_result = (
-                result
-                if isinstance(result, str)
-                else json.dumps(result, ensure_ascii=True)
-            )
-            return {
-                "exit_status": exit_status,
-                "result": serialized_result,
-            }
-
-
-        def main():
-            '''Execute mini-swe-agent on the GitHub issue.'''
-
-            logging.getLogger().setLevel(LOG_LEVEL)
-            logging.info("Solve payload: %s", SOLVE_PAYLOAD)
-            github_token = os.getenv("GITHUB_TOKEN")
-            try:
-                _assert_capacity()
-                model_context = _select_models(MODEL_NAME)
-                _install_mini_swe_agent()
-                _clone_repository(
-                    repo_url=REPO_URL,
-                    branch_name=BRANCH_NAME,
-                    token=github_token,
-                )
-                issue_text = _resolve_issue_text(github_token)
-
-                logging.info("Starting mini-swe-agent execution...")
-                execution = _execute_run(
-                    issue_text=issue_text,
-                    model_name=model_context["model_name"],
-                )
-                _record_success(execution)
-
-                exit_code = 0 if execution["exit_status"] == "finished" else 1
-                _finalize_solve_if_complete({"exit_code": exit_code})
-
-                if exit_code == 0:
-                    print("\\n✓ Agent completed successfully")
-                    print(f"Result: {execution['result']}")
-                    return 0
-
-                print("\\n✗ Agent failed with status:", execution["exit_status"])
-                print(f"Result: {execution['result']}")
-                return exit_code
-
-            except KeyboardInterrupt:
-                logging.warning("Execution interrupted")
-                _record_failure(RuntimeError("Execution interrupted"))
-                return 130
-            except Exception as exc:  # pragma: no cover - safety net on remote sandbox
-                logging.error("Agent execution failed: %s", exc, exc_info=True)
-                _record_failure(exc)
-                return 1
-
-
-        if __name__ == "__main__":
-            sys.exit(main())
-        """
-    )
+logging.basicConfig(
+    level=logging.$log_level,
+    format="[%(levelname)s] %(message)s"
 )
+
+CONFIG_DIR = Path("/home/user/config_mswea")
+TFBD_PATH = Path("/home/user/tfbd.yaml")
+TESTBED_PATH = Path("/home/user/testbed")
+MINI_SWE_ROOT = Path("/home/user/mini-swe-agent")
+TRAJECTORY_PATH = Path("/home/user/trajectory.json")
+OUTPUT_PATH = Path("/home/user/last_mini_run.traj.json")
+
+REPO_URL = $repo_literal
+BRANCH_NAME = $branch_literal
+ISSUE_URL = $issue_url_literal
+MODEL_NAME = "$model_name"
+ISSUE_TEXT_LITERAL = $task_literal
+
+TEMPERATURE = $temperature
+MAX_TOKENS = $max_tokens
+MAX_ITERATIONS = $max_iterations
+MAX_COST = $max_cost
+SMALL_CHANGE = $small_change
+BEST_EFFORT = $best_effort
+
+SOLVE_PAYLOAD = {
+    "small_change": SMALL_CHANGE,
+    "best_effort": BEST_EFFORT,
+    "max_iterations": MAX_ITERATIONS,
+    "max_cost": MAX_COST,
+}
+
+logger = logging.getLogger("yudai.solver.script")
+
+
+def fetch_github_issue(issue_url: str) -> str:
+    \"\"\"Fetch GitHub issue text from the URL.\"\"\"
+    if not issue_url:
+        raise ValueError("GitHub issue URL is required")
+    
+    api_url = issue_url.replace(
+        "github.com", "api.github.com/repos"
+    ).replace("/issues/", "/issues/")
+    
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    if github_token := os.getenv("GITHUB_TOKEN"):
+        headers["Authorization"] = f"token {github_token}"
+    
+    try:
+        response = requests.get(api_url, headers=headers, timeout=30)
+        response.raise_for_status()
+        issue_data = response.json()
+    except Exception as exc:
+        logger.warning("Failed to fetch GitHub issue: %s", exc)
+        raise ValueError(f"Failed to fetch GitHub issue: {exc}")
+    
+    title = issue_data.get("title", "No title")
+    body = issue_data.get("body", "")
+    
+    return f"GitHub Issue: {title}\\n\\n{body}"
+
+
+def load_config() -> Dict[str, Any]:
+    \"\"\"Load agent configuration from tfbd.yaml.\"\"\"
+    if not TFBD_PATH.exists():
+        raise RuntimeError(f"Config file not found at {TFBD_PATH}")
+    
+    logger.info("Loading agent config from '%s'", TFBD_PATH)
+    config = yaml.safe_load(TFBD_PATH.read_text())
+    
+    # Apply runtime overrides
+    config.setdefault("agent", {})["mode"] = "yolo"
+    config.setdefault("agent", {})["confirm_exit"] = False
+    config.setdefault("agent", {})["max_iterations"] = MAX_ITERATIONS
+    config.setdefault("agent", {})["cost_limit"] = MAX_COST
+    
+    config.setdefault("model", {})["temperature"] = TEMPERATURE
+    config.setdefault("model", {})["max_tokens"] = MAX_TOKENS
+    
+    return config
+
+
+def clone_repository() -> None:
+    \"\"\"Clone the target repository into testbed directory.\"\"\"
+    if TESTBED_PATH.exists():
+        logger.info("Testbed already exists at %s", TESTBED_PATH)
+        return
+    
+    repo_url = REPO_URL
+    if github_token := os.getenv("GITHUB_TOKEN"):
+        if "github.com" in repo_url:
+            repo_url = repo_url.replace(
+                "https://github.com/", 
+                f"https://{github_token}@github.com/"
+            )
+    
+    if not repo_url.endswith(".git"):
+        repo_url += ".git"
+    
+    clone_cmd = ["git", "clone", "--depth", "1"]
+    if BRANCH_NAME:
+        clone_cmd.extend(["--branch", BRANCH_NAME])
+    clone_cmd.extend([repo_url, str(TESTBED_PATH)])
+    
+    logger.info("Cloning repository: %s", REPO_URL)
+    result = subprocess.run(
+        clone_cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Failed to clone repository: {result.stderr}"
+        )
+    
+    logger.info("Repository cloned successfully to %s", TESTBED_PATH)
+
+
+def install_mini_swe_agent() -> None:
+    \"\"\"Install mini-swe-agent if not already available.\"\"\"
+    logger.info("Ensuring mini-swe-agent is available")
+    
+    if not MINI_SWE_ROOT.exists():
+        logger.info("Cloning mini-swe-agent repository")
+        result = subprocess.run(
+            [
+                "git", "clone", "--depth", "1",
+                "https://github.com/pranay5255/yudai-swe-agent.git",
+                str(MINI_SWE_ROOT),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to clone mini-swe-agent: {result.stderr}")
+    
+    logger.info("Installing mini-swe-agent")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--no-cache-dir", "-e", "."],
+        cwd=MINI_SWE_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to install mini-swe-agent: {result.stderr}")
+    
+    logger.info("mini-swe-agent installed successfully")
+
+
+def record_success(exit_status: str, result: Any) -> None:
+    \"\"\"Record successful execution results.\"\"\"
+    payload = {
+        "exit_status": exit_status,
+        "result": str(result) if result else None,
+        "trajectory_file": str(OUTPUT_PATH),
+        "tfbd_path": str(TFBD_PATH),
+        "repository_path": str(TESTBED_PATH),
+        "solve_payload": SOLVE_PAYLOAD,
+    }
+    Path("/home/user/solve_success.json").write_text(
+        json.dumps(payload, indent=2)
+    )
+    logger.info("Recorded success to /home/user/solve_success.json")
+
+
+def record_failure(error: Exception) -> None:
+    \"\"\"Record execution failure.\"\"\"
+    payload = {
+        "error": str(error),
+        "traceback": traceback.format_exc(),
+    }
+    Path("/home/user/solve_failure.json").write_text(
+        json.dumps(payload, indent=2)
+    )
+    logger.error("Recorded failure: %s", error)
+
+
+def finalize_execution(exit_code: int) -> None:
+    \"\"\"Write final execution state.\"\"\"
+    summary = {
+        "exit_code": exit_code,
+        "completed": exit_code == 0,
+    }
+    Path("/home/user/solve_final_state.json").write_text(
+        json.dumps(summary, indent=2)
+    )
+    logger.info("Execution finalized with exit code %d", exit_code)
+
+
+def main() -> int:
+    \"\"\"Execute mini-swe-agent on the GitHub issue.\"\"\"
+    
+    logger.info("Starting mini-swe-agent execution")
+    logger.info("Solve configuration: %s", SOLVE_PAYLOAD)
+    
+    exit_status, result, extra_info = None, None, None
+    
+    try:
+        # Verify API key is available
+        if not os.getenv("OPENROUTER_API_KEY"):
+            raise RuntimeError("OPENROUTER_API_KEY environment variable required")
+        
+        # Install mini-swe-agent
+        install_mini_swe_agent()
+        
+        # Clone target repository
+        clone_repository()
+        
+        # Determine task text
+        task = None
+        if ISSUE_TEXT_LITERAL and isinstance(ISSUE_TEXT_LITERAL, str):
+            logger.info("Using provided issue text")
+            task = ISSUE_TEXT_LITERAL
+        elif ISSUE_URL:
+            logger.info("Fetching GitHub issue from: %s", ISSUE_URL)
+            task = fetch_github_issue(ISSUE_URL)
+        else:
+            raise RuntimeError("No task or issue URL provided")
+        
+        logger.info("Task loaded successfully")
+        
+        # Load configuration
+        config = load_config()
+        logger.info("Configuration loaded successfully")
+        
+        # Initialize model
+        model = get_model(MODEL_NAME, config.get("model", {}))
+        logger.info("Model initialized: %s", MODEL_NAME)
+        
+        # Initialize environment (LocalEnvironment for headless execution)
+        env = LocalEnvironment(**config.get("env", {}))
+        logger.info("Environment initialized: LocalEnvironment")
+        
+        # Initialize agent in yolo mode (non-interactive)
+        agent_config = config.get("agent", {})
+        agent = DefaultAgent(model, env, **agent_config)
+        logger.info("Agent initialized with config: %s", agent_config)
+        
+        # Run the agent
+        logger.info("Executing agent on task...")
+        exit_status, result = agent.run(task)
+        logger.info("Agent execution completed: %s", exit_status)
+        
+        # Save trajectory
+        save_traj(
+            agent, 
+            OUTPUT_PATH, 
+            exit_status=exit_status, 
+            result=result, 
+            extra_info=extra_info
+        )
+        logger.info("Trajectory saved to: %s", OUTPUT_PATH)
+        
+        # Record success
+        record_success(exit_status, result)
+        
+        # Determine exit code
+        exit_code = 0 if exit_status == "finished" else 1
+        finalize_execution(exit_code)
+        
+        if exit_code == 0:
+            print("\\n✓ Agent completed successfully")
+            print(f"Result: {result}")
+        else:
+            print(f"\\n✗ Agent finished with status: {exit_status}")
+            print(f"Result: {result}")
+        
+        return exit_code
+        
+    except KeyboardInterrupt:
+        logger.warning("Execution interrupted by user")
+        record_failure(RuntimeError("Execution interrupted"))
+        finalize_execution(130)
+        return 130
+        
+    except Exception as exc:
+        logger.error("Agent execution failed: %s", exc, exc_info=True)
+        exit_status = type(exc).__name__
+        result = str(exc)
+        extra_info = {"traceback": traceback.format_exc()}
+        
+        # Attempt to save trajectory even on failure
+        try:
+            if OUTPUT_PATH and 'agent' in locals():
+                save_traj(agent, OUTPUT_PATH, exit_status=exit_status, result=result, extra_info=extra_info)
+        except Exception:
+            pass
+        
+        record_failure(exc)
+        finalize_execution(1)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+"""
+
+SCRIPT_TEMPLATE = Template(_SCRIPT_TEMPLATE_STR)
 
 
 def build_agent_script(params: AgentScriptParams) -> str:
