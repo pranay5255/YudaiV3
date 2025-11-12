@@ -1,31 +1,26 @@
 """
-Solver manager orchestrating asynchronous mini-swe-agent executions inside E2B sandboxes.
+Solver manager orchestrating asynchronous mini-swe-agent solve sessions.
 
-This module consolidates all solver functionality including:
+This module handles:
 - Solve session orchestration and lifecycle management
-- E2B sandbox creation and execution using mini-swe-agent Python bindings
-- Direct mini-swe-agent integration via DefaultAgent
 - Database updates and state tracking
 - Async task management and cleanup
+- Integration with sandbox executor for agent execution
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import logging
 import os
-import re
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from db.database import SessionLocal
-from e2b import Sandbox
 from fastapi import HTTPException, status
 from models import (
     AIModel,
@@ -42,624 +37,17 @@ from models import (
     StartSolveResponse,
     User,
 )
+from solver.sandbox import (
+    HeadlessSandboxExecutor,
+    HeadlessSandboxRequest,
+    SandboxExecutionError,
+    SandboxRunResult,
+)
 from sqlalchemy.orm import Session
 
 from utils import utc_now
 
 logger = logging.getLogger(__name__)
-TFBD_TEMPLATE_PATH = Path(__file__).with_name("tfbd.yaml")
-DEFAULT_TFBD_FALLBACK = """agent:
-  system_template: "You are a helpful assistant that can interact with a computer."
-model:
-  model_name: "{model_name}"
-  model_class: "openrouter"
-  model_kwargs:
-    temperature: 0.4
-"""
-
-
-def build_tfbd_template(
-    model_name: str,
-    small_change: bool = False,
-    best_effort: bool = False,
-    max_iterations: int = 50,
-    max_cost: float = 10.0,
-) -> str:
-    """
-    Build a tfbd.yaml-style template with the requested model and options.
-
-    The sandbox expects both the execution script and the YAML control file,
-    so we lazily load the repository template, update the model stanza, and
-    fall back to a minimal configuration when the template is missing.
-
-    Args:
-        model_name: Model identifier for the solver
-        small_change: Limit scope to minimal code changes
-        best_effort: Continue solving even if tests fail
-        max_iterations: Maximum iterations for the agent
-        max_cost: Maximum cost in USD for the solve session
-    """
-
-    try:
-        base_template = TFBD_TEMPLATE_PATH.read_text()
-    except FileNotFoundError:
-        logger.warning(
-            "tfbd.yaml template missing at %s. Using fallback definition.",
-            TFBD_TEMPLATE_PATH,
-        )
-        return DEFAULT_TFBD_FALLBACK.format(model_name=model_name)
-
-    updated_template, replacements = re.subn(
-        r'model_name:\s*"[^"]+"',
-        f'model_name: "{model_name}"',
-        base_template,
-        count=1,
-    )
-
-    if replacements == 0:
-        # Append a model block if the template did not contain one.
-        appended_block = (
-            f"\nmodel:\n"
-            f'    model_name: "{model_name}"\n'
-            f'    model_class: "openrouter"\n'
-            f"    model_kwargs:\n"
-            f"        temperature: 0.4\n"
-        )
-        updated_template = base_template.rstrip() + appended_block
-
-    # Add agent configuration based on user options
-    agent_config = generate_agent_config(
-        small_change=small_change,
-        best_effort=best_effort,
-        max_iterations=max_iterations,
-        max_cost=max_cost,
-    )
-
-    # Append agent configuration
-    updated_template = updated_template.rstrip() + "\n" + agent_config
-
-    return updated_template
-
-
-def generate_agent_config(
-    small_change: bool = False,
-    best_effort: bool = False,
-    max_iterations: int = 50,
-    max_cost: float = 10.0,
-) -> str:
-    """
-    Generate agent configuration YAML block based on user options.
-
-    Args:
-        small_change: Limit scope to minimal code changes
-        best_effort: Continue solving even if tests fail
-        max_iterations: Maximum iterations for the agent
-        max_cost: Maximum cost in USD for the solve session
-
-    Returns:
-        YAML configuration string for agent settings
-    """
-
-    # Adjust iterations based on small_change option
-    if small_change:
-        max_iterations = min(max_iterations, 20)
-        max_cost = min(max_cost, 5.0)
-
-    # Configure mode based on best_effort option
-    mode = "best_effort" if best_effort else "yolo"
-
-    config = f"""
-agent:
-  mode: "{mode}"
-  max_iterations: {max_iterations}
-  max_cost: {max_cost}
-  small_change: {str(small_change).lower()}
-  best_effort: {str(best_effort).lower()}
-"""
-
-    return config
-
-
-def generate_solve_config_file(
-    model_name: str,
-    issue_url: str,
-    repo_url: str,
-    branch_name: str = "main",
-    small_change: bool = False,
-    best_effort: bool = False,
-    max_iterations: int = 50,
-    max_cost: float = 10.0,
-) -> Dict[str, str]:
-    """
-    Generate complete configuration files for a solve session.
-
-    Args:
-        model_name: Model identifier for the solver
-        issue_url: GitHub issue URL to solve
-        repo_url: Repository URL
-        branch_name: Branch to work on
-        small_change: Limit scope to minimal code changes
-        best_effort: Continue solving even if tests fail
-        max_iterations: Maximum iterations for the agent
-        max_cost: Maximum cost in USD for the solve session
-
-    Returns:
-        Dictionary containing file paths and contents for configuration files
-    """
-
-    # Generate YAML configuration
-    yaml_config = build_tfbd_template(
-        model_name=model_name,
-        small_change=small_change,
-        best_effort=best_effort,
-        max_iterations=max_iterations,
-        max_cost=max_cost,
-    )
-
-    # Generate metadata file
-    metadata = {
-        "issue_url": issue_url,
-        "repo_url": repo_url,
-        "branch_name": branch_name,
-        "model_name": model_name,
-        "small_change": small_change,
-        "best_effort": best_effort,
-        "max_iterations": max_iterations,
-        "max_cost": max_cost,
-        "created_at": utc_now().isoformat(),
-    }
-
-    return {
-        "tfbd.yaml": yaml_config,
-        "solve_metadata.json": json.dumps(metadata, indent=2),
-    }
-
-
-# ============================================================================
-# SANDBOX EXECUTION DATA MODELS
-# ============================================================================
-
-
-@dataclass
-class SandboxRunResult:
-    """Result from a completed sandbox execution."""
-
-    sandbox_id: str
-    exit_code: int
-    stdout: str
-    stderr: str
-    command: str
-    duration_ms: int
-    completed_at: datetime
-    trajectory_file: Optional[str] = None
-    pr_url: Optional[str] = None
-    tfbd_path: Optional[str] = None
-    script_path: Optional[str] = None
-    error: Optional[str] = None
-
-
-class SandboxExecutionError(Exception):
-    """Raised when sandbox execution fails."""
-
-    def __init__(self, message: str, logs: str = ""):
-        super().__init__(message)
-        self.logs = logs
-
-
-@dataclass
-class HeadlessSandboxRequest:
-    """Request parameters for headless sandbox execution."""
-
-    issue_url: str
-    repo_url: str
-    branch_name: str = "main"
-    model_name: str = "anthropic/claude-sonnet-4-5-20250929"
-    env: Optional[Dict[str, str]] = None
-    verbose: bool = False
-
-
-# ============================================================================
-# SANDBOX EXECUTOR - MINI-SWE-AGENT INTEGRATION
-# ============================================================================
-
-
-class HeadlessSandboxExecutor:
-    """
-    Executes mini-swe-agent in E2B sandboxes using Python bindings.
-
-    This executor:
-    1. Creates an E2B sandbox with required dependencies
-    2. Clones the repository into the sandbox
-    3. Uses mini-swe-agent Python bindings (DefaultAgent) directly
-    4. Captures execution results and trajectory data
-    5. Manages sandbox lifecycle and cleanup
-    """
-
-    def __init__(self):
-        self._sandbox: Optional[Sandbox] = None
-        self._cancelled = False
-        self._lock = asyncio.Lock()
-
-    async def run(self, request: HeadlessSandboxRequest) -> SandboxRunResult:
-        """
-        Execute mini-swe-agent in E2B sandbox using Python bindings.
-
-        Args:
-            request: Sandbox execution request with issue URL, repo, model, etc.
-
-        Returns:
-            SandboxRunResult with execution details
-
-        Raises:
-            SandboxExecutionError: If execution fails
-        """
-        start_time = utc_now()
-
-        try:
-            # Get required environment variables
-            openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-            github_token = os.getenv("GITHUB_TOKEN")
-
-            if not openrouter_api_key:
-                raise SandboxExecutionError(
-                    "OPENROUTER_API_KEY environment variable required"
-                )
-
-            # Prepare environment variables for sandbox
-            env_vars = {
-                "OPENROUTER_API_KEY": openrouter_api_key,
-                **(request.env or {}),
-            }
-
-            if github_token:
-                env_vars["GITHUB_TOKEN"] = github_token
-
-            # Create E2B sandbox
-            logger.info("Creating E2B sandbox with mini-swe-agent...")
-            async with self._lock:
-                if self._cancelled:
-                    raise SandboxExecutionError("Execution cancelled before start")
-                self._sandbox = Sandbox.create(envs=env_vars)
-
-            sandbox_id = self._sandbox.get_info().sandbox_id
-            logger.info(f"Sandbox created: {sandbox_id}")
-
-            # Install mini-swe-agent from source
-            await self._install_mini_swe_agent()
-
-            # Clone repository into sandbox
-            await self._clone_repository(
-                request.repo_url, request.branch_name, github_token
-            )
-
-            # Fetch GitHub issue content
-            issue_text = await self._fetch_github_issue(request.issue_url, github_token)
-
-            # Create tfbd.yaml config with the selected model and user options for traceability
-            tfbd_path = "/home/user/tfbd.yaml"
-            tfbd_config = build_tfbd_template(
-                model_name=request.model_name,
-                small_change=request.env.get("SMALL_CHANGE", "false").lower() == "true",
-                best_effort=request.env.get("BEST_EFFORT", "false").lower() == "true",
-                max_iterations=int(request.env.get("MAX_ITERATIONS", "50")),
-                max_cost=float(request.env.get("MAX_COST", "10.0")),
-            )
-            self._sandbox.files.write(tfbd_path, tfbd_config)
-            logger.info(
-                "Uploaded tfbd.yaml template to sandbox %s for model %s (small_change=%s, best_effort=%s)",
-                sandbox_id,
-                request.model_name,
-                request.env.get("SMALL_CHANGE", "false"),
-                request.env.get("BEST_EFFORT", "false"),
-            )
-
-            # Create mini-swe-agent Python script using bindings
-            python_script = self._generate_agent_script(
-                issue_text=issue_text,
-                model_name=request.model_name,
-                verbose=request.verbose,
-            )
-
-            # Upload script to sandbox
-            script_path = "/home/user/run_agent.py"
-            self._sandbox.files.write(script_path, python_script)
-            logger.info(
-                "Uploaded headless execution script to sandbox %s",
-                sandbox_id,
-            )
-
-            # Execute the agent script
-            logger.info(
-                "Executing mini-swe-agent in sandbox %s (repo=%s, issue=%s, model=%s)",
-                sandbox_id,
-                request.repo_url,
-                request.issue_url,
-                request.model_name,
-            )
-            result = self._sandbox.commands.run(
-                f"cd /home/user/testbed && python {script_path}"
-            )
-
-            # Calculate duration
-            end_time = utc_now()
-            duration_ms = int((end_time - start_time).total_seconds() * 1000)
-
-            # Check for cancellation
-            async with self._lock:
-                if self._cancelled:
-                    raise SandboxExecutionError("Execution cancelled")
-
-            # Parse output for PR URL and trajectory data
-            pr_url = self._extract_pr_url(result.stdout)
-            trajectory_file = self._extract_trajectory_path(result.stdout)
-
-            logger.info(
-                f"Sandbox execution completed: exit_code={result.exit_code}, "
-                f"duration={duration_ms}ms"
-            )
-
-            return SandboxRunResult(
-                sandbox_id=sandbox_id,
-                exit_code=result.exit_code,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                command=f"python {script_path}",
-                duration_ms=duration_ms,
-                completed_at=end_time,
-                trajectory_file=trajectory_file,
-                pr_url=pr_url,
-                tfbd_path=tfbd_path,
-                script_path=script_path,
-                error=None if result.exit_code == 0 else "Agent execution failed",
-            )
-
-        except SandboxExecutionError:
-            raise
-        except Exception as e:
-            logger.exception("Sandbox execution failed")
-            raise SandboxExecutionError(
-                f"Sandbox execution failed: {str(e)}",
-                logs=getattr(e, "logs", str(e)),
-            )
-        finally:
-            await self._cleanup_sandbox()
-
-    async def cancel(self):
-        """Cancel the running sandbox execution."""
-        async with self._lock:
-            self._cancelled = True
-            if self._sandbox:
-                try:
-                    self._sandbox.close()
-                    logger.info("Sandbox cancelled and closed")
-                except Exception as e:
-                    logger.warning(f"Failed to close sandbox during cancellation: {e}")
-
-    async def _install_mini_swe_agent(self):
-        """Install mini-swe-agent from source in the sandbox."""
-        logger.info("Installing mini-swe-agent from source...")
-
-        # Clone mini-swe-agent repository
-        clone_result = self._sandbox.commands.run(
-            "cd /home/user && git clone https://github.com/pranay5255/yudai-swe-agent.git mini-swe-agent"
-        )
-        if clone_result.exit_code != 0:
-            raise SandboxExecutionError(
-                "Failed to clone mini-swe-agent repository",
-                logs=clone_result.stderr,
-            )
-
-        # Install mini-swe-agent
-        install_result = self._sandbox.commands.run(
-            "cd /home/user/mini-swe-agent && pip install --no-cache-dir -e ."
-        )
-        if install_result.exit_code != 0:
-            raise SandboxExecutionError(
-                "Failed to install mini-swe-agent",
-                logs=install_result.stderr,
-            )
-
-        # Verify installation
-        verify_result = self._sandbox.commands.run(
-            "python -c 'import minisweagent; print(minisweagent.__version__)'"
-        )
-        if verify_result.exit_code != 0:
-            logger.warning("Could not verify mini-swe-agent installation")
-        else:
-            logger.info(f"mini-swe-agent installed: {verify_result.stdout.strip()}")
-
-    async def _clone_repository(
-        self, repo_url: str, branch_name: str, github_token: Optional[str]
-    ):
-        """Clone the target repository into the sandbox."""
-        logger.info(f"Cloning repository: {repo_url}")
-
-        # Add GitHub token to URL if available
-        if github_token and "github.com" in repo_url:
-            repo_path = repo_url.rstrip("/").replace("https://github.com/", "")
-            if repo_path.endswith(".git"):
-                repo_path = repo_path[:-4]
-            clone_url = (
-                f"https://x-access-token:{github_token}@github.com/{repo_path}.git"
-            )
-        else:
-            clone_url = repo_url if repo_url.endswith(".git") else f"{repo_url}.git"
-
-        # Clone repository
-        clone_cmd = f"cd /home/user && git clone {clone_url} testbed"
-        if branch_name and branch_name != "main":
-            clone_cmd += f" --branch {branch_name}"
-
-        result = self._sandbox.commands.run(clone_cmd)
-        if result.exit_code != 0:
-            raise SandboxExecutionError(
-                f"Failed to clone repository: {repo_url}",
-                logs=result.stderr,
-            )
-
-        logger.info("Repository cloned successfully")
-
-    async def _fetch_github_issue(
-        self, issue_url: str, github_token: Optional[str]
-    ) -> str:
-        """Fetch GitHub issue content from API."""
-        logger.info(f"Fetching GitHub issue: {issue_url}")
-
-        # Convert GitHub issue URL to API URL
-        api_url = issue_url.replace("github.com", "api.github.com/repos").replace(
-            "/issues/", "/issues/"
-        )
-
-        # Build curl command with optional auth
-        headers = ""
-        if github_token:
-            headers = f'-H "Authorization: token {github_token}"'
-
-        curl_cmd = f"curl -s {headers} {api_url}"
-        result = self._sandbox.commands.run(curl_cmd)
-
-        if result.exit_code != 0:
-            raise SandboxExecutionError(
-                "Failed to fetch GitHub issue",
-                logs=result.stderr,
-            )
-
-        try:
-            issue_data = json.loads(result.stdout)
-            title = issue_data.get("title", "No title")
-            body = issue_data.get("body", "")
-            return f"GitHub Issue: {title}\n\n{body}"
-        except json.JSONDecodeError as e:
-            raise SandboxExecutionError(
-                f"Failed to parse GitHub issue response: {e}",
-                logs=result.stdout,
-            )
-
-    def _generate_agent_script(
-        self, issue_text: str, model_name: str, verbose: bool
-    ) -> str:
-        """
-        Generate Python script using mini-swe-agent bindings.
-
-        This uses the Python API directly instead of CLI:
-        - DefaultAgent for headless execution
-        - LocalEnvironment for executing commands
-        - get_model for automatic model selection
-        """
-        script = f'''#!/usr/bin/env python3
-"""
-Mini-SWE-Agent execution script using Python bindings.
-Generated automatically by YudaiV3 solver manager.
-"""
-import sys
-import logging
-from pathlib import Path
-
-from minisweagent.agents.default import DefaultAgent
-from minisweagent.models import get_model
-from minisweagent.environments.local import LocalEnvironment
-from minisweagent.run.utils.save import save_traj
-
-# Configure logging
-logging.basicConfig(
-    level=logging.{"DEBUG" if verbose else "INFO"},
-    format="[%(levelname)s] %(message)s"
-)
-
-def main():
-    """Execute mini-swe-agent on the GitHub issue."""
-    
-    # Task description from GitHub issue
-    task = """
-{issue_text}
-"""
-    
-    # Configuration
-    model_name = "{model_name}"
-    config = {{
-        "model_name": model_name,
-        "temperature": 0.1,
-        "max_tokens": 4000,
-    }}
-    
-    agent_config = {{
-        "mode": "yolo",  # Headless mode without confirmation
-        "max_iterations": 50,
-        "max_cost": 10.0,
-    }}
-    
-    environment_config = {{}}
-    
-    try:
-        # Create agent using Python bindings
-        agent = DefaultAgent(
-            get_model(model_name=model_name, config=config),
-            LocalEnvironment(**environment_config),
-            **agent_config,
-        )
-        
-        # Run agent on task
-        logging.info("Starting mini-swe-agent execution...")
-        exit_status, result = agent.run(task)
-        
-        # Save trajectory
-        output_path = Path("/home/user/trajectory.json")
-        save_traj(agent, output_path, exit_status=exit_status, result=result)
-        logging.info(f"Trajectory saved to {{output_path}}")
-        
-        # Print result
-        if exit_status == "finished":
-            print(f"\\n✓ Agent completed successfully")
-            print(f"Result: {{result}}")
-            return 0
-        else:
-            print(f"\\n✗ Agent failed with status: {{exit_status}}")
-            print(f"Result: {{result}}")
-            return 1
-            
-    except KeyboardInterrupt:
-        logging.warning("Execution interrupted")
-        return 130
-    except Exception as e:
-        logging.error(f"Agent execution failed: {{e}}", exc_info=True)
-        return 1
-
-if __name__ == "__main__":
-    sys.exit(main())
-'''
-        return script
-
-    def _extract_pr_url(self, stdout: str) -> Optional[str]:
-        """Extract PR URL from agent output."""
-        import re
-
-        # Look for GitHub PR URLs in output
-        pr_pattern = r"https://github\.com/[\w-]+/[\w-]+/pull/\d+"
-        matches = re.findall(pr_pattern, stdout)
-
-        return matches[-1] if matches else None
-
-    def _extract_trajectory_path(self, stdout: str) -> Optional[str]:
-        """Extract trajectory file path from agent output."""
-        if "Trajectory saved to" in stdout:
-            import re
-
-            match = re.search(r"Trajectory saved to (.+)", stdout)
-            if match:
-                return match.group(1).strip()
-        return "/home/user/trajectory.json"
-
-    async def _cleanup_sandbox(self):
-        """Clean up sandbox resources."""
-        async with self._lock:
-            if self._sandbox:
-                try:
-                    self._sandbox.close()
-                    logger.info("Sandbox closed")
-                except Exception as e:
-                    logger.warning(f"Failed to close sandbox: {e}")
-                finally:
-                    self._sandbox = None
 
 
 # ============================================================================
@@ -718,6 +106,37 @@ class DefaultSolverManager(SolverManager):
         self._max_parallel = max_parallel or int(os.getenv("SOLVER_MAX_PARALLEL", "3"))
         self._time_budget_s = int(os.getenv("SOLVER_TIME_BUDGET_SECONDS", "5400"))
 
+    @staticmethod
+    def _coerce_bool(value: Any, default: bool = False) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _coerce_int(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _coerce_float(value: Any, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _extract_solve_options(self, solve: Solve) -> Dict[str, Any]:
+        matrix = solve.matrix or {}
+        return {
+            "small_change": self._coerce_bool(matrix.get("small_change")),
+            "best_effort": self._coerce_bool(matrix.get("best_effort")),
+            "max_iterations": self._coerce_int(matrix.get("max_iterations"), 50),
+            "max_cost": self._coerce_float(matrix.get("max_cost"), 10.0),
+        }
+
     async def start_solve(
         self, *, session_id: str, request: StartSolveRequest, user: User
     ) -> StartSolveResponse:
@@ -768,8 +187,9 @@ class DefaultSolverManager(SolverManager):
             experiments = []
             model_run_plans: List[ModelRunPlan] = []
             solve_runs: List[SolveRun] = []
+            selected_models = ai_models[:1]
 
-            for current_model in ai_models:
+            for current_model in selected_models:
                 run_id = uuid.uuid4().hex
                 temperature = self._extract_temperature(current_model)
                 experiments.append(
@@ -801,8 +221,7 @@ class DefaultSolverManager(SolverManager):
                     )
                 )
 
-            max_parallel = max(len(model_run_plans), 1)
-            max_parallel = min(max_parallel, self._max_parallel)
+            max_parallel = 1
 
             solve = Solve(
                 id=solve_id,
@@ -1085,19 +504,20 @@ class DefaultSolverManager(SolverManager):
             run.started_at = now
             db.commit()
 
+            options = self._extract_solve_options(solve)
+
             request = HeadlessSandboxRequest(
                 issue_url=issue_url,
                 repo_url=repo_url,
                 branch_name=branch_name,
                 model_name=model_name,
-                env={
-                    "SOLVE_ID": solve_id,
-                    "SOLVE_RUN_ID": run_id,
-                    "SMALL_CHANGE": str(getattr(solve, "small_change", False)),
-                    "BEST_EFFORT": str(getattr(solve, "best_effort", False)),
-                    "MAX_ITERATIONS": str(getattr(solve, "max_iterations", 50)),
-                    "MAX_COST": str(getattr(solve, "max_cost", 10.0)),
-                },
+                temperature=run.temperature,
+                small_change=options["small_change"],
+                best_effort=options["best_effort"],
+                max_iterations=options["max_iterations"],
+                max_cost=options["max_cost"],
+                solve_id=solve_id,
+                solve_run_id=run_id,
                 verbose=True,
             )
 
@@ -1141,8 +561,26 @@ class DefaultSolverManager(SolverManager):
         run.sandbox_id = result.sandbox_id
         run.pr_url = result.pr_url
         run.error_message = None if succeeded else "Agent execution failed"
+
+        # Store trajectory data with local path and metadata
+        trajectory_data = {}
         if result.trajectory_file:
-            run.trajectory_data = {"file_path": result.trajectory_file}
+            trajectory_data["remote_path"] = result.trajectory_file
+        if result.local_trajectory_path:
+            trajectory_data["local_path"] = result.local_trajectory_path
+        if result.trajectory_metadata:
+            trajectory_data["metadata"] = {
+                "exit_status": result.trajectory_metadata.exit_status,
+                "submission": result.trajectory_metadata.submission,
+                "instance_cost": result.trajectory_metadata.instance_cost,
+                "api_calls": result.trajectory_metadata.api_calls,
+                "mini_version": result.trajectory_metadata.mini_version,
+                "model_name": result.trajectory_metadata.model_name,
+                "total_messages": result.trajectory_metadata.total_messages,
+            }
+        if trajectory_data:
+            run.trajectory_data = trajectory_data
+
         preview_length = 2000
         run.diagnostics = {
             "command": result.command,
@@ -1151,6 +589,7 @@ class DefaultSolverManager(SolverManager):
             "tfbd_path": result.tfbd_path,
             "script_path": result.script_path,
             "trajectory_file": result.trajectory_file,
+            "local_trajectory_path": result.local_trajectory_path,
         }
 
         if succeeded and not solve.champion_run_id:

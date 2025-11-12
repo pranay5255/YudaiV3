@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useRepository } from '../hooks/useRepository';
 import { useSessionManagement } from '../hooks/useSessionManagement';
-import type { 
-  SolveStatusResponse, 
-  StartSolveResponse 
+import type {
+  SolveStatusResponse,
+  StartSolveRequest,
+  StartSolveResponse,
 } from '../types/sessionTypes';
 
 // Simple API helper
@@ -68,6 +69,11 @@ const isCompleteStatus = (status: string): boolean => {
 const canCancelStatus = (status: string): boolean => {
   const upper = status.toUpperCase();
   return ['PENDING', 'RUNNING'].includes(upper);
+};
+
+const DEFAULT_SOLVER_LIMITS = {
+  max_iterations: 40,
+  max_cost: 7.5,
 };
 
 interface IssueModalProps {
@@ -526,20 +532,21 @@ export function SolveIssues() {
                         selectedRepository.repository.full_name.split('/')[0];
       const repoName = selectedRepository.repository.name;
 
-      const data = await apiCall(
-        `/api/daifu/sessions/${activeSessionId}/solve/start`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            issue_id: issueId,
-            ai_model_id: modelId,
-            repo_url: `https://github.com/${repoOwner}/${repoName}`,
-            branch_name: selectedRepository.branch || 'main',
-            small_change: smallChange,
-            best_effort: bestEffort,
-          }),
-        }
-      );
+      const solverPayload: StartSolveRequest = {
+        issue_id: issueId,
+        ai_model_id: modelId,
+        repo_url: `https://github.com/${repoOwner}/${repoName}`,
+        branch_name: selectedRepository.branch || 'main',
+        small_change: smallChange,
+        best_effort: bestEffort,
+        max_iterations: DEFAULT_SOLVER_LIMITS.max_iterations,
+        max_cost: DEFAULT_SOLVER_LIMITS.max_cost,
+      };
+
+      const data = await apiCall(`/api/daifu/sessions/${activeSessionId}/solve/start`, {
+        method: 'POST',
+        body: JSON.stringify(solverPayload),
+      });
 
       const response = data as StartSolveResponse;
       setActiveSolveId(response.solve_session_id);

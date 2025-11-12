@@ -2212,3 +2212,177 @@ async def create_github_issue_from_user_issue_for_session(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=str(e),
             )
+
+
+# ============================================================================
+# TRAJECTORY VIEWER ENDPOINTS
+# ============================================================================
+
+
+@router.get("/sessions/{session_id}/trajectories", response_model=List[Dict[str, Any]])
+async def get_session_trajectories(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get all trajectories for a session from solve runs.
+    """
+    try:
+        from models import Solve
+
+        from .session_service import SessionService
+
+        # Ensure session exists and belongs to user
+        db_session = SessionService.ensure_owned_session(
+            db, current_user.id, session_id
+        )
+
+        # Get all solves for this session
+        solves = (
+            db.query(Solve)
+            .filter(
+                Solve.session_id == db_session.id,
+                Solve.user_id == current_user.id,
+            )
+            .all()
+        )
+
+        trajectories = []
+        for solve in solves:
+            for run in solve.runs:
+                if run.trajectory_data:
+                    trajectory_data = run.trajectory_data
+                    if isinstance(trajectory_data, str):
+                        try:
+                            trajectory_data = json.loads(trajectory_data)
+                        except json.JSONDecodeError:
+                            trajectory_data = {}
+
+                    local_path = trajectory_data.get("local_path")
+                    metadata = trajectory_data.get("metadata", {})
+
+                    trajectories.append(
+                        {
+                            "id": run.id,
+                            "solve_id": solve.id,
+                            "run_id": run.id,
+                            "model": run.model,
+                            "status": run.status,
+                            "local_path": local_path,
+                            "remote_path": trajectory_data.get("remote_path"),
+                            "exit_status": metadata.get("exit_status"),
+                            "instance_cost": metadata.get("instance_cost"),
+                            "api_calls": metadata.get("api_calls"),
+                            "mini_version": metadata.get("mini_version"),
+                            "model_name": metadata.get("model_name"),
+                            "total_messages": metadata.get("total_messages"),
+                            "created_at": run.created_at.isoformat()
+                            if run.created_at
+                            else None,
+                            "completed_at": run.completed_at.isoformat()
+                            if run.completed_at
+                            else None,
+                        }
+                    )
+
+        return trajectories
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get trajectories for session {session_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get trajectories: {str(e)}",
+        )
+
+
+@router.get(
+    "/sessions/{session_id}/trajectories/{run_id}", response_model=Dict[str, Any]
+)
+async def get_trajectory_file(
+    session_id: str,
+    run_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get trajectory file content for a specific run.
+    """
+    try:
+        from models import Solve, SolveRun
+
+        from .session_service import SessionService
+
+        # Ensure session exists and belongs to user
+        db_session = SessionService.ensure_owned_session(
+            db, current_user.id, session_id
+        )
+
+        # Get the solve run
+        run = (
+            db.query(SolveRun)
+            .join(Solve)
+            .filter(
+                SolveRun.id == run_id,
+                Solve.session_id == db_session.id,
+                Solve.user_id == current_user.id,
+            )
+            .first()
+        )
+
+        if not run:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Trajectory not found",
+            )
+
+        trajectory_data = run.trajectory_data
+        if not trajectory_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No trajectory data available for this run",
+            )
+
+        if isinstance(trajectory_data, str):
+            try:
+                trajectory_data = json.loads(trajectory_data)
+            except json.JSONDecodeError:
+                trajectory_data = {}
+
+        local_path = trajectory_data.get("local_path")
+        if not local_path:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Trajectory file path not found",
+            )
+
+        # Read trajectory file
+        trajectory_file_path = Path(local_path)
+        if not trajectory_file_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Trajectory file not found on disk",
+            )
+
+        trajectory_content = json.loads(trajectory_file_path.read_text())
+
+        return {
+            "run_id": run.id,
+            "solve_id": run.solve_id,
+            "model": run.model,
+            "status": run.status,
+            "local_path": local_path,
+            "content": trajectory_content,
+            "metadata": trajectory_data.get("metadata", {}),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get trajectory file for run {run_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get trajectory file: {str(e)}",
+        )

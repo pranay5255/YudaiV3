@@ -6,6 +6,8 @@ import os
 import uuid
 from datetime import timedelta
 
+import requests
+
 # Import Base from unified models
 from models import Base
 from sqlalchemy import create_engine, event, text
@@ -84,13 +86,65 @@ def init_db():
         return False
 
 
+def fetch_and_add_openrouter_models() -> None:
+    """
+    Fetch OpenRouter models from API and add as sample data to the database.
+    """
+
+    from models import AIModel
+
+    db = SessionLocal()
+    try:
+        models_endpoint = "https://openrouter.ai/api/v1/models"
+        response = requests.get(models_endpoint, timeout=10)
+        if not response.ok:
+            print(f"✗ Failed to fetch OpenRouter models: {response.status_code}")
+            return
+        models_data = response.json().get("data", [])
+        if not models_data:
+            print("✗ No model data found in response")
+            return
+
+        created_models = []
+        for model in models_data:
+            model_id = model.get("id")
+            # Avoid duplicates by checking if the model already exists in DB
+            exists = db.query(AIModel).filter_by(openai_id=model_id).first()
+            if exists:
+                print(f"✓ Model already exists: {model_id}")
+                continue
+
+            ai_model = AIModel(
+                name=model.get("name"),
+                provider="openrouter",
+                openai_id=model_id,
+                context_length=model.get("context_length")
+                or model.get("top_provider", {}).get("context_length"),
+                description=model.get("description", ""),
+                is_available=True,
+                meta=model,
+            )
+            db.add(ai_model)
+            created_models.append(model.get("name", model_id))
+        db.commit()
+
+        if created_models:
+            print(f"✓ Added {len(created_models)} OpenRouter models: {created_models}")
+        else:
+            print("No new OpenRouter models added.")
+    except Exception as e:
+        db.rollback()
+        print(f"✗ Error adding OpenRouter models: {e}")
+    finally:
+        db.close()
+
+
 def create_sample_data():
     """
     Create sample data for all tables
     """
     from models import (
         # AI Solver models
-        AIModel,
         AuthToken,
         ChatMessage,
         ChatSession,
@@ -196,6 +250,8 @@ def create_sample_data():
         for token in sample_tokens:
             db.add(token)
         db.commit()
+
+        fetch_and_add_openrouter_models()
 
         # Assign refresh_token after construction to avoid keyword issues
         try:
@@ -518,49 +574,8 @@ def create_sample_data():
             db.add(file_embedding)
         db.commit()
 
-        # Sample AI Models
-        sample_ai_models = [
-            AIModel(
-                name="Claude 3.5 Sonnet",
-                provider="openrouter",
-                model_id="anthropic/claude-3.5-sonnet",
-                config={"temperature": 0.1, "max_tokens": 4000, "top_p": 0.9},
-                description="Strong coding model for balanced latency and quality.",
-                input_price_per_million_tokens=3.0,
-                output_price_per_million_tokens=15.0,
-                currency="USD",
-                last_price_refresh_at=utc_now(),
-                is_active=True,
-            ),
-            AIModel(
-                name="GPT-4 Turbo",
-                provider="openrouter",
-                model_id="openai/gpt-4-turbo",
-                config={"temperature": 0.2, "max_tokens": 4000, "top_p": 0.95},
-                description="OpenAI GPT-4 Turbo via OpenRouter",
-                input_price_per_million_tokens=10.0,
-                output_price_per_million_tokens=30.0,
-                currency="USD",
-                last_price_refresh_at=utc_now(),
-                is_active=True,
-            ),
-            AIModel(
-                name="DeepSeek Coder",
-                provider="openrouter",
-                model_id="deepseek/deepseek-coder",
-                config={"temperature": 0.1, "max_tokens": 8000, "top_p": 0.9},
-                description="High context open-source coding model",
-                input_price_per_million_tokens=1.25,
-                output_price_per_million_tokens=2.5,
-                currency="USD",
-                last_price_refresh_at=utc_now(),
-                is_active=False,
-            ),
-        ]
-
-        for ai_model in sample_ai_models:
-            db.add(ai_model)
-        db.commit()
+        # Fetch and add OpenRouter models
+        fetch_and_add_openrouter_models()
 
         # Sample Solve jobs for solver orchestration
         sample_solves = [

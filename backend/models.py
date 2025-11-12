@@ -814,8 +814,30 @@ class AIModel(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     provider: Mapped[str] = mapped_column(String(100), nullable=False)
     model_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    config: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    canonical_slug: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+    hugging_face_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_timestamp: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    context_length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    architecture: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
+    pricing: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=True)
+    top_provider: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
+    per_request_limits: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
+    supported_parameters: Mapped[Optional[List[str]]] = mapped_column(
+        JSON_TYPE, nullable=True, default=list
+    )
+    default_parameters: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
+    config: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     input_price_per_million_tokens: Mapped[Optional[float]] = mapped_column(
         Float, nullable=True
     )
