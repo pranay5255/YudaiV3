@@ -4,7 +4,7 @@ import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { Chat } from './components/Chat';
 import { ContextCards } from './components/ContextCards';
-import { IdeasToImplement } from './components/IdeasToImplement';
+import { TrajectoryViewer } from './components/TrajectoryViewer';
 import { SolveIssues } from './components/SolveIssues';
 import { ToastContainer } from './components/Toast';
 import { RepositorySelectionToast } from './components/RepositorySelectionToast';
@@ -13,7 +13,7 @@ import { SessionErrorBoundary } from './components/SessionErrorBoundary';
 import { AuthSuccess } from './components/AuthSuccess';
 import { AuthCallback } from './components/AuthCallback';
 import { LoginPage } from './components/LoginPage';
-import { IdeaItem, Toast, ProgressStep, TabType, SelectedRepository } from './types';
+import { Toast, ProgressStep, TabType, SelectedRepository } from './types';
 import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
 import { useSessionManagement } from './hooks/useSessionManagement';
@@ -145,11 +145,6 @@ function AppContent() {
     });
   };
 
-  const handleCreateIdeaIssue = (idea: IdeaItem) => {
-    // Simplified idea issue creation
-    console.log('Creating idea issue:', idea);
-    addToast('Idea issue creation not implemented yet', 'info');
-  };
 
   const handleTabChange = (newTab: TabType) => {
     setActiveTab(newTab);
@@ -172,8 +167,8 @@ function AppContent() {
         );
       case 'ideas':
         return (
-          <IdeasToImplement
-            onCreateIssue={handleCreateIdeaIssue}
+          <TrajectoryViewer
+            sessionId={activeSessionId || undefined}
           />
         );
       case 'solve':
