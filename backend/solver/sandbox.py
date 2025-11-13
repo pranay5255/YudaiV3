@@ -47,6 +47,8 @@ model:
 
 REMOTE_TFBD_PATH = "/home/user/tfbd.yaml"
 REMOTE_AGENT_SCRIPT_PATH = "/home/user/run_agent.py"
+MINI_SWE_AGENT_PATH = "/home/user/mini-swe-agent"
+MINI_SWE_AGENT_REPO = "https://github.com/pranay5255/yudai-swe-agent.git"
 
 
 # ============================================================================
@@ -514,6 +516,12 @@ class HeadlessSandboxExecutor:
                 sandbox_id,
             )
 
+            # Prepare mini-swe-agent dependencies
+            await self._prepare_mini_swe_agent(
+                sandbox=sandbox,
+                envs=command_env,
+            )
+
             # Execute the agent script
             logger.info(
                 "Executing mini-swe-agent in sandbox %s (repo=%s, issue=%s, model=%s)",
@@ -620,6 +628,26 @@ class HeadlessSandboxExecutor:
                 finally:
                     self._sandbox = None
 
+    async def _prepare_mini_swe_agent(
+        self,
+        *,
+        sandbox: AsyncSandbox,
+        envs: Dict[str, str],
+    ) -> None:
+        """Ensure mini-swe-agent and runtime dependencies are available in sandbox."""
+
+        setup_commands = [
+            ("if [ ! -d {path} ]; then git clone --depth 1 {repo} {path}; fi").format(
+                path=MINI_SWE_AGENT_PATH, repo=MINI_SWE_AGENT_REPO
+            ),
+            "python3 -m pip install --no-cache-dir requests pyyaml",
+            f"python3 -m pip install --no-cache-dir -e {MINI_SWE_AGENT_PATH}",
+        ]
+
+        for command in setup_commands:
+            logger.info("Running sandbox setup command: %s", command)
+            await sandbox.run_command(command, envs=envs)
+
     def _build_metadata(self, request: HeadlessSandboxRequest) -> Dict[str, str]:
         metadata: Dict[str, Any] = {
             "solve_id": request.solve_id,
@@ -652,7 +680,8 @@ class HeadlessSandboxExecutor:
             match = re.search(r"Trajectory saved to (.+)", stdout)
             if match:
                 return match.group(1).strip()
-        return "/home/user/trajectory.json"
+        # Fallback to the default output path used in run_agent.py
+        return "/home/user/last_mini_run.traj.json"
 
     async def _cleanup_sandbox(self):
         """Clean up sandbox resources."""
