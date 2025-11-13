@@ -338,14 +338,24 @@ CREATE TABLE IF NOT EXISTS file_embeddings (
     updated_at TIMESTAMP WITH TIME ZONE
 );
 
--- AI models table
+-- AI models table (matches AIModel schema from models.py)
 CREATE TABLE IF NOT EXISTS ai_models (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     provider VARCHAR(100) NOT NULL,
     model_id VARCHAR(255) NOT NULL,
-    config JSON,
+    canonical_slug VARCHAR(255),
+    hugging_face_id VARCHAR(255),
     description TEXT,
+    created_timestamp INTEGER,
+    context_length INTEGER,
+    architecture JSONB,
+    pricing JSONB,
+    top_provider JSONB,
+    per_request_limits JSONB,
+    supported_parameters JSONB DEFAULT '[]',
+    default_parameters JSONB,
+    config JSONB,
     input_price_per_million_tokens DOUBLE PRECISION,
     output_price_per_million_tokens DOUBLE PRECISION,
     currency VARCHAR(10) DEFAULT 'USD',
@@ -480,6 +490,9 @@ CREATE INDEX IF NOT EXISTS idx_commits_repository_id ON commits(repository_id);
 
 -- AI solver indexes
 CREATE INDEX IF NOT EXISTS idx_ai_models_is_active ON ai_models(is_active);
+CREATE INDEX IF NOT EXISTS idx_ai_models_model_id ON ai_models(model_id);
+CREATE INDEX IF NOT EXISTS idx_ai_models_canonical_slug ON ai_models(canonical_slug);
+CREATE INDEX IF NOT EXISTS idx_ai_models_provider ON ai_models(provider);
 CREATE INDEX IF NOT EXISTS idx_solves_user_id ON solves(user_id);
 CREATE INDEX IF NOT EXISTS idx_solves_session_id ON solves(session_id);
 CREATE INDEX IF NOT EXISTS idx_solves_status ON solves(status);

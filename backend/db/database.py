@@ -88,10 +88,13 @@ def init_db():
 
 def fetch_and_add_openrouter_models() -> None:
     """
-    Fetch OpenRouter models from API and add as sample data to the database.
+    Fetch OpenRouter models from API and add to the database.
+    Maps OpenRouter API response to AIModel schema.
     """
 
     from models import AIModel
+
+    from utils import utc_now
 
     db = SessionLocal()
     try:
@@ -106,35 +109,93 @@ def fetch_and_add_openrouter_models() -> None:
             return
 
         created_models = []
+        updated_models = []
+
         for model in models_data:
             model_id = model.get("id")
-            # Avoid duplicates by checking if the model already exists in DB
-            exists = db.query(AIModel).filter_by(openai_id=model_id).first()
-            if exists:
-                print(f"✓ Model already exists: {model_id}")
+            if not model_id:
                 continue
 
-            ai_model = AIModel(
-                name=model.get("name"),
-                provider="openrouter",
-                openai_id=model_id,
-                context_length=model.get("context_length")
-                or model.get("top_provider", {}).get("context_length"),
-                description=model.get("description", ""),
-                is_available=True,
-                meta=model,
+            # Extract provider from model_id (e.g., "openai/gpt-4" -> "openai")
+            provider_parts = model_id.split("/")
+            provider = provider_parts[0] if len(provider_parts) > 1 else "openrouter"
+
+            # Avoid duplicates by checking if the model already exists in DB
+            existing_model = db.query(AIModel).filter_by(model_id=model_id).first()
+
+            # Extract pricing information
+            pricing_info = model.get("pricing", {})
+            top_provider_info = model.get("top_provider", {})
+
+            # Get context length from model or top_provider
+            context_length = (
+                model.get("context_length")
+                or top_provider_info.get("context_length")
+                or None
             )
-            db.add(ai_model)
-            created_models.append(model.get("name", model_id))
+
+            # Extract pricing per million tokens
+            input_price = pricing_info.get("prompt") or top_provider_info.get(
+                "input_price_per_million_tokens"
+            )
+            output_price = pricing_info.get("completion") or top_provider_info.get(
+                "output_price_per_million_tokens"
+            )
+
+            # Prepare model data
+            model_data = {
+                "name": model.get("name") or model_id,
+                "provider": provider,
+                "model_id": model_id,
+                "canonical_slug": model.get("id"),  # Use model ID as canonical slug
+                "description": model.get("description") or "",
+                "context_length": context_length,
+                "architecture": model.get("architecture"),
+                "pricing": pricing_info if pricing_info else None,
+                "top_provider": top_provider_info if top_provider_info else None,
+                "per_request_limits": model.get("per_request_limits"),
+                "supported_parameters": model.get("supported_parameters", []),
+                "default_parameters": model.get("default_parameters"),
+                "config": model,  # Store full model data as config
+                "input_price_per_million_tokens": float(input_price)
+                if input_price
+                else None,
+                "output_price_per_million_tokens": float(output_price)
+                if output_price
+                else None,
+                "currency": pricing_info.get("currency", "USD")
+                if pricing_info
+                else "USD",
+                "last_price_refresh_at": utc_now(),
+                "is_active": True,
+            }
+
+            if existing_model:
+                # Update existing model with latest data
+                for key, value in model_data.items():
+                    if value is not None:
+                        setattr(existing_model, key, value)
+                updated_models.append(model.get("name", model_id))
+            else:
+                # Create new model
+                ai_model = AIModel(**model_data)
+                db.add(ai_model)
+                created_models.append(model.get("name", model_id))
+
         db.commit()
 
         if created_models:
-            print(f"✓ Added {len(created_models)} OpenRouter models: {created_models}")
-        else:
-            print("No new OpenRouter models added.")
+            print(f"✓ Added {len(created_models)} new OpenRouter models")
+        if updated_models:
+            print(f"✓ Updated {len(updated_models)} existing OpenRouter models")
+        if not created_models and not updated_models:
+            print("No OpenRouter models added or updated.")
     except Exception as e:
         db.rollback()
         print(f"✗ Error adding OpenRouter models: {e}")
+        import traceback
+
+        traceback.print_exc()
     finally:
         db.close()
 
@@ -574,7 +635,8 @@ def create_sample_data():
             db.add(file_embedding)
         db.commit()
 
-        # Fetch and add OpenRouter models
+        # Fetch and add OpenRouter models (called separately after sample data)
+        # This ensures models are available for the solver
         fetch_and_add_openrouter_models()
 
         # Sample Solve jobs for solver orchestration
