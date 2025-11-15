@@ -118,15 +118,18 @@ def display_config(config: dict):
     logger.info("=" * 80)
     logger.info("E2B Sandbox Demo Configuration")
     logger.info("=" * 80)
-    logger.info("Repository: %s", config["repo_url"])
-    logger.info("Branch: %s", config["branch_name"])
-    logger.info("Issue URL: %s", config["issue_url"])
-    logger.info("Model: %s", config["model_name"])
-    logger.info("Temperature: %.2f", config["temperature"])
-    logger.info("Max Iterations: %d", config["max_iterations"])
-    logger.info("Max Cost: $%.2f", config["max_cost"])
-    logger.info("Small Change Mode: %s", config["small_change"])
-    logger.info("Best Effort Mode: %s", config["best_effort"])
+    for key in (
+        "repo_url",
+        "branch_name",
+        "issue_url",
+        "model_name",
+        "temperature",
+        "max_iterations",
+        "max_cost",
+        "small_change",
+        "best_effort",
+    ):
+        logger.info("%s: %s", key.replace("_", " ").title(), config.get(key))
     logger.info("=" * 80)
 
 
@@ -177,21 +180,10 @@ def display_result(result: SandboxRunResult):
     logger.info("=" * 80)
 
 
-async def run_demo(config: dict) -> SandboxRunResult:
-    """
-    Execute the e2b sandbox demo with the provided configuration.
+def build_demo_request(config: dict) -> HeadlessSandboxRequest:
+    """Build a HeadlessSandboxRequest from the user config."""
 
-    Args:
-        config: Configuration dictionary with repo, issue, and model details
-
-    Returns:
-        SandboxRunResult with execution details
-
-    Raises:
-        SandboxExecutionError: If execution fails
-    """
-    # Create the sandbox request
-    request = HeadlessSandboxRequest(
+    return HeadlessSandboxRequest(
         issue_url=config["issue_url"],
         repo_url=config["repo_url"],
         branch_name=config["branch_name"],
@@ -207,6 +199,22 @@ async def run_demo(config: dict) -> SandboxRunResult:
         solve_id="demo_solve",
         solve_run_id="demo_run",
     )
+
+
+async def run_demo(config: dict) -> SandboxRunResult:
+    """
+    Execute the e2b sandbox demo with the provided configuration.
+
+    Args:
+        config: Configuration dictionary with repo, issue, and model details
+
+    Returns:
+        SandboxRunResult with execution details
+
+    Raises:
+        SandboxExecutionError: If execution fails
+    """
+    request = build_demo_request(config)
 
     # Create executor and run
     logger.info("Creating sandbox executor...")
