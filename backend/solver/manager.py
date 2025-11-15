@@ -506,19 +506,14 @@ class DefaultSolverManager(SolverManager):
 
             options = self._extract_solve_options(solve)
 
-            request = HeadlessSandboxRequest(
+            request = self._build_headless_request(
                 issue_url=issue_url,
                 repo_url=repo_url,
                 branch_name=branch_name,
                 model_name=model_name,
-                temperature=run.temperature,
-                small_change=options["small_change"],
-                best_effort=options["best_effort"],
-                max_iterations=options["max_iterations"],
-                max_cost=options["max_cost"],
-                solve_id=solve_id,
-                solve_run_id=run_id,
-                verbose=True,
+                run=run,
+                solve=solve,
+                options=options,
             )
 
             try:
@@ -546,6 +541,34 @@ class DefaultSolverManager(SolverManager):
                 )
         finally:
             db.close()
+
+    def _build_headless_request(
+        self,
+        *,
+        issue_url: str,
+        repo_url: str,
+        branch_name: str,
+        model_name: str,
+        run: SolveRun,
+        solve: Solve,
+        options: Dict[str, Any],
+    ) -> HeadlessSandboxRequest:
+        """Create a sandbox execution request for a solver run."""
+
+        return HeadlessSandboxRequest(
+            issue_url=issue_url,
+            repo_url=repo_url,
+            branch_name=branch_name,
+            model_name=model_name,
+            temperature=run.temperature,
+            small_change=options["small_change"],
+            best_effort=options["best_effort"],
+            max_iterations=options["max_iterations"],
+            max_cost=options["max_cost"],
+            solve_id=solve.id,
+            solve_run_id=run.id,
+            verbose=True,
+        )
 
     def _record_success(
         self, db: Session, solve: Solve, run: SolveRun, result: SandboxRunResult

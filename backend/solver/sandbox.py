@@ -152,6 +152,12 @@ def build_tfbd_config(params: AgentScriptParams) -> str:
     )
 
 
+def _stringify_env(env: Dict[str, Any]) -> Dict[str, str]:
+    """Convert Env dict values to strings to satisfy E2B requirements."""
+
+    return {key: str(value) for key, value in env.items() if value not in (None, "")}
+
+
 def build_sandbox_env_bundle(
     *,
     openrouter_api_key: str,
@@ -159,13 +165,12 @@ def build_sandbox_env_bundle(
 ) -> Tuple[Dict[str, str], Dict[str, str]]:
     """Construct sandbox and command environments following E2B guidance."""
 
-    sandbox_env: Dict[str, str] = {"OPENROUTER_API_KEY": openrouter_api_key}
-    command_env: Dict[str, str] = {"OPENROUTER_API_KEY": openrouter_api_key}
-
+    base_env: Dict[str, Any] = {"OPENROUTER_API_KEY": openrouter_api_key}
     if github_token:
-        sandbox_env["GITHUB_TOKEN"] = github_token
-        command_env["GITHUB_TOKEN"] = github_token
+        base_env["GITHUB_TOKEN"] = github_token
 
+    sandbox_env = _stringify_env(base_env)
+    command_env = sandbox_env.copy()
     return sandbox_env, command_env
 
 
@@ -225,6 +230,7 @@ class HeadlessSandboxRequest:
     solve_run_id: Optional[str] = None
     issue_text: Optional[str] = None
     verbose: bool = False
+    timeout: int = 1800  # 30 minutes default for agent execution
 
 
 class SandboxExecutionError(Exception):
@@ -241,8 +247,8 @@ class SandboxExecutionError(Exception):
 
 
 @dataclass
-class AsyncSandbox:
-    """Asynchronous adapter around the E2B Sandbox SDK."""
+class SandboxClient:
+    """Thin asynchronous adapter around the E2B Sandbox SDK."""
 
     _sandbox: Sandbox
 
@@ -252,13 +258,23 @@ class AsyncSandbox:
         *,
         envs: Optional[Dict[str, str]] = None,
         metadata: Optional[Dict[str, str]] = None,
-    ) -> "AsyncSandbox":
-        kwargs: Dict[str, Any] = {}
-        if envs:
-            kwargs["envs"] = envs
-        if metadata:
-            kwargs["metadata"] = metadata
-        sandbox = await asyncio.to_thread(Sandbox.create, **kwargs)
+        timeout: int = 1800,  # 30 minutes default for agent execution
+    ) -> "SandboxClient":
+        sanitized_envs = _stringify_env(envs or {})
+        sanitized_metadata = _stringify_env(metadata or {})
+        logger.info(
+            "Creating sandbox with envs=%s metadata=%s timeout=%ds",
+            sanitized_envs,
+            sanitized_metadata,
+            timeout,
+        )
+
+        sandbox = await asyncio.to_thread(
+            Sandbox.create,
+            timeout=timeout,
+            envs=sanitized_envs or None,
+            metadata=sanitized_metadata or None,
+        )
         return cls(_sandbox=sandbox)
 
     async def run_command(
@@ -267,10 +283,12 @@ class AsyncSandbox:
         *,
         envs: Optional[Dict[str, str]] = None,
     ):
-        kwargs: Dict[str, Any] = {}
-        if envs:
-            kwargs["envs"] = envs
-        return await asyncio.to_thread(self._sandbox.commands.run, command, **kwargs)
+        sanitized_envs = _stringify_env(envs or {})
+        return await asyncio.to_thread(
+            self._sandbox.commands.run,
+            command,
+            envs=sanitized_envs or None,
+        )
 
     async def write_file(self, path: str, content: str):
         await asyncio.to_thread(self._sandbox.files.write, path, content)
@@ -300,18 +318,24 @@ async def create_sandbox_instance(
     *,
     sandbox_env: Dict[str, str],
     metadata: Dict[str, str],
-) -> AsyncSandbox:
-    """Create an AsyncSandbox with the provided environment and metadata."""
+    timeout: int = 1800,  # 30 minutes default for agent execution
+) -> SandboxClient:
+    """Create a SandboxClient with the provided environment and metadata."""
 
-    kwargs: Dict[str, Any] = {"envs": sandbox_env}
-    if metadata:
-        kwargs["metadata"] = metadata
-    return await AsyncSandbox.create(**kwargs)
+    logger.info(
+        "Requesting sandbox creation (env keys=%s, metadata=%s, timeout=%ds)",
+        list(sandbox_env.keys()),
+        metadata,
+        timeout,
+    )
+    return await SandboxClient.create(
+        envs=sandbox_env, metadata=metadata, timeout=timeout
+    )
 
 
 async def upload_solver_artifacts(
     *,
-    sandbox: AsyncSandbox,
+    sandbox: SandboxClient,
     params: AgentScriptParams,
 ) -> Tuple[str, str]:
     """Upload tfbd.yaml and agent runner script into the sandbox."""
@@ -347,7 +371,7 @@ def parse_trajectory_metadata(trajectory_data: Dict[str, Any]) -> TrajectoryMeta
 
 async def download_trajectory_file(
     *,
-    sandbox: AsyncSandbox,
+    sandbox: SandboxClient,
     remote_path: str,
     solve_id: str,
     run_id: str,
@@ -430,7 +454,7 @@ class HeadlessSandboxExecutor:
     """
 
     def __init__(self):
-        self._sandbox: Optional[AsyncSandbox] = None
+        self._sandbox: Optional[SandboxClient] = None
         self._cancelled = False
         self._lock = asyncio.Lock()
 
@@ -472,6 +496,7 @@ class HeadlessSandboxExecutor:
                 self._sandbox = await create_sandbox_instance(
                     sandbox_env=sandbox_env,
                     metadata=metadata,
+                    timeout=request.timeout,
                 )
 
             sandbox = self._sandbox
@@ -631,7 +656,7 @@ class HeadlessSandboxExecutor:
     async def _prepare_mini_swe_agent(
         self,
         *,
-        sandbox: AsyncSandbox,
+        sandbox: SandboxClient,
         envs: Dict[str, str],
     ) -> None:
         """Ensure mini-swe-agent and runtime dependencies are available in sandbox."""
