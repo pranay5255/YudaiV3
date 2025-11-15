@@ -249,13 +249,11 @@ def load_config() -> Dict[str, Any]:
     config = yaml.safe_load(TFBD_PATH.read_text())
     
     # Apply runtime overrides
-    config.setdefault("agent", {})["mode"] = "yolo"
-    config.setdefault("agent", {})["confirm_exit"] = False
-    config.setdefault("agent", {})["max_iterations"] = MAX_ITERATIONS
     config.setdefault("agent", {})["cost_limit"] = MAX_COST
     
-    config.setdefault("model", {})["temperature"] = TEMPERATURE
-    config.setdefault("model", {})["max_tokens"] = MAX_TOKENS
+    # Set temperature and max_tokens inside model_kwargs (required by OpenRouterModelConfig)
+    config.setdefault("model", {}).setdefault("model_kwargs", {})["temperature"] = TEMPERATURE
+    config.setdefault("model", {}).setdefault("model_kwargs", {})["max_tokens"] = MAX_TOKENS
     
     return config
 
