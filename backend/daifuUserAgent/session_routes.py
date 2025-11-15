@@ -343,12 +343,33 @@ async def get_available_ai_models(
 ):
     """
     Get list of available AI models for solving issues.
+    Fetches models from OpenRouter API and stores them in the database if not already present.
     """
-    # TODO: Add models from openrouter to db for display and queryability
     try:
+        from db.database import fetch_and_add_openrouter_models
         from models import AIModel
 
-        models = db.query(AIModel).filter(AIModel.is_active.is_(True)).all()
+        # Check if we have any models in the database
+        model_count = db.query(AIModel).filter(AIModel.is_active.is_(True)).count()
+
+        # If no models exist, fetch from OpenRouter
+        if model_count == 0:
+            logger.info("No AI models found in database, fetching from OpenRouter...")
+            # Run synchronously in a thread pool to avoid blocking the async endpoint
+            import asyncio
+
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, fetch_and_add_openrouter_models)
+            # Refresh the query after fetching
+            db.expire_all()
+
+        # Get all active models
+        models = (
+            db.query(AIModel)
+            .filter(AIModel.is_active.is_(True))
+            .order_by(AIModel.name)
+            .all()
+        )
 
         return [
             {

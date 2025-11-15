@@ -8,30 +8,29 @@ import traceback
 from pathlib import Path
 from typing import Any
 
+import requests
 import typer
 import yaml
-import requests
+from minisweagent.agents.interactive import InteractiveAgent
+from minisweagent.agents.interactive_textual import TextualAgent
+from minisweagent.config import get_config_path
+from minisweagent.environments.local import LocalEnvironment
+from minisweagent.models import get_model
+from minisweagent.run.extra.config import configure_if_first_time
+from minisweagent.run.utils.save import save_traj
+from minisweagent.utils.log import logger
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.shortcuts import PromptSession
 from rich.console import Console
 
-from minisweagent import global_config_dir
-from minisweagent.agents.interactive import InteractiveAgent
-from minisweagent.agents.interactive_textual import TextualAgent
-from minisweagent.config import builtin_config_dir, get_config_path
-from minisweagent.environments.local import LocalEnvironment
-from minisweagent.environments.docker import DockerEnvironment
-from minisweagent.models import get_model
-from minisweagent.run.extra.config import configure_if_first_time
-from minisweagent.run.utils.save import save_traj
-from minisweagent.utils.log import logger
-
-DEFAULT_CONFIG = Path(os.getenv("MSWEA_MINI_CONFIG_PATH",  "./config_mswea/mini.yaml"))
-DEFAULT_OUTPUT =  "./config_mswea/last_mini_run.traj.json"
+DEFAULT_CONFIG = Path(os.getenv("MSWEA_MINI_CONFIG_PATH", "./config_mswea/mini.yaml"))
+DEFAULT_OUTPUT = "./config_mswea/last_mini_run.traj.json"
 console = Console(highlight=False)
 app = typer.Typer(rich_markup_mode="rich")
-prompt_session = PromptSession(history=FileHistory("./config_mswea/mini_task_history.txt"))
+prompt_session = PromptSession(
+    history=FileHistory("./config_mswea/mini_task_history.txt")
+)
 _HELP_TEXT = """Run mini-SWE-agent in your local environment.
 
 [not dim]
@@ -44,18 +43,23 @@ More information about the usage: [bold green]https://mini-swe-agent.com/latest/
 [/not dim]
 """
 
+
 def fetch_github_issue(issue_url: str) -> str:
     """Fetch GitHub issue text from the URL."""
     # Convert GitHub issue URL to API URL
-    api_url = issue_url.replace("github.com", "api.github.com/repos").replace("/issues/", "/issues/")
+    api_url = issue_url.replace("github.com", "api.github.com/repos").replace(
+        "/issues/", "/issues/"
+    )
 
-    headers = {'Accept': 'application/vnd.github.v3+json'}
+    headers = {"Accept": "application/vnd.github.v3+json"}
     if github_token := os.getenv("GITHUB_TOKEN"):
         headers["Authorization"] = f"token {github_token}"
 
     response = requests.get(api_url, headers=headers)
     if not response.ok:
-        raise ValueError(f"Failed to fetch GitHub issue: {response.status_code} - {response.text}")
+        raise ValueError(
+            f"Failed to fetch GitHub issue: {response.status_code} - {response.text}"
+        )
     issue_data = response.json()
 
     title = issue_data["title"]
@@ -116,7 +120,7 @@ def main(
     model = get_model(model_name, config.get("model", {}))
 
     # Use DockerEnvironment for GitHub issues, Local otherwise
- 
+
     env = LocalEnvironment(**config.get("env", {}))
 
     # Both visual flag and the MSWEA_VISUAL_MODE_DEFAULT flip the mode, so it's essentially a XOR

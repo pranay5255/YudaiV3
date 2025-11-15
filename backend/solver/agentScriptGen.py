@@ -254,6 +254,7 @@ def load_config() -> Dict[str, Any]:
     # Set temperature and max_tokens inside model_kwargs (required by OpenRouterModelConfig)
     config.setdefault("model", {}).setdefault("model_kwargs", {})["temperature"] = TEMPERATURE
     config.setdefault("model", {}).setdefault("model_kwargs", {})["max_tokens"] = MAX_TOKENS
+
     
     return config
 
