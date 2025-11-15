@@ -227,7 +227,7 @@ def fetch_github_issue(issue_url: str) -> str:
         headers["Authorization"] = f"token {github_token}"
     
     try:
-        response = requests.get(api_url, headers=headers, timeout=30)
+        response = requests.get(api_url, headers=headers, timeout=60)
         response.raise_for_status()
         issue_data = response.json()
     except Exception as exc:

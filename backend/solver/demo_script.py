@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .agentScriptGen import AgentScriptParams, build_agent_script
+from solver.agentScriptGen import AgentScriptParams, build_agent_script
 
 ARTIFACT_DIR = Path(__file__).with_name("sandbox_demo_artifacts")
 ISSUE_DEMO_PATH = Path(__file__).with_name("issue_demo.txt")
