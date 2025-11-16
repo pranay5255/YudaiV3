@@ -2,13 +2,14 @@
 Solver API router exposing start/status/cancel endpoints.
 """
 
-# from auth.github_oauth import get_current_user
-from fastapi import APIRouter
+from auth.github_oauth import get_current_user
+from fastapi import APIRouter, Depends
 from models import (
     CancelSolveResponse,
     SolveStatusResponse,
     StartSolveRequest,
     StartSolveResponse,
+    User,
 )
 from solver.manager import DefaultSolverManager
 
@@ -24,7 +25,7 @@ router = APIRouter(tags=["solver"])
 async def start_solve(
     session_id: str,
     request: StartSolveRequest,
-    # current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> StartSolveResponse:
     """
     Launch a new solver session for the given chat session and GitHub issue.
@@ -32,7 +33,7 @@ async def start_solve(
     return await solver_manager.start_solve(
         session_id=session_id,
         request=request,
-        # user=current_user,
+        user=current_user,
     )
 
 
@@ -43,7 +44,7 @@ async def start_solve(
 async def get_solve_status(
     session_id: str,
     solve_id: str,
-    # current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> SolveStatusResponse:
     """
     Retrieve the latest status for a solver session.
@@ -51,7 +52,7 @@ async def get_solve_status(
     return await solver_manager.get_status(
         session_id=session_id,
         solve_id=solve_id,
-        # user=current_user,
+        user=current_user,
     )
 
 
@@ -62,7 +63,7 @@ async def get_solve_status(
 async def cancel_solve(
     session_id: str,
     solve_id: str,
-    # current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> CancelSolveResponse:
     """
     Cancel an in-flight solver session and tear down its sandbox.
@@ -70,5 +71,5 @@ async def cancel_solve(
     return await solver_manager.cancel_solve(
         session_id=session_id,
         solve_id=solve_id,
-        # user=current_user,
+        user=current_user,
     )

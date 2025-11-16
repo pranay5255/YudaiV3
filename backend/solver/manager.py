@@ -43,7 +43,7 @@ from solver.sandbox import (
     SandboxExecutionError,
     SandboxRunResult,
 )
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from utils import utc_now
 
@@ -160,9 +160,18 @@ class DefaultSolverManager(SolverManager):
                     status.HTTP_404_NOT_FOUND, detail="Session not found for user"
                 )
 
-            issue = db.query(Issue).filter(Issue.id == request.issue_id).first()
+            issue = (
+                db.query(Issue)
+                .options(joinedload(Issue.repository))
+                .filter(Issue.id == request.issue_id)
+                .first()
+            )
             if not issue:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Issue not found")
+
+            if issue.repository.user_id != user.id:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Issue not found")
+
             issue_url = issue.html_url
 
             ai_models = self._select_models(

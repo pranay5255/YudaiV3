@@ -5,8 +5,26 @@ This module handles all sandbox-related operations including:
 - E2B sandbox creation and lifecycle management
 - Sandbox environment configuration
 - Agent script and config artifact upload
-- Sandbox command execution
+- Sandbox command execution with streaming output support
 - Result parsing and cleanup
+
+Streaming Example:
+    # Basic streaming with callbacks
+    def on_stdout(chunk: str):
+        print(f"Output: {chunk}")
+
+    result = await sandbox.run_command(
+        "python agent.py",
+        on_stdout=on_stdout,
+        on_stderr=lambda chunk: print(f"Error: {chunk}")
+    )
+
+    # Streaming with automatic logging
+    result = await sandbox.run_command_with_logging(
+        "python agent.py",
+        logger=my_logger,
+        log_prefix="[Agent] "
+    )
 """
 
 from __future__ import annotations
@@ -19,7 +37,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from e2b import Sandbox
 from solver.agentScriptGen import AgentScriptParams, build_agent_script
@@ -230,6 +248,7 @@ class HeadlessSandboxRequest:
     solve_run_id: Optional[str] = None
     issue_text: Optional[str] = None
     verbose: bool = False
+    openrouter_call_delay: float = 0.0
     timeout: int = 1800  # 30 minutes default for agent execution
 
 
@@ -282,12 +301,69 @@ class SandboxClient:
         command: str,
         *,
         envs: Optional[Dict[str, str]] = None,
+        timeout: int = 0,  # 0 disables timeout for long-running agent commands
+        on_stdout: Optional[Callable[[str], None]] = None,
+        on_stderr: Optional[Callable[[str], None]] = None,
     ):
+        """
+        Run a command in the sandbox with optional streaming callbacks.
+
+        Args:
+            command: The command to execute
+            envs: Environment variables for the command
+            timeout: Command timeout (0 = disabled)
+            on_stdout: Callback function for stdout streaming (receives str chunks)
+            on_stderr: Callback function for stderr streaming (receives str chunks)
+        """
         sanitized_envs = _stringify_env(envs or {})
-        return await asyncio.to_thread(
-            self._sandbox.commands.run,
+
+        def _run_with_callbacks():
+            return self._sandbox.commands.run(
+                command,
+                timeout=timeout,
+                envs=sanitized_envs or None,
+                on_stdout=on_stdout,
+                on_stderr=on_stderr,
+            )
+
+        return await asyncio.to_thread(_run_with_callbacks)
+
+    async def run_command_with_logging(
+        self,
+        command: str,
+        *,
+        envs: Optional[Dict[str, str]] = None,
+        timeout: int = 0,
+        logger: Optional[logging.Logger] = None,
+        log_prefix: str = "",
+    ):
+        """
+        Run a command with automatic stdout/stderr logging.
+
+        Args:
+            command: The command to execute
+            envs: Environment variables for the command
+            timeout: Command timeout (0 = disabled)
+            logger: Logger instance to use (defaults to module logger)
+            log_prefix: Prefix for log messages
+        """
+        if logger is None:
+            logger = logging.getLogger(__name__)
+
+        def log_stdout(chunk: str):
+            if chunk.strip():
+                logger.info(f"{log_prefix}STDOUT: {chunk.strip()}")
+
+        def log_stderr(chunk: str):
+            if chunk.strip():
+                logger.warning(f"{log_prefix}STDERR: {chunk.strip()}")
+
+        return await self.run_command(
             command,
-            envs=sanitized_envs or None,
+            envs=envs,
+            timeout=timeout,
+            on_stdout=log_stdout,
+            on_stderr=log_stderr,
         )
 
     async def write_file(self, path: str, content: str):
@@ -487,6 +563,15 @@ class HeadlessSandboxExecutor:
                 github_token=github_token,
             )
 
+            if request.openrouter_call_delay and request.openrouter_call_delay > 0:
+                delay_str = f"{request.openrouter_call_delay:.2f}"
+                sandbox_env["OPENROUTER_CALL_DELAY"] = delay_str
+                command_env["OPENROUTER_CALL_DELAY"] = delay_str
+                logger.info(
+                    "Applying OpenRouter call delay of %ss to sandbox environment",
+                    delay_str,
+                )
+
             # Create E2B sandbox
             logger.info("Creating E2B sandbox with mini-swe-agent...")
             metadata = self._build_metadata(request)
@@ -547,7 +632,7 @@ class HeadlessSandboxExecutor:
                 envs=command_env,
             )
 
-            # Execute the agent script
+            # Execute the agent script with streaming output
             logger.info(
                 "Executing mini-swe-agent in sandbox %s (repo=%s, issue=%s, model=%s)",
                 sandbox_id,
@@ -555,9 +640,12 @@ class HeadlessSandboxExecutor:
                 request.issue_url,
                 request.model_name,
             )
-            result = await sandbox.run_command(
+            result = await sandbox.run_command_with_logging(
                 f"python {script_path}",
                 envs=command_env,
+                timeout=0,  # Disable command timeout for agent execution
+                logger=logger,
+                log_prefix=f"[Agent {sandbox_id}] ",
             )
 
             # Calculate duration
