@@ -49,24 +49,26 @@ logger = logging.getLogger(__name__)
 
 USER_CONFIG = {
     # Repository details
-    "repo_url": "https://github.com/pranay5255/YudaiV3",
+    "repo_url": "https://github.com/satavisha/TFBDMap3",
     "branch_name": "main",
     # Issue details (provide either issue_url OR issue_text)
-    "issue_url": "https://github.com/pranay5255/YudaiV3/issues/112",
+    "issue_url": "https://github.com/satavisha/TFBDMap3/issues/22",
     "issue_text": None,  # Optional: provide issue text directly instead of URL
     # Model configuration
-    "model_name": "qwen/qwen3-next-80b-a3b-thinking",  # Free model for testing
+    "model_name": "deepseek/deepseek-v3.2-exp",  # Free model for testing
     # Alternative models:
     # "anthropic/claude-sonnet-4-5-20250929"
-    # "openai/gpt-4-turbo"
+    # "openai/gpt-4-turbo",
     # "google/gemini-pro-1.5"
     # Agent behavior configuration
-    "temperature": 0.7,
-    "max_tokens": 6000,
+    "temperature": 0.1,
+    "max_tokens": 8000,
     "max_iterations": 40,
     "max_cost": 7.5,
     "small_change": True,  # Limit to minimal targeted changes
     "best_effort": False,  # Continue even if tests fail
+    # Rate limiting safeguards
+    "openrouter_call_delay": 5.0,  # Seconds to sleep between OpenRouter requests
     # Execution settings
     "verbose": True,
 }
@@ -128,6 +130,7 @@ def display_config(config: dict):
         "max_cost",
         "small_change",
         "best_effort",
+        "openrouter_call_delay",
     ):
         logger.info("%s: %s", key.replace("_", " ").title(), config.get(key))
     logger.info("=" * 80)
@@ -196,6 +199,7 @@ def build_demo_request(config: dict) -> HeadlessSandboxRequest:
         best_effort=config["best_effort"],
         issue_text=config.get("issue_text"),
         verbose=config["verbose"],
+        openrouter_call_delay=config.get("openrouter_call_delay", 0.0),
         solve_id="demo_solve",
         solve_run_id="demo_run",
     )

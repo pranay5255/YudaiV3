@@ -167,6 +167,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -211,6 +212,28 @@ SOLVE_PAYLOAD = {
 }
 
 logger = logging.getLogger("yudai.solver.script")
+
+
+def _parse_openrouter_delay(value: Optional[str]) -> float:
+    \"\"\"Parse OPENROUTER_CALL_DELAY from environment.\"\"\"
+    if not value:
+        return 0.0
+    try:
+        delay = float(value)
+        if delay < 0:
+            logger.warning(
+                "OPENROUTER_CALL_DELAY must be non-negative, ignoring %s", value
+            )
+            return 0.0
+        return delay
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid OPENROUTER_CALL_DELAY value '%s'; ignoring delay override", value
+        )
+        return 0.0
+
+
+OPENROUTER_CALL_DELAY = _parse_openrouter_delay(os.getenv("OPENROUTER_CALL_DELAY"))
 
 
 def fetch_github_issue(issue_url: str) -> str:
@@ -370,6 +393,37 @@ def finalize_execution(exit_code: int) -> None:
     logger.info("Execution finalized with exit code %d", exit_code)
 
 
+def apply_openrouter_delay(delay: float) -> None:
+    \"\"\"Apply optional throttling between OpenRouter API calls.\"\"\"
+    if delay <= 0:
+        return
+
+    try:
+        from minisweagent.models import openrouter_model
+    except Exception as exc:
+        logger.warning("Unable to apply OpenRouter delay: %s", exc)
+        return
+
+    if getattr(openrouter_model.OpenRouterModel, "_yudai_delay_wrapped", False):
+        return
+
+    original_query = openrouter_model.OpenRouterModel._query
+
+    def delayed_query(self, *args, **kwargs):
+        logger.debug(
+            "Sleeping %.2fs before OpenRouter API request to avoid rate limits",
+            delay,
+        )
+        time.sleep(delay)
+        return original_query(self, *args, **kwargs)
+
+    openrouter_model.OpenRouterModel._query = delayed_query
+    setattr(openrouter_model.OpenRouterModel, "_yudai_delay_wrapped", True)
+    logger.info(
+        "OpenRouter API throttling enabled: %.2fs delay between calls", delay
+    )
+
+
 def main() -> int:
     \"\"\"Execute mini-swe-agent on the GitHub issue.\"\"\"
     
@@ -405,6 +459,9 @@ def main() -> int:
         # Load configuration
         config = load_config()
         logger.info("Configuration loaded successfully")
+
+        # Optionally slow down OpenRouter requests to mitigate rate limiting
+        apply_openrouter_delay(OPENROUTER_CALL_DELAY)
         
         # Initialize model
         model = get_model(MODEL_NAME, config.get("model", {}))
