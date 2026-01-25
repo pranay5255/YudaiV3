@@ -37,21 +37,21 @@ interface ContextCardsProps {
   };
 }
 
-export const ContextCards: React.FC<ContextCardsProps> = ({ 
-  cards = [], 
-  onRemoveCard = () => {}, 
-  onShowIssuePreview, 
-  onShowError, 
-  repositoryInfo 
+export const ContextCards: React.FC<ContextCardsProps> = ({
+  cards = [],
+  onRemoveCard = () => {},
+  onShowIssuePreview,
+  onShowError,
+  repositoryInfo
 }) => {
   // Zustand store for state management
   const { activeSessionId } = useSessionStore();
   const { selectedRepository } = useRepository();
-  
+
   const { deleteContextCard } = useSessionStore();
   const [isLoading, setIsLoading] = useState(false);
 
-  // ✅ FIXED: Move hook call to top level
+  // FIXED: Move hook call to top level
   const createIssueMutation = useCreateIssueWithContext();
 
   const showError = useCallback((message: string) => {
@@ -71,7 +71,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
 
   const removeContextCard = useCallback(async (cardId: string) => {
     if (!activeSessionId) return;
-    
+
     try {
       console.log('Removing context card:', cardId);
       await deleteContextCard(cardId);
@@ -95,9 +95,9 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   };
 
   const getTokenHeatColor = (tokens: number) => {
-    if (tokens < 300) return 'from-teal-500 to-teal-500';
-    if (tokens < 700) return 'from-teal-500 to-amber-500';
-    return 'from-amber-500 to-red-500';
+    if (tokens < 300) return 'from-success to-success';
+    if (tokens < 700) return 'from-success to-amber';
+    return 'from-amber to-error';
   };
 
   const totalTokens = cards.reduce((sum, card) => sum + card.tokens, 0);
@@ -109,16 +109,16 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
       name: selectedRepository.repository.name,
       branch: selectedRepository.branch
     } : null);
-    
+
     if (isLoading || !repoInfo) {
       if (!repoInfo) {
         showError('No repository selected. Please select a repository first.');
       }
       return;
     }
-    
+
     setIsLoading(true);
-    
+
     try {
       // Separate chat and file context
       const chatCards = cards.filter(card => card.source === 'chat');
@@ -131,7 +131,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
         isCode: false,
         timestamp: new Date().toISOString(),
       }));
-      
+
       const fileContextItems: FileContextItem[] = fileCards.map(card => ({
         id: card.id,
         name: card.title,
@@ -150,7 +150,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
         priority: 'medium',
       };
 
-      // ✅ FIXED: Use the hook result instead of calling hook inside callback
+      // FIXED: Use the hook result instead of calling hook inside callback
       const response = await createIssueMutation.mutateAsync(request);
 
       if (response && response.success && onShowIssuePreview) {
@@ -171,60 +171,68 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
       setIsLoading(false);
     }
   }, [
-    isLoading, 
-    repositoryInfo, 
-    selectedRepository, 
-    cards, 
-    onShowIssuePreview, 
+    isLoading,
+    repositoryInfo,
+    selectedRepository,
+    cards,
+    onShowIssuePreview,
     showError,
-    // ✅ FIXED: Add hook dependency
+    // FIXED: Add hook dependency
     createIssueMutation
   ]);
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col bg-bg terminal-noise">
+      {/* Header */}
+      <div className="p-4 border-b border-border">
+        <h2 className="font-mono font-semibold text-fg text-sm">Context Cards</h2>
+        <p className="text-xs text-muted font-mono mt-1">Curated context for issue generation</p>
+      </div>
+
       {/* Cards List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {cards.length === 0 ? (
-          <div className="text-center py-12 text-fg/60">
-            <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
-            <p>No context cards yet</p>
-            <p className="text-sm">Add items from chat or file dependencies</p>
+          <div className="text-center py-12 animate-fade-in">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-xl bg-bg-tertiary border border-border flex items-center justify-center">
+              <FileText className="w-8 h-8 text-muted" />
+            </div>
+            <p className="text-fg-secondary font-mono text-sm mb-1">No context cards yet</p>
+            <p className="text-muted text-xs font-mono">Add items from chat or file dependencies</p>
           </div>
         ) : (
-          cards.map((card) => {
+          cards.map((card, index) => {
             const SourceIcon = getSourceIcon(card.source);
-            
+
             return (
               <div
                 key={card.id}
-                className="bg-zinc-800/50 rounded-xl p-4 group hover:bg-zinc-800 
-                         transition-colors border border-zinc-700/50"
+                className="bg-bg-secondary border border-border rounded-xl p-4 group hover:border-border-accent transition-all duration-200 animate-fade-in"
+                style={{ animationDelay: `${index * 50}ms` }}
               >
                 {/* Token Heat Bar */}
-                <div className="h-1 w-full rounded-full bg-zinc-700 mb-3 overflow-hidden">
-                  <div 
-                    className={`h-full bg-gradient-to-r ${getTokenHeatColor(card.tokens)}`}
+                <div className="h-1 w-full rounded-full bg-bg-tertiary mb-3 overflow-hidden">
+                  <div
+                    className={`h-full bg-gradient-to-r ${getTokenHeatColor(card.tokens)} transition-all duration-300`}
                     style={{ width: `${Math.min((card.tokens / 100000) * 100, 100)}%` }}
                   />
                 </div>
 
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-fg text-sm mb-1 truncate">
+                    <h3 className="font-mono font-medium text-fg text-sm mb-1 truncate">
                       {card.title}
                     </h3>
-                    <p className="text-fg/70 text-sm line-clamp-2 mb-3">
+                    <p className="text-fg-secondary text-xs font-mono line-clamp-2 mb-3">
                       {card.description}
                     </p>
-                    
+
                     <div className="flex items-center gap-3">
-                      <span className="bg-zinc-800 px-2 py-0.5 rounded-full text-xs text-fg/80">
+                      <span className="bg-bg-tertiary border border-border px-2.5 py-1 rounded-lg text-xs font-mono text-fg-secondary">
                         {card.tokens.toLocaleString()} tokens
                       </span>
-                      <div className="flex items-center gap-1">
-                        <SourceIcon className="w-3 h-3 text-fg/60" />
-                        <span className="text-xs uppercase font-mono text-fg/60">
+                      <div className="flex items-center gap-1.5">
+                        <SourceIcon className="w-3 h-3 text-muted" />
+                        <span className="text-xs uppercase font-mono text-muted tracking-wider">
                           {card.source}
                         </span>
                       </div>
@@ -233,8 +241,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
 
                   <button
                     onClick={() => removeContextCard(card.id)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity
-                             p-1 hover:bg-error/20 rounded text-error"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 p-2 hover:bg-error/10 rounded-lg text-error border border-transparent hover:border-error/20"
                     aria-label="Remove card"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -247,18 +254,16 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
       </div>
 
       {/* Footer */}
-      <div className="p-4 border-t border-zinc-800">
+      <div className="p-4 border-t border-border bg-bg-secondary">
         <div className="flex items-center justify-between mb-3">
-          <span className="text-sm text-fg/70">
-            {cards.length} cards • {totalTokens.toLocaleString()} total tokens
+          <span className="text-xs text-muted font-mono">
+            {cards.length} cards &bull; {totalTokens.toLocaleString()} total tokens
           </span>
         </div>
         <button
           onClick={handleCreateGitHubIssue}
           disabled={cards.length === 0 || isLoading || (!repositoryInfo && !selectedRepository)}
-          className="w-full h-11 bg-primary hover:bg-primary/80 disabled:opacity-50
-                   disabled:cursor-not-allowed text-white rounded-xl font-medium
-                   transition-colors"
+          className="w-full h-11 bg-amber hover:bg-amber/90 disabled:bg-bg-tertiary disabled:border-border disabled:text-muted text-bg-primary rounded-xl font-mono font-semibold text-sm transition-all duration-200 disabled:cursor-not-allowed border border-amber disabled:border-border glow-amber disabled:shadow-none flex items-center justify-center gap-2"
           title={
             !repositoryInfo && !selectedRepository
               ? 'Select a repository first'
@@ -268,12 +273,12 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
           }
         >
           {isLoading ? (
-            <div className="flex items-center justify-center gap-2">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-              Creating...
-            </div>
+            <>
+              <div className="animate-spin rounded-full h-4 w-4 border-2 border-bg-primary/20 border-t-bg-primary" />
+              <span>Creating...</span>
+            </>
           ) : (
-            'Create GitHub Issue'
+            <span>Create GitHub Issue</span>
           )}
         </button>
       </div>
