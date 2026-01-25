@@ -33,7 +33,7 @@ export const DiffModal: React.FC<DiffModalProps> = ({
   const [githubIssueCreated, setGithubIssueCreated] = useState(false);
   const [githubIssueUrl, setGithubIssueUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  
+
   const { createGitHubIssueFromUserIssue } = useSessionStore();
 
   const showError = useCallback((message: string) => {
@@ -48,20 +48,20 @@ export const DiffModal: React.FC<DiffModalProps> = ({
       showError('Cannot create GitHub issue: missing issue data or repository access');
       return;
     }
-    
+
     setIsCreatingGitHubIssue(true);
     setError(null);
-    
+
     try {
       const response = await createGitHubIssueFromUserIssue(issuePreview.userIssue.issue_id);
-      
+
       if (response?.success && response?.github_url) {
         setGithubIssueCreated(true);
         setGithubIssueUrl(response.github_url);
       } else {
         showError(response?.message || 'Failed to create GitHub issue');
       }
-      
+
     } catch (error) {
       console.error('Failed to create GitHub issue:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -80,22 +80,24 @@ export const DiffModal: React.FC<DiffModalProps> = ({
   if (!isOpen || !issuePreview) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-bg border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-6xl h-[85vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-bg-secondary border border-border rounded-xl shadow-terminal w-full max-w-6xl h-[85vh] flex flex-col animate-fade-in">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-zinc-800">
+        <div className="flex items-center justify-between p-6 border-b border-border">
           <div className="flex items-center gap-4">
-            <FileText className="w-5 h-5 text-primary" />
+            <div className="w-10 h-10 rounded-lg bg-amber/10 border border-amber/20 flex items-center justify-center">
+              <FileText className="w-5 h-5 text-amber" />
+            </div>
             <div>
-              <h2 className="text-lg font-semibold text-fg">GitHub Issue Preview</h2>
-              <p className="text-sm text-fg/60">
-                {issuePreview.repositoryInfo 
-                  ? `${issuePreview.repositoryInfo.owner}/${issuePreview.repositoryInfo.name}` 
+              <h2 className="text-lg font-mono font-semibold text-fg">GitHub Issue Preview</h2>
+              <p className="text-xs font-mono text-muted">
+                {issuePreview.repositoryInfo
+                  ? `${issuePreview.repositoryInfo.owner}/${issuePreview.repositoryInfo.name}`
                   : 'No repository selected'}
               </p>
             </div>
             {githubIssueCreated && (
-              <span className="bg-success/20 text-success px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1">
+              <span className="bg-success/10 text-success border border-success/20 px-3 py-1.5 rounded-lg text-xs font-mono font-medium flex items-center gap-1.5">
                 <Check className="w-3 h-3" />
                 Created
               </span>
@@ -104,20 +106,20 @@ export const DiffModal: React.FC<DiffModalProps> = ({
 
           <button
             onClick={onClose}
-            className="p-2 hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-2 hover:bg-bg-tertiary rounded-lg transition-colors text-muted hover:text-fg"
             aria-label="Close modal"
           >
-            <X className="w-5 h-5 text-fg" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Error Message */}
         {error && (
-          <div className="mx-6 mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-            <p className="text-sm text-red-400">{error}</p>
+          <div className="mx-6 mt-4 p-3 bg-error/10 border border-error/30 rounded-lg animate-fade-in">
+            <p className="text-sm text-error font-mono">{error}</p>
             <button
               onClick={() => setError(null)}
-              className="mt-2 text-xs text-red-300 hover:text-red-200 underline"
+              className="mt-2 text-xs text-error/80 hover:text-error underline font-mono"
             >
               Dismiss
             </button>
@@ -131,12 +133,12 @@ export const DiffModal: React.FC<DiffModalProps> = ({
             <div className="col-span-2 space-y-6">
               {/* Issue Title */}
               <div>
-                <h3 className="text-xl font-semibold text-fg mb-2">{issuePreview.title}</h3>
-                <div className="flex items-center gap-2 mb-4">
+                <h3 className="text-xl font-mono font-semibold text-fg mb-3">{issuePreview.title}</h3>
+                <div className="flex items-center gap-2 mb-4 flex-wrap">
                   {issuePreview.labels.map((label, index) => (
                     <span
                       key={index}
-                      className="bg-primary/20 text-primary px-2 py-1 rounded text-xs font-medium flex items-center gap-1"
+                      className="bg-cyan/10 text-cyan border border-cyan/20 px-2.5 py-1 rounded-lg text-xs font-mono flex items-center gap-1.5"
                     >
                       <Tag className="w-3 h-3" />
                       {label}
@@ -146,12 +148,13 @@ export const DiffModal: React.FC<DiffModalProps> = ({
               </div>
 
               {/* Issue Body */}
-              <div className="border border-zinc-800 rounded-lg">
-                <div className="bg-zinc-900/50 px-4 py-2 border-b border-zinc-800">
-                  <span className="text-sm font-medium text-fg">Issue Description</span>
+              <div className="border border-border rounded-xl overflow-hidden">
+                <div className="bg-bg-tertiary px-4 py-2.5 border-b border-border flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber" />
+                  <span className="text-xs font-mono font-medium text-fg-secondary uppercase tracking-wider">Issue Description</span>
                 </div>
-                <div className="p-4">
-                  <pre className="text-sm text-fg whitespace-pre-wrap font-sans">
+                <div className="p-4 bg-bg-tertiary/50">
+                  <pre className="text-sm text-fg-secondary whitespace-pre-wrap font-mono leading-relaxed">
                     {issuePreview.body}
                   </pre>
                 </div>
@@ -159,26 +162,24 @@ export const DiffModal: React.FC<DiffModalProps> = ({
 
               {/* Repository Information */}
               {issuePreview.repositoryInfo && (
-                <div className="border border-zinc-800 rounded-lg">
-                  <div className="bg-zinc-900/50 px-4 py-2 border-b border-zinc-800">
-                    <span className="text-sm font-medium text-fg flex items-center gap-2">
-                      <GitBranch className="w-4 h-4" />
-                      Repository Information
-                    </span>
+                <div className="border border-border rounded-xl overflow-hidden">
+                  <div className="bg-bg-tertiary px-4 py-2.5 border-b border-border flex items-center gap-2">
+                    <GitBranch className="w-4 h-4 text-cyan" />
+                    <span className="text-xs font-mono font-medium text-fg-secondary uppercase tracking-wider">Repository Information</span>
                   </div>
-                  <div className="p-4">
-                    <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div className="p-4 bg-bg-tertiary/50">
+                    <div className="grid grid-cols-2 gap-4 text-sm font-mono">
                       <div>
-                        <span className="text-fg/60">Owner:</span>
+                        <span className="text-muted">Owner:</span>
                         <span className="text-fg ml-2">{issuePreview.repositoryInfo.owner}</span>
                       </div>
                       <div>
-                        <span className="text-fg/60">Repository:</span>
+                        <span className="text-muted">Repository:</span>
                         <span className="text-fg ml-2">{issuePreview.repositoryInfo.name}</span>
                       </div>
                       {issuePreview.repositoryInfo.branch && (
                         <div>
-                          <span className="text-fg/60">Branch:</span>
+                          <span className="text-muted">Branch:</span>
                           <span className="text-fg ml-2">{issuePreview.repositoryInfo.branch}</span>
                         </div>
                       )}
@@ -191,28 +192,26 @@ export const DiffModal: React.FC<DiffModalProps> = ({
             {/* Right Column - Context & Metadata */}
             <div className="space-y-4">
               {/* Metadata */}
-              <div className="border border-zinc-800 rounded-lg">
-                <div className="bg-zinc-900/50 px-4 py-2 border-b border-zinc-800">
-                  <span className="text-sm font-medium text-fg flex items-center gap-2">
-                    <Clock className="w-4 h-4" />
-                    Metadata
-                  </span>
+              <div className="border border-border rounded-xl overflow-hidden">
+                <div className="bg-bg-tertiary px-4 py-2.5 border-b border-border flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-amber" />
+                  <span className="text-xs font-mono font-medium text-fg-secondary uppercase tracking-wider">Metadata</span>
                 </div>
-                <div className="p-4 space-y-3">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-fg/60">Chat Messages:</span>
+                <div className="p-4 bg-bg-tertiary/50 space-y-2.5">
+                  <div className="flex justify-between text-xs font-mono">
+                    <span className="text-muted">Chat Messages:</span>
                     <span className="text-fg">{issuePreview.metadata.chat_messages_count}</span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-fg/60">File Context:</span>
+                  <div className="flex justify-between text-xs font-mono">
+                    <span className="text-muted">File Context:</span>
                     <span className="text-fg">{issuePreview.metadata.file_context_count}</span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-fg/60">Total Tokens:</span>
+                  <div className="flex justify-between text-xs font-mono">
+                    <span className="text-muted">Total Tokens:</span>
                     <span className="text-fg">{issuePreview.metadata.total_tokens.toLocaleString()}</span>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-fg/60">Generated:</span>
+                  <div className="flex justify-between text-xs font-mono">
+                    <span className="text-muted">Generated:</span>
                     <span className="text-fg">{new Date(issuePreview.metadata.generated_at).toLocaleTimeString()}</span>
                   </div>
                 </div>
@@ -220,21 +219,21 @@ export const DiffModal: React.FC<DiffModalProps> = ({
 
               {/* Chat Context */}
               {issuePreview.conversationContext.length > 0 && (
-                <div className="border border-zinc-800 rounded-lg">
-                  <div className="bg-zinc-900/50 px-4 py-2 border-b border-zinc-800">
-                    <span className="text-sm font-medium text-fg flex items-center gap-2">
-                      <MessageSquare className="w-4 h-4" />
+                <div className="border border-border rounded-xl overflow-hidden">
+                  <div className="bg-bg-tertiary px-4 py-2.5 border-b border-border flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-cyan" />
+                    <span className="text-xs font-mono font-medium text-fg-secondary uppercase tracking-wider">
                       Chat Context ({issuePreview.conversationContext.length})
                     </span>
                   </div>
-                  <div className="p-4 max-h-48 overflow-y-auto space-y-2">
+                  <div className="p-3 bg-bg-tertiary/50 max-h-48 overflow-y-auto space-y-2">
                     {issuePreview.conversationContext.slice(-5).map((msg, index) => (
                       <div key={index} className="text-xs">
-                        <div className={`p-2 rounded ${msg.isCode ? 'bg-zinc-900' : 'bg-zinc-800/50'}`}>
-                          <div className="text-fg/60 mb-1">
+                        <div className={`p-2.5 rounded-lg ${msg.isCode ? 'bg-bg-secondary border border-border' : 'bg-bg-secondary/50'}`}>
+                          <div className="text-muted mb-1 font-mono text-[10px] uppercase tracking-wider">
                             {msg.isCode ? 'Code' : 'Message'}
                           </div>
-                          <div className="text-fg">
+                          <div className="text-fg-secondary font-mono leading-relaxed">
                             {msg.content.length > 100 ? `${msg.content.substring(0, 100)}...` : msg.content}
                           </div>
                         </div>
@@ -246,22 +245,22 @@ export const DiffModal: React.FC<DiffModalProps> = ({
 
               {/* File Context */}
               {issuePreview.fileContext.length > 0 && (
-                <div className="border border-zinc-800 rounded-lg">
-                  <div className="bg-zinc-900/50 px-4 py-2 border-b border-zinc-800">
-                    <span className="text-sm font-medium text-fg flex items-center gap-2">
-                      <FileText className="w-4 h-4" />
+                <div className="border border-border rounded-xl overflow-hidden">
+                  <div className="bg-bg-tertiary px-4 py-2.5 border-b border-border flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-success" />
+                    <span className="text-xs font-mono font-medium text-fg-secondary uppercase tracking-wider">
                       File Context ({issuePreview.fileContext.length})
                     </span>
                   </div>
-                  <div className="p-4 max-h-48 overflow-y-auto space-y-1">
+                  <div className="p-3 bg-bg-tertiary/50 max-h-48 overflow-y-auto space-y-1">
                     {issuePreview.fileContext.slice(0, 10).map((file, index) => (
-                      <div key={index} className="flex justify-between items-center text-xs">
-                        <span className="text-fg truncate">{file.name}</span>
-                        <span className="text-fg/60 ml-2">{file.tokens} tokens</span>
+                      <div key={index} className="flex justify-between items-center text-xs font-mono py-1">
+                        <span className="text-fg-secondary truncate">{file.name}</span>
+                        <span className="text-muted ml-2">{file.tokens} tokens</span>
                       </div>
                     ))}
                     {issuePreview.fileContext.length > 10 && (
-                      <div className="text-xs text-fg/60 pt-2">
+                      <div className="text-xs text-muted pt-2 font-mono">
                         +{issuePreview.fileContext.length - 10} more files...
                       </div>
                     )}
@@ -273,27 +272,36 @@ export const DiffModal: React.FC<DiffModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-6 border-t border-zinc-800 flex justify-between items-center">
-          <div className="text-sm text-fg/60">
+        <div className="p-6 border-t border-border flex justify-between items-center">
+          <div className="text-sm text-muted font-mono">
             {githubIssueCreated ? (
-              <span className="text-green-400">✓ GitHub issue created successfully</span>
+              <span className="text-success flex items-center gap-2">
+                <Check className="w-4 h-4" />
+                GitHub issue created successfully
+              </span>
             ) : issuePreview?.canCreateGitHubIssue ? (
-              'Ready to create GitHub issue'
+              <span className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+                Ready to create GitHub issue
+              </span>
             ) : (
-              'Repository access required to create GitHub issue'
+              <span className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber" />
+                Repository access required
+              </span>
             )}
           </div>
           <div className="flex gap-3">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-fg hover:bg-zinc-800 rounded-lg transition-colors"
+              className="px-4 py-2.5 text-fg hover:bg-bg-tertiary rounded-lg transition-colors font-mono text-sm border border-border"
             >
               Close
             </button>
             {githubIssueCreated ? (
               <button
                 onClick={handleOpenGitHubIssue}
-                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors"
+                className="flex items-center gap-2 bg-success hover:bg-success/90 text-bg-primary px-5 py-2.5 rounded-lg font-mono text-sm font-semibold transition-all duration-200 glow-emerald"
               >
                 Open GitHub Issue
                 <ExternalLink className="w-4 h-4" />
@@ -302,8 +310,7 @@ export const DiffModal: React.FC<DiffModalProps> = ({
               <button
                 onClick={handleCreateGitHubIssue}
                 disabled={!issuePreview?.canCreateGitHubIssue || isCreatingGitHubIssue || !issuePreview?.userIssue}
-                className="flex items-center gap-2 bg-primary hover:bg-primary/80 disabled:opacity-50
-                         disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg transition-colors"
+                className="flex items-center gap-2 bg-amber hover:bg-amber/90 disabled:bg-bg-tertiary disabled:border-border disabled:text-muted text-bg-primary px-5 py-2.5 rounded-lg font-mono text-sm font-semibold transition-all duration-200 disabled:cursor-not-allowed border border-amber disabled:border-border glow-amber disabled:shadow-none"
                 title={
                   !issuePreview?.canCreateGitHubIssue
                     ? 'Repository access required'
@@ -314,7 +321,7 @@ export const DiffModal: React.FC<DiffModalProps> = ({
               >
                 {isCreatingGitHubIssue ? (
                   <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-bg-primary/20 border-t-bg-primary" />
                     Creating...
                   </>
                 ) : (
@@ -331,4 +338,3 @@ export const DiffModal: React.FC<DiffModalProps> = ({
     </div>
   );
 };
-
