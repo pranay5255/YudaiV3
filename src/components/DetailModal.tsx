@@ -9,11 +9,11 @@ interface DetailModalProps {
   onAddToContext: (file: FileItem) => void;
 }
 
-export const DetailModal: React.FC<DetailModalProps> = ({ 
-  isOpen, 
-  onClose, 
-  file, 
-  onAddToContext 
+export const DetailModal: React.FC<DetailModalProps> = ({
+  isOpen,
+  onClose,
+  file,
+  onAddToContext
 }) => {
   if (!isOpen || !file) return null;
 
@@ -42,50 +42,52 @@ export const Component: React.FC<Props> = ({ title, description }) => {
 };`;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-bg border border-zinc-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-bg-secondary border border-border rounded-xl shadow-terminal w-full max-w-2xl max-h-[80vh] flex flex-col animate-fade-in">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-zinc-800">
+        <div className="flex items-center justify-between p-6 border-b border-border">
           <div className="flex items-center gap-3">
-            <FileText className="w-5 h-5 text-primary" />
+            <div className="w-10 h-10 rounded-lg bg-amber/10 border border-amber/20 flex items-center justify-center">
+              <FileText className="w-5 h-5 text-amber" />
+            </div>
             <div>
-              <h2 className="text-lg font-semibold text-fg">{file.file_name}</h2>
-              <p className="text-sm text-fg/60">
-                {file.file_type} • {file.tokens} tokens
+              <h2 className="text-lg font-mono font-semibold text-fg">{file.file_name}</h2>
+              <p className="text-xs font-mono text-muted">
+                {file.file_type} &bull; {file.tokens} tokens
               </p>
             </div>
           </div>
-          
+
           <button
             onClick={onClose}
-            className="p-2 hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-2 hover:bg-bg-tertiary rounded-lg transition-colors text-muted hover:text-fg"
             aria-label="Close modal"
           >
-            <X className="w-5 h-5 text-fg" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-auto p-6">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden">
-            <div className="bg-zinc-800 px-4 py-2 border-b border-zinc-700">
-              <span className="text-sm font-medium text-fg">File Contents</span>
+          <div className="bg-bg-tertiary border border-border rounded-xl overflow-hidden">
+            <div className="bg-bg-secondary px-4 py-2.5 border-b border-border flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber" />
+              <span className="text-xs font-mono font-medium text-fg-secondary uppercase tracking-wider">File Contents</span>
             </div>
-            <pre className="p-4 text-sm font-mono text-fg overflow-auto max-h-96">
+            <pre className="p-4 text-sm font-mono text-fg-secondary overflow-auto max-h-96 leading-relaxed">
               <code>{mockContent}</code>
             </pre>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="p-6 border-t border-zinc-800 flex justify-end">
+        <div className="p-6 border-t border-border flex justify-end">
           <button
             onClick={() => {
               onAddToContext(file);
               onClose();
             }}
-            className="flex items-center gap-2 bg-primary hover:bg-primary/80 
-                     text-white px-4 py-2 rounded-lg transition-colors"
+            className="flex items-center gap-2 bg-amber hover:bg-amber/90 text-bg-primary px-5 py-2.5 rounded-lg font-mono text-sm font-semibold transition-all duration-200 glow-amber"
           >
             <Plus className="w-4 h-4" />
             Add to Context
