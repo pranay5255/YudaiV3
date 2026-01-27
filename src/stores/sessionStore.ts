@@ -1154,21 +1154,51 @@ export const useSessionStore = create<SessionState>()(
         // ============================================================================
 
         createIssueWithContext: async (request: CreateIssueWithContextRequest) => {
-          const { sessionToken } = get();
+          const { sessionToken, activeSessionId, selectedRepository, currentSession } = get();
 
           try {
             set({ isLoadingIssues: true, issueError: null });
 
-            const { activeSessionId } = get();
-            if (!activeSessionId) {
+            const normalizeSelection = (repository: SelectedRepository) => ({
+              owner: repository.repository.owner?.login || repository.repository.full_name.split('/')[0],
+              name: repository.repository.name,
+              branch: repository.branch || '',
+            });
+
+            const selectionInfo = selectedRepository ? normalizeSelection(selectedRepository) : null;
+            const sessionMatchesSelection = selectionInfo && currentSession
+              ? currentSession.repo_owner === selectionInfo.owner
+                && currentSession.repo_name === selectionInfo.name
+                && (currentSession.repo_branch || '') === selectionInfo.branch
+              : false;
+
+            let sessionIdToUse = activeSessionId;
+            if (selectionInfo && (!sessionIdToUse || !sessionMatchesSelection)) {
+              const newSessionId = await get().createSessionForRepository(selectedRepository);
+              if (!newSessionId) {
+                throw new Error('Failed to create session for selected repository');
+              }
+              sessionIdToUse = newSessionId;
+            }
+
+            if (!sessionIdToUse) {
               throw new Error('No active session available');
             }
 
+            const repositoryInfo = selectionInfo
+              ? { owner: selectionInfo.owner, name: selectionInfo.name, branch: selectionInfo.branch || undefined }
+              : request.repository_info;
+
+            const mergedRequest = {
+              ...request,
+              repository_info: repositoryInfo,
+            };
+
             const response = await handleApiResponse<IssueCreationResponse>(
-              await fetch(buildApiUrl(API.SESSIONS.ISSUES.CREATE, { sessionId: activeSessionId }), {
+              await fetch(buildApiUrl(API.SESSIONS.ISSUES.CREATE, { sessionId: sessionIdToUse }), {
                 method: 'POST',
                 headers: getAuthHeaders(sessionToken || ''),
-                body: JSON.stringify(request),
+                body: JSON.stringify(mergedRequest),
               })
             );
 

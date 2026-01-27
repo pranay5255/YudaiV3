@@ -18,6 +18,7 @@ import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
 import { useSessionManagement } from './hooks/useSessionManagement';
 import { useSession, useContextCards, useRemoveContextCard } from './hooks/useSessionQueries';
+import { useSessionStore } from './stores/sessionStore';
 
 /**
  * Main App Content Component
@@ -27,7 +28,7 @@ import { useSession, useContextCards, useRemoveContextCard } from './hooks/useSe
 function AppContent() {
   // Auth and repository contexts
   const { user, isAuthenticated } = useAuth();
-  const { setSelectedRepository, hasSelectedRepository } = useRepository();
+  const { setSelectedRepository, hasSelectedRepository, selectedRepository } = useRepository();
   
   // Session management hook for state management
   const {
@@ -35,8 +36,11 @@ function AppContent() {
     activeTab,
     setActiveTab,
     sidebarCollapsed,
-    setSidebarCollapsed
+    setSidebarCollapsed,
+    clearSession
   } = useSessionManagement();
+
+  const { currentSession } = useSessionStore();
   
   // React Query hooks for data fetching
   const { data: sessionData, isLoading: isSessionLoading } = useSession(activeSessionId || '');
@@ -104,6 +108,32 @@ function AppContent() {
 
   const handleRepositoryConfirm = async (selection: SelectedRepository) => {
     try {
+      const normalizeSelection = (repoSelection: SelectedRepository) => ({
+        owner: repoSelection.repository.owner?.login || repoSelection.repository.full_name.split('/')[0],
+        name: repoSelection.repository.name,
+        branch: repoSelection.branch || '',
+      });
+
+      const selectionRepo = normalizeSelection(selection);
+      const selectedRepo = selectedRepository ? normalizeSelection(selectedRepository) : null;
+      const sessionRepo = currentSession ? {
+        owner: currentSession.repo_owner || '',
+        name: currentSession.repo_name || '',
+        branch: currentSession.repo_branch || '',
+      } : null;
+
+      const matchesRepo = (a: { owner: string; name: string; branch: string }, b: { owner: string; name: string; branch: string }) =>
+        a.owner === b.owner && a.name === b.name && a.branch === b.branch;
+
+      const selectionDiffersFromSelected = selectedRepo ? !matchesRepo(selectionRepo, selectedRepo) : false;
+      const selectionDiffersFromSession = sessionRepo ? !matchesRepo(selectionRepo, sessionRepo) : false;
+      const shouldResetSession = Boolean(activeSessionId && (selectionDiffersFromSelected || selectionDiffersFromSession));
+
+      if (shouldResetSession) {
+        addToast('Switching repositories will start a new session.', 'info');
+        clearSession();
+      }
+
       setSelectedRepository(selection);
       setShowRepositorySelection(false);
       addToast('Repository selected successfully!', 'success');
