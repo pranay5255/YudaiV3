@@ -25,6 +25,7 @@ try:
     yudai_grep_path = Path(__file__).parent / "yudai-grep"
     if yudai_grep_path.exists():
         sys.path.insert(0, str(yudai_grep_path))
+        sys.path.insert(0, str(yudai_grep_path / "src"))
     from main import predict_action
 
     from src.runtime import load_model
