@@ -1872,15 +1872,55 @@ async def create_issue_with_context_for_session(
         # Use consolidated issue creation service
         issue_service = IssueOpsService(db)
 
-        # Fall back to request repository_info if session repo data is incomplete
+        repository_info = request.get("repository_info") or {}
+        requested_owner = repository_info.get("owner")
+        requested_name = repository_info.get("name")
+
         repo_owner = db_session.repo_owner
         repo_name = db_session.repo_name
 
-        if not repo_owner or not repo_name:
-            repository_info = request.get("repository_info", {})
+        if requested_owner and requested_name:
+            if repo_owner and repo_name:
+                if (repo_owner, repo_name) != (requested_owner, requested_name):
+                    logger.warning(
+                        "Repository mismatch for session %s (user %s): "
+                        "session=%s/%s request=%s/%s. Updating session repo fields.",
+                        db_session.session_id,
+                        current_user.id,
+                        repo_owner,
+                        repo_name,
+                        requested_owner,
+                        requested_name,
+                    )
+            else:
+                logger.info(
+                    "Repository info provided for session %s (user %s): %s/%s. "
+                    "Updating session repo fields.",
+                    db_session.session_id,
+                    current_user.id,
+                    requested_owner,
+                    requested_name,
+                )
+
+            if (repo_owner, repo_name) != (requested_owner, requested_name):
+                db_session.repo_owner = requested_owner
+                db_session.repo_name = requested_name
+                try:
+                    db.commit()
+                except Exception as commit_error:
+                    logger.error(
+                        "Failed to update session repo fields for session %s: %s",
+                        db_session.session_id,
+                        commit_error,
+                    )
+                    db.rollback()
+                    raise
+                repo_owner = requested_owner
+                repo_name = requested_name
+        elif not repo_owner or not repo_name:
             if repository_info:
-                repo_owner = repository_info.get("owner") or repo_owner
-                repo_name = repository_info.get("name") or repo_name
+                repo_owner = requested_owner or repo_owner
+                repo_name = requested_name or repo_name
 
         result = await issue_service.create_issue_with_context(
             user_id=current_user.id,
