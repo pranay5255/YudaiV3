@@ -138,6 +138,7 @@ class SessionService:
                 context_cards=msg.context_cards,
                 referenced_files=msg.referenced_files,
                 error_message=msg.error_message,
+                actions=msg.actions,
                 created_at=msg.created_at,
                 updated_at=msg.updated_at,
             )
@@ -242,6 +243,7 @@ class SessionService:
                 context_cards=msg.context_cards,
                 referenced_files=msg.referenced_files,
                 error_message=msg.error_message,
+                actions=msg.actions,
                 created_at=msg.created_at,
                 updated_at=msg.updated_at,
             )

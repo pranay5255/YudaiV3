@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -39,6 +40,59 @@ class LLMService:
 
     # Cache directory configuration
     HF_HOME = os.getenv("HF_HOME", "/tmp/huggingface_cache")
+
+    BUTTON_ACTION_PATTERN = re.compile(
+        r'Button\{\s*"(?P<label>[^"]+)"\s*\}', re.IGNORECASE
+    )
+
+    @staticmethod
+    def _extract_suggested_task_titles(message_text: str) -> List[str]:
+        lines = [line.strip() for line in message_text.splitlines()]
+        titles: List[str] = []
+        for index, line in enumerate(lines):
+            if line.lower().startswith("suggested task"):
+                for next_line in lines[index + 1 :]:
+                    if next_line:
+                        titles.append(next_line)
+                        break
+        return titles
+
+    @staticmethod
+    def _derive_labels(label: str, title: Optional[str]) -> List[str]:
+        combined = f"{label} {title or ''}".lower()
+        labels: List[str] = []
+        if "bug" in combined:
+            labels.append("bug")
+        if "enhancement" in combined:
+            labels.append("enhancement")
+        if "task" in combined and "bug" not in combined and "enhancement" not in combined:
+            labels.append("task")
+        return labels
+
+    @staticmethod
+    def format_chat_response(message_text: str) -> Tuple[str, List[Dict[str, Any]]]:
+        if not message_text:
+            return "", []
+
+        matches = list(LLMService.BUTTON_ACTION_PATTERN.finditer(message_text))
+        suggested_titles = LLMService._extract_suggested_task_titles(message_text)
+        actions: List[Dict[str, Any]] = []
+
+        for index, match in enumerate(matches):
+            label = match.group("label").strip()
+            issue_title = suggested_titles[index] if index < len(suggested_titles) else None
+            actions.append(
+                {
+                    "action_type": "create_issue",
+                    "label": label,
+                    "issue_title": issue_title,
+                    "labels": LLMService._derive_labels(label, issue_title),
+                }
+            )
+
+        cleaned_text = LLMService.BUTTON_ACTION_PATTERN.sub("", message_text).strip()
+        cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text).strip()
+        return cleaned_text, actions
 
     @staticmethod
     def get_api_key() -> str:
@@ -228,7 +282,7 @@ class LLMService:
         temperature: float = None,
         max_tokens: int = None,
         timeout: int = None,
-    ) -> str:
+    ) -> Dict[str, Any]:
         """
         Generate response using pre-fetched and stored GitHub context with improved error handling
 
@@ -262,22 +316,36 @@ class LLMService:
 
             # Generate response with error handling
             try:
-                return await LLMService.generate_response(
+                raw_response = await LLMService.generate_response(
                     prompt=prompt,
                     model=model,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     timeout=timeout,
                 )
+                formatted_text, actions = LLMService.format_chat_response(raw_response)
+                return {
+                    "text": formatted_text,
+                    "actions": actions,
+                    "raw_response": raw_response,
+                }
             except Exception as generation_error:
                 logger.error(f"Failed to generate response: {generation_error}")
                 # Return fallback response
-                return "I'm having trouble processing your request right now. Please try again in a moment."
+                fallback_text = (
+                    "I'm having trouble processing your request right now. "
+                    "Please try again in a moment."
+                )
+                return {"text": fallback_text, "actions": [], "raw_response": fallback_text}
 
         except Exception as e:
             logger.error(f"Failed to generate response with stored context: {e}")
             # Return a helpful fallback response instead of raising an exception
-            return "I understand you're asking about something, but I'm currently experiencing technical difficulties. Please try again in a moment."
+            fallback_text = (
+                "I understand you're asking about something, but I'm currently "
+                "experiencing technical difficulties. Please try again in a moment."
+            )
+            return {"text": fallback_text, "actions": [], "raw_response": fallback_text}
 
     @staticmethod
     def _build_daifu_prompt_from_context(
@@ -301,39 +369,22 @@ class LLMService:
             Complete prompt string with stored GitHub context
         """
         try:
-            # System header with comprehensive DAifu instructions focused on OnchainKit and Base app development
-            system_header = """You are DAifu, a powerful AI assistant specialized in OnchainKit integration and Base app development. You operate in a GitHub-integrated chat system designed for repository management and onchain application development.
+            # System header with comprehensive DAifu instructions focused on issue creation and resolution
+            system_header = """You are DAifu, an AI assistant focused on helping users create clear, actionable GitHub issues and guide their resolution. You operate in a GitHub-integrated chat system designed for repository management and issue-driven development.
 
-You are collaborating with a USER to manage their GitHub repository and provide expert guidance on integrating OnchainKit React components into their codebase.
+You are collaborating with a USER to understand their repository context, break down requests into actionable issues, and help plan how to solve them.
 
-## Your Expertise Areas:
-- **OnchainKit Integration**: Deep knowledge of OnchainKit SDK for building beautiful onchain applications
-- **Base App Development**: Expertise in Base protocol features and ecosystem integration
-- **React Component Integration**: Specialized in integrating OnchainKit components into existing React applications
-- **GitHub Repository Management**: Creating clear, actionable GitHub issues for onchain development tasks
+## Your Core Responsibilities:
+- **Issue Discovery**: Ask clarifying questions to understand scope, impact, and desired outcomes.
+- **Issue Drafting**: Propose concise, actionable GitHub issues with clear titles, descriptions, and acceptance criteria.
+- **Issue Resolution Guidance**: Outline high-level implementation steps and testing guidance after issues are created.
+- **Repository Context Awareness**: Use repository context (commits, issues, branches, files) to avoid duplicates and tailor recommendations.
 
-## OnchainKit Knowledge:
-OnchainKit is your go-to SDK for building beautiful onchain applications. Key features include:
-- **Ergonomic design**: Full-stack tools that make complex onchain interactions intuitive
-- **Battle-tested patterns**: Industry best practices packaged into ready-to-use solutions
-- **Purpose-built components**: Pre-built modules for common onchain workflows
-- **Framework agnostic**: Compatible with any React-supporting framework
-- **Supercharged by Base**: Deep integration with Base's protocol features and ecosystem
-
-## Available OnchainKit Components:
-- **Identity**: Show Basenames, avatars, badges, and addresses
-- **Wallet**: Create or connect wallets with Connect Wallet functionality
-- **Transaction**: Handle transactions using EOAs or Smart Wallets
-- **Checkout**: Integrate USDC checkout flows with ease
-- **Fund**: Create funding flows to onboard users
-- **Tokens**: Search and display tokens with various components
-- **Swap**: Enable token swaps in your app
-- **Mint**: View and mint NFTs in your app
-
-## Installation Options:
-- **Automatic**: `npm create onchain@latest` for new projects
-- **Manual**: Add to existing Next.js, Vite, Remix, or Astro projects
-- **Templates**: Onchain Commerce, NFT minting, Funding flow, Social profile
+## Behavior Guidelines:
+- Be concise, direct, and helpful.
+- When you recommend an issue, include a “Suggested task” section followed by a button directive on a new line in this exact format: Button{"Start Task"}.
+- Provide 2–3 issue suggestions when the request warrants multiple tasks.
+- If the user asks for help beyond issue creation, offer to break the work into issues first and then provide the solution plan.
 
 <tool_calling>
 You have tools at your disposal to solve GitHub-related tasks. Follow these rules regarding tool calls:
@@ -355,16 +406,6 @@ It is *EXTREMELY* important that your generated issues are clear, actionable, an
 5. If you encounter errors in context (e.g., missing data), fix them if obvious or ask the USER for clarification. DO NOT loop more than 3 times on the same issue. On the third attempt, stop and ask the USER what to do next.
 6. If the request cannot proceed due to invalid context, address it immediately.
 </creating_issues>
-
-<onchainkit_integration_guidance>
-When helping with OnchainKit integration:
-1. **Analyze the existing codebase** to understand the current React setup and architecture
-2. **Identify integration points** where OnchainKit components would be most beneficial
-3. **Provide specific implementation suggestions** with code examples and best practices
-4. **Consider Base ecosystem features** and how they can enhance the application
-5. **Suggest testing strategies** using OnchainTestKit for comprehensive end-to-end testing
-6. **Recommend component combinations** that work well together for common onchain workflows
-</onchainkit_integration_guidance>
 
 <github_management>
 Use the provided GitHub context (repository details, commits, issues, branches) as your primary source.
@@ -389,8 +430,8 @@ Answer the USER's request using the relevant tool(s), if they are available. Che
 [IMPORTANT]
 Reply in the same language as the USER.
 On the first prompt, don't create issues until the USER confirms the plan.
-If the USER provides ambiguous input, like a single word or phrase, explain how you can help and suggest a few possible ways (e.g., OnchainKit integration, Base app development, GitHub issue creation).
-If USER asks for non-onchain tasks (e.g., general coding unrelated to onchain development), politely tell the USER that while you can provide advice, your focus is onchain application development and GitHub management. Confirm with the USER before proceeding.
+If the USER provides ambiguous input, like a single word or phrase, explain how you can help and suggest a few possible ways (e.g., clarifying the bug report, drafting feature issues, or planning issue breakdowns).
+If USER asks for tasks outside repository issue creation, explain that you can still help but recommend structuring the work as issues first. Confirm with the USER before proceeding.
 
 # Tools
 
@@ -546,8 +587,17 @@ parameters: object,
                     f"{speaker}: {utterance}" for speaker, utterance in conversation
                 )
 
+            first_response_instruction = ""
+            if conversation and len(conversation) <= 1:
+                first_response_instruction = (
+                    "\n<FIRST_RESPONSE>\n"
+                    "This is the first assistant response in a new session. "
+                    "Ask 2–4 clarifying questions before proposing issues.\n"
+                    "</FIRST_RESPONSE>\n"
+                )
+
             # Combine all into final prompt
-            prompt = f"""{system_header}
+            prompt = f"""{system_header}{first_response_instruction}
 
 <GITHUB_CONTEXT_BEGIN>
 {details_str}
@@ -564,7 +614,7 @@ parameters: object,
 {convo_formatted}
 </CONVERSATION_END>
 
-(Respond now as DAifu following the guidelines above. Keep responses conversational and under 100 words.)"""
+(Respond now as DAifu following the guidelines above. Keep responses conversational and under 200 words.)"""
             return prompt.strip()
 
         except Exception as e:

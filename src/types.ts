@@ -33,7 +33,8 @@ import type {
   GitHubCommitInfo,
   ChatProcessingRequest,
   ChatProcessingResponse,
-  GitHubIssuePreview
+  GitHubIssuePreview,
+  ChatAction
 } from './types/sessionTypes';
 
 export interface IdeaItem {
@@ -146,6 +147,7 @@ export interface Message {
   timestamp: Date;
   sessionId: string;
   role?: 'user' | 'assistant' | 'system';
+  actions?: ChatAction[];
 }
 
 export interface Toast {
@@ -233,7 +235,6 @@ export interface SessionState {
   lastUpdated: Date;
   connectionStatus: 'connected' | 'disconnected' | 'reconnecting';
 }
-
 
 
 

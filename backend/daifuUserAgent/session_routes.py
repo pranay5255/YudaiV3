@@ -648,6 +648,7 @@ async def add_chat_message(
             context_cards=message_data.get("context_cards"),
             referenced_files=message_data.get("referenced_files"),
             error_message=message_data.get("error_message"),
+            actions=message_data.get("actions"),
         )
 
         db.add(message)
@@ -673,6 +674,7 @@ async def add_chat_message(
             context_cards=message.context_cards,
             referenced_files=message.referenced_files,
             error_message=message.error_message,
+            actions=message.actions,
             created_at=message.created_at,
             updated_at=message.updated_at,
         )
@@ -734,6 +736,7 @@ async def add_bulk_chat_messages(
                 context_cards=message_data.get("context_cards"),
                 referenced_files=message_data.get("referenced_files"),
                 error_message=message_data.get("error_message"),
+                actions=message_data.get("actions"),
             )
 
             db.add(message)
@@ -765,6 +768,7 @@ async def add_bulk_chat_messages(
                 context_cards=msg.context_cards,
                 referenced_files=msg.referenced_files,
                 error_message=msg.error_message,
+                actions=msg.actions,
                 created_at=msg.created_at,
                 updated_at=msg.updated_at,
             )
