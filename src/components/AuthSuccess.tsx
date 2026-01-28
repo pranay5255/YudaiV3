@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 import { useSessionStore } from '../stores/sessionStore';
 
 /**
@@ -8,14 +9,23 @@ import { useSessionStore } from '../stores/sessionStore';
  */
 export const AuthSuccess: React.FC = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const { setAuthFromCallback } = useSessionStore();
+  const { setAuthFromCallback } = useAuth();
+  const clearSession = useSessionStore((state) => state.clearSession);
+  const hasProcessed = useRef(false);
 
   useEffect(() => {
+    if (hasProcessed.current) {
+      return;
+    }
+
+    hasProcessed.current = true;
+
     const handleAuthSuccess = async () => {
       try {
         console.log('[AuthSuccess] Processing OAuth callback data');
-        
+
+        const searchParams = new URLSearchParams(window.location.search);
+
         // Extract auth data from URL parameters
         const sessionToken = searchParams.get('session_token');
         const userId = searchParams.get('user_id');
@@ -46,10 +56,12 @@ export const AuthSuccess: React.FC = () => {
         console.log('[AuthSuccess] Setting up user session:', user);
 
         // Set up the session using the session store
-        await setAuthFromCallback({
+        setAuthFromCallback({
           user,
           sessionToken,
         });
+
+        clearSession();
 
         console.log('[AuthSuccess] Authentication successful, redirecting to main app');
         
@@ -63,7 +75,7 @@ export const AuthSuccess: React.FC = () => {
     };
 
     handleAuthSuccess();
-  }, [searchParams, navigate, setAuthFromCallback]);
+  }, [navigate, setAuthFromCallback, clearSession]);
 
   return (
     <div className="min-h-screen bg-zinc-900 flex items-center justify-center">
