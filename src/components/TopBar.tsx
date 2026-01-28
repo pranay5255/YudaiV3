@@ -1,4 +1,5 @@
 import React from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { ChevronDown, Database, User } from 'lucide-react';
 import { ProgressStep } from '../types';
 import { UserProfile } from './UserProfile';
@@ -14,10 +15,12 @@ const steps: ProgressStep[] = ['DAifu', 'Architect', 'Test-Writer', 'Coder'];
 
 export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
   const { user, login, isLoading } = useAuth();
-  const { indexCodebaseEnabled, setIndexCodebaseEnabled } = useSessionStore((state) => ({
-    indexCodebaseEnabled: state.indexCodebaseEnabled,
-    setIndexCodebaseEnabled: state.setIndexCodebaseEnabled,
-  }));
+  const { indexCodebaseEnabled, setIndexCodebaseEnabled } = useSessionStore(
+    useShallow((state) => ({
+      indexCodebaseEnabled: state.indexCodebaseEnabled,
+      setIndexCodebaseEnabled: state.setIndexCodebaseEnabled,
+    }))
+  );
 
   const handleLoginClick = () => {
     if (!user && !isLoading) {
