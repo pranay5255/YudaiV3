@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 /**
  * AuthCallback component handles OAuth error callbacks from the backend
@@ -7,9 +7,16 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
  */
 export const AuthCallback: React.FC = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const hasProcessed = useRef(false);
 
   useEffect(() => {
+    if (hasProcessed.current) {
+      return;
+    }
+
+    hasProcessed.current = true;
+
+    const searchParams = new URLSearchParams(window.location.search);
     const error = searchParams.get('error');
     if (error) {
       console.error('[AuthCallback] OAuth error received:', error);
@@ -19,7 +26,7 @@ export const AuthCallback: React.FC = () => {
       // No error, redirect to login
       navigate('/auth/login', { replace: true });
     }
-  }, [searchParams, navigate]);
+  }, [navigate]);
 
   return (
     <div className="min-h-screen bg-zinc-900 flex items-center justify-center">
