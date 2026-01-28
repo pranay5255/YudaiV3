@@ -249,6 +249,7 @@ class HeadlessSandboxRequest:
     issue_text: Optional[str] = None
     verbose: bool = False
     openrouter_call_delay: float = 0.0
+    create_pr: bool = True
     timeout: int = 1800  # 30 minutes default for agent execution
 
 
@@ -607,6 +608,7 @@ class HeadlessSandboxExecutor:
                     "max_cost": request.max_cost,
                     "small_change": request.small_change,
                     "best_effort": request.best_effort,
+                    "create_pr": request.create_pr,
                 },
                 verbose=request.verbose,
             )
