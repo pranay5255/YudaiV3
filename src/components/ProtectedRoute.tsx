@@ -1,6 +1,6 @@
-import React, { ReactNode, useEffect, useState } from 'react';
+import React, { ReactNode } from 'react';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { LoginPage } from '../components/LoginPage';
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -19,50 +19,9 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   loadingComponent
 }) => {
   const { isAuthenticated, isLoading, user } = useAuth();
-  const [timeoutReached, setTimeoutReached] = useState(false);
-
-  // Debug logging for authentication state
-  useEffect(() => {
-    console.log('[ProtectedRoute] Auth state changed:', {
-      isAuthenticated,
-      isLoading,
-      hasUser: !!user,
-      timeoutReached,
-      timestamp: new Date().toISOString()
-    });
-  }, [isAuthenticated, isLoading, user, timeoutReached]);
-
-  // Add timeout to prevent infinite loading - only when not authenticated
-  useEffect(() => {
-    // Only set timeout if we're loading and not authenticated
-    if (isLoading && !isAuthenticated && !user) {
-      console.log('[ProtectedRoute] Setting up timeout timer for unauthenticated user');
-      const timer = setTimeout(() => {
-        console.warn('[ProtectedRoute] Authentication timeout reached, forcing login page');
-        console.warn('[ProtectedRoute] Current state at timeout:', {
-          isAuthenticated,
-          isLoading,
-          hasUser: !!user,
-          timestamp: new Date().toISOString()
-        });
-        setTimeoutReached(true);
-      }, 5000); // 5 second timeout
-
-      return () => {
-        console.log('[ProtectedRoute] Clearing timeout timer');
-        clearTimeout(timer);
-      };
-    } else {
-      // Clear timeout if user becomes authenticated
-      if (isAuthenticated && user) {
-        console.log('[ProtectedRoute] User authenticated, clearing timeout');
-        setTimeoutReached(false);
-      }
-    }
-  }, [isLoading, isAuthenticated, user]);
 
   // Show loading spinner while checking authentication (with timeout fallback)
-  if (isLoading && !timeoutReached) {
+  if (isLoading) {
     return loadingComponent || (
       <div className="min-h-screen bg-bg flex items-center justify-center">
         <div className="text-center">
@@ -74,9 +33,9 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     );
   }
 
-  // Show login page if not authenticated or timeout reached
-  if (!isAuthenticated || !user || timeoutReached) {
-    return fallback ? <>{fallback}</> : <LoginPage />;
+  // Redirect to login if not authenticated
+  if (!isAuthenticated || !user) {
+    return fallback ? <>{fallback}</> : <Navigate to="/auth/login" replace />;
   }
 
   // Render protected content
