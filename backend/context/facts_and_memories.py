@@ -292,6 +292,29 @@ class FactsAndMemoriesService:
         }
 
     @staticmethod
+    def _extract_queries(
+        conversation: Optional[Sequence[Dict[str, Any]]],
+        max_messages: int = 10,
+    ) -> List[str]:
+        queries: List[str] = []
+        if conversation:
+            for msg in conversation[-max_messages:]:
+                text = (msg.get("text") or msg.get("content") or "").strip()
+                if text and len(text) > 10:  # Filter out very short messages
+                    queries.append(text)
+        return queries
+
+    def build_yudai_grep_analysis(
+        self,
+        snapshot: RepositorySnapshot,
+        conversation: Optional[Sequence[Dict[str, Any]]] = None,
+        max_messages: int = 10,
+    ) -> Dict[str, Any]:
+        """Run yudai-grep analysis to identify important files/folders."""
+        queries = self._extract_queries(conversation, max_messages=max_messages)
+        return self._analyze_repository_structure(snapshot, queries)
+
+    @staticmethod
     def _summarize_directory_structure(
         dir_dict: Dict[str, Any], max_depth: int = 3
     ) -> str:
@@ -321,16 +344,11 @@ class FactsAndMemoriesService:
         conversation: Optional[Sequence[Dict[str, Any]]] = None,
         max_messages: int = 10,
     ) -> FactsAndMemoriesResult:
-        # Extract queries from conversation for yudai-grep analysis
-        queries = []
-        if conversation:
-            for msg in conversation[-max_messages:]:
-                text = (msg.get("text") or msg.get("content") or "").strip()
-                if text and len(text) > 10:  # Filter out very short messages
-                    queries.append(text)
-
-        # Analyze repository structure using yudai-grep
-        repo_analysis = self._analyze_repository_structure(snapshot, queries)
+        repo_analysis = self.build_yudai_grep_analysis(
+            snapshot,
+            conversation,
+            max_messages=max_messages,
+        )
 
         prompt = self._build_prompt(
             snapshot,
