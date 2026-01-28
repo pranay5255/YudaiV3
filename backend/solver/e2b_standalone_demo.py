@@ -67,6 +67,7 @@ USER_CONFIG = {
     "max_cost": 7.5,
     "small_change": True,  # Limit to minimal targeted changes
     "best_effort": False,  # Continue even if tests fail
+    "create_pr": True,  # Automatically create pull request after solving
     # Rate limiting safeguards
     "openrouter_call_delay": 5.0,  # Seconds to sleep between OpenRouter requests
     # Execution settings
@@ -197,6 +198,7 @@ def build_demo_request(config: dict) -> HeadlessSandboxRequest:
         max_cost=config["max_cost"],
         small_change=config["small_change"],
         best_effort=config["best_effort"],
+        create_pr=config.get("create_pr", True),
         issue_text=config.get("issue_text"),
         verbose=config["verbose"],
         openrouter_call_delay=config.get("openrouter_call_delay", 0.0),
