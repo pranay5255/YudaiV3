@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
@@ -247,25 +247,51 @@ function AppContent() {
 }
 
 function App() {
-  const { initializeAuth } = useAuth();
-  
-  // Initialize authentication on app mount - this must happen before ProtectedRoute
+  const { isAuthenticated } = useAuth();
+  const clearSession = useSessionStore((state) => state.clearSession);
+  const hasBootstrappedRef = useRef(false);
+
+  // Always start fresh on app mount - no persisted session or token.
   useEffect(() => {
-    console.log('[App] Initializing authentication on app mount');
-    initializeAuth();
-  }, [initializeAuth]);
+    if (hasBootstrappedRef.current) {
+      return;
+    }
+
+    hasBootstrappedRef.current = true;
+
+    try {
+      localStorage.removeItem('session-storage');
+      localStorage.removeItem('session_token');
+    } catch (error) {
+      console.warn('[App] Failed to clear stored session data:', error);
+    }
+
+    clearSession();
+  }, [clearSession]);
+
+  // Auto-clear session store after 10 minutes of auth.
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      clearSession();
+    }, 10 * 60 * 1000);
+
+    return () => clearTimeout(timer);
+  }, [isAuthenticated, clearSession]);
 
   // Handle session errors by clearing session and optionally logging out
   const handleSessionError = () => {
     console.log('[App] Handling session error - clearing session state');
-    // Don't automatically logout as user might still be authenticated
-    // Just clear the invalid session
+    clearSession();
   };
 
   // Handle retry by re-initializing auth
   const handleRetry = () => {
-    console.log('[App] Retrying after error - re-initializing auth');
-    initializeAuth();
+    console.log('[App] Retrying after error - redirecting to login');
+    window.location.href = '/auth/login';
   };
 
   return (
