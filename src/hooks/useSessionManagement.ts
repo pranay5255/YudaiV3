@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useSessionStore } from '../stores/sessionStore';
 import { useAuthStore } from '../stores/authStore';
 import { useCreateSessionFromRepository, useEnsureSessionExists } from './useSessionQueries';
@@ -28,11 +29,13 @@ export const useSessionManagement = () => {
     setSidebarCollapsed,
   } = useSessionStore();
 
-  const { isAuthenticated, isLoading: authLoading, user } = useAuthStore((state) => ({
-    isAuthenticated: state.isAuthenticated,
-    isLoading: state.isLoading,
-    user: state.user,
-  }));
+  const { isAuthenticated, isLoading: authLoading, user } = useAuthStore(
+    useShallow((state) => ({
+      isAuthenticated: state.isAuthenticated,
+      isLoading: state.isLoading,
+      user: state.user,
+    }))
+  );
 
   const createSessionMutation = useCreateSessionFromRepository();
   const ensureSessionMutation = useEnsureSessionExists();
