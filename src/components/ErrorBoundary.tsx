@@ -1,7 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Wifi } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
-import { useSessionStore } from '../stores/sessionStore';
 
 interface Props {
   children: ReactNode;
@@ -177,18 +176,14 @@ export const ErrorBoundary: React.FC<ErrorBoundaryWrapperProps> = ({
   fallback
 }) => {
   const { login, logout } = useAuth();
-  const { setAuthError } = useSessionStore();
 
   const handleReauth = async () => {
     try {
       console.log('[ErrorBoundary] Attempting to re-authenticate user');
-      setAuthError(null); // Clear any existing auth errors
       await logout(); // Clear current session state
       await login();  // Redirect to login through session store
     } catch (error) {
       console.error('[ErrorBoundary] Re-authentication failed:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Re-authentication failed';
-      setAuthError(errorMessage);
       // Fallback to direct redirect if session store login fails
       window.location.href = '/auth/login';
     }
