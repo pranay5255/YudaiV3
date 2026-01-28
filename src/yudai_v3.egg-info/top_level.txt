@@ -1,8 +1,7 @@
 components
 config
-docs
+data
 hooks
-services
 stores
 types
 utils
