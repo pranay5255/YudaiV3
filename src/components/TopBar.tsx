@@ -1,8 +1,9 @@
 import React from 'react';
-import { ChevronDown, User } from 'lucide-react';
+import { ChevronDown, Database, User } from 'lucide-react';
 import { ProgressStep } from '../types';
 import { UserProfile } from './UserProfile';
 import { useAuth } from '../hooks/useAuth';
+import { useSessionStore } from '../stores/sessionStore';
 
 interface TopBarProps {
   currentStep: ProgressStep;
@@ -13,6 +14,10 @@ const steps: ProgressStep[] = ['DAifu', 'Architect', 'Test-Writer', 'Coder'];
 
 export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
   const { user, login, isLoading } = useAuth();
+  const { indexCodebaseEnabled, setIndexCodebaseEnabled } = useSessionStore((state) => ({
+    indexCodebaseEnabled: state.indexCodebaseEnabled,
+    setIndexCodebaseEnabled: state.setIndexCodebaseEnabled,
+  }));
 
   const handleLoginClick = () => {
     if (!user && !isLoading) {
@@ -34,33 +39,50 @@ export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
       </div>
 
       {/* Progress Stepper */}
-      <div className="flex items-center gap-2 flex-1">
-        {steps.map((step, index) => {
-          const isActive = step === currentStep;
-          const isError = step === errorStep;
-          const isCompleted = steps.indexOf(currentStep) > index;
-          
-          return (
-            <div
-              key={step}
-              className={`
-                px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-240
-                ${isActive 
-                  ? 'bg-primary text-white animate-pulse-subtle' 
-                  : isError
-                  ? 'bg-error text-white'
-                  : isCompleted
-                  ? 'bg-success/20 text-success'
-                  : 'bg-zinc-800 text-fg/60'
-                }
-              `}
-              role="status"
-              aria-current={isActive ? 'step' : undefined}
-            >
-              {step}
-            </div>
-          );
-        })}
+      <div className="flex items-center gap-3 flex-1">
+        <div className="flex items-center gap-2">
+          {steps.map((step, index) => {
+            const isActive = step === currentStep;
+            const isError = step === errorStep;
+            const isCompleted = steps.indexOf(currentStep) > index;
+            
+            return (
+              <div
+                key={step}
+                className={`
+                  px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-240
+                  ${isActive 
+                    ? 'bg-primary text-white animate-pulse-subtle' 
+                    : isError
+                    ? 'bg-error text-white'
+                    : isCompleted
+                    ? 'bg-success/20 text-success'
+                    : 'bg-zinc-800 text-fg/60'
+                  }
+                `}
+                role="status"
+                aria-current={isActive ? 'step' : undefined}
+              >
+                {step}
+              </div>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          onClick={() => setIndexCodebaseEnabled(!indexCodebaseEnabled)}
+          className={`
+            flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors
+            ${indexCodebaseEnabled
+              ? 'bg-success/20 text-success hover:bg-success/30'
+              : 'bg-zinc-800 text-fg/70 hover:bg-zinc-700'
+            }
+          `}
+          aria-pressed={indexCodebaseEnabled}
+        >
+          <Database className="w-4 h-4" />
+          Index codebase
+        </button>
       </div>
 
       {/* Right Side Controls */}

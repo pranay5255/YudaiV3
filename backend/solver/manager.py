@@ -22,10 +22,15 @@ from typing import Any, Dict, List, Optional
 
 from db.database import SessionLocal
 from fastapi import HTTPException, status
+from context.facts_and_memories import (
+    FactsAndMemoriesService,
+    RepositorySnapshotService,
+)
 from models import (
     AIModel,
     CancelSolveResponse,
     ChatSession,
+    ChatMessage,
     Issue,
     Solve,
     SolveProgress,
@@ -137,6 +142,36 @@ class DefaultSolverManager(SolverManager):
             "max_cost": self._coerce_float(matrix.get("max_cost"), 10.0),
         }
 
+    async def _build_solve_metadata(
+        self,
+        *,
+        db: Session,
+        chat_session: ChatSession,
+        repo_url: str,
+    ) -> Dict[str, Any]:
+        conversation = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == chat_session.id)
+            .order_by(ChatMessage.created_at.desc())
+            .limit(10)
+            .all()
+        )
+        conversation_payload = [
+            {"author": message.sender_type, "text": message.message_text}
+            for message in reversed(conversation)
+        ]
+
+        snapshot = await RepositorySnapshotService.fetch(repo_url=repo_url)
+        facts_service = FactsAndMemoriesService()
+        analysis = facts_service.build_yudai_grep_analysis(
+            snapshot,
+            conversation=conversation_payload,
+        )
+        return {
+            "yudai_grep": analysis,
+            "generated_at": utc_now().isoformat(),
+        }
+
     async def start_solve(
         self, *, session_id: str, request: StartSolveRequest, user: User
     ) -> StartSolveResponse:
@@ -193,6 +228,23 @@ class DefaultSolverManager(SolverManager):
                     detail="Repository URL is required for solver execution",
                 )
 
+            solve_metadata: Dict[str, Any] = {}
+            try:
+                solve_metadata = await self._build_solve_metadata(
+                    db=db,
+                    chat_session=chat_session,
+                    repo_url=repo_url,
+                )
+            except Exception as metadata_error:
+                logger.warning(
+                    "Failed to build yudai-grep metadata for solve: %s",
+                    metadata_error,
+                )
+                solve_metadata = {
+                    "yudai_grep": {"error": str(metadata_error)},
+                    "generated_at": utc_now().isoformat(),
+                }
+
             experiments = []
             model_run_plans: List[ModelRunPlan] = []
             solve_runs: List[SolveRun] = []
@@ -246,6 +298,7 @@ class DefaultSolverManager(SolverManager):
                     "best_effort": request.best_effort,
                     "max_iterations": request.max_iterations,
                     "max_cost": request.max_cost,
+                    "metadata": solve_metadata,
                 },
                 limits={
                     "max_parallel": max_parallel,
@@ -400,6 +453,7 @@ class DefaultSolverManager(SolverManager):
                 runs=runs_out,
                 champion_run=champion,
                 error_message=solve.error_message,
+                metadata=(solve.matrix or {}).get("metadata"),
             )
         finally:
             db.close()

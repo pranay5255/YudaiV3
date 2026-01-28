@@ -129,6 +129,7 @@ interface SessionState {
   activeTab: TabType;
   sidebarCollapsed: boolean;
   sessionLoadingEnabled: boolean;
+  indexCodebaseEnabled: boolean;
 
   // ============================================================================
   // SESSION STATISTICS & METADATA
@@ -157,6 +158,7 @@ interface SessionState {
   deleteSession: (sessionId: string) => Promise<boolean>;
   ensureSessionExists: (sessionId: string) => Promise<boolean>;
   validatePersistedSession: () => Promise<void>;
+  setIndexCodebaseEnabled: (enabled: boolean) => void;
 
   // ============================================================================
   // REPOSITORY ACTIONS
@@ -323,6 +325,7 @@ export const useSessionStore = create<SessionState>()(
         activeTab: 'chat',
         sidebarCollapsed: false,
         sessionLoadingEnabled: false,
+        indexCodebaseEnabled: true,
 
         // Session statistics
         totalTokens: 0,
@@ -506,7 +509,7 @@ export const useSessionStore = create<SessionState>()(
         // ============================================================================
 
         createSessionForRepository: async (repository: SelectedRepository) => {
-          const { sessionToken } = get();
+          const { sessionToken, indexCodebaseEnabled } = get();
 
           if (!sessionToken) {
             throw new Error('No session token available');
@@ -528,7 +531,7 @@ export const useSessionStore = create<SessionState>()(
                   repo_branch: repository.branch,
                   title: `Chat - ${repoOwner}/${repoName}`,
                   // Trigger background indexing on session creation
-                  index_codebase: true,
+                  index_codebase: indexCodebaseEnabled,
                 }),
               })
             );
@@ -693,6 +696,10 @@ export const useSessionStore = create<SessionState>()(
               get().clearSession();
             }
           }
+        },
+
+        setIndexCodebaseEnabled: (enabled: boolean) => {
+          set({ indexCodebaseEnabled: enabled });
         },
 
         // ============================================================================
@@ -1303,6 +1310,7 @@ export const useSessionStore = create<SessionState>()(
           activeTab: state.activeTab,
           sidebarCollapsed: state.sidebarCollapsed,
           sessionLoadingEnabled: state.sessionLoadingEnabled,
+          indexCodebaseEnabled: state.indexCodebaseEnabled,
 
           // Connection status
           connectionStatus: state.connectionStatus,

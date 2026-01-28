@@ -1093,6 +1093,7 @@ class SolveStatusResponse(BaseModel):
     runs: List[SolveRunOut] = Field(default_factory=list)
     champion_run: Optional[SolveRunOut] = None
     error_message: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class CancelSolveResponse(BaseModel):
