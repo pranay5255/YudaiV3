@@ -29,15 +29,15 @@ export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
   };
 
   return (
-    <div className="flex h-14 items-center px-4 border-b border-zinc-800 bg-bg">
+    <div className="flex h-14 items-center px-4 border-b border-[#2a2a2e] bg-[#111113] backdrop-blur-sm">
       {/* Logo & Project Switcher */}
       <div className="flex items-center gap-2 mr-8">
-        <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-          <span className="text-white font-bold text-sm">AI</span>
+        <div className="w-8 h-8 bg-gradient-to-br from-[#f59e0b] to-[#f59e0b]/80 rounded-lg flex items-center justify-center shadow-lg shadow-[#f59e0b]/20">
+          <span className="text-[#0a0a0b] font-bold text-sm font-mono">AI</span>
         </div>
-        <button className="flex items-center gap-1 text-fg hover:text-primary transition-colors">
-          <span className="font-medium">Project Assistant</span>
-          <ChevronDown className="w-4 h-4" />
+        <button className="flex items-center gap-1 text-[#f4f4f5] hover:text-[#f59e0b] transition-colors duration-200 group">
+          <span className="font-medium text-sm">Project Assistant</span>
+          <ChevronDown className="w-4 h-4 group-hover:translate-y-0.5 transition-transform duration-200" />
         </button>
       </div>
 
@@ -48,19 +48,19 @@ export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
             const isActive = step === currentStep;
             const isError = step === errorStep;
             const isCompleted = steps.indexOf(currentStep) > index;
-            
+
             return (
               <div
                 key={step}
                 className={`
-                  px-3 py-1.5 rounded-full text-sm font-medium transition-all duration-240
-                  ${isActive 
-                    ? 'bg-primary text-white animate-pulse-subtle' 
+                  relative px-3 py-1.5 rounded-md text-xs font-mono font-medium transition-all duration-300
+                  ${isActive
+                    ? 'bg-[#f59e0b] text-[#0a0a0b] shadow-lg shadow-[#f59e0b]/30 animate-pulse-subtle'
                     : isError
-                    ? 'bg-error text-white'
+                    ? 'bg-red-500/90 text-white border border-red-400/30'
                     : isCompleted
-                    ? 'bg-success/20 text-success'
-                    : 'bg-zinc-800 text-fg/60'
+                    ? 'bg-[#10b981]/20 text-[#10b981] border border-[#10b981]/30'
+                    : 'bg-[#1a1a1d] text-[#71717a] border border-[#2a2a2e] hover:border-[#3d3d42]'
                   }
                 `}
                 role="status"
@@ -75,15 +75,15 @@ export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
           type="button"
           onClick={() => setIndexCodebaseEnabled(!indexCodebaseEnabled)}
           className={`
-            flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors
+            relative flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-mono font-medium transition-all duration-200
             ${indexCodebaseEnabled
-              ? 'bg-success/20 text-success hover:bg-success/30'
-              : 'bg-zinc-800 text-fg/70 hover:bg-zinc-700'
+              ? 'bg-[#22d3ee]/15 text-[#22d3ee] border border-[#22d3ee]/30 hover:bg-[#22d3ee]/20 shadow-sm shadow-[#22d3ee]/10'
+              : 'bg-[#1a1a1d] text-[#a1a1aa] border border-[#2a2a2e] hover:border-[#3d3d42] hover:text-[#f4f4f5]'
             }
           `}
           aria-pressed={indexCodebaseEnabled}
         >
-          <Database className="w-4 h-4" />
+          <Database className={`w-3.5 h-3.5 transition-transform duration-200 ${indexCodebaseEnabled ? 'scale-110' : ''}`} />
           Index codebase
         </button>
       </div>
@@ -95,21 +95,21 @@ export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
           <UserProfile />
         ) : (
           // Show login button when not logged in
-          <button 
+          <button
             onClick={handleLoginClick}
             disabled={isLoading}
-            className="flex items-center space-x-2 text-fg hover:text-primary transition-colors duration-200 bg-zinc-800/50 hover:bg-zinc-800 rounded-lg px-3 py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 text-[#f4f4f5] hover:text-[#f59e0b] transition-all duration-200 bg-[#1a1a1d] hover:bg-[#1a1a1d]/80 border border-[#2a2a2e] hover:border-[#3d3d42] rounded-md px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed group"
             aria-label="Sign in with GitHub"
           >
             {isLoading ? (
               <>
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" />
-                <span className="text-sm font-medium">Signing in...</span>
+                <span className="text-xs font-medium font-mono">Signing in...</span>
               </>
             ) : (
               <>
-                <User className="w-5 h-5" />
-                <span className="text-sm font-medium">Sign in</span>
+                <User className="w-4 h-4 group-hover:scale-110 transition-transform duration-200" />
+                <span className="text-xs font-medium font-mono">Sign in</span>
               </>
             )}
           </button>
