@@ -1,537 +1,757 @@
-# Solve Issues Tab Implementation
+# Solve Issues Implementation Guide
 
-This document explains the implementation of the "Solve Issues" tab in YudaiV3, which allows users to solve GitHub issues using AI-powered agents.
+**Status**: Partially Implemented
+**Version**: 1.0.0
+**Last Updated**: January 2026
 
 ## Overview
 
-The Solve Issues feature enables users to:
-1. View all GitHub issues from the selected repository
-2. Filter issues by source (Yudai-generated vs. others)
-3. Select issues and configure solving parameters
-4. Start AI-powered solve sessions
-5. Monitor solve progress in real-time
-6. View and access generated pull requests
+The Solve Issues feature enables users to automatically solve GitHub issues using AI-powered agents running in E2B sandboxes. The system:
+1. Creates issues with full conversation and file context
+2. Launches mini-swe-agent in isolated E2B containers
+3. Monitors progress in real-time
+4. Generates pull requests with fixes
+5. Tracks costs, iterations, and results
+
+---
+
+## Current Implementation Status
+
+### ✅ Implemented
+- **Backend Infrastructure**:
+  - Solver API router included in `session_routes.py` (line 127)
+  - E2B sandbox executor (`solver/sandbox.py`)
+  - HeadlessSandboxExecutor with full lifecycle management
+  - TFBD config generation (`solver/manager.py`)
+  - Agent script generation (`solver/agentScriptGen.py`)
+  - Demo scripts proving E2B integration works
+
+- **Database**:
+  - `Solve` table for solve sessions
+  - `SolveRun` table for individual agent runs
+  - `Issue` table for GitHub issues
+  - Trajectory storage via JSONB + file paths
+
+- **API Endpoints**:
+  - `GET /github/repositories/{owner}/{repo}/issues` - Fetch issues
+  - `GET /ai-models` - List available models
+  - Solver router endpoints (need verification)
+
+### ❌ Missing
+- **Frontend Components**:
+  - SolveConfigModal (configuration UI)
+  - SolveProgressModal (real-time monitoring)
+  - "Solve This Issue" button integration
+  - Session store methods for solve operations
+
+- **Integration Layer**:
+  - Bridge between user issue creation → solve trigger
+  - Workflow to prepare HeadlessSandboxRequest from issue data
+  - Status polling implementation
+  - Error handling and retry logic
+
+---
 
 ## Architecture
 
-### Frontend Components
-
-#### 1. **SolveIssues.tsx** - Main Component
-Location: `src/components/SolveIssues.tsx`
-
-**Features:**
-- Fetches and displays GitHub issues in a card grid layout
-- Filters issues by type (All, Yudai-generated, Others)
-- Distinguishes Yudai-generated issues via `chat-generated` label
-- Manages issue selection and solve configuration
-- Polls solve status every 3 seconds when active
-- Displays solve progress with detailed run information
-
-**Key Components:**
-- `SolveIssues` - Main container component
-- `IssueModal` - Configuration modal for solving an issue
-- `SolveProgressModal` - Real-time progress monitoring
-
-#### 2. **Sidebar.tsx** - Navigation
-Updated to include "Solve Issues" tab with Zap icon
-
-#### 3. **App.tsx** - Routing
-Updated to:
-- Import SolveIssues component
-- Add 'solve' to valid tab types
-- Render SolveIssues component when tab is active
-
-### Backend Endpoints
-
-#### 1. **GitHub Issues Endpoint**
-```
-GET /daifu/github/repositories/{owner}/{repo}/issues
-```
-
-**Purpose:** Fetch GitHub issues for a repository and store them in the database
-
-**Features:**
-- Fetches issues from GitHub API via GitHubOps
-- Stores issues in the database with proper relationships
-- Returns issues with database IDs for solving
-- Supports pagination (default 100 issues)
-
-**Response:**
-```typescript
-Array<{
-  id: number,           // Database ID (required for solving)
-  number: number,       // GitHub issue number
-  title: string,
-  body: string,
-  state: string,
-  html_url: string,
-  labels: string[],
-  comments: number,
-  created_at: string,
-  updated_at: string
-}>
-```
-
-#### 2. **AI Models Endpoint**
-```
-GET /daifu/ai-models
-```
-
-**Purpose:** Get list of available AI models for solving
-
-**Response:**
-```typescript
-Array<{
-  id: number,
-  name: string,
-  provider: string,
-  model_id: string,
-  description?: string
-}>
-```
-
-#### 3. **Solver Endpoints** (existing, updated)
-
-**Start Solve:**
-```
-POST /daifu/sessions/{session_id}/solve/start
-```
-
-**Request Body:**
-```typescript
-{
-  issue_id: number,           // Database issue ID
-  ai_model_id: number,        // Selected AI model
-  repo_url: string,           // Repository URL
-  branch_name: string,        // Branch to work on (default: "main")
-  small_change: boolean,      // Limit scope to minimal changes
-  best_effort: boolean,       // Continue even if tests fail
-  max_iterations: number,     // Max agent iterations (default: 50)
-  max_cost: number           // Max cost in USD (default: 10.0)
-}
-```
-
-**Response:**
-```typescript
-{
-  solve_session_id: string,
-  status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED"
-}
-```
-
-**Get Status:**
-```
-GET /daifu/sessions/{session_id}/solve/status/{solve_id}
-```
-
-**Response:**
-```typescript
-{
-  solve_session_id: string,
-  status: string,
-  progress: {
-    runs_total: number,
-    runs_completed: number,
-    runs_failed: number,
-    runs_running: number,
-    last_update: string,
-    message: string
-  },
-  runs: Array<{
-    id: string,
-    model: string,
-    status: string,
-    started_at?: string,
-    completed_at?: string,
-    pr_url?: string,
-    error_message?: string
-  }>,
-  champion_run?: {...},
-  error_message?: string
-}
-```
-
-**Cancel Solve:**
-```
-POST /daifu/sessions/{session_id}/solve/cancel/{solve_id}
-```
-
-### Backend Updates
-
-#### 1. **manager.py** - Enhanced Configuration
-
-**New Functions:**
-
-**`build_tfbd_template()`** - Updated
-```python
-def build_tfbd_template(
-    model_name: str,
-    small_change: bool = False,
-    best_effort: bool = False,
-    max_iterations: int = 50,
-    max_cost: float = 10.0,
-) -> str
-```
-Generates YAML configuration with user-specified options.
-
-**`generate_agent_config()`** - New
-```python
-def generate_agent_config(
-    small_change: bool = False,
-    best_effort: bool = False,
-    max_iterations: int = 50,
-    max_cost: float = 10.0,
-) -> str
-```
-Creates agent configuration block based on user options.
-
-**`generate_solve_config_file()`** - New
-```python
-def generate_solve_config_file(
-    model_name: str,
-    issue_url: str,
-    repo_url: str,
-    branch_name: str = "main",
-    small_change: bool = False,
-    best_effort: bool = False,
-    max_iterations: int = 50,
-    max_cost: float = 10.0,
-) -> Dict[str, str]
-```
-Generates complete configuration files including YAML and metadata.
-
-**Configuration Options:**
-
-1. **Small Change Mode:**
-   - Reduces max_iterations to 20 (from default 50)
-   - Reduces max_cost to 5.0 (from default 10.0)
-   - Instructs agent to make minimal code changes
-
-2. **Best Effort Mode:**
-   - Sets agent mode to "best_effort"
-   - Allows agent to continue even if tests fail
-   - Useful for exploratory fixes
-
-**YAML Configuration Example:**
-```yaml
-agent:
-  mode: "yolo"  # or "best_effort"
-  max_iterations: 50
-  max_cost: 10.0
-  small_change: false
-  best_effort: false
-```
-
-#### 2. **models.py** - Updated Request Model
-
-**StartSolveRequest** - Enhanced
-```python
-class StartSolveRequest(BaseModel):
-    issue_id: int
-    repo_url: str
-    branch_name: str = "main"
-    ai_model_id: Optional[int] = None
-    ai_model_ids: Optional[List[int]] = None
-    small_change: bool = False
-    best_effort: bool = False
-    max_iterations: int = 50
-    max_cost: float = 10.0
-```
-
-#### 3. **session_routes.py** - New Endpoints
-
-Added three new endpoints:
-1. List repository issues
-2. Get available AI models
-3. Solver endpoints (integrated via router)
-
-### Data Flow
-
-#### Starting a Solve Session
+### Data Flow: Issue Creation → Solve → PR
 
 ```
-1. User clicks on issue card
+1. User creates issue in chat
    ↓
-2. IssueModal opens with configuration options
+2. Issue saved to user_issues table with context
    ↓
-3. User selects:
-   - AI Model
-   - Small Change option
-   - Best Effort option
+3. Optional: Create GitHub issue
    ↓
-4. User clicks "Start Solve"
+4. User clicks "Solve This Issue"
    ↓
-5. Frontend sends POST to /sessions/{session_id}/solve/start
+5. SolveConfigModal opens (AI model, small_change, best_effort, etc.)
    ↓
-6. Backend:
-   - Validates issue and session
-   - Creates Solve record in database
-   - Generates custom YAML config based on options
-   - Creates E2B sandbox
-   - Installs mini-swe-agent
-   - Clones repository
-   - Starts agent execution
+6. POST /sessions/{session_id}/solve/start
    ↓
-7. Frontend receives solve_session_id
+7. Backend workflow:
+   - Fetch Issue (get GitHub URL, repo info)
+   - Fetch Repository (owner, name, branch, clone_url)
+   - Fetch AIModel (get model_id like "anthropic/claude-4.5")
+   - Create Solve record (status: PENDING)
+   - Create SolveRun record(s)
+   - Build HeadlessSandboxRequest
+   - Launch async: HeadlessSandboxExecutor.run()
+   - Update Solve (status: RUNNING)
+   - Return solve_session_id
    ↓
 8. Frontend opens SolveProgressModal
    ↓
-9. Frontend polls /solve/status/{solve_id} every 3 seconds
+9. Poll GET /solve/status/{solve_id} every 3s
    ↓
-10. Backend returns current status, progress, and runs
-   ↓
-11. Frontend displays progress in real-time
-   ↓
-12. When complete:
-    - Shows champion run
-    - Displays PR URL
-    - Allows closing or viewing results
+10. E2B sandbox workflow (async):
+    - Create E2B sandbox (~30-60s)
+    - Install mini-swe-agent
+    - Clone repository
+    - Generate TFBD config + agent script
+    - Execute agent (5-30 minutes)
+    - Agent: reads issue → analyzes code → makes changes → runs tests → creates PR
+    - Capture output, trajectory, PR URL
+    - Update SolveRun (status: COMPLETED, pr_url, trajectory_data)
+    - Update Solve (status: COMPLETED, champion_run_id)
+    - Cleanup sandbox
+    ↓
+11. Frontend displays completion:
+    - Champion run highlighted
+    - PR URL clickable
+    - Cost and metrics shown
 ```
 
-#### Progress Monitoring
+### Database Schema
 
+```sql
+-- Core relationships
+User
+ └─ ChatSession
+     ├─ UserIssue (user-created issue with context)
+     │   └─ Issue (GitHub issue record)
+     │       └─ Repository
+     └─ Solve (solve session)
+         ├─ SolveRun[] (individual executions)
+         │   ├─ model: string (e.g., "anthropic/claude-4.5")
+         │   ├─ status: PENDING | RUNNING | COMPLETED | FAILED
+         │   ├─ pr_url: string
+         │   ├─ trajectory_data: JSONB
+         │   ├─ error_message: string
+         │   └─ timestamps
+         └─ champion_run_id: int (best result)
 ```
-Every 3 seconds:
-1. Frontend polls GET /sessions/{session_id}/solve/status/{solve_id}
-2. Backend queries database for latest status
-3. Returns:
-   - Overall status (PENDING/RUNNING/COMPLETED/FAILED/CANCELLED)
-   - Progress metrics (total, completed, failed, running)
-   - Individual run details
-   - Champion run (if completed)
-   - Error messages (if any)
-4. Frontend updates UI:
-   - Progress bars
-   - Status indicators
-   - Run details
-   - PR links
+
+---
+
+## API Reference
+
+### 1. Start Solve Session
+```http
+POST /daifu/sessions/{session_id}/solve/start
 ```
 
-## User Interface
+**Request**:
+```json
+{
+  "issue_id": 123,                    // Database issue ID (not GitHub number)
+  "ai_model_id": 5,                   // AIModel.id
+  "repo_url": "https://github.com/owner/repo",
+  "branch_name": "main",              // Optional, default: "main"
+  "small_change": false,              // Limit to minimal changes
+  "best_effort": false,               // Continue if tests fail
+  "max_iterations": 50,               // Max agent iterations
+  "max_cost": 10.0                    // Max cost in USD
+}
+```
 
-### Issue Cards
-- Grid layout with 3 columns (responsive)
-- Each card shows:
-  - Issue number
-  - Title
-  - Description preview
-  - Labels (with special badge for Yudai-generated)
-  - Creation date
-  - Comment count
+**Response**:
+```json
+{
+  "solve_session_id": "solve_abc123",
+  "status": "PENDING"
+}
+```
 
-### Filter Buttons
-- **All Issues:** Shows all repository issues
-- **Yudai Generated:** Shows only issues with `chat-generated` label
-- **Other Issues:** Shows issues without `chat-generated` label
+### 2. Get Solve Status
+```http
+GET /daifu/sessions/{session_id}/solve/status/{solve_id}
+```
 
-### Issue Configuration Modal
-- Issue details (title, description, labels)
-- AI Model dropdown (populated from available models)
+**Response**:
+```json
+{
+  "solve_session_id": "solve_abc123",
+  "status": "RUNNING",
+  "progress": {
+    "runs_total": 1,
+    "runs_completed": 0,
+    "runs_failed": 0,
+    "runs_running": 1,
+    "last_update": "2026-01-28T10:30:00Z",
+    "message": "Agent analyzing codebase..."
+  },
+  "runs": [
+    {
+      "id": "run_xyz789",
+      "model": "anthropic/claude-sonnet-4-5",
+      "status": "RUNNING",
+      "started_at": "2026-01-28T10:25:00Z",
+      "completed_at": null,
+      "pr_url": null,
+      "error_message": null
+    }
+  ],
+  "champion_run": null,
+  "error_message": null
+}
+```
+
+### 3. Cancel Solve
+```http
+POST /daifu/sessions/{session_id}/solve/cancel/{solve_id}
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "message": "Solve session cancelled"
+}
+```
+
+### 4. Get Available AI Models
+```http
+GET /daifu/ai-models
+```
+
+**Response**:
+```json
+[
+  {
+    "id": 1,
+    "name": "Claude Sonnet 4.5",
+    "provider": "anthropic",
+    "model_id": "anthropic/claude-sonnet-4-5-20250929",
+    "description": "Most capable model for complex reasoning"
+  },
+  {
+    "id": 2,
+    "name": "DeepSeek V3.2",
+    "provider": "deepseek",
+    "model_id": "deepseek/deepseek-v3.2-exp",
+    "description": "Fast and cost-effective"
+  }
+]
+```
+
+### 5. Fetch Repository Issues
+```http
+GET /daifu/github/repositories/{owner}/{repo}/issues
+```
+
+**Response**:
+```json
+[
+  {
+    "id": 123,                       // Database ID (use this for solving)
+    "number": 45,                    // GitHub issue number
+    "title": "Fix authentication bug",
+    "body": "Users can't login with...",
+    "state": "open",
+    "html_url": "https://github.com/owner/repo/issues/45",
+    "labels": ["bug", "chat-generated"],
+    "comments": 2,
+    "created_at": "2026-01-20T12:00:00Z",
+    "updated_at": "2026-01-28T09:00:00Z"
+  }
+]
+```
+
+---
+
+## Implementation Plan
+
+### Phase 1: Backend Verification (Priority: HIGH)
+
+**Files to verify**:
+- `backend/solver/solver.py` - Confirm router endpoints exist
+- `backend/models.py` - Verify StartSolveRequest model
+
+**Required Logic** (`backend/solver/workflow.py` - new file):
+```python
+async def prepare_solve_from_issue(
+    db: Session,
+    issue_id: int,
+    ai_model_id: int,
+    config: dict
+) -> HeadlessSandboxRequest:
+    """
+    Build HeadlessSandboxRequest from issue data
+
+    Steps:
+    1. Fetch Issue (get html_url, repository_id)
+    2. Fetch Repository (get clone_url, owner, name, branch)
+    3. Fetch AIModel (get model_id string)
+    4. Return HeadlessSandboxRequest
+    """
+    pass
+
+async def start_solve_session(
+    db: Session,
+    session_id: str,
+    user_id: int,
+    request: StartSolveRequest
+) -> dict:
+    """
+    Orchestrate solve session start
+
+    Steps:
+    1. Validate user owns session
+    2. Create Solve record (status: PENDING)
+    3. Create SolveRun record(s)
+    4. Prepare HeadlessSandboxRequest
+    5. Launch background task: HeadlessSandboxExecutor.run()
+    6. Update Solve (status: RUNNING)
+    7. Return solve_session_id
+    """
+    pass
+
+async def get_solve_status(
+    db: Session,
+    solve_session_id: str,
+    user_id: int
+) -> dict:
+    """
+    Query solve status and progress
+
+    Steps:
+    1. Fetch Solve record
+    2. Fetch all SolveRun records
+    3. Calculate progress metrics
+    4. Determine champion run
+    5. Return structured status
+    """
+    pass
+```
+
+**Checklist**:
+- [ ] Verify solver router is properly mounted
+- [ ] Test `/solve/start` endpoint with demo data
+- [ ] Test `/solve/status` endpoint returns correct format
+- [ ] Confirm HeadlessSandboxExecutor integration works
+- [ ] Add workflow functions to bridge issue → sandbox
+
+### Phase 2: Frontend Components (Priority: HIGH)
+
+#### 2.1 SolveConfigModal Component
+**File**: `src/components/SolveConfigModal.tsx` (new)
+
+**Props**:
+```typescript
+interface SolveConfigModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onStartSolve: (config: SolveConfig) => Promise<void>;
+  issueId: string;
+  repositoryInfo: {
+    owner: string;
+    name: string;
+    branch: string;
+  };
+}
+
+interface SolveConfig {
+  ai_model_id: number;
+  small_change: boolean;
+  best_effort: boolean;
+  max_iterations: number;
+  max_cost: number;
+}
+```
+
+**UI Elements**:
+- AI Model dropdown (fetched from `/ai-models`)
 - Small Change checkbox
 - Best Effort checkbox
-- Cancel and Start Solve buttons
+- Max Iterations slider (10-100, default: 50)
+- Max Cost slider ($1-$50, default: $10)
+- Cancel + Start Solve buttons
 
-### Progress Modal
-- Overall status indicator with animation
-- Progress statistics (total, completed, failed, running)
-- Individual run details with status icons
-- Champion run highlight (green border)
-- PR links (when available)
-- Cancel button (for active solves)
-- Close button (for completed solves)
+#### 2.2 SolveProgressModal Component
+**File**: `src/components/SolveProgressModal.tsx` (new)
 
-## Styling
+**Props**:
+```typescript
+interface SolveProgressModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  solveSessionId: string;
+  sessionId: string;
+}
+```
 
-Uses Tailwind CSS with custom theme:
-- `bg` - Background colors
-- `bg-secondary` - Secondary background
-- `fg` - Foreground/text colors
-- `accent` - Accent color (for buttons, links)
-- `border` - Border colors
-- `muted` - Muted text
+**Features**:
+- Poll status every 3 seconds via `GET /solve/status/{solve_id}`
+- Display overall status with animation
+- Show progress bar and metrics
+- List all runs with individual status
+- Highlight champion run when complete
+- Show PR URL as clickable link
+- Cancel button (calls cancel endpoint)
+- Auto-stop polling when status is terminal (COMPLETED/FAILED/CANCELLED)
 
-## Error Handling
+#### 2.3 Integrate into DiffModal
+**File**: `src/components/DiffModal.tsx`
 
-### Frontend
-- Displays error messages in red banners
-- Handles API failures gracefully
-- Shows loading states during operations
-- Prevents duplicate solve starts
+**Changes**:
+1. Add "Solve This Issue" button next to "Create GitHub Issue"
+2. Show button only when:
+   - Issue has been created (userIssue exists)
+   - Repository info is available
+3. Add state for solve configuration modal
+4. Wire up solve trigger:
+   ```typescript
+   const handleStartSolve = async (config: SolveConfig) => {
+     const solveSessionId = await startSolveSession(issueId, config);
+     setShowSolveProgress(true);
+     setActiveSolveId(solveSessionId);
+   };
+   ```
 
-### Backend
-- Validates session ownership
-- Checks issue existence
-- Verifies model availability
-- Handles sandbox failures
-- Logs errors comprehensively
+#### 2.4 Session Store Methods
+**File**: `src/stores/sessionStore.ts`
 
-## Database Schema
+**New methods**:
+```typescript
+// Fetch available AI models
+getAvailableAiModels: async () => Promise<AIModel[]>
 
-### Updated Tables
+// Start solve session
+startSolveSession: async (
+  issueId: string,
+  config: SolveConfig
+) => Promise<{ solve_session_id: string }>
 
-**Solve Table:**
-- Added fields for user options in `matrix` JSON column:
-  - `small_change`
-  - `best_effort`
-  - `max_iterations`
-  - `max_cost`
+// Get solve status (for polling)
+getSolveStatus: async (
+  solveSessionId: string
+) => Promise<SolveStatusResponse>
 
-**Issue Table:**
-- Stores GitHub issues with:
-  - `github_issue_id` (unique)
-  - `repository_id` (foreign key)
-  - `number`, `title`, `body`
-  - `state`, `html_url`
-  - `author_username`
-  - `github_created_at`, `github_updated_at`
+// Cancel solve
+cancelSolve: async (
+  solveSessionId: string
+) => Promise<{ success: boolean }>
+```
+
+**Checklist**:
+- [ ] Create SolveConfigModal component
+- [ ] Create SolveProgressModal component
+- [ ] Add "Solve This Issue" button to DiffModal
+- [ ] Add session store methods
+- [ ] Wire up solve trigger flow
+- [ ] Test end-to-end: create issue → configure → monitor → view PR
+
+### Phase 3: E2B Sandbox Management (Priority: MEDIUM)
+
+**Background Task Implementation**:
+
+```python
+# In backend/solver/solver.py or background_tasks.py
+
+async def execute_solve_in_sandbox(
+    db: Session,
+    solve_id: int,
+    solve_run_id: int,
+    request: HeadlessSandboxRequest
+):
+    """
+    Background task that runs the actual solve
+
+    Steps:
+    1. Update SolveRun status: RUNNING
+    2. Call HeadlessSandboxExecutor.run(request)
+    3. Wait for completion (5-30 minutes)
+    4. Parse result:
+       - Extract PR URL from output
+       - Save trajectory to file
+       - Store trajectory metadata
+    5. Update SolveRun:
+       - status: COMPLETED or FAILED
+       - pr_url: extracted URL
+       - trajectory_data: { local_path, metadata }
+       - error_message: if failed
+    6. Update Solve:
+       - Recalculate overall status
+       - Set champion_run_id if all complete
+    7. Handle errors gracefully
+    """
+    try:
+        result = await HeadlessSandboxExecutor().run(request)
+
+        # Save trajectory file
+        trajectory_path = save_trajectory(
+            solve_id, solve_run_id, result.trajectory_file
+        )
+
+        # Update database
+        solve_run = db.query(SolveRun).get(solve_run_id)
+        solve_run.status = "COMPLETED" if result.exit_code == 0 else "FAILED"
+        solve_run.pr_url = result.pr_url
+        solve_run.trajectory_data = {
+            "local_path": str(trajectory_path),
+            "metadata": result.trajectory_metadata
+        }
+        solve_run.completed_at = utc_now()
+
+        # Update parent Solve
+        update_solve_status(db, solve_id)
+
+        db.commit()
+
+    except Exception as e:
+        # Mark as failed
+        solve_run = db.query(SolveRun).get(solve_run_id)
+        solve_run.status = "FAILED"
+        solve_run.error_message = str(e)
+        db.commit()
+```
+
+**Checklist**:
+- [ ] Implement background task execution
+- [ ] Add trajectory file saving logic
+- [ ] Implement champion run selection algorithm
+- [ ] Add sandbox cleanup on failure
+- [ ] Test concurrent solves (respect SOLVER_MAX_PARALLEL)
+
+### Phase 4: Error Handling & Polish (Priority: LOW)
+
+**Backend Error Scenarios**:
+- [ ] E2B API key missing → return 500 with clear message
+- [ ] Sandbox creation fails → retry once, then fail gracefully
+- [ ] Repository clone fails → capture logs, return error
+- [ ] Agent exceeds cost limit → stop execution, mark as FAILED
+- [ ] Agent timeout → cleanup sandbox, save partial trajectory
+- [ ] Concurrent solve limit reached → return 429 with retry-after
+
+**Frontend Error Scenarios**:
+- [ ] API call fails → show error banner in modal
+- [ ] Polling fails → exponential backoff, max 3 retries
+- [ ] User closes modal → keep polling in background, show notification
+- [ ] Solve fails → display error, offer to view logs
+- [ ] No AI models available → disable solve button with tooltip
+
+---
 
 ## Configuration
 
 ### Environment Variables
-- `OPENROUTER_API_KEY` - Required for AI model access
-- `GITHUB_TOKEN` - Optional, for private repository access
-- `SOLVER_MAX_PARALLEL` - Max concurrent solves (default: 3)
-- `SOLVER_TIME_BUDGET_SECONDS` - Max solve time (default: 5400)
 
-## Testing
+**Backend** (`.env`):
+```bash
+# Required
+OPENROUTER_API_KEY=sk-or-...              # For AI model access
+E2B_API_KEY=e2b_...                       # For sandbox creation
+GITHUB_TOKEN=ghp_...                      # For repo access
+DATABASE_URL=postgresql://...
 
-### Manual Testing Steps
+# Solver Configuration
+SOLVER_MAX_PARALLEL=3                     # Max concurrent solves
+SOLVER_TIME_BUDGET_SECONDS=5400           # 90 minutes timeout
+SOLVER_DEFAULT_MODEL=deepseek/deepseek-v3.2-exp
+SOLVER_ENABLE_TRAJECTORY_STORAGE=true
+```
 
-1. **Issue Display:**
-   - Select a repository
-   - Navigate to "Solve Issues" tab
-   - Verify issues load correctly
-   - Test filter buttons
+### Frontend Configuration
 
-2. **Issue Selection:**
-   - Click on an issue card
-   - Verify modal opens with correct details
-   - Check AI model dropdown populates
-
-3. **Solve Configuration:**
-   - Select different AI models
-   - Toggle Small Change checkbox
-   - Toggle Best Effort checkbox
-   - Verify UI updates correctly
-
-4. **Solve Execution:**
-   - Click "Start Solve"
-   - Verify progress modal opens
-   - Check status updates every 3 seconds
-   - Monitor run progress
-
-5. **Solve Completion:**
-   - Wait for solve to complete
-   - Verify champion run displays
-   - Check PR link works
-   - Test close button
-
-6. **Error Scenarios:**
-   - Try starting solve without session
-   - Test canceling active solve
-   - Verify error messages display
-
-## Future Enhancements
-
-1. **Solve History:** View past solves for comparison
-2. **Batch Solving:** Solve multiple issues simultaneously
-3. **Custom Templates:** Save and reuse configuration templates
-4. **Cost Tracking:** Display cumulative costs for solves
-5. **Notifications:** Alert when solve completes
-6. **Advanced Filters:** Filter by label, assignee, date range
-7. **Issue Preview:** Show issue content before selecting
-8. **PR Integration:** Auto-merge successful PRs with approval
-
-## Troubleshooting
-
-### Issues Not Loading
-- Check repository selection
-- Verify GitHub token permissions
-- Check backend logs for API errors
-
-### Solve Not Starting
-- Verify session is active
-- Check OPENROUTER_API_KEY is set
-- Ensure issue has database ID
-- Check backend logs
-
-### Progress Not Updating
-- Verify solve_session_id is valid
-- Check polling interval (should be 3 seconds)
-- Look for network errors in browser console
-
-### E2B Sandbox Errors
-- Check E2B API key configuration
-- Verify sandbox template exists
-- Check mini-swe-agent installation logs
-
-## Security Considerations
-
-1. **Authentication:** All endpoints require authenticated user
-2. **Session Ownership:** Solves are scoped to user's sessions
-3. **Repository Access:** Respects GitHub token permissions
-4. **Cost Limits:** Max cost enforced to prevent runaway expenses
-5. **Rate Limiting:** GitHub API requests are rate-limited
-6. **Sandbox Isolation:** Each solve runs in isolated E2B sandbox
-
-## Performance Optimization
-
-1. **Issue Caching:** Issues cached in database after first fetch
-2. **Polling Interval:** 3-second interval balances updates vs. load
-3. **Lazy Loading:** Issues load on tab activation
-4. **Database Indexing:** Issues indexed by repository and number
-5. **Parallel Solves:** Configurable max parallel solves (default: 3)
-
-## Deployment Checklist
-
-- [ ] Set OPENROUTER_API_KEY environment variable
-- [ ] Configure GitHub token for private repos
-- [ ] Set solver limits (max_parallel, time_budget)
-- [ ] Test issue fetching with public and private repos
-- [ ] Verify E2B sandbox configuration
-- [ ] Test solve execution end-to-end
-- [ ] Monitor costs and set alerts
-- [ ] Configure logging and monitoring
-
-## API Reference Summary
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/daifu/github/repositories/{owner}/{repo}/issues` | GET | Fetch repository issues |
-| `/daifu/ai-models` | GET | Get available AI models |
-| `/daifu/sessions/{session_id}/solve/start` | POST | Start solve session |
-| `/daifu/sessions/{session_id}/solve/status/{solve_id}` | GET | Get solve status |
-| `/daifu/sessions/{session_id}/solve/cancel/{solve_id}` | POST | Cancel solve |
-
-## File Changes Summary
-
-### New Files
-- `src/components/SolveIssues.tsx` - Main component
-
-### Modified Files
-- `src/App.tsx` - Added solve tab rendering
-- `src/components/Sidebar.tsx` - Added solve tab button
-- `src/types/sessionTypes.ts` - Added 'solve' to TabType
-- `backend/daifuUserAgent/session_routes.py` - Added endpoints
-- `backend/solver/manager.py` - Added config generation functions
-- `backend/models.py` - Updated StartSolveRequest model
-
-## Support
-
-For issues or questions:
-1. Check backend logs: `backend/logs/`
-2. Check frontend console: Browser DevTools
-3. Verify environment variables are set
-4. Review E2B sandbox logs
-5. Check GitHub API rate limits
-
-## License
-
-Same as YudaiV3 project license.
+**File**: `src/config/solver.ts` (new)
+```typescript
+export const SOLVER_CONFIG = {
+  POLL_INTERVAL_MS: 3000,              // Poll status every 3s
+  MAX_POLL_RETRIES: 3,                 // Max failed polls before error
+  DEFAULT_MAX_ITERATIONS: 50,
+  DEFAULT_MAX_COST: 10.0,
+  COST_SLIDER_RANGE: [1, 50] as const,
+  ITERATIONS_SLIDER_RANGE: [10, 100] as const,
+};
+```
 
 ---
 
-**Implementation Date:** November 2025
-**Version:** 1.0.0
-**Author:** YudaiV3 Development Team
+## TFBD Configuration Options
 
+### Small Change Mode
+```yaml
+agent:
+  max_iterations: 20          # Reduced from 50
+  max_cost: 5.0              # Reduced from 10.0
+  instructions: |
+    Limit code edits to minimal, targeted changes directly tied to the issue.
+```
+
+### Best Effort Mode
+```yaml
+agent:
+  mode: "best_effort"        # Continue even if tests fail
+  instructions: |
+    Continue working toward a solution even if automated checks fail,
+    documenting any failures.
+```
+
+### Standard Mode (Default)
+```yaml
+agent:
+  mode: "yolo"
+  max_iterations: 50
+  max_cost: 10.0
+
+model:
+  model_name: "anthropic/claude-sonnet-4-5-20250929"
+  model_class: "openrouter"
+  model_kwargs:
+    temperature: 0.4
+```
+
+---
+
+## Testing Strategy
+
+### Backend Tests
+```bash
+# Unit tests
+pytest backend/tests/test_solver_workflow.py
+pytest backend/tests/test_tfbd_generation.py
+
+# Integration tests
+pytest backend/tests/integration/test_solve_api.py
+pytest backend/tests/integration/test_e2b_sandbox.py
+```
+
+**Test scenarios**:
+- [ ] Create solve from issue data
+- [ ] TFBD config generation with various parameters
+- [ ] Solve status polling and aggregation
+- [ ] Trajectory parsing and storage
+- [ ] Concurrent solve execution
+- [ ] Solve cancellation
+- [ ] Error handling (missing keys, sandbox failures)
+
+### Frontend Tests
+```bash
+npm run test src/components/SolveConfigModal.test.tsx
+npm run test src/components/SolveProgressModal.test.tsx
+```
+
+**Test scenarios**:
+- [ ] Modal renders and validates input
+- [ ] AI models dropdown populates
+- [ ] Solve config validation
+- [ ] Progress polling updates UI
+- [ ] Error states display properly
+- [ ] Cancel button works
+
+### E2E Test
+```bash
+# Manual test flow
+1. Create issue in chat
+2. Click "Solve This Issue"
+3. Configure solver
+4. Monitor progress
+5. Verify PR created
+6. Check trajectory saved
+```
+
+---
+
+## Troubleshooting
+
+### Solve Not Starting
+**Symptoms**: POST /solve/start returns 500 or 404
+
+**Debug steps**:
+1. Check backend logs: `tail -f backend/logs/app.log`
+2. Verify issue exists: `psql -d yudai -c "SELECT * FROM issues WHERE id = <issue_id>"`
+3. Verify AI model exists: `psql -d yudai -c "SELECT * FROM ai_models WHERE id = <model_id>"`
+4. Check OPENROUTER_API_KEY is set: `echo $OPENROUTER_API_KEY`
+5. Check E2B_API_KEY is set: `echo $E2B_API_KEY`
+
+### Sandbox Creation Fails
+**Symptoms**: Status stuck on PENDING, logs show E2B errors
+
+**Debug steps**:
+1. Verify E2B API key: `curl -H "Authorization: Bearer $E2B_API_KEY" https://api.e2b.dev/sandboxes`
+2. Check E2B quota/limits in dashboard
+3. Review sandbox creation logs in backend
+4. Try manual sandbox creation: `python backend/solver/e2b_standalone_demo.py`
+
+### Progress Not Updating
+**Symptoms**: Frontend shows stale status
+
+**Debug steps**:
+1. Open browser console, check for network errors
+2. Verify polling is active (should see requests every 3s)
+3. Check backend returns valid JSON: `curl http://localhost:8000/daifu/sessions/{session_id}/solve/status/{solve_id}`
+4. Check database: `psql -d yudai -c "SELECT * FROM solves WHERE id = <solve_id>"`
+
+### Agent Fails to Create PR
+**Symptoms**: Status COMPLETED but no pr_url
+
+**Debug steps**:
+1. Check trajectory file for errors
+2. Verify GITHUB_TOKEN has push permissions
+3. Check agent output logs: Look in trajectory data → stdout/stderr
+4. Check repository settings (branch protection, required reviews)
+
+---
+
+## Critical Implementation Checklist
+
+### Backend (Must-Have)
+- [ ] Verify `/solve/start` endpoint exists and works
+- [ ] Verify `/solve/status` endpoint returns correct format
+- [ ] Implement `prepare_solve_from_issue()` workflow function
+- [ ] Implement background task for sandbox execution
+- [ ] Add trajectory file saving logic
+- [ ] Test E2B integration end-to-end
+
+### Frontend (Must-Have)
+- [ ] Create SolveConfigModal component
+- [ ] Create SolveProgressModal component
+- [ ] Add "Solve This Issue" button to DiffModal
+- [ ] Add session store methods (startSolve, getStatus, cancel)
+- [ ] Wire up solve trigger flow
+- [ ] Implement status polling with 3s interval
+
+### Testing (Must-Have)
+- [ ] Test solve creation with real issue
+- [ ] Test sandbox execution with demo script
+- [ ] Test status polling updates UI correctly
+- [ ] Test PR URL appears when complete
+- [ ] Test error scenarios (missing keys, failures)
+
+### Nice-to-Have (Post-MVP)
+- [ ] Solve history viewer
+- [ ] Batch solving (multiple issues)
+- [ ] Custom TFBD templates
+- [ ] Cost tracking dashboard
+- [ ] Email notifications when complete
+- [ ] Trajectory diff viewer
+
+---
+
+## File Changes Required
+
+### New Files
+1. `backend/solver/workflow.py` - Workflow orchestration functions
+2. `src/components/SolveConfigModal.tsx` - Configuration UI
+3. `src/components/SolveProgressModal.tsx` - Progress monitoring UI
+4. `src/config/solver.ts` - Frontend configuration
+5. `backend/tests/test_solver_workflow.py` - Unit tests
+6. `src/components/SolveConfigModal.test.tsx` - Component tests
+
+### Files to Modify
+1. `src/components/DiffModal.tsx` - Add solve button and trigger
+2. `src/stores/sessionStore.ts` - Add solve-related methods
+3. `backend/solver/solver.py` - Verify/enhance endpoints
+4. `backend/models.py` - Verify StartSolveRequest model
+5. `src/types/api.ts` - Add SolveConfig and SolveStatus types
+
+---
+
+## Future Enhancements
+
+1. **Solve History**: View past solves for comparison and learning
+2. **Batch Solving**: Solve multiple issues simultaneously with queue management
+3. **Custom Templates**: Save and reuse TFBD configuration templates
+4. **Cost Tracking**: Dashboard showing cumulative costs, cost per issue, ROI metrics
+5. **Notifications**: Email/Slack alerts when solve completes
+6. **Advanced Filters**: Filter issues by label, assignee, date range, complexity
+7. **Trajectory Diff Viewer**: Side-by-side comparison of multiple solve attempts
+8. **Auto-merge**: Automatically merge successful PRs with approval workflows
+9. **Learning Mode**: Agent learns from failed solves and improves over time
+
+---
+
+**Implementation Date**: November 2025 - January 2026
+**Status**: Integration Phase
+**Next Steps**: Complete backend verification → Build frontend components → E2E testing
