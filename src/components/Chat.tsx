@@ -20,6 +20,7 @@ import {
 import { useSessionManagement } from '../hooks/useSessionManagement';
 import { useRepository } from '../hooks/useRepository';
 import { useSessionStore } from '../stores/sessionStore';
+import { useAuthStore } from '../stores/authStore';
 import { API, buildApiUrl } from '../config/api';
 
 // Types are now imported from '../types'
@@ -174,6 +175,7 @@ export const Chat: React.FC<ChatProps> = ({
   // Session management hook for state management
   const { activeSessionId } = useSessionManagement();
   const { selectedRepository } = useRepository();
+  const sessionToken = useAuthStore((state) => state.sessionToken);
 
   const queryClient = useQueryClient();
   const { sendChatMessage } = useSessionStore();
@@ -430,7 +432,7 @@ export const Chat: React.FC<ChatProps> = ({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('session_token') || ''}`,
+          ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
         },
         body: JSON.stringify({
           issue_id: issueId,
@@ -458,7 +460,7 @@ export const Chat: React.FC<ChatProps> = ({
       console.error('[Chat] Failed to start solver:', error);
       showError(`Failed to start solver: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [selectedRepository, activeSessionId, currentIssuePreview, showError, queryClient]);
+  }, [selectedRepository, activeSessionId, currentIssuePreview, sessionToken, showError, queryClient]);
 
 
 
