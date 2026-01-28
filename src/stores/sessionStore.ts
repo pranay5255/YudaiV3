@@ -7,7 +7,6 @@ import {
   FileItem,
   ChatMessage,
   GitHubRepository,
-  User,
   UserIssue,
   Session,
   SessionContext,
@@ -23,21 +22,12 @@ import {
   CreateGitHubIssueResponse
 } from '../types/sessionTypes';
 import { API, buildApiUrl } from '../config/api';
-
-// Helper function to safely retrieve session token from localStorage
-const getStoredSessionToken = (): string | null => {
-  try {
-    return localStorage.getItem('session_token');
-  } catch (error) {
-    console.warn('Failed to access localStorage:', error);
-    return null;
-  }
-};
+import { useAuthStore } from './authStore';
 
 // Helper function to get auth headers
 const getAuthHeaders = (sessionToken?: string): HeadersInit => {
   const headers: HeadersInit = { 'Content-Type': 'application/json' };
-  const token = sessionToken || getStoredSessionToken();
+  const token = sessionToken || useAuthStore.getState().sessionToken;
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
@@ -61,15 +51,6 @@ const handleApiResponse = async <T>(response: Response): Promise<T> => {
 
 // Unified Session State Interface - matches backend models perfectly
 interface SessionState {
-  // ============================================================================
-  // AUTH STATE (only for login/entry point)
-  // ============================================================================
-  user: User | null;
-  sessionToken: string | null;
-  isAuthenticated: boolean;
-  authLoading: boolean;
-  authError: string | null;
-
   // ============================================================================
   // SESSION STATE (core session management)
   // ============================================================================
@@ -139,17 +120,6 @@ interface SessionState {
   connectionStatus: 'connected' | 'disconnected' | 'reconnecting';
 
   // ============================================================================
-  // AUTH ACTIONS (only for login/logout)
-  // ============================================================================
-  initializeAuth: () => Promise<void>;
-  login: () => Promise<void>;
-  logout: () => Promise<void>;
-  refreshAuth: () => Promise<void>;
-  setAuthFromCallback: (authData: { user: User; sessionToken: string }) => Promise<void>;
-  setAuthLoading: (loading: boolean) => void;
-  setAuthError: (error: string | null) => void;
-
-  // ============================================================================
   // SESSION MANAGEMENT ACTIONS (matches backend session APIs)
   // ============================================================================
   createSessionForRepository: (repository: SelectedRepository) => Promise<string | null>;
@@ -157,7 +127,6 @@ interface SessionState {
   updateSession: (sessionId: string, updates: UpdateSessionRequest) => Promise<boolean>;
   deleteSession: (sessionId: string) => Promise<boolean>;
   ensureSessionExists: (sessionId: string) => Promise<boolean>;
-  validatePersistedSession: () => Promise<void>;
   setIndexCodebaseEnabled: (enabled: boolean) => void;
 
   // ============================================================================
@@ -275,13 +244,6 @@ export const useSessionStore = create<SessionState>()(
         // INITIAL STATE - matches backend models perfectly
         // ============================================================================
 
-        // Auth state (only for login/logout)
-        user: null,
-        sessionToken: null,
-        isAuthenticated: false,
-        authLoading: true,
-        authError: null,
-
         // Session state
         activeSessionId: null,
         currentSession: null,
@@ -333,183 +295,12 @@ export const useSessionStore = create<SessionState>()(
         connectionStatus: 'disconnected',
         
         // ============================================================================
-        // AUTH ACTIONS (only for login/logout - matches backend auth flow)
-        // ============================================================================
-
-        initializeAuth: async () => {
-          try {
-            console.log('[SessionStore] Starting authentication initialization');
-            set({ authLoading: true, authError: null });
-
-            const storedSessionToken = getStoredSessionToken();
-
-            if (storedSessionToken) {
-              console.log('[SessionStore] Found stored session token, validating...');
-              try {
-                const userData = await handleApiResponse<{
-                  id: string;
-                  github_username: string;
-                  github_id: string;
-                  email: string;
-                  display_name: string;
-                  avatar_url: string;
-                }>(
-                  await fetch(buildApiUrl(API.AUTH.USER), {
-                    method: 'GET',
-                    headers: getAuthHeaders(storedSessionToken),
-                  })
-                );
-                const user: User = {
-                  id: parseInt(userData.id),
-                  github_username: userData.github_username,
-                  github_user_id: userData.github_id,
-                  email: userData.email,
-                  display_name: userData.display_name,
-                  avatar_url: userData.avatar_url,
-                  created_at: new Date().toISOString(),
-                  last_login: new Date().toISOString(),
-                };
-
-                set({
-                  user,
-                  sessionToken: storedSessionToken,
-                  isAuthenticated: true,
-                  authLoading: false,
-                  authError: null,
-                });
-
-                // After successful auth, validate any persisted session
-                await get().validatePersistedSession();
-              } catch (error) {
-                console.warn('[SessionStore] Stored session validation failed:', error);
-                localStorage.removeItem('session_token');
-                get().clearSession();
-
-                set({
-                  user: null,
-                  sessionToken: null,
-                  isAuthenticated: false,
-                  authLoading: false,
-                  authError: 'Stored session validation failed',
-                });
-              }
-            } else {
-              console.log('[SessionStore] No stored session token found');
-              get().clearSession();
-
-              set({
-                user: null,
-                sessionToken: null,
-                isAuthenticated: false,
-                authLoading: false,
-                authError: null,
-              });
-            }
-            console.log('[SessionStore] Authentication initialization completed');
-          } catch (error) {
-            console.error('[SessionStore] Auth initialization failed:', error);
-            get().clearSession();
-
-            set({
-              user: null,
-              sessionToken: null,
-              isAuthenticated: false,
-              authLoading: false,
-              authError: 'Auth initialization failed',
-            });
-          }
-        },
-
-        login: async () => {
-          try {
-            set({ authLoading: true, authError: null });
-            const { login_url } = await handleApiResponse<{ login_url: string }>(
-              await fetch(buildApiUrl(API.AUTH.LOGIN), {
-                method: 'GET',
-                headers: getAuthHeaders(),
-              })
-            );
-            window.location.href = login_url;
-          } catch (error) {
-            console.error('Login failed:', error);
-            set({ authLoading: false, authError: 'Login failed' });
-            throw error;
-          }
-        },
-
-        logout: async () => {
-          try {
-            const { sessionToken } = get();
-            if (sessionToken) {
-              await handleApiResponse<{ success: boolean }>(
-                await fetch(buildApiUrl(API.AUTH.LOGOUT), {
-                  method: 'POST',
-                  headers: getAuthHeaders(sessionToken),
-                  body: JSON.stringify({ session_token: sessionToken }),
-                })
-              );
-            }
-          } catch (error) {
-            console.warn('Logout API call failed:', error);
-          } finally {
-            localStorage.removeItem('session_token');
-            set({
-              user: null,
-              sessionToken: null,
-              isAuthenticated: false,
-              authLoading: false,
-              authError: null,
-              activeSessionId: null,
-              error: null,
-              sessionInitialized: false,
-              messages: [],
-              contextCards: [],
-              fileContext: [],
-              userIssues: [],
-              currentIssue: null,
-              totalTokens: 0,
-              lastActivity: null,
-            });
-            window.location.href = '/auth/login';
-          }
-        },
-
-        refreshAuth: async () => {
-          await get().initializeAuth();
-        },
-
-        setAuthFromCallback: async (authData: { user: User; sessionToken: string }) => {
-          try {
-            console.log('[SessionStore] Setting auth from callback:', authData);
-
-            localStorage.setItem('session_token', authData.sessionToken);
-
-            set({
-              user: authData.user,
-              sessionToken: authData.sessionToken,
-              isAuthenticated: true,
-              authLoading: false,
-              authError: null,
-            });
-
-            get().clearSession();
-            console.log('[SessionStore] Auth from callback completed successfully');
-          } catch (error) {
-            console.error('[SessionStore] Error setting auth from callback:', error);
-            set({ authError: 'Failed to set auth from callback' });
-            throw error;
-          }
-        },
-
-        setAuthLoading: (loading: boolean) => set({ authLoading: loading }),
-        setAuthError: (error: string | null) => set({ authError: error }),
-
-        // ============================================================================
         // SESSION MANAGEMENT ACTIONS (matches backend session APIs)
         // ============================================================================
 
         createSessionForRepository: async (repository: SelectedRepository) => {
-          const { sessionToken, indexCodebaseEnabled } = get();
+          const { indexCodebaseEnabled } = get();
+          const sessionToken = useAuthStore.getState().sessionToken;
 
           if (!sessionToken) {
             throw new Error('No session token available');
@@ -558,7 +349,7 @@ export const useSessionStore = create<SessionState>()(
         },
 
         loadSession: async (sessionId: string) => {
-          const { sessionToken } = get();
+          const sessionToken = useAuthStore.getState().sessionToken;
 
           if (!sessionToken) {
             throw new Error('No session token available');
@@ -615,7 +406,7 @@ export const useSessionStore = create<SessionState>()(
 
         ensureSessionExists: async (sessionId: string) => {
           try {
-            const { sessionToken } = get();
+            const sessionToken = useAuthStore.getState().sessionToken;
             if (!sessionToken) {
               console.warn('[SessionStore] No session token available for session validation');
               get().clearSession();
@@ -660,44 +451,6 @@ export const useSessionStore = create<SessionState>()(
           }
         },
 
-        validatePersistedSession: async () => {
-          const { activeSessionId, sessionToken } = get();
-
-          if (!activeSessionId || !sessionToken) {
-            console.log('[SessionStore] No persisted session to validate');
-            return;
-          }
-
-          console.log(`[SessionStore] Validating persisted session: ${activeSessionId}`);
-
-          try {
-            await handleApiResponse<SessionContext>(
-              await fetch(buildApiUrl(API.SESSIONS.DETAIL, { sessionId: activeSessionId }), {
-                method: 'GET',
-                headers: getAuthHeaders(sessionToken),
-              })
-            );
-            console.log(`[SessionStore] Persisted session ${activeSessionId} is valid`);
-
-            set({
-              sessionInitialized: true,
-              error: null,
-            });
-          } catch (error) {
-            console.warn(`[SessionStore] Persisted session ${activeSessionId} is invalid:`, error);
-
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            const isSessionNotFound = errorMessage.includes('Session not found') ||
-                                     errorMessage.includes('404') ||
-                                     errorMessage.includes('Not Found');
-
-            if (isSessionNotFound) {
-              console.log('[SessionStore] Persisted session not found, clearing');
-              get().clearSession();
-            }
-          }
-        },
-
         setIndexCodebaseEnabled: (enabled: boolean) => {
           set({ indexCodebaseEnabled: enabled });
         },
@@ -707,7 +460,7 @@ export const useSessionStore = create<SessionState>()(
         // ============================================================================
 
         loadRepositories: async () => {
-          const { sessionToken } = get();
+          const sessionToken = useAuthStore.getState().sessionToken;
 
           try {
             set({ isLoadingRepositories: true, repositoryError: null });
@@ -770,7 +523,7 @@ export const useSessionStore = create<SessionState>()(
         },
 
         loadMessages: async (sessionId: string) => {
-          const { sessionToken } = get();
+          const sessionToken = useAuthStore.getState().sessionToken;
 
           try {
             set({ isLoadingMessages: true, messageError: null });
@@ -811,7 +564,8 @@ export const useSessionStore = create<SessionState>()(
         // ============================================================================
 
         createContextCard: async (card: CreateContextCardRequest) => {
-          const { activeSessionId, sessionToken } = get();
+          const { activeSessionId } = get();
+          const sessionToken = useAuthStore.getState().sessionToken;
 
           if (!activeSessionId || !sessionToken) {
             throw new Error('No active session or session token available');
@@ -859,7 +613,8 @@ export const useSessionStore = create<SessionState>()(
         },
 
         deleteContextCard: async (cardId: string) => {
-          const { activeSessionId, sessionToken } = get();
+          const { activeSessionId } = get();
+          const sessionToken = useAuthStore.getState().sessionToken;
 
           if (!activeSessionId || !sessionToken) {
             throw new Error('No active session or session token available');
@@ -897,7 +652,7 @@ export const useSessionStore = create<SessionState>()(
         },
 
         loadContextCards: async (sessionId: string) => {
-          const { sessionToken } = get();
+          const sessionToken = useAuthStore.getState().sessionToken;
 
           try {
             set({ isLoadingContextCards: true, contextCardError: null });
@@ -966,7 +721,7 @@ export const useSessionStore = create<SessionState>()(
         },
 
         loadFileDependencies: async (sessionId: string) => {
-          const { sessionToken } = get();
+          const sessionToken = useAuthStore.getState().sessionToken;
 
           try {
             set({ isLoadingFileContext: true, fileContextError: null });
@@ -1100,7 +855,8 @@ export const useSessionStore = create<SessionState>()(
         // ============================================================================
 
         sendChatMessage: async (message: string, contextCards?: string[], repository?: SelectedRepository) => {
-          const { activeSessionId, sessionToken } = get();
+          const { activeSessionId } = get();
+          const sessionToken = useAuthStore.getState().sessionToken;
 
           if (!activeSessionId || !sessionToken) {
             throw new Error('No active session or session token available');
@@ -1161,7 +917,8 @@ export const useSessionStore = create<SessionState>()(
         // ============================================================================
 
         createIssueWithContext: async (request: CreateIssueWithContextRequest) => {
-          const { sessionToken, activeSessionId, selectedRepository, currentSession } = get();
+          const { activeSessionId, selectedRepository, currentSession } = get();
+          const sessionToken = useAuthStore.getState().sessionToken;
 
           try {
             set({ isLoadingIssues: true, issueError: null });
@@ -1247,7 +1004,7 @@ export const useSessionStore = create<SessionState>()(
         // ============================================================================
 
         loadRepositoryBranches: async (owner: string, repo: string) => {
-          const { sessionToken } = get();
+          const sessionToken = useAuthStore.getState().sessionToken;
 
           try {
             const branches = await handleApiResponse<GitHubBranch[]>(
@@ -1276,7 +1033,8 @@ export const useSessionStore = create<SessionState>()(
         // ============================================================================
 
         createGitHubIssueFromUserIssue: async (issueId: string) => {
-          const { sessionToken, activeSessionId } = get();
+          const { activeSessionId } = get();
+          const sessionToken = useAuthStore.getState().sessionToken;
 
           if (!activeSessionId) {
             throw new Error('No active session available');
@@ -1295,18 +1053,7 @@ export const useSessionStore = create<SessionState>()(
         name: 'session-storage',
         // Only persist certain parts of the state for security and performance
         partialize: (state) => ({
-          // Auth state - persist session token and user info
-          user: state.user,
-          sessionToken: state.sessionToken,
-          isAuthenticated: state.isAuthenticated,
-
-          // Session state - persist session info but not full data
-          activeSessionId: state.activeSessionId,
-          currentSession: state.currentSession,
-          selectedRepository: state.selectedRepository,
-          sessionInitialized: state.sessionInitialized,
-
-          // UI preferences
+          // UI preferences (no session persistence)
           activeTab: state.activeTab,
           sidebarCollapsed: state.sidebarCollapsed,
           sessionLoadingEnabled: state.sessionLoadingEnabled,
