@@ -28,6 +28,7 @@ def build_demo_params() -> AgentScriptParams:
         "max_cost": 7.5,
         "small_change": True,
         "best_effort": False,
+        "create_pr": True,
     }
     issue_text = ISSUE_DEMO_PATH.read_text().strip() if ISSUE_DEMO_PATH.exists() else ""
     params = AgentScriptParams.from_payload(
