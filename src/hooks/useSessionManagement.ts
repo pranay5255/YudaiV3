@@ -1,5 +1,6 @@
 import { useCallback, useEffect } from 'react';
 import { useSessionStore } from '../stores/sessionStore';
+import { useAuthStore } from '../stores/authStore';
 import { useCreateSessionFromRepository, useEnsureSessionExists } from './useSessionQueries';
 import { SelectedRepository } from '../types';
 
@@ -15,9 +16,6 @@ export const useSessionManagement = () => {
     sessionInitialized,
     isLoading,
     error,
-    isAuthenticated,
-    authLoading,
-    user,
     activeTab,
     sidebarCollapsed,
     createSessionForRepository,
@@ -29,6 +27,12 @@ export const useSessionManagement = () => {
     setActiveTab,
     setSidebarCollapsed,
   } = useSessionStore();
+
+  const { isAuthenticated, isLoading: authLoading, user } = useAuthStore((state) => ({
+    isAuthenticated: state.isAuthenticated,
+    isLoading: state.isLoading,
+    user: state.user,
+  }));
 
   const createSessionMutation = useCreateSessionFromRepository();
   const ensureSessionMutation = useEnsureSessionExists();
