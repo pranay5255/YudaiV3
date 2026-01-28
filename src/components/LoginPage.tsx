@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { useSessionStore } from '../stores/sessionStore';
+import { useMemo, useState } from 'react';
+import { useAuth } from '../hooks/useAuth';
 
 /**
  * LoginPage component handles GitHub OAuth login
  * YudaiV3: Context-engineered coding agent for review-ready PRs
  */
 export const LoginPage: React.FC = () => {
-  const [searchParams] = useSearchParams();
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const errorParam = params.get('error');
+    return errorParam ? decodeURIComponent(errorParam) : null;
+  });
+  const { login, isLoading, authError } = useAuth();
 
   const githubAppInstallUrl = useMemo(() => {
     const explicitUrl = import.meta.env.VITE_GITHUB_APP_INSTALL_URL;
@@ -25,30 +27,21 @@ export const LoginPage: React.FC = () => {
     return 'https://github.com/apps/yudai/installations/new';
   }, []);
 
-  // Check for error parameters in URL
-  useEffect(() => {
-    const errorParam = searchParams.get('error');
-    if (errorParam) {
-      setError(decodeURIComponent(errorParam));
-    }
-  }, [searchParams]);
-
   const handleGitHubLogin = async () => {
     try {
-      setIsLoading(true);
       setError(null);
 
       console.log('[LoginPage] Initiating GitHub OAuth login');
 
-      // Use sessionStore login method (unchanged)
-      await useSessionStore.getState().login();
+      await login();
 
     } catch (error) {
       console.error('[LoginPage] Login failed:', error);
       setError('Failed to initiate login. Please try again.');
-      setIsLoading(false);
     }
   };
+
+  const errorMessage = error || authError;
 
   return (
     <div className="min-h-screen bg-[#0a0a0b] text-[#f4f4f5] selection:bg-amber-500/30">
@@ -223,9 +216,9 @@ export const LoginPage: React.FC = () => {
                 </div>
 
                 {/* Error Display */}
-                {error && (
+                {errorMessage && (
                   <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-lg">
-                    <p className="text-red-400 text-sm">{error}</p>
+                    <p className="text-red-400 text-sm">{errorMessage}</p>
                   </div>
                 )}
 
