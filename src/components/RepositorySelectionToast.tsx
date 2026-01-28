@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ChevronDown, Github, GitBranch, Check, X, Loader2 } from 'lucide-react';
 import { GitHubRepository, GitHubBranch, SelectedRepository } from '../types';
 import { useSessionStore } from '../stores/sessionStore';
@@ -21,96 +21,88 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
   const [isRepoDropdownOpen, setIsRepoDropdownOpen] = useState(false);
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const selectedRepoFullName = selectedRepository?.full_name ?? '';
+  const selectedRepoDefaultBranch = selectedRepository?.default_branch ?? '';
 
-  const { loadRepositoryBranches } = useSessionStore();
-
-  // Use session store for repository state
+  // Use session store for repository state - consolidated into single hook call
   const {
+    loadRepositoryBranches,
     availableRepositories,
     isLoadingRepositories,
     repositoryError,
     setRepositoryLoading
   } = useSessionStore();
 
-  const loadRepositories = useCallback(async () => {
-    console.log('Loading repositories...');
-    setRepositoryLoading(true);
-    setError(null);
-
-    try {
-      // Use unified sessionStore method to load repositories
-      // The loadRepositories method in sessionStore will handle the API call
-      // and update the availableRepositories state automatically
-      const { loadRepositories: loadReposFromStore } = useSessionStore.getState();
-      await loadReposFromStore();
-
-      console.log('Repositories loaded successfully via sessionStore');
-    } catch (error) {
-      console.error('Failed to load repositories:', error);
-      setError('Failed to load repositories. Please try again.');
-    } finally {
-      setRepositoryLoading(false);
-    }
-  }, [setRepositoryLoading]);
-
-  const loadBranches = useCallback(async () => {
-    if (!selectedRepository) return;
-
-    console.log('Loading branches for repository:', selectedRepository.full_name);
-    setLoadingBranches(true);
-    setSelectedBranch('');
-    setBranches([]);
-
-    try {
-      const [owner, repo] = selectedRepository.full_name.split('/');
-      console.log('Fetching branches for:', { owner, repo });
-      const branchList = await loadRepositoryBranches(owner, repo);
-      console.log('Received branch list:', branchList);
-
-      // Transform API response to match frontend GitHubBranch type
-      const transformedBranches: GitHubBranch[] = branchList.map(branch => ({
-        name: branch.name,
-        commit: branch.commit,
-        protected: false // API doesn't provide this, set default
-      }));
-
-      console.log('Transformed branches:', transformedBranches);
-      setBranches(transformedBranches);
-
-      // Auto-select main or master branch if available, or default branch
-      const defaultBranch = transformedBranches.find(b =>
-        b.name === 'main' || b.name === 'master' || b.name === selectedRepository.default_branch
-      );
-      if (defaultBranch) {
-        console.log('Auto-selecting default branch:', defaultBranch.name);
-        setSelectedBranch(defaultBranch.name);
-      } else if (transformedBranches.length > 0) {
-        console.log('Auto-selecting first branch:', transformedBranches[0].name);
-        setSelectedBranch(transformedBranches[0].name);
-      }
-    } catch (error) {
-      console.error('Failed to load branches:', error);
-      setError('Failed to load branches. Please try again.');
-    } finally {
-      setLoadingBranches(false);
-    }
-  }, [selectedRepository, loadRepositoryBranches]);
-
   // Load repositories when toast opens
   useEffect(() => {
     if (isOpen && availableRepositories.length === 0) {
       console.log('Loading repositories...');
-      loadRepositories();
+      const loadRepos = async () => {
+        setRepositoryLoading(true);
+        setError(null);
+
+        try {
+          const { loadRepositories: loadReposFromStore } = useSessionStore.getState();
+          await loadReposFromStore();
+          console.log('Repositories loaded successfully via sessionStore');
+        } catch (error) {
+          console.error('Failed to load repositories:', error);
+          setError('Failed to load repositories. Please try again.');
+        } finally {
+          setRepositoryLoading(false);
+        }
+      };
+      loadRepos();
     }
-  }, [isOpen, availableRepositories.length, loadRepositories]);
+  }, [isOpen, availableRepositories.length, setRepositoryLoading]);
 
   // Load branches when repository is selected
   useEffect(() => {
-    if (selectedRepository) {
-      console.log('Repository selected, loading branches...');
-      loadBranches();
-    }
-  }, [selectedRepository, loadBranches]);
+    if (!selectedRepoFullName) return;
+
+    console.log('Loading branches for repository:', selectedRepoFullName);
+    const loadBranchesForRepo = async () => {
+      setLoadingBranches(true);
+      setSelectedBranch('');
+      setBranches([]);
+
+      try {
+        const [owner, repo] = selectedRepoFullName.split('/');
+        console.log('Fetching branches for:', { owner, repo });
+        const branchList = await loadRepositoryBranches(owner, repo);
+        console.log('Received branch list:', branchList);
+
+        // Transform API response to match frontend GitHubBranch type
+        const transformedBranches: GitHubBranch[] = branchList.map(branch => ({
+          name: branch.name,
+          commit: branch.commit,
+          protected: false // API doesn't provide this, set default
+        }));
+
+        console.log('Transformed branches:', transformedBranches);
+        setBranches(transformedBranches);
+
+        // Auto-select main or master branch if available, or default branch
+        const defaultBranch = transformedBranches.find(b => (
+          b.name === 'main' || b.name === 'master' || b.name === selectedRepoDefaultBranch
+        ));
+        if (defaultBranch) {
+          console.log('Auto-selecting default branch:', defaultBranch.name);
+          setSelectedBranch(defaultBranch.name);
+        } else if (transformedBranches.length > 0) {
+          console.log('Auto-selecting first branch:', transformedBranches[0].name);
+          setSelectedBranch(transformedBranches[0].name);
+        }
+      } catch (error) {
+        console.error('Failed to load branches:', error);
+        setError('Failed to load branches. Please try again.');
+      } finally {
+        setLoadingBranches(false);
+      }
+    };
+
+    loadBranchesForRepo();
+  }, [selectedRepoFullName, selectedRepoDefaultBranch, loadRepositoryBranches]);
 
   // Set error from repository context
   useEffect(() => {
