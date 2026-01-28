@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useRepository } from '../hooks/useRepository';
 import { useSessionManagement } from '../hooks/useSessionManagement';
+import { useAuthStore } from '../stores/authStore';
 import type {
   SolveStatusResponse,
   StartSolveRequest,
@@ -10,7 +11,7 @@ import type {
 // Simple API helper
 const apiCall = async (url: string, options?: RequestInit) => {
   const headers: HeadersInit = { 'Content-Type': 'application/json' };
-  const token = localStorage.getItem('session_token');
+  const token = useAuthStore.getState().sessionToken;
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
