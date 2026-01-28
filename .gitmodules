@@ -1,6 +1,3 @@
-[submodule "backend/context/yudai-grep"]
-	path = backend/context/yudai-grep
-	url = https://github.com/pranay5255/yudai-grep.git
 [submodule "backend/solver/mswea"]
 	path = backend/solver/mswea
 	url = https://github.com/pranay5255/yudai-swe-agent.git
