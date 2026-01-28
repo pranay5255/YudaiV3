@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSessionStore } from '../stores/sessionStore';
+import { useAuthStore } from '../stores/authStore';
 import { API, buildApiUrl } from '../config/api';
 import {
   ChatMessage,
@@ -24,7 +25,7 @@ import {
 // Helper function to get auth headers
 const getAuthHeaders = (sessionToken?: string): HeadersInit => {
   const headers: HeadersInit = { 'Content-Type': 'application/json' };
-  const token = sessionToken || localStorage.getItem('session_token');
+  const token = sessionToken || useAuthStore.getState().sessionToken;
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
@@ -113,11 +114,8 @@ export const QueryKeys = {
 // ============================================================================
 
 export const useSession = (sessionId: string) => {
-  const {
-    sessionToken,
-    clearSession,
-    loadSession
-  } = useSessionStore();
+  const { clearSession, loadSession } = useSessionStore();
+  const sessionToken = useAuthStore((state) => state.sessionToken);
 
   return useQuery({
     queryKey: QueryKeys.session(sessionId),
@@ -169,7 +167,8 @@ export const useSession = (sessionId: string) => {
 // ============================================================================
 
 export const useChatMessages = (sessionId: string) => {
-  const { sessionToken, clearSession, loadMessages } = useSessionStore();
+  const { clearSession, loadMessages } = useSessionStore();
+  const sessionToken = useAuthStore((state) => state.sessionToken);
 
   return useQuery({
     queryKey: QueryKeys.messages(sessionId),
@@ -210,7 +209,8 @@ export const useChatMessages = (sessionId: string) => {
 // ============================================================================
 
 export const useContextCards = (sessionId: string) => {
-  const { sessionToken, clearSession, loadContextCards } = useSessionStore();
+  const { clearSession, loadContextCards } = useSessionStore();
+  const sessionToken = useAuthStore((state) => state.sessionToken);
 
   return useQuery({
     queryKey: QueryKeys.contextCards(sessionId),
@@ -315,7 +315,8 @@ export const useRemoveContextCard = () => {
 // ============================================================================
 
 export const useFileDependencies = (sessionId: string) => {
-  const { sessionToken, clearSession, loadFileDependencies } = useSessionStore();
+  const { clearSession, loadFileDependencies } = useSessionStore();
+  const sessionToken = useAuthStore((state) => state.sessionToken);
 
   return useQuery({
     queryKey: QueryKeys.fileDependencies(sessionId),
@@ -418,7 +419,8 @@ export const useEnsureSessionExists = () => {
 // ============================================================================
 
 export const useRepositories = () => {
-  const { sessionToken, availableRepositories, loadRepositories } = useSessionStore();
+  const { availableRepositories, loadRepositories } = useSessionStore();
+  const sessionToken = useAuthStore((state) => state.sessionToken);
 
   return useQuery({
     queryKey: QueryKeys.repositories,
@@ -439,7 +441,8 @@ export const useRepositories = () => {
 // ============================================================================
 
 export const useRepositoryBranches = (owner: string, repo: string) => {
-  const { sessionToken, loadRepositoryBranches } = useSessionStore();
+  const { loadRepositoryBranches } = useSessionStore();
+  const sessionToken = useAuthStore((state) => state.sessionToken);
 
   return useQuery({
     queryKey: ['repository-branches', owner, repo],
@@ -491,7 +494,8 @@ export const useCreateGitHubIssueFromUserIssue = () => {
 
 export const useStartSolveSession = () => {
   const queryClient = useQueryClient();
-  const { sessionToken, activeSessionId } = useSessionStore();
+  const { activeSessionId } = useSessionStore();
+  const sessionToken = useAuthStore((state) => state.sessionToken);
 
   return useMutation({
     mutationFn: async (request: StartSolveRequest) => {
@@ -520,7 +524,8 @@ export const useStartSolveSession = () => {
 };
 
 export const useGetSolveSession = (solveSessionId: string) => {
-  const { sessionToken, activeSessionId } = useSessionStore();
+  const { activeSessionId } = useSessionStore();
+  const sessionToken = useAuthStore((state) => state.sessionToken);
 
   return useQuery({
     queryKey: ['solve-session', activeSessionId, solveSessionId],
@@ -551,7 +556,8 @@ export const useGetSolveSession = (solveSessionId: string) => {
 
 export const useCancelSolveSession = () => {
   const queryClient = useQueryClient();
-  const { sessionToken, activeSessionId } = useSessionStore();
+  const { activeSessionId } = useSessionStore();
+  const sessionToken = useAuthStore((state) => state.sessionToken);
 
   return useMutation({
     mutationFn: async (solveSessionId: string) => {
@@ -580,6 +586,3 @@ export const useCancelSolveSession = () => {
     },
   });
 };
-
-
-
