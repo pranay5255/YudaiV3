@@ -1,25 +1,37 @@
 import { useEffect } from 'react';
-import { useSessionStore } from '../stores/sessionStore';
+import { useAuthStore } from '../stores/authStore';
 
 /**
- * Custom hook to access authentication state from the session store
+ * Custom hook to access authentication state from the auth store
  */
 export const useAuth = () => {
-  const { 
-    user, 
+  const {
+    user,
     sessionToken,
-    isAuthenticated, 
-    authLoading: isLoading, 
-    authError,
+    isAuthenticated,
+    isLoading,
+    error: authError,
     initializeAuth,
     login,
     logout,
-    refreshAuth 
-  } = useSessionStore();
+    refreshAuth,
+    setAuthFromCallback,
+  } = useAuthStore((state) => ({
+    user: state.user,
+    sessionToken: state.sessionToken,
+    isAuthenticated: state.isAuthenticated,
+    isLoading: state.isLoading,
+    error: state.error,
+    initializeAuth: state.initializeAuth,
+    login: state.login,
+    logout: state.logout,
+    refreshAuth: state.refreshAuth,
+    setAuthFromCallback: state.setAuthFromCallback,
+  }));
 
   // Debug logging for auth state changes
   useEffect(() => {
-    console.log('[useAuth] Auth state from session store:', {
+    console.log('[useAuth] Auth state from auth store:', {
       isAuthenticated,
       isLoading,
       hasUser: !!user,
@@ -40,7 +52,8 @@ export const useAuth = () => {
     initializeAuth,
     login,
     logout,
-    refreshAuth
+    refreshAuth,
+    setAuthFromCallback,
   };
 };
 
