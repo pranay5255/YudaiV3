@@ -204,7 +204,7 @@ class ChatOps:
                             )
 
                 # Generate response using LLM service
-                ai_response = await LLMService.generate_response_with_stored_context(
+                llm_result = await LLMService.generate_response_with_stored_context(
                     db=self.db,
                     user_id=user_id,
                     github_context=github_context,
@@ -216,11 +216,14 @@ class ChatOps:
                     max_tokens=2500,
                     timeout=55,
                 )
+                ai_response = llm_result.get("text", "")
+                ai_actions = llm_result.get("actions", [])
 
             except Exception as llm_error:
                 logger.error(f"LLM service error: {llm_error}")
                 # Fallback response
                 ai_response = f"I understand you said: '{message_text}'. I'm currently having trouble processing your request. Could you please try again?"
+                ai_actions = []
 
             # Save user message to database
             user_msg = ChatMessage(
@@ -241,6 +244,7 @@ class ChatOps:
                 sender_type="assistant",
                 role="assistant",
                 tokens=len(ai_response.split()),  # Rough estimate
+                actions=ai_actions,
             )
             self.db.add(ai_msg)
 

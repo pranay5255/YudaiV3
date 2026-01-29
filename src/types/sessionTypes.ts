@@ -51,6 +51,7 @@ export interface ChatMessage {
   context_cards?: string[];
   referenced_files?: string[];
   error_message?: string;
+  actions?: ChatAction[];
   created_at: string;
   updated_at?: string;
 }
@@ -153,6 +154,14 @@ export interface AgentStatus {
 // ============================================================================
 // ISSUE CREATION & MANAGEMENT TYPES
 // ============================================================================
+
+export interface ChatAction {
+  action_type: string;
+  label: string;
+  issue_title?: string;
+  issue_description?: string;
+  labels?: string[];
+}
 
 export interface CreateUserIssueRequest {
   title: string;

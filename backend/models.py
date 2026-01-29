@@ -513,6 +513,7 @@ class ChatMessage(Base):
     context_cards: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
     referenced_files: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    actions: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSON, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -1226,6 +1227,16 @@ class ChatSessionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ChatAction(BaseModel):
+    action_type: str = Field(..., max_length=50)
+    label: str = Field(..., max_length=100)
+    issue_title: Optional[str] = Field(None, max_length=200)
+    issue_description: Optional[str] = Field(None, max_length=2000)
+    labels: Optional[List[str]] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ChatMessageResponse(BaseModel):
     id: int
     message_id: str
@@ -1239,6 +1250,7 @@ class ChatMessageResponse(BaseModel):
     context_cards: Optional[List[str]] = None
     referenced_files: Optional[List[str]] = None
     error_message: Optional[str] = None
+    actions: Optional[List[ChatAction]] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

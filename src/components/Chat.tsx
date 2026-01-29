@@ -6,7 +6,8 @@ import type {
   FileContextItem,
   CreateIssueWithContextRequest,
   GitHubIssuePreview,
-  UserIssueResponse
+  UserIssueResponse,
+  ChatAction
 } from '../types/sessionTypes';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -167,6 +168,67 @@ const IssuePreviewModal: React.FC<IssuePreviewModalProps> = ({
   );
 };
 
+const BUTTON_ACTION_REGEX = /Button\{\s*"([^"]+)"\s*\}/gi;
+
+const extractSuggestedTaskTitles = (content: string): string[] => {
+  const lines = content.split('\n').map(line => line.trim());
+  const titles: string[] = [];
+  lines.forEach((line, index) => {
+    if (line.toLowerCase().startsWith('suggested task')) {
+      const nextLine = lines.slice(index + 1).find(candidate => candidate.length > 0);
+      if (nextLine) {
+        titles.push(nextLine);
+      }
+    }
+  });
+  return titles;
+};
+
+const extractButtonActions = (content: string): ChatAction[] => {
+  BUTTON_ACTION_REGEX.lastIndex = 0;
+  const matches = [...content.matchAll(BUTTON_ACTION_REGEX)];
+  if (!matches.length) {
+    return [];
+  }
+  const suggestedTitles = extractSuggestedTaskTitles(content);
+  return matches.map((match, index) => {
+    const label = match[1].trim();
+    const issueTitle = suggestedTitles[index];
+    const combined = `${label} ${issueTitle || ''}`.toLowerCase();
+    const labels: string[] = [];
+    if (combined.includes('bug')) {
+      labels.push('bug');
+    }
+    if (combined.includes('enhancement')) {
+      labels.push('enhancement');
+    }
+    if (!labels.length && combined.includes('task')) {
+      labels.push('task');
+    }
+    return {
+      action_type: 'create_issue',
+      label,
+      issue_title: issueTitle,
+      labels,
+    };
+  });
+};
+
+const stripButtonActions = (content: string): string => {
+  BUTTON_ACTION_REGEX.lastIndex = 0;
+  return content.replace(BUTTON_ACTION_REGEX, '').trim();
+};
+
+const shouldShowDefaultActions = (content: string): boolean => {
+  return /suggested task/i.test(content) || /suggested tasks/i.test(content);
+};
+
+const defaultIssueActions: ChatAction[] = [
+  { action_type: 'create_issue', label: 'Start Task' },
+  { action_type: 'create_issue', label: 'Create bug issue', labels: ['bug'] },
+  { action_type: 'create_issue', label: 'Create enhancement issue', labels: ['enhancement'] },
+];
+
 // ChatWithPreview component removed - functionality integrated into main Chat component
 
 export const Chat: React.FC<ChatProps> = ({
@@ -196,6 +258,7 @@ export const Chat: React.FC<ChatProps> = ({
     timestamp: new Date(msg.created_at),
     sessionId: activeSessionId || 'default',
     role: msg.role || 'user',
+    actions: msg.actions,
   }));
 
   // Simplified messages state without session management
@@ -310,7 +373,7 @@ export const Chat: React.FC<ChatProps> = ({
     }
   };
 
-  const handleCreateGitHubIssue = useCallback(async () => {
+  const handleCreateGitHubIssue = useCallback(async (action?: ChatAction) => {
     if (isCreatingIssue || !selectedRepository) {
       return;
     }
@@ -341,9 +404,18 @@ export const Chat: React.FC<ChatProps> = ({
       }));
 
       // Prepare the request using the proper API method
+      const fallbackTitle = `Issue from Chat Session - ${selectedRepository.repository.name}`;
+      const descriptionParts = [
+        action?.issue_description,
+        action?.labels && action.labels.length > 0 ? `Suggested labels: ${action.labels.join(', ')}` : null
+      ].filter(Boolean) as string[];
+      const requestDescription = descriptionParts.length > 0
+        ? descriptionParts.join('\n\n')
+        : 'This issue was generated from a chat conversation with file dependency context.';
+
       const request: CreateIssueWithContextRequest = {
-        title: `Issue from Chat Session - ${selectedRepository.repository.name}`,
-        description: 'This issue was generated from a chat conversation with file dependency context.',
+        title: action?.issue_title || fallbackTitle,
+        description: requestDescription,
         chat_messages: conversationMessages,
         file_context: fileContextItems,
         repository_info: {
@@ -519,7 +591,17 @@ export const Chat: React.FC<ChatProps> = ({
 
       {/* Messages Container */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((message, index) => (
+        {messages.map((message, index) => {
+          const parsedActions = extractButtonActions(message.content);
+          const cleanedContent = stripButtonActions(message.content);
+          const messageActions = message.actions && message.actions.length > 0
+            ? message.actions
+            : parsedActions;
+          const actionsToRender = message.role === 'assistant' && messageActions.length === 0 && shouldShowDefaultActions(cleanedContent)
+            ? defaultIssueActions
+            : messageActions;
+
+          return (
           <div
             key={message.id}
             className={`flex ${message.role === 'assistant' ? 'justify-start' : 'justify-end'} animate-fade-in`}
@@ -534,11 +616,25 @@ export const Chat: React.FC<ChatProps> = ({
                   : 'bg-amber/10 border border-amber/30 text-fg'
               }`}
             >
-              <div className="whitespace-pre-wrap font-mono text-sm leading-relaxed">{message.content}</div>
+              <div className="whitespace-pre-wrap font-mono text-sm leading-relaxed">{cleanedContent}</div>
+              {message.role === 'assistant' && actionsToRender.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-border/50 flex flex-wrap gap-2">
+                  {actionsToRender.map((action, actionIndex) => (
+                    <button
+                      key={`${message.id}-${actionIndex}`}
+                      onClick={() => handleCreateGitHubIssue(action)}
+                      disabled={isCreatingIssue || !selectedRepository}
+                      className="text-xs font-mono bg-bg-tertiary hover:bg-border/50 px-3 py-1.5 rounded-lg text-fg-secondary hover:text-fg transition-all duration-200 border border-border disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              )}
               {hoveredMessage === message.id && message.id !== '1' && message.id !== '2' && (
                 <div className="mt-3 pt-3 border-t border-border/50">
                   <button
-                    onClick={() => handleAddToContext(message.content)}
+                    onClick={() => handleAddToContext(cleanedContent)}
                     className="text-xs font-mono bg-bg-tertiary hover:bg-border/50 px-3 py-1.5 rounded-lg text-muted hover:text-fg transition-all duration-200 border border-border"
                   >
                     + Add to Context
@@ -547,7 +643,8 @@ export const Chat: React.FC<ChatProps> = ({
               )}
             </div>
           </div>
-        ))}
+          );
+        })}
 
         {isLoading && (
           <div className="flex justify-start animate-fade-in">
