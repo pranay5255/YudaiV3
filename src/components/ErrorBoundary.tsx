@@ -11,7 +11,6 @@ interface Props {
 interface State {
   hasError: boolean;
   error: Error | null;
-  errorInfo: ErrorInfo | null;
   isAuthError: boolean;
   isNetworkError: boolean;
 }
@@ -20,7 +19,6 @@ class ErrorBoundaryClass extends Component<Props, State> {
   public state: State = {
     hasError: false,
     error: null,
-    errorInfo: null,
     isAuthError: false,
     isNetworkError: false,
   };
@@ -47,14 +45,12 @@ class ErrorBoundaryClass extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught an error:', error, errorInfo);
-    this.setState({ errorInfo });
   }
 
   private handleRetry = () => {
     this.setState({
       hasError: false,
       error: null,
-      errorInfo: null,
       isAuthError: false,
       isNetworkError: false,
     });
@@ -64,12 +60,12 @@ class ErrorBoundaryClass extends Component<Props, State> {
     window.location.reload();
   };
 
-  private handleReconnect = () => {
-    // Refresh the page to reinitialize API connections
-    window.location.reload();
-  };
-
   private handleReauth = () => {
+    if (this.props.onReauth) {
+      this.props.onReauth();
+      return;
+    }
+
     // Redirect to login page
     window.location.href = '/auth/login';
   };
