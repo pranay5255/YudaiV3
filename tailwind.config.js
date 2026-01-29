@@ -4,13 +4,29 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: '#0F0F11',
-        fg: '#E5E7EB',
-        primary: '#6366F1',
-        accent: '#14B8A6',
-        success: '#22C55E',
-        amber: '#F59E0B',
-        error: '#EF4444',
+        bg: {
+          primary: 'var(--bg-primary)',
+          secondary: 'var(--bg-secondary)',
+          tertiary: 'var(--bg-tertiary)',
+        },
+        border: {
+          DEFAULT: 'var(--border)',
+          accent: 'var(--border-accent)',
+        },
+        text: {
+          primary: 'var(--text-primary)',
+          secondary: 'var(--text-secondary)',
+          muted: 'var(--text-muted)',
+        },
+        accent: {
+          amber: 'var(--accent-amber)',
+          'amber-soft': 'var(--accent-amber-soft)',
+          cyan: 'var(--accent-cyan)',
+          'cyan-soft': 'var(--accent-cyan-soft)',
+          emerald: 'var(--accent-emerald)',
+          violet: 'var(--accent-violet)',
+        },
+        discord: 'var(--discord)',
       },
       borderRadius: {
         'xl': '1rem',
