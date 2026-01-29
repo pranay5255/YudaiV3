@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User, LogOut, ChevronDown, Github, GitBranch } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useRepository } from '../hooks/useRepository';
+import { logger } from '../utils/logger';
 
 export const UserProfile: React.FC = () => {
   const { user, logout, isLoading } = useAuth();
@@ -14,7 +15,7 @@ export const UserProfile: React.FC = () => {
       setIsLoggingOut(true);
       await logout();
     } catch (error) {
-      console.error('Logout failed:', error);
+      logger.error('[Auth] Logout failed:', error);
       setIsLoggingOut(false);
     }
   };

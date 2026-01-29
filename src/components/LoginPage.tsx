@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { logger } from '../utils/logger';
 
 /**
  * LoginPage component handles GitHub OAuth login
@@ -31,12 +32,12 @@ export const LoginPage: React.FC = () => {
     try {
       setError(null);
 
-      console.log('[LoginPage] Initiating GitHub OAuth login');
+      logger.info('[Auth] Initiating GitHub OAuth login');
 
       await login();
 
     } catch (error) {
-      console.error('[LoginPage] Login failed:', error);
+      logger.error('[Auth] Login failed:', error);
       setError('Failed to initiate login. Please try again.');
     }
   };

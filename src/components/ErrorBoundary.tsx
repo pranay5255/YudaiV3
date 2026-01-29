@@ -1,6 +1,7 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Wifi } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { logger } from '../utils/logger';
 
 interface Props {
   children: ReactNode;
@@ -46,7 +47,7 @@ class ErrorBoundaryClass extends Component<Props, State> {
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    logger.error('[ErrorBoundary] Caught an error:', error, errorInfo);
     this.setState({ errorInfo });
   }
 
@@ -179,11 +180,11 @@ export const ErrorBoundary: React.FC<ErrorBoundaryWrapperProps> = ({
 
   const handleReauth = async () => {
     try {
-      console.log('[ErrorBoundary] Attempting to re-authenticate user');
+      logger.info('[Auth] Attempting to re-authenticate user');
       await logout(); // Clear current session state
       await login();  // Redirect to login through session store
     } catch (error) {
-      console.error('[ErrorBoundary] Re-authentication failed:', error);
+      logger.error('[Auth] Re-authentication failed:', error);
       // Fallback to direct redirect if session store login fails
       window.location.href = '/auth/login';
     }

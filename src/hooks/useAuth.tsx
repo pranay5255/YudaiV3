@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useAuthStore } from '../stores/authStore';
+import { logger } from '../utils/logger';
 
 /**
  * Custom hook to access authentication state from the auth store
@@ -34,7 +35,7 @@ export const useAuth = () => {
 
   // Debug logging for auth state changes
   useEffect(() => {
-    console.log('[useAuth] Auth state from auth store:', {
+    logger.info('[Auth] Auth state from auth store:', {
       isAuthenticated,
       isLoading,
       hasUser: !!user,

@@ -22,6 +22,7 @@ import { useRepository } from '../hooks/useRepository';
 import { useSessionStore } from '../stores/sessionStore';
 import { useAuthStore } from '../stores/authStore';
 import { API, buildApiUrl } from '../config/api';
+import { logger } from '../utils/logger';
 
 // Types are now imported from '../types'
 
@@ -234,11 +235,11 @@ export const Chat: React.FC<ChatProps> = ({
   }, [fileContext, messages]);
 
   const showError = useCallback((message: string) => {
-    console.error('[Chat] Error occurred:', message);
+    logger.error('[Chat] Error occurred:', message);
     if (onShowError) {
       onShowError(message);
     } else {
-      console.error('Chat Error:', message);
+      logger.error('[Chat] Chat error:', message);
     }
   }, [onShowError]);
 
@@ -287,7 +288,7 @@ export const Chat: React.FC<ChatProps> = ({
           );
 
           if (response) {
-              console.log('[Chat] Message sent successfully:', response.message_id);
+              logger.info('[Chat] Message sent successfully:', response.message_id);
 
               // Invalidate and refetch the messages to show the updated conversation
               await queryClient.invalidateQueries({
@@ -296,7 +297,7 @@ export const Chat: React.FC<ChatProps> = ({
           }
 
       } catch (error) {
-          console.error('[Chat] Message sending failed:', error);
+          logger.error('[Chat] Message sending failed:', error);
           showError('Failed to send message. Please try again.');
       } finally {
           setIsLoading(false);
@@ -328,7 +329,7 @@ export const Chat: React.FC<ChatProps> = ({
           timestamp: msg.timestamp.toISOString()
         }));
 
-      console.log('[Chat] Prepared conversation messages:', conversationMessages);
+      logger.info('[Chat] Prepared conversation messages:', conversationMessages);
 
       // Convert file context to FileContextItem format
       const fileContextItems: FileContextItem[] = fileContext.map((file) => ({
@@ -373,7 +374,7 @@ export const Chat: React.FC<ChatProps> = ({
       }
 
     } catch (error) {
-      console.error('[Chat] Issue creation failed:', error);
+      logger.error('[Chat] Issue creation failed:', error);
       const errorText = `Failed to create GitHub issue: ${error instanceof Error ? error.message : 'Unknown error'}`;
       showError(errorText);
     } finally {
@@ -392,7 +393,7 @@ export const Chat: React.FC<ChatProps> = ({
         const result = await createGitHubIssueMutation.mutateAsync(currentIssuePreview.userIssue.issue_id);
 
         if (result?.success && result?.github_url) {
-          console.log('[Chat] GitHub issue created successfully:', result.github_url);
+          logger.info('[Chat] GitHub issue created successfully:', result.github_url);
           setShowIssuePreview(false);
           setCurrentIssuePreview(null);
           showError(`✓ GitHub issue created successfully! ${result.github_url}`);
@@ -401,7 +402,7 @@ export const Chat: React.FC<ChatProps> = ({
         }
       }
     } catch (error) {
-      console.error('[Chat] Failed to create GitHub issue:', error);
+      logger.error('[Chat] Failed to create GitHub issue:', error);
       showError(`Failed to create GitHub issue: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }, [currentIssuePreview, showError, createGitHubIssueMutation]);
@@ -421,7 +422,7 @@ export const Chat: React.FC<ChatProps> = ({
     }
 
     try {
-      console.log('[Chat] Starting solver for issue:', issueId);
+      logger.info('[Chat] Starting solver for issue:', issueId);
 
       // Close the preview modal
       setShowIssuePreview(false);
@@ -446,7 +447,7 @@ export const Chat: React.FC<ChatProps> = ({
       }
 
       const result = await response.json();
-      console.log('[Chat] Solver started successfully:', result);
+      logger.info('[Chat] Solver started successfully:', result);
 
       // Invalidate messages to show solver status updates
       await queryClient.invalidateQueries({
@@ -457,7 +458,7 @@ export const Chat: React.FC<ChatProps> = ({
       showError(`🚀 AI Solver started! Session ID: ${result.solve_session_id}. Watch the chat for progress updates.`);
 
     } catch (error) {
-      console.error('[Chat] Failed to start solver:', error);
+      logger.error('[Chat] Failed to start solver:', error);
       showError(`Failed to start solver: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }, [selectedRepository, activeSessionId, currentIssuePreview, sessionToken, showError, queryClient]);

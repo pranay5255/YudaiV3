@@ -6,6 +6,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSessionStore } from '../stores/sessionStore';
 import { useAuthStore } from '../stores/authStore';
 import { API, buildApiUrl } from '../config/api';
+import { logger } from '../utils/logger';
 import {
   ChatMessage,
   ContextCard,
@@ -45,7 +46,7 @@ const isSessionNotFoundError = (error: unknown): boolean => {
 // Helper function to handle session errors by clearing invalid session
 const handleSessionError = (error: unknown, sessionId: string, clearSession: () => void) => {
   if (isSessionNotFoundError(error)) {
-    console.warn(`[useSessionQueries] Session ${sessionId} not found, clearing invalid session`);
+    logger.warn(`[Session] Session ${sessionId} not found, clearing invalid session`);
     clearSession();
     return true; // Indicates session was cleared
   }
@@ -62,7 +63,7 @@ const shouldAllowSessionRequest = (sessionId: string): boolean => {
   const timeSinceLastRequest = now - lastRequestTime;
   
   if (timeSinceLastRequest < SESSION_REQUEST_COOLDOWN) {
-    console.log(`[SessionQueries] Rate limiting session request for ${sessionId}, last request was ${timeSinceLastRequest}ms ago`);
+    logger.info(`[Session] Rate limiting session request for ${sessionId}, last request was ${timeSinceLastRequest}ms ago`);
     return false;
   }
   

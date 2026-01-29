@@ -19,6 +19,7 @@ import { useRepository } from './hooks/useRepository';
 import { useSessionManagement } from './hooks/useSessionManagement';
 import { useSession, useContextCards, useRemoveContextCard } from './hooks/useSessionQueries';
 import { useSessionStore } from './stores/sessionStore';
+import { logger } from './utils/logger';
 
 /**
  * Main App Content Component
@@ -67,7 +68,7 @@ function AppContent() {
 
   // Show repository selection after login if no repository is selected
   useEffect(() => {
-    console.log('Repository selection check:', {
+    logger.info('[App] Repository selection check:', {
       isAuthenticated,
       user: !!user,
       hasSelectedRepository
@@ -75,7 +76,7 @@ function AppContent() {
     
     // Always show repository selection after login if no repository is selected
     if (isAuthenticated && user && !hasSelectedRepository) {
-      console.log('Showing repository selection toast');
+      logger.info('[App] Showing repository selection toast');
       // Add a small delay to let the user see they've logged in
       const timer = setTimeout(() => {
         setShowRepositorySelection(true);
@@ -88,7 +89,7 @@ function AppContent() {
   // Session initialization check
   useEffect(() => {
     if (isAuthenticated && user && !activeSessionId && hasSelectedRepository) {
-      console.log('User is authenticated and has selected repository but no active session');
+      logger.info('[Session] User is authenticated and has selected repository but no active session');
       // Optionally auto-create a session or prompt user
       addToast('Ready to start a chat session!', 'info');
     }
@@ -97,7 +98,7 @@ function AppContent() {
   // Debug log session and data state
   useEffect(() => {
     if (activeSessionId) {
-      console.log('Session state:', {
+      logger.info('[Session] Session state:', {
         sessionId: activeSessionId,
         sessionData: sessionData ? 'loaded' : 'loading',
         contextCardsCount: contextCards.length,
@@ -138,7 +139,7 @@ function AppContent() {
       setShowRepositorySelection(false);
       addToast('Repository selected successfully!', 'success');
     } catch (error) {
-      console.error('Failed to select repository:', error);
+      logger.error('[Repository] Failed to select repository:', error);
       addToast('Failed to select repository', 'error');
     }
   };
@@ -263,7 +264,7 @@ function App() {
       localStorage.removeItem('session-storage');
       localStorage.removeItem('session_token');
     } catch (error) {
-      console.warn('[App] Failed to clear stored session data:', error);
+      logger.warn('[Session] Failed to clear stored session data:', error);
     }
 
     clearSession();
@@ -284,13 +285,13 @@ function App() {
 
   // Handle session errors by clearing session and optionally logging out
   const handleSessionError = () => {
-    console.log('[App] Handling session error - clearing session state');
+    logger.info('[Session] Handling session error - clearing session state');
     clearSession();
   };
 
   // Handle retry by re-initializing auth
   const handleRetry = () => {
-    console.log('[App] Retrying after error - redirecting to login');
+    logger.info('[Auth] Retrying after error - redirecting to login');
     window.location.href = '/auth/login';
   };
 

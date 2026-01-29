@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, ChevronRight, ChevronDown, DollarSign, MessageSquare, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import trajectoryData from '../data/last_mini_run.traj.json';
+import { logger } from '../utils/logger';
 
 interface TrajectoryMessage {
   role: string;
@@ -50,7 +51,7 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({ sessionId })
       // This is more reliable than fetching from public directory
       setTrajectory(trajectoryData as TrajectoryData);
     } catch (err) {
-      console.error('Failed to load trajectory:', err);
+      logger.error('[Trajectory] Failed to load trajectory:', err);
       setError(err instanceof Error ? err.message : 'Failed to load trajectory');
     } finally {
       setLoading(false);
@@ -251,4 +252,3 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({ sessionId })
     </div>
   );
 };
-

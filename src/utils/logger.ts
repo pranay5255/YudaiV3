@@ -6,14 +6,18 @@ export enum LogLevel {
   ERROR = 'error'
 }
 
+const isDevelopment = import.meta.env.MODE === 'development';
+
 export const logger = {
   debug: (message: string, ...args: unknown[]) => {
-    if (process.env.NODE_ENV === 'development') {
+    if (isDevelopment) {
       console.log(`[DEBUG] ${message}`, ...args);
     }
   },
   info: (message: string, ...args: unknown[]) => {
-    console.log(`[INFO] ${message}`, ...args);
+    if (isDevelopment) {
+      console.log(`[INFO] ${message}`, ...args);
+    }
   },
   warn: (message: string, ...args: unknown[]) => {
     console.warn(`[WARN] ${message}`, ...args);

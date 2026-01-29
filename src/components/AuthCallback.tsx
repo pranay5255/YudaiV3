@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { logger } from '../utils/logger';
 
 /**
  * AuthCallback component handles OAuth error callbacks from the backend
@@ -19,7 +20,7 @@ export const AuthCallback: React.FC = () => {
     const searchParams = new URLSearchParams(window.location.search);
     const error = searchParams.get('error');
     if (error) {
-      console.error('[AuthCallback] OAuth error received:', error);
+      logger.error('[Auth] OAuth error received:', error);
       // Redirect to login page with the error
       navigate(`/auth/login?error=${encodeURIComponent(error)}`, { replace: true });
     } else {

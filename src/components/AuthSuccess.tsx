@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSessionStore } from '../stores/sessionStore';
+import { logger } from '../utils/logger';
 
 /**
  * AuthSuccess component handles the OAuth callback from GitHub
@@ -22,7 +23,7 @@ export const AuthSuccess: React.FC = () => {
 
     const handleAuthSuccess = async () => {
       try {
-        console.log('[AuthSuccess] Processing OAuth callback data');
+        logger.info('[Auth] Processing OAuth callback data');
 
         const searchParams = new URLSearchParams(window.location.search);
 
@@ -36,7 +37,7 @@ export const AuthSuccess: React.FC = () => {
         const githubId = searchParams.get('github_id');
 
         if (!sessionToken || !userId || !username) {
-          console.error('[AuthSuccess] Missing required auth parameters');
+          logger.error('[Auth] Missing required auth parameters');
           navigate('/auth/login?error=missing_auth_data');
           return;
         }
@@ -53,7 +54,7 @@ export const AuthSuccess: React.FC = () => {
           last_login: new Date().toISOString(),
         };
 
-        console.log('[AuthSuccess] Setting up user session:', user);
+        logger.info('[Auth] Setting up user session:', user);
 
         // Set up the session using the session store
         setAuthFromCallback({
@@ -63,13 +64,13 @@ export const AuthSuccess: React.FC = () => {
 
         clearSession();
 
-        console.log('[AuthSuccess] Authentication successful, redirecting to main app');
+        logger.info('[Auth] Authentication successful, redirecting to main app');
         
         // Redirect to the main application
         navigate('/', { replace: true });
 
       } catch (error) {
-        console.error('[AuthSuccess] Error processing auth callback:', error);
+        logger.error('[Auth] Error processing auth callback:', error);
         navigate('/auth/login?error=auth_processing_failed');
       }
     };

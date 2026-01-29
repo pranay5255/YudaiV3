@@ -4,6 +4,7 @@ import { useSessionStore } from '../stores/sessionStore';
 import { useAuthStore } from '../stores/authStore';
 import { useCreateSessionFromRepository, useEnsureSessionExists } from './useSessionQueries';
 import { SelectedRepository } from '../types';
+import { logger } from '../utils/logger';
 
 /**
  * Custom hook for session management that integrates with the session store
@@ -43,18 +44,18 @@ export const useSessionManagement = () => {
   // Auto-create session when repository is selected and user is authenticated
   useEffect(() => {
     if (isAuthenticated && user && selectedRepository && !activeSessionId && !sessionInitialized && !isLoading && !authLoading && !createSessionMutation.isPending) {
-      console.log('[SessionManagement] Auto-creating session for repository:', selectedRepository.repository.name);
+      logger.info('[Session] Auto-creating session for repository:', selectedRepository.repository.name);
       createSessionMutation.mutate(selectedRepository, {
         onSuccess: (sessionId) => {
           if (!sessionId) {
-            console.error('[SessionManagement] Failed to create session');
+            logger.error('[Session] Failed to create session');
             setError('Failed to create session');
           } else {
-            console.log('[SessionManagement] Session created successfully:', sessionId);
+            logger.info('[Session] Session created successfully:', sessionId);
           }
         },
         onError: (error) => {
-          console.error('[SessionManagement] Session creation error:', error);
+          logger.error('[Session] Session creation error:', error);
           setError(error instanceof Error ? error.message : 'Failed to create session');
           // Add retry logic
           setTimeout(() => createSessionMutation.mutate(selectedRepository), 2000);  // Retry after 2s
@@ -66,19 +67,19 @@ export const useSessionManagement = () => {
   // Validate session exists when activeSessionId changes (but not during creation)
   useEffect(() => {
     if (isAuthenticated && user && activeSessionId && !sessionInitialized && !createSessionMutation.isPending && !ensureSessionMutation.isPending) {
-      console.log('[SessionManagement] Validating existing session:', activeSessionId);
+      logger.info('[Session] Validating existing session:', activeSessionId);
       ensureSessionMutation.mutate(activeSessionId, {
         onSuccess: (exists) => {
           if (!exists) {
-            console.warn('[SessionManagement] Session does not exist:', activeSessionId);
+            logger.warn('[Session] Session does not exist:', activeSessionId);
             clearSession();
             setError('Session not found');
           } else {
-            console.log('[SessionManagement] Session validation successful:', activeSessionId);
+            logger.info('[Session] Session validation successful:', activeSessionId);
           }
         },
         onError: (error) => {
-          console.error('[SessionManagement] Session validation error:', error);
+          logger.error('[Session] Session validation error:', error);
           clearSession();
           setError('Session validation failed');
         },
@@ -93,7 +94,7 @@ export const useSessionManagement = () => {
       const sessionId = await createSessionForRepository(repository);
       return sessionId;
     } catch (error) {
-      console.error('[SessionManagement] Manual session creation failed:', error);
+      logger.error('[Session] Manual session creation failed:', error);
       setError(error instanceof Error ? error.message : 'Failed to create session');
       return null;
     }
@@ -106,7 +107,7 @@ export const useSessionManagement = () => {
       const exists = await ensureSessionExists(sessionId);
       return exists;
     } catch (error) {
-      console.error('[SessionManagement] Session validation failed:', error);
+      logger.error('[Session] Session validation failed:', error);
       setError(error instanceof Error ? error.message : 'Session validation failed');
       return false;
     }

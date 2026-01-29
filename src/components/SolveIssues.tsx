@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useRepository } from '../hooks/useRepository';
 import { useSessionManagement } from '../hooks/useSessionManagement';
 import { useAuthStore } from '../stores/authStore';
+import { logger } from '../utils/logger';
 import type {
   SolveStatusResponse,
   StartSolveRequest,
@@ -465,7 +466,7 @@ export function SolveIssues() {
         );
         setIssues(data);
       } catch (err) {
-        console.error('Failed to fetch issues:', err);
+        logger.error('[SolveIssues] Failed to fetch issues:', err);
         const error = err as Error;
         setError(error.message || 'Failed to fetch issues');
       } finally {
@@ -483,7 +484,7 @@ export function SolveIssues() {
         const data = await apiCall('/api/daifu/ai-models');
         setAvailableModels(data);
       } catch (err) {
-        console.error('Failed to fetch AI models:', err);
+        logger.error('[SolveIssues] Failed to fetch AI models:', err);
       }
     };
 
@@ -506,7 +507,7 @@ export function SolveIssues() {
           setActiveSolveId(null);
         }
       } catch (err) {
-        console.error('Failed to fetch solve status:', err);
+        logger.error('[SolveIssues] Failed to fetch solve status:', err);
       }
     };
 
@@ -569,7 +570,7 @@ export function SolveIssues() {
       });
       setSelectedIssue(null);
     } catch (err) {
-      console.error('Failed to start solve:', err);
+      logger.error('[SolveIssues] Failed to start solve:', err);
       const error = err as Error;
       setError(error.message || 'Failed to start solve');
     } finally {
@@ -590,7 +591,7 @@ export function SolveIssues() {
       setActiveSolveId(null);
       setSolveStatus(null);
     } catch (err) {
-      console.error('Failed to cancel solve:', err);
+      logger.error('[SolveIssues] Failed to cancel solve:', err);
     }
   };
 

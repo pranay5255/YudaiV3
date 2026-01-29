@@ -11,6 +11,7 @@ import type {
 import { useRepository } from '../hooks/useRepository';
 import { useCreateIssueWithContext } from '../hooks/useSessionQueries';
 import { useSessionStore } from '../stores/sessionStore';
+import { logger } from '../utils/logger';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -58,14 +59,14 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
     if (onShowError) {
       onShowError(message);
     } else {
-      console.error('ContextCards Error:', message);
+      logger.error('[Context] Error:', message);
     }
   }, [onShowError]);
 
   // Load context cards when session changes (cards are now passed as props from parent)
   useEffect(() => {
     if (activeSessionId && cards.length === 0) {
-      console.log('Context cards available:', cards.length);
+      logger.info('[Context] Context cards available:', cards.length);
     }
   }, [activeSessionId, cards]);
 
@@ -73,13 +74,13 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
     if (!activeSessionId) return;
 
     try {
-      console.log('Removing context card:', cardId);
+      logger.info('[Context] Removing context card:', cardId);
       await deleteContextCard(cardId);
-      console.log('Context card removed successfully');
+      logger.info('[Context] Context card removed successfully');
       // Call the onRemoveCard callback to update the parent state
       onRemoveCard(cardId);
     } catch (error) {
-      console.error('Failed to remove context card:', error);
+      logger.error('[Context] Failed to remove context card:', error);
       const errorMessage = error instanceof Error ? error.message : 'Failed to remove context card';
       showError(`Failed to remove context card: ${errorMessage}`);
     }
@@ -165,7 +166,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
         onShowIssuePreview(previewData);
       }
     } catch (error) {
-      console.error('Failed to create issue with context:', error);
+      logger.error('[Context] Failed to create issue with context:', error);
       showError('Failed to create issue with context. Please try again.');
     } finally {
       setIsLoading(false);

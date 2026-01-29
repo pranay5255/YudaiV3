@@ -7,6 +7,7 @@ import {
   useFileDependencies,
   useAddContextCard
 } from '../hooks/useSessionQueries';
+import { logger } from '../utils/logger';
 // react-query not needed here currently
 
 interface FileDependenciesProps {
@@ -36,7 +37,7 @@ export const FileDependencies: React.FC<FileDependenciesProps> = ({
   }, [onShowError]);
 
   const handleRefresh = async () => {
-    console.log('[FileDependencies] Refreshing file dependencies...');
+    logger.info('[FileDependencies] Refreshing file dependencies...');
     refetch();
   };
 

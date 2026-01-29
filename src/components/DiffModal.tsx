@@ -3,6 +3,7 @@ import { X, ExternalLink, GitBranch, FileText, MessageSquare, Tag, Clock, Check 
 import type { GitHubIssuePreview, ChatContextMessage, FileContextItem } from '../types/api';
 import { UserIssueResponse } from '../types';
 import { useSessionStore } from '../stores/sessionStore';
+import { logger } from '../utils/logger';
 
 interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
@@ -63,7 +64,7 @@ export const DiffModal: React.FC<DiffModalProps> = ({
       }
 
     } catch (error) {
-      console.error('Failed to create GitHub issue:', error);
+      logger.error('[DiffModal] Failed to create GitHub issue:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       showError(`Failed to create GitHub issue: ${errorMessage}`);
     } finally {

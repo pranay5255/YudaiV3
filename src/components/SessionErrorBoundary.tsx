@@ -1,5 +1,6 @@
 import React, { Component, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react';
+import { logger } from '../utils/logger';
 
 interface SessionErrorBoundaryProps {
   children: ReactNode;
@@ -47,7 +48,7 @@ export class SessionErrorBoundary extends Component<SessionErrorBoundaryProps, S
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('[SessionErrorBoundary] Caught error:', error, errorInfo);
+    logger.error('[Session] Caught error:', error, errorInfo);
     
     this.setState({
       error,
@@ -63,7 +64,7 @@ export class SessionErrorBoundary extends Component<SessionErrorBoundaryProps, S
   handleRetry = () => {
     if (this.retryCount < this.maxRetries) {
       this.retryCount++;
-      console.log(`[SessionErrorBoundary] Retry attempt ${this.retryCount}/${this.maxRetries}`);
+      logger.info(`[Session] Retry attempt ${this.retryCount}/${this.maxRetries}`);
       
       this.setState({
         hasError: false,
