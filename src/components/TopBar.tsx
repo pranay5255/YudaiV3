@@ -29,13 +29,13 @@ export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
   };
 
   return (
-    <div className="flex h-14 items-center px-4 border-b border-[#2a2a2e] bg-[#111113] backdrop-blur-sm">
+    <div className="flex h-14 items-center px-4 border-b border-border bg-bg-secondary backdrop-blur-sm">
       {/* Logo & Project Switcher */}
       <div className="flex items-center gap-2 mr-8">
-        <div className="w-8 h-8 bg-gradient-to-br from-[#f59e0b] to-[#f59e0b]/80 rounded-lg flex items-center justify-center shadow-lg shadow-[#f59e0b]/20">
-          <span className="text-[#0a0a0b] font-bold text-sm font-mono">AI</span>
+        <div className="w-8 h-8 bg-gradient-to-br from-accent-amber to-accent-amber/80 rounded-lg flex items-center justify-center shadow-lg shadow-accent-amber/20">
+          <span className="text-bg-primary font-bold text-sm font-mono">AI</span>
         </div>
-        <button className="flex items-center gap-1 text-[#f4f4f5] hover:text-[#f59e0b] transition-colors duration-200 group">
+        <button className="flex items-center gap-1 text-text-primary hover:text-accent-amber transition-colors duration-200 group">
           <span className="font-medium text-sm">Project Assistant</span>
           <ChevronDown className="w-4 h-4 group-hover:translate-y-0.5 transition-transform duration-200" />
         </button>
@@ -55,12 +55,12 @@ export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
                 className={`
                   relative px-3 py-1.5 rounded-md text-xs font-mono font-medium transition-all duration-300
                   ${isActive
-                    ? 'bg-[#f59e0b] text-[#0a0a0b] shadow-lg shadow-[#f59e0b]/30 animate-pulse-subtle'
+                    ? 'bg-accent-amber text-bg-primary shadow-lg shadow-accent-amber/30 animate-pulse-subtle'
                     : isError
                     ? 'bg-red-500/90 text-white border border-red-400/30'
                     : isCompleted
-                    ? 'bg-[#10b981]/20 text-[#10b981] border border-[#10b981]/30'
-                    : 'bg-[#1a1a1d] text-[#71717a] border border-[#2a2a2e] hover:border-[#3d3d42]'
+                    ? 'bg-accent-emerald/20 text-accent-emerald border border-accent-emerald/30'
+                    : 'bg-bg-tertiary text-text-muted border border-border hover:border-border-accent'
                   }
                 `}
                 role="status"
@@ -77,8 +77,8 @@ export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
           className={`
             relative flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-mono font-medium transition-all duration-200
             ${indexCodebaseEnabled
-              ? 'bg-[#22d3ee]/15 text-[#22d3ee] border border-[#22d3ee]/30 hover:bg-[#22d3ee]/20 shadow-sm shadow-[#22d3ee]/10'
-              : 'bg-[#1a1a1d] text-[#a1a1aa] border border-[#2a2a2e] hover:border-[#3d3d42] hover:text-[#f4f4f5]'
+              ? 'bg-accent-cyan/15 text-accent-cyan border border-accent-cyan/30 hover:bg-accent-cyan/20 shadow-sm shadow-accent-cyan/10'
+              : 'bg-bg-tertiary text-text-secondary border border-border hover:border-border-accent hover:text-text-primary'
             }
           `}
           aria-pressed={indexCodebaseEnabled}
@@ -98,7 +98,7 @@ export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
           <button
             onClick={handleLoginClick}
             disabled={isLoading}
-            className="flex items-center gap-2 text-[#f4f4f5] hover:text-[#f59e0b] transition-all duration-200 bg-[#1a1a1d] hover:bg-[#1a1a1d]/80 border border-[#2a2a2e] hover:border-[#3d3d42] rounded-md px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed group"
+            className="flex items-center gap-2 text-text-primary hover:text-accent-amber transition-all duration-200 bg-bg-tertiary hover:bg-bg-tertiary/80 border border-border hover:border-border-accent rounded-md px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed group"
             aria-label="Sign in with GitHub"
           >
             {isLoading ? (
