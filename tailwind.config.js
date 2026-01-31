@@ -9,6 +9,10 @@ export default {
           secondary: 'var(--bg-secondary)',
           tertiary: 'var(--bg-tertiary)',
         },
+        amber: 'var(--accent-amber)',
+        cyan: 'var(--accent-cyan)',
+        success: 'var(--accent-emerald)',
+        error: 'var(--accent-error)',
         border: {
           DEFAULT: 'var(--border)',
           accent: 'var(--border-accent)',

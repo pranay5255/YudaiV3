@@ -16,7 +16,8 @@ import {
   useFileDependencies,
   useAddContextCard,
   useCreateIssueWithContext,
-  useCreateGitHubIssueFromUserIssue
+  useCreateGitHubIssueFromUserIssue,
+  QueryKeys
 } from '../hooks/useSessionQueries';
 import { useSessionManagement } from '../hooks/useSessionManagement';
 import { useRepository } from '../hooks/useRepository';
@@ -352,9 +353,12 @@ export const Chat: React.FC<ChatProps> = ({
           if (response) {
               console.log('[Chat] Message sent successfully:', response.message_id);
 
+              const { messages: latestMessages } = useSessionStore.getState();
+              queryClient.setQueryData(QueryKeys.messages(activeSessionId), latestMessages);
+
               // Invalidate and refetch the messages to show the updated conversation
               await queryClient.invalidateQueries({
-                queryKey: ['messages', activeSessionId]
+                queryKey: QueryKeys.messages(activeSessionId)
               });
           }
 
