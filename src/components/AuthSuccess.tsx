@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSessionStore } from '../stores/sessionStore';
+import { useQueryClient } from '@tanstack/react-query';
 
 /**
  * AuthSuccess component handles the OAuth callback from GitHub
@@ -9,8 +10,9 @@ import { useSessionStore } from '../stores/sessionStore';
  */
 export const AuthSuccess: React.FC = () => {
   const navigate = useNavigate();
-  const { setAuthFromCallback } = useAuth();
+  const { setAuthFromCallback, clearAuth } = useAuth();
   const clearSession = useSessionStore((state) => state.clearSession);
+  const queryClient = useQueryClient();
   const hasProcessed = useRef(false);
 
   useEffect(() => {
@@ -55,13 +57,16 @@ export const AuthSuccess: React.FC = () => {
 
         console.log('[AuthSuccess] Setting up user session:', user);
 
+        // Ensure any prior auth/session data is cleared before applying the new token.
+        clearAuth();
+        clearSession();
+        queryClient.clear();
+
         // Set up the session using the session store
         setAuthFromCallback({
           user,
           sessionToken,
         });
-
-        clearSession();
 
         console.log('[AuthSuccess] Authentication successful, redirecting to main app');
         

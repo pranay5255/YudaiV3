@@ -19,6 +19,7 @@ import { useRepository } from './hooks/useRepository';
 import { useSessionManagement } from './hooks/useSessionManagement';
 import { useSession, useContextCards, useRemoveContextCard } from './hooks/useSessionQueries';
 import { useSessionStore } from './stores/sessionStore';
+import { useQueryClient } from '@tanstack/react-query';
 
 /**
  * Main App Content Component
@@ -247,27 +248,32 @@ function AppContent() {
 }
 
 function App() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, sessionToken, initializeAuth } = useAuth();
   const clearSession = useSessionStore((state) => state.clearSession);
-  const hasBootstrappedRef = useRef(false);
+  const setSelectedRepository = useSessionStore((state) => state.setSelectedRepository);
+  const queryClient = useQueryClient();
+  const previousTokenRef = useRef<string | null>(null);
 
-  // Always start fresh on app mount - no persisted session or token.
+  // Initialize authentication on app mount.
   useEffect(() => {
-    if (hasBootstrappedRef.current) {
+    console.log('[App] Initializing authentication on app mount');
+    initializeAuth();
+  }, [initializeAuth]);
+
+  // Reset session state when the auth token changes to avoid stale data across logins or tabs.
+  useEffect(() => {
+    if (previousTokenRef.current === null) {
+      previousTokenRef.current = sessionToken;
       return;
     }
 
-    hasBootstrappedRef.current = true;
-
-    try {
-      localStorage.removeItem('session-storage');
-      localStorage.removeItem('session_token');
-    } catch (error) {
-      console.warn('[App] Failed to clear stored session data:', error);
+    if (previousTokenRef.current !== sessionToken) {
+      clearSession();
+      setSelectedRepository(null);
+      queryClient.clear();
+      previousTokenRef.current = sessionToken;
     }
-
-    clearSession();
-  }, [clearSession]);
+  }, [clearSession, queryClient, sessionToken, setSelectedRepository]);
 
   // Auto-clear session store after 10 minutes of auth.
   useEffect(() => {

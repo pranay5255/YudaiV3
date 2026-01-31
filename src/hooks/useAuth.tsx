@@ -17,6 +17,7 @@ export const useAuth = () => {
     logout,
     refreshAuth,
     setAuthFromCallback,
+    clearAuth,
   } = useAuthStore(
     useShallow((state) => ({
       user: state.user,
@@ -29,6 +30,7 @@ export const useAuth = () => {
       logout: state.logout,
       refreshAuth: state.refreshAuth,
       setAuthFromCallback: state.setAuthFromCallback,
+      clearAuth: state.clearAuth,
     }))
   );
 
@@ -57,6 +59,7 @@ export const useAuth = () => {
     logout,
     refreshAuth,
     setAuthFromCallback,
+    clearAuth,
   };
 };
 
