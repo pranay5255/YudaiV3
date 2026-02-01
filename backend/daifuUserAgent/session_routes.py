@@ -88,8 +88,9 @@ from context import (
     RepositorySnapshotService,
 )
 from daifuUserAgent.githubOps import GitHubOps
-from db.database import SessionLocal, get_db
+from db.database import SessionLocal, get_db_connection
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from psycopg import Connection
 
 # Import from filedeps.py
 from models import (
@@ -160,7 +161,7 @@ def create_standardized_error(
 
 @router.get("/github/repositories", response_model=List[Dict[str, Any]])
 async def daifu_github_list_user_repositories(
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -169,7 +170,7 @@ async def daifu_github_list_user_repositories(
     try:
         from daifuUserAgent.githubOps import GitHubOps
 
-        github_ops = GitHubOps(db)
+        github_ops = GitHubOps(conn)
         repositories = await github_ops.get_user_repositories(user_id=current_user.id)
         return repositories
     except HTTPException:
@@ -191,7 +192,7 @@ async def daifu_github_list_user_repositories(
 async def daifu_github_list_repository_branches(
     owner: str,
     repo: str,
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -200,7 +201,7 @@ async def daifu_github_list_repository_branches(
     try:
         from daifuUserAgent.githubOps import GitHubOps
 
-        github_ops = GitHubOps(db)
+        github_ops = GitHubOps(conn)
         branches = await github_ops.fetch_repository_branches(
             owner, repo, current_user.id
         )
@@ -237,7 +238,7 @@ async def daifu_github_list_repository_issues(
     owner: str,
     repo: str,
     limit: int = Query(100, ge=1, le=100),
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -246,7 +247,7 @@ async def daifu_github_list_repository_issues(
     try:
         from daifuUserAgent.githubOps import GitHubOps
 
-        github_ops = GitHubOps(db)
+        github_ops = GitHubOps(conn)
         issues = await github_ops.fetch_repository_issues(
             owner, repo, current_user.id, limit
         )
@@ -338,7 +339,7 @@ async def daifu_github_list_repository_issues(
 
 @router.get("/ai-models", response_model=List[Dict[str, Any]])
 async def get_available_ai_models(
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -396,7 +397,7 @@ async def get_available_ai_models(
 async def create_session(
     request: CreateSessionRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
     background_tasks: BackgroundTasks = BackgroundTasks(),
 ):
     """
@@ -506,7 +507,7 @@ async def update_session(
     session_id: str,
     request: UpdateSessionRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
 ):
     """
     Update session details (title, description, branch, etc.)
@@ -580,7 +581,7 @@ async def update_session(
 async def get_session_context(
     session_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
 ):
     """
     Get session context including messages, context cards, and repository info.
@@ -595,7 +596,7 @@ async def get_session_context(
         )
 
         # Get complete session context
-        return SessionService.get_context(db, _db_session)
+        return SessionService.get_context(conn, _db_session)
 
     except Exception as e:
         raise HTTPException(
@@ -612,7 +613,7 @@ async def add_chat_message(
     session_id: str,
     message_data: dict,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
 ):
     """
     Add a new chat message to a session.
@@ -694,7 +695,7 @@ async def add_bulk_chat_messages(
     session_id: str,
     messages: List[dict],
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
 ):
     """
     Add multiple chat messages to a session in bulk.
@@ -788,7 +789,7 @@ async def get_chat_messages(
     session_id: str,
     limit: int = Query(100, ge=1, le=1000),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
 ):
     """
     Get chat messages for a session.
@@ -817,7 +818,7 @@ async def add_context_card(
     session_id: str,
     request: CreateContextCardRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
 ):
     """
     Add a context card to a session.
@@ -882,7 +883,7 @@ async def add_context_card(
 async def get_context_cards(
     session_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
 ):
     """
     Get context cards for a session.
@@ -945,7 +946,7 @@ async def get_context_cards(
 async def get_file_dependencies_for_session(
     session_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
 ):
     """Get file items for a session (matches frontend FileItem interface)"""
     try:
@@ -1010,7 +1011,7 @@ async def chat_in_session(
     session_id: str,
     request: ChatRequest,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -1047,7 +1048,7 @@ async def chat_in_session(
         from .ChatOps import ChatOps
 
         # Initialize ChatOps instance
-        chat_ops = ChatOps(db)
+        chat_ops = ChatOps(conn)
 
         # Prepare repository information for ChatOps
         repository_info = None
@@ -1611,7 +1612,7 @@ async def _index_repository_for_session_background(
 
         # Fetch repo metadata (best effort)
         try:
-            gh = GitHubOps(db)
+            gh = GitHubOps(conn)
             meta = await gh.fetch_repository_info_detailed(
                 repo_owner, repo_name, user_id
             )
@@ -1858,7 +1859,7 @@ async def _index_repository_for_session_background(
 async def create_issue_with_context_for_session(
     session_id: str,
     request: dict,
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -1956,7 +1957,7 @@ async def get_issues_for_session(
     status_filter: Optional[str] = Query(None, alias="status"),
     priority: Optional[str] = Query(None, alias="priority"),
     limit: int = Query(50, ge=1, le=100),
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -2039,7 +2040,7 @@ async def get_issues_for_session(
 async def get_issue_for_session(
     session_id: str,
     issue_id: str,
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -2125,7 +2126,7 @@ async def update_issue_status_for_session(
     agent_response: Optional[str] = None,
     processing_time: Optional[float] = None,
     tokens_used: int = 0,
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -2151,7 +2152,7 @@ async def update_issue_status_for_session(
         from daifuUserAgent.IssueOps import IssueService
 
         # Update issue status
-        issue_service = IssueService(db)
+        issue_service = IssueService(conn)
         updated_issue = issue_service.update_issue_status(
             current_user.id,
             issue_id,
@@ -2208,7 +2209,7 @@ async def update_issue_status_for_session(
 async def create_github_issue_from_user_issue_for_session(
     session_id: str,
     issue_id: str,
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -2220,7 +2221,7 @@ async def create_github_issue_from_user_issue_for_session(
         from .session_service import SessionService
 
         # Ensure session exists and belongs to user
-        _ = SessionService.ensure_owned_session(db, current_user.id, session_id)
+        _ = SessionService.ensure_owned_session(conn, current_user.id, session_id)
 
         # Create GitHub issue using consolidated IssueOps (context assembled internally)
         issue_service = IssueOpsService(db)
@@ -2287,7 +2288,7 @@ async def create_github_issue_from_user_issue_for_session(
 @router.get("/sessions/{session_id}/trajectories", response_model=List[Dict[str, Any]])
 async def get_session_trajectories(
     session_id: str,
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -2369,7 +2370,7 @@ async def get_session_trajectories(
 async def get_trajectory_file(
     session_id: str,
     run_id: str,
-    db: Session = Depends(get_db),
+    conn: Connection = Depends(get_db_connection),
     current_user: User = Depends(get_current_user),
 ):
     """

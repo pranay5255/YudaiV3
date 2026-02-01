@@ -39,6 +39,7 @@ LOW PRIORITY:
 import logging
 import time
 import uuid
+import json
 from typing import Any, Dict, List, Optional
 
 from models import (
@@ -49,6 +50,8 @@ from models import (
     UserIssue,
 )
 from sqlalchemy.orm import Session
+from psycopg import Connection
+from db.sql_helpers import execute_one, execute_query, execute_write
 
 from utils import utc_now
 
@@ -73,8 +76,8 @@ class IssueService:
     - Integration with chat sessions
     """
 
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(self, conn: Connection):
+        self.conn = conn
         self.logger = logging.getLogger(__name__)
 
     # Removed unused token/session helpers; use GitHubOps directly when needed
@@ -251,11 +254,11 @@ class IssueService:
                 "success": True,
                 "preview_only": False,
                 "user_issue": {
-                    "id": user_issue.id,
-                    "issue_id": user_issue.issue_id,
-                    "title": user_issue.title,
-                    "description": user_issue.description,
-                    "issue_text_raw": user_issue.issue_text_raw,
+                    "id": user_issue['id'],
+                    "issue_id": user_issue['issue_id'],
+                    "title": user_issue['title'],
+                    "description": user_issue['description'],
+                    "issue_text_raw": user_issue['issue_text_raw'],
                 },
                 "github_preview": {
                     "title": llm_generated_issue["title"],
@@ -277,22 +280,15 @@ class IssueService:
                     },
                 },
                 "llm_response": llm_generated_issue["llm_response"],
-                "message": f"Issue created successfully with ID: {user_issue.issue_id}",
+                "message": f"Issue created successfully with ID: {user_issue['issue_id']}",
             }
 
-            # Ensure DB persistence before responding so the follow-up
-            # "Create GitHub Issue" action can find the record reliably.
-            try:
-                self.db.commit()
-            except Exception as commit_err:
-                logger.error(f"Commit failed after creating user issue: {commit_err}")
-                self.db.rollback()
-                raise
+            # DB persistence happens automatically via connection context manager
 
             # Optionally create GitHub issue
             if create_github_issue:
                 github_issue = await self.create_github_issue_from_user_issue(
-                    user_id, user_issue.issue_id
+                    user_id, user_issue['issue_id']
                 )
                 if github_issue:
                     result["github_issue"] = github_issue
@@ -305,7 +301,7 @@ class IssueService:
 
     def _create_user_issue_record(
         self, user_id: int, issue_request: CreateUserIssueRequest
-    ) -> UserIssue:
+    ) -> Dict[str, Any]:
         """
         Helper method to create user issue record in database
         """
@@ -314,26 +310,35 @@ class IssueService:
 
         try:
             # Create the user issue
-            user_issue = UserIssue(
-                issue_id=issue_id,
-                user_id=user_id,
-                title=issue_request.title,
-                issue_text_raw=issue_request.issue_text_raw,
-                description=issue_request.description,
-                session_id=issue_request.session_id,
-                context_card_id=issue_request.context_card_id,
-                repo_owner=issue_request.repo_owner,
-                repo_name=issue_request.repo_name,
-                priority=issue_request.priority,
-                issue_steps=issue_request.issue_steps,
-                status="pending",
-                agent_response=None,
-                processing_time=None,
-                tokens_used=0,
-            )
-
-            self.db.add(user_issue)
-            self.db.flush()  # Get the ID without committing
+            query = """
+                INSERT INTO user_issues (
+                    issue_id, user_id, title, issue_text_raw, description,
+                    session_id, context_card_id, repo_owner, repo_name, priority,
+                    issue_steps, status, agent_response, processing_time, tokens_used,
+                    created_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                RETURNING id, issue_id, user_id, title, issue_text_raw, description,
+                          session_id, context_card_id, repo_owner, repo_name, priority,
+                          issue_steps, status, created_at
+            """
+            user_issue = execute_one(self.conn, query, (
+                issue_id,
+                user_id,
+                issue_request.title,
+                issue_request.issue_text_raw,
+                issue_request.description,
+                issue_request.session_id,
+                issue_request.context_card_id,
+                issue_request.repo_owner,
+                issue_request.repo_name,
+                issue_request.priority,
+                json.dumps(issue_request.issue_steps) if issue_request.issue_steps else None,
+                "pending",
+                None,  # agent_response
+                None,  # processing_time
+                0  # tokens_used
+            ))
 
             logger.info(
                 f"Successfully created user issue {issue_id} for user {user_id}"
@@ -343,9 +348,6 @@ class IssueService:
             logger.error(
                 f"Failed while creating user issue {issue_id} for user {user_id}: {e}"
             )
-            # If any prior DB SELECT failed, the transaction may be aborted.
-            # Roll back to reset the session state.
-            self.db.rollback()
             raise
 
     def update_issue_status(
@@ -356,7 +358,7 @@ class IssueService:
         agent_response: Optional[str] = None,
         processing_time: Optional[float] = None,
         tokens_used: int = 0,
-    ) -> Optional[UserIssue]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Update the status of a user issue
 
@@ -369,40 +371,42 @@ class IssueService:
             tokens_used: Tokens used
 
         Returns:
-            Updated UserIssue object or None if not found
+            Updated issue dict or None if not found
         """
         try:
             logger.info(f"Updating issue status for issue {issue_id} by user {user_id}")
 
-            # Find the issue
-            issue = (
-                self.db.query(UserIssue)
-                .filter(UserIssue.user_id == user_id, UserIssue.issue_id == issue_id)
-                .first()
-            )
+            # Update the issue
+            query = """
+                UPDATE user_issues
+                SET status = %s,
+                    agent_response = COALESCE(%s, agent_response),
+                    processing_time = COALESCE(%s, processing_time),
+                    tokens_used = %s,
+                    updated_at = NOW(),
+                    processed_at = NOW()
+                WHERE user_id = %s AND issue_id = %s
+                RETURNING id, issue_id, user_id, title, status, agent_response,
+                          processing_time, tokens_used, updated_at, processed_at
+            """
+            issue = execute_one(self.conn, query, (
+                status,
+                agent_response,
+                processing_time,
+                tokens_used,
+                user_id,
+                issue_id
+            ))
 
             if not issue:
                 logger.warning(f"Issue {issue_id} not found for user {user_id}")
                 return None
-
-            # Update the issue
-            issue.status = status
-            if agent_response is not None:
-                issue.agent_response = agent_response
-            if processing_time is not None:
-                issue.processing_time = processing_time
-            issue.tokens_used = tokens_used
-            issue.updated_at = utc_now()
-            issue.processed_at = utc_now()
-
-            self.db.commit()
 
             logger.info(f"Successfully updated issue {issue_id} status to {status}")
             return issue
 
         except Exception as e:
             logger.error(f"Failed to update issue status: {e}")
-            self.db.rollback()
             raise IssueOpsError(f"Failed to update issue status: {str(e)}")
 
     async def generate_issue_from_context(
@@ -441,7 +445,7 @@ class IssueService:
             from context.chat_context import ChatContext
 
             repo_context = await ChatContext.get_best_repo_context_string(
-                db=self.db,
+                conn=self.conn,
                 user_id=user_id,
                 session_id=session_id,
                 repo_owner=repo_owner,
@@ -459,14 +463,11 @@ class IssueService:
                 from .llm_service import LLMService as _LLM
 
                 # Fetch numeric session id
-                sess = (
-                    self.db.query(_ChatSession)
-                    .filter(
-                        _ChatSession.session_id == session_id,
-                        _ChatSession.user_id == user_id,
-                    )
-                    .first()
-                )
+                sess_query = """
+                    SELECT id FROM chat_sessions
+                    WHERE session_id = %s AND user_id = %s
+                """
+                sess = execute_one(self.conn, sess_query, (session_id, user_id))
                 if sess:
                     # Build comprehensive query text including context cards
                     last_msgs = " ".join(
@@ -487,17 +488,12 @@ class IssueService:
                         )
                     )
                     embedding_contexts = await _LLM.get_relevant_file_contexts(
-                        db=self.db, session_id=sess.id, query_text=query_text, top_k=5
+                        conn=self.conn, session_id=sess['id'], query_text=query_text, top_k=5
                     )
             except Exception as e:
                 logger.warning(
                     f"Failed to retrieve embedding contexts for issue generation: {e}"
                 )
-                # Reset DB session if a read failed to avoid aborted transaction state
-                try:
-                    self.db.rollback()
-                except Exception:
-                    pass
 
             # Build the LLM prompt for issue generation
             prompt = self._build_issue_generation_prompt(
@@ -550,49 +546,36 @@ class IssueService:
     ) -> List[Dict[str, Any]]:
         """Get context cards for a session"""
         try:
-            from models import ChatSession as _ChatSession
-            from models import ContextCard
-
             # Resolve the numeric chat session primary key from the public session_id
-            sess = (
-                self.db.query(_ChatSession)
-                .filter(
-                    _ChatSession.session_id == session_id,
-                    _ChatSession.user_id == user_id,
-                )
-                .first()
-            )
+            sess_query = """
+                SELECT id FROM chat_sessions
+                WHERE session_id = %s AND user_id = %s
+            """
+            sess = execute_one(self.conn, sess_query, (session_id, user_id))
             if not sess:
                 return []
 
-            cards = (
-                self.db.query(ContextCard)
-                .filter(
-                    ContextCard.session_id == sess.id,
-                    ContextCard.user_id == user_id,
-                    ContextCard.is_active,
-                )
-                .order_by(ContextCard.created_at.desc())
-                .all()
-            )
+            cards_query = """
+                SELECT id, title, content, source, tokens
+                FROM context_cards
+                WHERE session_id = %s AND user_id = %s AND is_active = TRUE
+                ORDER BY created_at DESC
+            """
+            cards = execute_query(self.conn, cards_query, (sess['id'], user_id))
 
             return [
                 {
-                    "id": card.id,
-                    "title": card.title,
-                    "content": card.content,
-                    "source": card.source,
-                    "tokens": card.tokens,
+                    "id": card['id'],
+                    "title": card['title'],
+                    "content": card['content'],
+                    "source": card.get('source'),
+                    "tokens": card.get('tokens'),
                 }
                 for card in cards
             ]
 
         except Exception as e:
             logger.error(f"Failed to get context cards: {e}")
-            try:
-                self.db.rollback()
-            except Exception:
-                pass
             return []
 
     def _get_session_context_cards_content(self, session_id: str, user_id: int) -> str:
@@ -777,18 +760,21 @@ class IssueService:
         Returns:
             Updated UserIssue object with GitHub issue URL or None if failed
         """
-        user_issue: Optional[UserIssue] = None
+        user_issue: Optional[Dict[str, Any]] = None
         try:
             logger.info(
                 f"Creating GitHub issue from user issue {issue_id} for user {user_id}"
             )
 
             # Find the user issue
-            user_issue = (
-                self.db.query(UserIssue)
-                .filter(UserIssue.user_id == user_id, UserIssue.issue_id == issue_id)
-                .first()
-            )
+            query = """
+                SELECT id, issue_id, user_id, title, issue_text_raw, description,
+                       repo_owner, repo_name, github_issue_url, github_issue_number,
+                       status, updated_at
+                FROM user_issues
+                WHERE user_id = %s AND issue_id = %s
+            """
+            user_issue = execute_one(self.conn, query, (user_id, issue_id))
 
             if not user_issue:
                 logger.warning(f"User issue {issue_id} not found for user {user_id}")
@@ -797,12 +783,12 @@ class IssueService:
                 )
 
             # Check if issue already has GitHub URL
-            if user_issue.github_issue_url:
+            if user_issue.get('github_issue_url'):
                 logger.info(f"GitHub issue already exists for user issue {issue_id}")
                 return user_issue
 
             # Validate repository information
-            if not user_issue.repo_owner or not user_issue.repo_name:
+            if not user_issue.get('repo_owner') or not user_issue.get('repo_name'):
                 logger.error(
                     f"Missing repository information for user issue {issue_id}"
                 )
@@ -814,7 +800,7 @@ class IssueService:
             # Get user's GitHub token
             from .githubOps import GitHubOps as _GitHubOps
 
-            github_token = _GitHubOps.get_user_github_token(user_id, self.db)
+            github_token = _GitHubOps.get_user_github_token(user_id, self.conn)
             if not github_token:
                 raise IssueOpsError(
                     "No valid GitHub token available. "
@@ -823,13 +809,13 @@ class IssueService:
                 )
 
             context = self._build_issue_context(user_issue, context_bundle)
-            issue_body = self._compose_issue_body(user_issue.issue_text_raw, context)
+            issue_body = self._compose_issue_body(user_issue['issue_text_raw'], context)
 
             # Create the GitHub issue
             github_issue_data = await self._create_github_issue(
-                user_issue.repo_owner,
-                user_issue.repo_name,
-                user_issue.title,
+                user_issue['repo_owner'],
+                user_issue['repo_name'],
+                user_issue['title'],
                 issue_body,
                 user_id,
             )
@@ -837,34 +823,41 @@ class IssueService:
             if not github_issue_data:
                 raise IssueOpsError(
                     f"GitHub issue creation returned no data for repository "
-                    f"{user_issue.repo_owner}/{user_issue.repo_name}. "
+                    f"{user_issue['repo_owner']}/{user_issue['repo_name']}. "
                     "Please verify repository permissions and retry."
                 )
 
             # Update the user issue with GitHub information
-            user_issue.github_issue_url = github_issue_data["html_url"]
-            user_issue.github_issue_number = github_issue_data["number"]
-            user_issue.status = "completed"
-            user_issue.updated_at = utc_now()
-            user_issue.processed_at = utc_now()
-
-            self.db.commit()
+            update_query = """
+                UPDATE user_issues
+                SET github_issue_url = %s,
+                    github_issue_number = %s,
+                    status = %s,
+                    updated_at = NOW(),
+                    processed_at = NOW()
+                WHERE id = %s
+                RETURNING id, issue_id, github_issue_url, github_issue_number, status
+            """
+            user_issue = execute_one(self.conn, update_query, (
+                github_issue_data["html_url"],
+                github_issue_data["number"],
+                "completed",
+                user_issue['id']
+            ))
 
             logger.info(f"Successfully created GitHub issue for user issue {issue_id}")
             return user_issue
 
         except IssueOpsError as e:
             logger.error(f"Failed to create GitHub issue from user issue: {e}")
-            self.db.rollback()
             raise
         except Exception as e:
             logger.error(f"Failed to create GitHub issue from user issue: {e}")
-            self.db.rollback()
 
             repo_ref = None
             if user_issue:
-                repo_owner = getattr(user_issue, "repo_owner", None)
-                repo_name = getattr(user_issue, "repo_name", None)
+                repo_owner = user_issue.get("repo_owner")
+                repo_name = user_issue.get("repo_name")
                 if repo_owner and repo_name:
                     repo_ref = f"{repo_owner}/{repo_name}"
             if not repo_ref:
@@ -905,68 +898,69 @@ class IssueService:
         context: Dict[str, Any] = dict(context_bundle or {})
         chat_session: Optional[ChatSession] = None
 
-        if user_issue.session_id:
-            chat_session = (
-                self.db.query(ChatSession)
-                .filter(ChatSession.session_id == user_issue.session_id)
-                .first()
-            )
+        if user_issue.get('session_id'):
+            session_query = """
+                SELECT id, session_id, repo_owner, repo_name, repo_branch, repo_context
+                FROM chat_sessions
+                WHERE session_id = %s
+            """
+            chat_session = execute_one(self.conn, session_query, (user_issue['session_id'],))
 
         if chat_session:
             context.setdefault(
                 "repository_info",
                 {
-                    "owner": chat_session.repo_owner,
-                    "name": chat_session.repo_name,
-                    "branch": chat_session.repo_branch,
-                    "url": f"https://github.com/{chat_session.repo_owner}/{chat_session.repo_name}"
-                    if chat_session.repo_owner and chat_session.repo_name
+                    "owner": chat_session.get('repo_owner'),
+                    "name": chat_session.get('repo_name'),
+                    "branch": chat_session.get('repo_branch'),
+                    "url": f"https://github.com/{chat_session['repo_owner']}/{chat_session['repo_name']}"
+                    if chat_session.get('repo_owner') and chat_session.get('repo_name')
                     else None,
                 },
             )
 
+            repo_context = chat_session.get('repo_context')
             if (
-                isinstance(chat_session.repo_context, dict)
+                isinstance(repo_context, dict)
                 and "facts_memories" not in context
             ):
-                fam = chat_session.repo_context.get("facts_and_memories")
+                fam = repo_context.get("facts_and_memories")
                 if isinstance(fam, dict):
                     context["facts_memories"] = fam
 
             if "conversation" not in context:
-                messages = (
-                    self.db.query(ChatMessage)
-                    .filter(ChatMessage.session_id == chat_session.id)
-                    .order_by(ChatMessage.created_at.desc())
-                    .limit(8)
-                    .all()
-                )
+                messages_query = """
+                    SELECT sender_type, role, message_text
+                    FROM chat_messages
+                    WHERE session_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT 8
+                """
+                messages = execute_query(self.conn, messages_query, (chat_session['id'],))
                 context["conversation"] = [
                     {
-                        "author": message.sender_type or message.role or "user",
-                        "text": message.message_text,
+                        "author": message.get('sender_type') or message.get('role') or "user",
+                        "text": message['message_text'],
                     }
                     for message in reversed(messages)
                 ]
 
             if "files" not in context:
-                files = (
-                    self.db.query(FileItem)
-                    .filter(
-                        FileItem.session_id == chat_session.id,
-                        FileItem.is_directory.is_(False),
-                    )
-                    .order_by(FileItem.tokens.desc())
-                    .limit(5)
-                    .all()
-                )
+                files_query = """
+                    SELECT path, tokens
+                    FROM file_items
+                    WHERE session_id = %s AND is_directory = FALSE
+                    ORDER BY tokens DESC
+                    LIMIT 5
+                """
+                files = execute_query(self.conn, files_query, (chat_session['id'],))
                 context["files"] = [
                     {
-                        "path": file.path,
-                        "tokens": file.tokens,
+                        "path": file['path'],
+                        "tokens": file.get('tokens'),
                     }
                     for file in files
-                    if file.path
+                    if file.get('path')
                 ]
 
         return context
@@ -1121,15 +1115,30 @@ class IssueService:
         try:
             logger.info(f"Getting user issues for user {user_id}")
 
-            query = self.db.query(UserIssue).filter(UserIssue.user_id == user_id)
+            # Build dynamic query
+            conditions = ["user_id = %s"]
+            params = [user_id]
 
             if session_id:
-                query = query.filter(UserIssue.session_id == session_id)
+                conditions.append("session_id = %s")
+                params.append(session_id)
 
             if status_filter:
-                query = query.filter(UserIssue.status == status_filter)
+                conditions.append("status = %s")
+                params.append(status_filter)
 
-            issues = query.order_by(UserIssue.created_at.desc()).limit(limit).all()
+            query_sql = f"""
+                SELECT id, issue_id, user_id, title, description, status,
+                       session_id, repo_owner, repo_name, github_issue_url,
+                       github_issue_number, created_at, updated_at
+                FROM user_issues
+                WHERE {' AND '.join(conditions)}
+                ORDER BY created_at DESC
+                LIMIT %s
+            """
+            params.append(limit)
+
+            issues = execute_query(self.conn, query_sql, tuple(params))
 
             logger.info(f"Retrieved {len(issues)} issues for user {user_id}")
             return issues
@@ -1138,7 +1147,7 @@ class IssueService:
             logger.error(f"Failed to get user issues: {e}")
             return []
 
-    def get_user_issue(self, user_id: int, issue_id: str) -> Optional[UserIssue]:
+    def get_user_issue(self, user_id: int, issue_id: str) -> Optional[Dict[str, Any]]:
         """
         Get a specific user issue
 
@@ -1147,16 +1156,19 @@ class IssueService:
             issue_id: Issue ID
 
         Returns:
-            UserIssue object or None if not found
+            User issue dict or None if not found
         """
         try:
             logger.info(f"Getting user issue {issue_id} for user {user_id}")
 
-            issue = (
-                self.db.query(UserIssue)
-                .filter(UserIssue.user_id == user_id, UserIssue.issue_id == issue_id)
-                .first()
-            )
+            query = """
+                SELECT id, issue_id, user_id, title, description, status,
+                       session_id, repo_owner, repo_name, github_issue_url,
+                       github_issue_number, issue_text_raw, created_at, updated_at
+                FROM user_issues
+                WHERE user_id = %s AND issue_id = %s
+            """
+            issue = execute_one(self.conn, query, (user_id, issue_id))
 
             if issue:
                 logger.info(f"Found user issue {issue_id}")

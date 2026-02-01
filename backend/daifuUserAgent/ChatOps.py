@@ -46,6 +46,8 @@ from context.facts_and_memories import (
 )
 from models import ChatMessage, ChatSession
 from sqlalchemy.orm import Session
+from psycopg import Connection
+from db.sql_helpers import execute_one, execute_query, execute_write
 
 from utils import utc_now
 
@@ -70,8 +72,8 @@ class ChatOps:
     - Session management
     """
 
-    def __init__(self, db: Session):
-        self.db = db
+    def __init__(self, conn: Connection):
+        self.conn = conn
         self.logger = logging.getLogger(__name__)
         self._facts_service = FactsAndMemoriesService()
 
@@ -90,14 +92,16 @@ class ChatOps:
             logger.info(f"Processing chat message for session {session_id}")
 
             # Get session from database
-            session = (
-                self.db.query(ChatSession)
-                .filter(
-                    ChatSession.session_id == session_id,
-                    ChatSession.user_id == user_id,
-                )
-                .first()
-            )
+            query = """
+                SELECT id, session_id, user_id, title, description,
+                       repo_owner, repo_name, repo_branch, repo_context,
+                       is_active, total_messages, total_tokens,
+                       created_at, updated_at, last_activity,
+                       generate_embeddings, generate_facts_memories
+                FROM chat_sessions
+                WHERE session_id = %s AND user_id = %s
+            """
+            session = execute_one(self.conn, query, (session_id, user_id))
 
             if not session:
                 raise ChatOpsError(f"Session {session_id} not found")
@@ -108,12 +112,12 @@ class ChatOps:
             if repository:
                 repo_owner = repository.get("owner")
                 repo_name = repository.get("name")
-            elif session.repo_owner and session.repo_name:
-                repo_owner = session.repo_owner
-                repo_name = session.repo_name
+            elif session.get('repo_owner') and session.get('repo_name'):
+                repo_owner = session['repo_owner']
+                repo_name = session['repo_name']
 
             # Get conversation history
-            history = self._get_conversation_history(session.id, 10)
+            history = self._get_conversation_history(session['id'], 10)
 
             context_inputs: List[str] = []
             if context_cards:
@@ -131,7 +135,7 @@ class ChatOps:
                 from .llm_service import LLMService
 
                 retrieved_contexts = await LLMService.get_relevant_file_contexts(
-                    db=self.db, session_id=session.id, query_text=message_text, top_k=5
+                    conn=self.conn, session_id=session['id'], query_text=message_text, top_k=5
                 )
                 if retrieved_contexts:
                     context_inputs.extend(retrieved_contexts)
@@ -140,7 +144,7 @@ class ChatOps:
                 # Continue without file contexts - non-fatal
 
             facts_memories_context = None
-            if session.generate_facts_memories:
+            if session.get('generate_facts_memories'):
                 facts_memories_context = await self._refresh_facts_memories_for_session(
                     session=session,
                     conversation_history=history + [("user", message_text)],
@@ -164,7 +168,7 @@ class ChatOps:
                 chat_context: Optional[ChatContext] = None
                 if repo_owner and repo_name:
                     chat_context = ChatContext(
-                        db=self.db,
+                        conn=self.conn,
                         user_id=user_id,
                         repo_owner=repo_owner,
                         repo_name=repo_name,
@@ -205,7 +209,7 @@ class ChatOps:
 
                 # Generate response using LLM service
                 llm_result = await LLMService.generate_response_with_stored_context(
-                    db=self.db,
+                    conn=self.conn,
                     user_id=user_id,
                     github_context=github_context,
                     conversation_history=full_history,
@@ -226,46 +230,67 @@ class ChatOps:
                 ai_actions = []
 
             # Save user message to database
-            user_msg = ChatMessage(
-                session_id=session.id,
-                message_id=f"msg_{utc_now().timestamp()}_{user_id}",
-                message_text=message_text,
-                sender_type="user",
-                role="user",
-                tokens=len(message_text.split()),  # Rough estimate
-            )
-            self.db.add(user_msg)
+            user_tokens = len(message_text.split())
+            user_msg_query = """
+                INSERT INTO chat_messages (
+                    session_id, message_id, message_text, sender_type, role,
+                    is_code, tokens, created_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                RETURNING id, message_id, created_at
+            """
+            user_msg = execute_one(self.conn, user_msg_query, (
+                session['id'],
+                f"msg_{utc_now().timestamp()}_{user_id}",
+                message_text,
+                "user",
+                "user",
+                False,
+                user_tokens
+            ))
 
             # Save AI response to database
-            ai_msg = ChatMessage(
-                session_id=session.id,
-                message_id=f"msg_{utc_now().timestamp()}_ai",
-                message_text=ai_response,
-                sender_type="assistant",
-                role="assistant",
-                tokens=len(ai_response.split()),  # Rough estimate
-                actions=ai_actions,
-            )
-            self.db.add(ai_msg)
+            ai_tokens = len(ai_response.split())
+            ai_msg_query = """
+                INSERT INTO chat_messages (
+                    session_id, message_id, message_text, sender_type, role,
+                    tokens, actions, created_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                RETURNING id, message_id, created_at
+            """
+            ai_msg = execute_one(self.conn, ai_msg_query, (
+                session['id'],
+                f"msg_{utc_now().timestamp()}_ai",
+                ai_response,
+                "assistant",
+                "assistant",
+                ai_tokens,
+                json.dumps(ai_actions) if ai_actions else None
+            ))
 
             # Update session statistics
-            session.total_messages += 2
-            session.total_tokens += user_msg.tokens + ai_msg.tokens
-            session.last_activity = utc_now()
-
-            self.db.commit()
+            total_tokens_added = user_tokens + ai_tokens
+            update_session_query = """
+                UPDATE chat_sessions
+                SET total_messages = total_messages + 2,
+                    total_tokens = total_tokens + %s,
+                    last_activity = NOW(),
+                    updated_at = NOW()
+                WHERE id = %s
+            """
+            execute_write(self.conn, update_session_query, (total_tokens_added, session['id']))
 
             logger.info(f"Successfully processed chat message for session {session_id}")
             return {
                 "reply": ai_response,
-                "message_id": ai_msg.message_id,
+                "message_id": ai_msg['message_id'],
                 "processing_time": 0.5,  # Placeholder
                 "session_id": session_id,
             }
 
         except Exception as e:
             logger.error(f"Failed to process chat message: {e}")
-            self.db.rollback()
             raise ChatOpsError(f"Chat processing failed: {str(e)}")
 
     def _get_conversation_history(
@@ -273,18 +298,19 @@ class ChatOps:
     ) -> List[Tuple[str, str]]:
         """Get recent conversation history for a session"""
         try:
-            messages = (
-                self.db.query(ChatMessage)
-                .filter(ChatMessage.session_id == session_id)
-                .order_by(ChatMessage.created_at.desc())
-                .limit(limit)
-                .all()
-            )
+            query = """
+                SELECT sender_type, message_text
+                FROM chat_messages
+                WHERE session_id = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+            """
+            messages = execute_query(self.conn, query, (session_id, limit))
 
             # Reverse to get chronological order
             messages.reverse()
 
-            return [(msg.sender_type, msg.message_text) for msg in messages]
+            return [(msg['sender_type'], msg['message_text']) for msg in messages]
 
         except Exception as e:
             logger.error(f"Failed to get conversation history: {e}")
@@ -293,20 +319,23 @@ class ChatOps:
     def _get_context_cards_content(self, card_ids: List[str], user_id: int) -> str:
         """Get content from context cards"""
         try:
-            from models import ContextCard
+            if not card_ids:
+                return ""
 
-            cards = (
-                self.db.query(ContextCard)
-                .filter(
-                    ContextCard.id.in_(card_ids),
-                    ContextCard.user_id == user_id,
-                    ContextCard.is_active,
-                )
-                .all()
-            )
+            # Convert card_ids to proper format for SQL IN clause
+            placeholders = ','.join(['%s'] * len(card_ids))
+            query = f"""
+                SELECT id, title, content
+                FROM context_cards
+                WHERE id IN ({placeholders})
+                  AND user_id = %s
+                  AND is_active = TRUE
+            """
+            params = tuple(card_ids) + (user_id,)
+            cards = execute_query(self.conn, query, params)
 
             return "\n\n".join(
-                [f"Context: {card.title}\n{card.content}" for card in cards]
+                [f"Context: {card['title']}\n{card['content']}" for card in cards]
             )
 
         except Exception as e:
@@ -315,7 +344,7 @@ class ChatOps:
 
     async def _refresh_facts_memories_for_session(
         self,
-        session: ChatSession,
+        session: Dict[str, Any],
         conversation_history: Sequence[Tuple[str, str]],
         supplemental_contexts: Sequence[str],
         repo_owner: Optional[str],
@@ -323,7 +352,7 @@ class ChatOps:
     ) -> Optional[str]:
         """Generate and persist Facts & Memories for the current session."""
 
-        if not session.generate_facts_memories:
+        if not session.get('generate_facts_memories'):
             return None
 
         try:
@@ -342,7 +371,7 @@ class ChatOps:
                 max_messages=12,
             )
 
-            repo_context = self._ensure_repo_context_dict(session.repo_context)
+            repo_context = self._ensure_repo_context_dict(session.get('repo_context'))
             stored = repo_context.get("facts_and_memories")
             if not isinstance(stored, dict):
                 stored = {}
@@ -356,7 +385,14 @@ class ChatOps:
                 }
             )
             repo_context["facts_and_memories"] = stored
-            session.repo_context = repo_context
+
+            # Update session repo_context in database
+            update_query = """
+                UPDATE chat_sessions
+                SET repo_context = %s, updated_at = NOW()
+                WHERE id = %s
+            """
+            execute_write(self.conn, update_query, (json.dumps(repo_context), session['id']))
 
             return self._format_internal_facts_context(result)
 
@@ -397,7 +433,7 @@ class ChatOps:
 
     def _build_lightweight_snapshot(
         self,
-        session: ChatSession,
+        session: Dict[str, Any],
         repo_owner: Optional[str],
         repo_name: Optional[str],
     ) -> RepositorySnapshot:
@@ -407,7 +443,7 @@ class ChatOps:
         if repo_owner and repo_name:
             summary_lines.append(f"Repository: {repo_owner}/{repo_name}")
 
-        repo_context = self._ensure_repo_context_dict(session.repo_context)
+        repo_context = self._ensure_repo_context_dict(session.get('repo_context'))
         description = repo_context.get("description")
         if isinstance(description, str) and description.strip():
             summary_lines.append(f"Description: {description.strip()}")

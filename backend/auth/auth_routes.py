@@ -18,7 +18,7 @@ from auth.github_oauth import (
     validate_github_app_config,
     validate_session_token,
 )
-from db.database import get_db
+from db.database import get_db_connection
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
 from fastapi.security import HTTPBearer
@@ -27,7 +27,7 @@ from models import (
     SessionTokenRequest,
     # SessionTokenResponse,
 )
-from sqlalchemy.orm import Session
+from psycopg import Connection
 
 from utils import utc_now
 
@@ -67,7 +67,7 @@ async def auth_callback(
     code: str = None,
     error: str = None,
     error_description: str = None,
-    db: Session = Depends(get_db)
+    conn: Connection = Depends(get_db_connection)
 ):
     """
     Handle GitHub OAuth callback - redirect to frontend with auth data
@@ -141,32 +141,32 @@ async def auth_callback(
 
         # Create or update user with GitHub App OAuth support
         user = await create_or_update_user(
-            db,
+            conn,
             github_user,
             access_token,
             installation_id=installation_id,
             permissions=permissions,
             repositories_url=repositories_url
         )
-        logger.info(f"Created/updated user record for: {user.github_username} (ID: {user.id})")
-        
+        logger.info(f"Created/updated user record for: {user['github_username']} (ID: {user['id']})")
+
         # Create session token for frontend (this ALWAYS creates a fresh token)
-        session_token = create_session_token(db, user.id, expires_in_hours=24)
-        logger.info(f"Created fresh session token for user: {user.github_username}")
-        
+        session_token = create_session_token(conn, user['id'], expires_in_hours=24)
+        logger.info(f"Created fresh session token for user: {user['github_username']}")
+
         # Build success redirect URL with auth data (NO GitHub token for security)
         auth_params = {
-            "session_token": session_token.session_token,
-            "user_id": str(user.id),
-            "username": user.github_username,
-            "name": user.display_name or user.github_username,
-            "email": user.email or "",
-            "avatar": user.avatar_url or "",
-            "github_id": user.github_user_id
+            "session_token": session_token['session_token'],
+            "user_id": str(user['id']),
+            "username": user['github_username'],
+            "name": user.get('display_name') or user['github_username'],
+            "email": user.get('email') or "",
+            "avatar": user.get('avatar_url') or "",
+            "github_id": user['github_user_id']
         }
         
         redirect_url = f"{get_frontend_base_url()}/auth/success?{urlencode(auth_params)}"
-        logger.info(f"Redirecting user {user.github_username} to frontend with session token")
+        logger.info(f"Redirecting user {user['github_username']} to frontend with session token")
         
         return RedirectResponse(url=redirect_url, status_code=302)
         
@@ -213,20 +213,20 @@ async def api_login():
 
 
 @router.get("/api/user")
-async def api_get_user(db: Session = Depends(get_db), credentials=Depends(HTTPBearer())):
+async def api_get_user(conn: Connection = Depends(get_db_connection), credentials=Depends(HTTPBearer())):
     """Get user by Bearer session token in Authorization header."""
     try:
         token = credentials.credentials if credentials else None
-        user = validate_session_token(db, token) if token else None
+        user = validate_session_token(conn, token) if token else None
         if not user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session token")
         return {
-            "id": user.id,
-            "github_username": user.github_username,
-            "github_id": user.github_user_id,
-            "display_name": user.display_name,
-            "email": user.email,
-            "avatar_url": user.avatar_url
+            "id": user['id'],
+            "github_username": user['github_username'],
+            "github_id": user['github_user_id'],
+            "display_name": user.get('display_name'),
+            "email": user.get('email'),
+            "avatar_url": user.get('avatar_url')
         }
     except HTTPException:
         raise
@@ -236,13 +236,13 @@ async def api_get_user(db: Session = Depends(get_db), credentials=Depends(HTTPBe
 
 
 @router.post("/api/logout")
-async def api_logout(request: SessionTokenRequest, db: Session = Depends(get_db)):
+async def api_logout(request: SessionTokenRequest, conn: Connection = Depends(get_db_connection)):
     """Logout user by deactivating session token"""
     try:
         logger.info(f"Processing logout for session token: {request.session_token[:10]}...")
-        
+
         # Deactivate the session token
-        success = deactivate_session_token(db, request.session_token)
+        success = deactivate_session_token(conn, request.session_token)
         
         if success:
             logger.info("User logged out successfully")

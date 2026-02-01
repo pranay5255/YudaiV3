@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import uuid
@@ -20,7 +21,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from db.database import SessionLocal
+from db.database import SessionLocal, get_raw_connection
+from db.sql_helpers import execute_one, execute_query, execute_write
 from fastapi import HTTPException, status
 from context.facts_and_memories import (
     FactsAndMemoriesService,
@@ -49,6 +51,7 @@ from solver.sandbox import (
     SandboxRunResult,
 )
 from sqlalchemy.orm import Session, joinedload
+from psycopg import Connection
 
 from utils import utc_now
 
@@ -145,19 +148,20 @@ class DefaultSolverManager(SolverManager):
     async def _build_solve_metadata(
         self,
         *,
-        db: Session,
-        chat_session: ChatSession,
+        conn: Connection,
+        chat_session: Dict[str, Any],
         repo_url: str,
     ) -> Dict[str, Any]:
-        conversation = (
-            db.query(ChatMessage)
-            .filter(ChatMessage.session_id == chat_session.id)
-            .order_by(ChatMessage.created_at.desc())
-            .limit(10)
-            .all()
-        )
+        query = """
+            SELECT sender_type, message_text
+            FROM chat_messages
+            WHERE session_id = %s
+            ORDER BY created_at DESC
+            LIMIT 10
+        """
+        conversation = execute_query(conn, query, (chat_session['id'],))
         conversation_payload = [
-            {"author": message.sender_type, "text": message.message_text}
+            {"author": message['sender_type'], "text": message['message_text']}
             for message in reversed(conversation)
         ]
 
@@ -181,36 +185,55 @@ class DefaultSolverManager(SolverManager):
         model_run_plans: List[ModelRunPlan] = []
         issue_url: Optional[str] = None
 
-        db = self._session_factory()
-        try:
-            chat_session = (
-                db.query(ChatSession)
-                .filter(
-                    ChatSession.session_id == session_id, ChatSession.user_id == user.id
-                )
-                .first()
-            )
+        with get_raw_connection() as conn:
+            # Get chat session
+            session_query = """
+                SELECT id, session_id, user_id, repo_owner, repo_name
+                FROM chat_sessions
+                WHERE session_id = %s AND user_id = %s
+            """
+            chat_session = execute_one(conn, session_query, (session_id, user['id'] if isinstance(user, dict) else user.id))
             if not chat_session:
                 raise HTTPException(
                     status.HTTP_404_NOT_FOUND, detail="Session not found for user"
                 )
 
-            issue = (
-                db.query(Issue)
-                .options(joinedload(Issue.repository))
-                .filter(Issue.id == request.issue_id)
-                .first()
-            )
-            if not issue:
+            # Get issue with repository (JOIN)
+            issue_query = """
+                SELECT i.id, i.html_url, i.number, i.title,
+                       r.id as repo_id, r.user_id as repo_user_id, r.repo_url,
+                       r.name as repo_name, r.owner as repo_owner
+                FROM issues i
+                JOIN repositories r ON i.repository_id = r.id
+                WHERE i.id = %s
+            """
+            issue_row = execute_one(conn, issue_query, (request.issue_id,))
+            if not issue_row:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Issue not found")
 
-            if issue.repository.user_id != user.id:
+            # Check ownership
+            user_id = user['id'] if isinstance(user, dict) else user.id
+            if issue_row['repo_user_id'] != user_id:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Issue not found")
 
-            issue_url = issue.html_url
+            # Restructure issue with repository data
+            issue = {
+                'id': issue_row['id'],
+                'html_url': issue_row['html_url'],
+                'number': issue_row['number'],
+                'title': issue_row['title'],
+                'repository': {
+                    'id': issue_row['repo_id'],
+                    'user_id': issue_row['repo_user_id'],
+                    'repo_url': issue_row['repo_url'],
+                    'name': issue_row['repo_name'],
+                    'owner': issue_row['repo_owner']
+                }
+            }
+            issue_url = issue['html_url']
 
             ai_models = self._select_models(
-                db,
+                conn,
                 ai_model_id=request.ai_model_id,
                 ai_model_ids=request.ai_model_ids,
             )
@@ -218,10 +241,10 @@ class DefaultSolverManager(SolverManager):
                 "Starting solve %s with %d model(s): %s",
                 solve_id,
                 len(ai_models),
-                ", ".join(model.model_id for model in ai_models),
+                ", ".join(model['model_id'] for model in ai_models),
             )
 
-            repo_url = request.repo_url or getattr(issue.repository, "repo_url", None)
+            repo_url = request.repo_url or issue['repository'].get('repo_url')
             if not repo_url:
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST,
@@ -231,7 +254,7 @@ class DefaultSolverManager(SolverManager):
             solve_metadata: Dict[str, Any] = {}
             try:
                 solve_metadata = await self._build_solve_metadata(
-                    db=db,
+                    conn=conn,
                     chat_session=chat_session,
                     repo_url=repo_url,
                 )
@@ -247,7 +270,7 @@ class DefaultSolverManager(SolverManager):
 
             experiments = []
             model_run_plans: List[ModelRunPlan] = []
-            solve_runs: List[SolveRun] = []
+            solve_run_data = []
             selected_models = ai_models[:1]
 
             for current_model in selected_models:
@@ -256,71 +279,94 @@ class DefaultSolverManager(SolverManager):
                 experiments.append(
                     {
                         "run_id": run_id,
-                        "model": current_model.model_id,
+                        "model": current_model['model_id'],
                         "temperature": temperature,
                         "mode": "yolo",
-                        "ai_model_id": current_model.id,
+                        "ai_model_id": current_model['id'],
                     }
                 )
-                solve_runs.append(
-                    SolveRun(
-                        id=run_id,
-                        solve_id=solve_id,
-                        model=current_model.model_id,
-                        temperature=temperature,
-                        max_edits=5,
-                        evolution="baseline",
-                        status=SolveStatus.PENDING.value,
-                    )
-                )
+                solve_run_data.append({
+                    'id': run_id,
+                    'solve_id': solve_id,
+                    'model': current_model['model_id'],
+                    'temperature': temperature,
+                    'max_edits': 5,
+                    'evolution': 'baseline',
+                    'status': SolveStatus.PENDING.value,
+                })
                 model_run_plans.append(
                     ModelRunPlan(
                         run_id=run_id,
-                        ai_model_id=current_model.id,
-                        model_identifier=current_model.model_id,
+                        ai_model_id=current_model['id'],
+                        model_identifier=current_model['model_id'],
                         temperature=temperature,
                     )
                 )
 
             max_parallel = 1
 
-            solve = Solve(
-                id=solve_id,
-                user_id=user.id,
-                session_id=chat_session.id,
-                repo_url=repo_url,
-                issue_number=issue.number,
-                base_branch=request.branch_name,
-                status=SolveStatus.PENDING.value,
-                matrix={
+            # Create solve record
+            user_id = user['id'] if isinstance(user, dict) else user.id
+            github_username = user.get('github_username') if isinstance(user, dict) else getattr(user, 'github_username', None)
+            email = user.get('email') if isinstance(user, dict) else getattr(user, 'email', None)
+
+            solve_query = """
+                INSERT INTO solves (
+                    id, user_id, session_id, repo_url, issue_number, base_branch,
+                    status, matrix, limits, requested_by, max_parallel, time_budget_s,
+                    small_change, best_effort, max_iterations, max_cost,
+                    started_at, created_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                RETURNING id
+            """
+            execute_one(conn, solve_query, (
+                solve_id,
+                user_id,
+                chat_session['id'],
+                repo_url,
+                issue['number'],
+                request.branch_name,
+                SolveStatus.PENDING.value,
+                json.dumps({
                     "experiments": experiments,
                     "small_change": request.small_change,
                     "best_effort": request.best_effort,
                     "max_iterations": request.max_iterations,
                     "max_cost": request.max_cost,
                     "metadata": solve_metadata,
-                },
-                limits={
+                }),
+                json.dumps({
                     "max_parallel": max_parallel,
                     "time_budget_s": self._time_budget_s,
-                },
-                requested_by=user.github_username or user.email or "unknown",
-                max_parallel=max_parallel,
-                time_budget_s=self._time_budget_s,
-            )
+                }),
+                github_username or email or "unknown",
+                max_parallel,
+                self._time_budget_s,
+                request.small_change,
+                request.best_effort,
+                request.max_iterations,
+                request.max_cost
+            ))
 
-            # Store user options as attributes for easy access
-            solve.small_change = request.small_change
-            solve.best_effort = request.best_effort
-            solve.max_iterations = request.max_iterations
-            solve.max_cost = request.max_cost
-
-            db.add(solve)
-            for solve_run in solve_runs:
-                db.add(solve_run)
-            db.commit()
-        finally:
-            db.close()
+            # Create solve run records
+            for run_data in solve_run_data:
+                run_query = """
+                    INSERT INTO solve_runs (
+                        id, solve_id, model, temperature, max_edits,
+                        evolution, status, created_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                """
+                execute_one(conn, run_query, (
+                    run_data['id'],
+                    run_data['solve_id'],
+                    run_data['model'],
+                    run_data['temperature'],
+                    run_data['max_edits'],
+                    run_data['evolution'],
+                    run_data['status']
+                ))
 
         run_ids = [plan.run_id for plan in model_run_plans]
         executor_registry: Dict[str, HeadlessSandboxExecutor] = {}
@@ -782,19 +828,23 @@ class DefaultSolverManager(SolverManager):
 
     def _select_models(
         self,
-        db: Session,
+        conn: Connection,
         *,
         ai_model_id: Optional[int],
         ai_model_ids: Optional[List[int]],
-    ) -> List[AIModel]:
+    ) -> List[Dict[str, Any]]:
         """Resolve requested models, preserving caller ordering."""
 
-        base_query = db.query(AIModel).filter(AIModel.is_active.is_(True))
-
         if ai_model_ids:
-            models = base_query.filter(AIModel.id.in_(ai_model_ids)).all()
-            found_by_id = {model.id: model for model in models}
-            ordered_models: List[AIModel] = []
+            placeholders = ','.join(['%s'] * len(ai_model_ids))
+            query = f"""
+                SELECT id, model_id, name, config, is_active
+                FROM ai_models
+                WHERE is_active = TRUE AND id IN ({placeholders})
+            """
+            models = execute_query(conn, query, tuple(ai_model_ids))
+            found_by_id = {model['id']: model for model in models}
+            ordered_models: List[Dict[str, Any]] = []
             missing_ids: List[int] = []
             for requested_id in ai_model_ids:
                 model = found_by_id.get(requested_id)
@@ -818,11 +868,13 @@ class DefaultSolverManager(SolverManager):
             return ordered_models
 
         if ai_model_id:
-            model = (
-                base_query.filter(AIModel.id == ai_model_id)
-                .order_by(AIModel.id.asc())
-                .first()
-            )
+            query = """
+                SELECT id, model_id, name, config, is_active
+                FROM ai_models
+                WHERE is_active = TRUE AND id = %s
+                ORDER BY id ASC
+            """
+            model = execute_one(conn, query, (ai_model_id,))
             if not model:
                 raise HTTPException(
                     status.HTTP_404_NOT_FOUND,
@@ -830,7 +882,14 @@ class DefaultSolverManager(SolverManager):
                 )
             return [model]
 
-        default_model = base_query.order_by(AIModel.id.asc()).first()
+        query = """
+            SELECT id, model_id, name, config, is_active
+            FROM ai_models
+            WHERE is_active = TRUE
+            ORDER BY id ASC
+            LIMIT 1
+        """
+        default_model = execute_one(conn, query)
         if not default_model:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
@@ -839,9 +898,10 @@ class DefaultSolverManager(SolverManager):
         return [default_model]
 
     @staticmethod
-    def _extract_temperature(model: AIModel) -> float:
+    def _extract_temperature(model: Dict[str, Any]) -> float:
         try:
-            return float((model.config or {}).get("temperature", 0.1))
+            config = model.get('config') or {}
+            return float(config.get("temperature", 0.1))
         except (TypeError, ValueError):
             return 0.1
 

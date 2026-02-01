@@ -4,4 +4,3 @@ data
 hooks
 stores
 types
-utils

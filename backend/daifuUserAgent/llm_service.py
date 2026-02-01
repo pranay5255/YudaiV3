@@ -19,6 +19,8 @@ from models import FileEmbedding
 from sentence_transformers import SentenceTransformer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from psycopg import Connection
+from db.sql_helpers import execute_query
 
 from utils import utc_now
 
@@ -241,13 +243,13 @@ class LLMService:
 
     @staticmethod
     async def get_relevant_file_contexts(
-        db: Session, session_id: int, query_text: str, top_k: int = 5, model: str = None
+        conn: Connection, session_id: int, query_text: str, top_k: int = 5, model: str = None
     ) -> List[str]:
         """
         Retrieve relevant file chunk texts using embedding similarity search.
 
         Args:
-            db: Database session
+            conn: Database connection
             session_id: Session ID to scope the search
             query_text: Text to embed and search against
             top_k: Number of top results to return
@@ -259,20 +261,25 @@ class LLMService:
         # Generate embedding for query
         query_embedding = LLMService.embed_text(query_text)
 
-        # Query for top similar embeddings
-        stmt = (
-            select(FileEmbedding.chunk_text)
-            .where(FileEmbedding.session_id == session_id)
-            .order_by(FileEmbedding.embedding.cosine_distance(query_embedding))
-            .limit(top_k)
-        )
+        # Query for top similar embeddings using pgvector cosine distance operator
+        # The <=> operator computes cosine distance (lower = more similar)
+        query = """
+            SELECT chunk_text,
+                   1 - (embedding <=> %s::vector) as similarity
+            FROM file_embeddings
+            WHERE session_id = %s
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s
+        """
+        # Convert list to PostgreSQL array format for pgvector
+        embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
 
-        results = db.execute(stmt).scalars().all()
-        return results
+        results = execute_query(conn, query, (embedding_str, session_id, embedding_str, top_k))
+        return [row['chunk_text'] for row in results]
 
     @staticmethod
     async def generate_response_with_stored_context(
-        db: Session,
+        conn: Connection,
         user_id: int,
         github_context: dict = None,
         conversation_history: List[Tuple[str, str]] = None,

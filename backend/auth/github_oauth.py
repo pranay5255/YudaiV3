@@ -15,13 +15,16 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
 import httpx
+import json
 from cryptography.hazmat.primitives import serialization
-from db.database import get_db
+from db.database import get_db, get_db_connection
+from db.sql_helpers import execute_one, execute_write, execute_query
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import encode as jwt_encode
 from models import AuthToken, SessionToken, User
 from sqlalchemy.orm import Session
+from psycopg import Connection
 
 from utils import utc_now
 
@@ -227,19 +230,19 @@ async def user_info(token: str) -> Dict[str, Any]:
 
 
 async def create_or_update_user(
-    db: Session,
+    conn: Connection,
     github_user: Dict[str, Any],
     access_token: str,
     installation_id: Optional[int] = None,
     permissions: Optional[Dict[str, Any]] = None,
     repositories_url: Optional[str] = None
-) -> User:
+) -> Dict[str, Any]:
     """
     Create or update user in database from GitHub user info
     Enhanced for GitHub App OAuth support
 
     Args:
-        db: Database session
+        conn: Database connection
         github_user: GitHub user information
         access_token: GitHub access token
         installation_id: Optional GitHub App installation ID
@@ -247,7 +250,7 @@ async def create_or_update_user(
         repositories_url: Optional URL for accessing installation repositories
 
     Returns:
-        User object
+        User dict
     """
     if not github_user or "id" not in github_user or "login" not in github_user:
         raise GitHubOAuthError("Invalid GitHub user information received")
@@ -257,58 +260,90 @@ async def create_or_update_user(
 
     try:
         # Check if user exists
-        user = db.query(User).filter(User.github_user_id == github_id).first()
+        query = """
+            SELECT id, github_username, github_user_id, email,
+                   display_name, avatar_url, created_at, updated_at, last_login
+            FROM users
+            WHERE github_user_id = %s
+        """
+        user = execute_one(conn, query, (github_id,))
 
         if user:
             # Update existing user
-            user.github_username = username
-            user.email = github_user.get("email")
-            user.display_name = github_user.get("name")
-            user.avatar_url = github_user.get("avatar_url")
-            user.last_login = utc_now()
-            user.updated_at = utc_now()
+            update_query = """
+                UPDATE users
+                SET github_username = %s,
+                    email = %s,
+                    display_name = %s,
+                    avatar_url = %s,
+                    last_login = %s,
+                    updated_at = %s
+                WHERE github_user_id = %s
+                RETURNING id, github_username, github_user_id, email,
+                          display_name, avatar_url, created_at, updated_at, last_login
+            """
+            user = execute_one(conn, update_query, (
+                username,
+                github_user.get("email"),
+                github_user.get("name"),
+                github_user.get("avatar_url"),
+                utc_now(),
+                utc_now(),
+                github_id
+            ))
         else:
             # Create new user
-            user = User(
-                github_username=username,
-                github_user_id=github_id,
-                email=github_user.get("email"),
-                display_name=github_user.get("name"),
-                avatar_url=github_user.get("avatar_url"),
-                last_login=utc_now(),
-            )
-            db.add(user)
-
-        db.flush()
+            insert_query = """
+                INSERT INTO users (
+                    github_username, github_user_id, email,
+                    display_name, avatar_url, last_login, created_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                RETURNING id, github_username, github_user_id, email,
+                          display_name, avatar_url, created_at, updated_at, last_login
+            """
+            user = execute_one(conn, insert_query, (
+                username,
+                github_id,
+                github_user.get("email"),
+                github_user.get("name"),
+                github_user.get("avatar_url"),
+                utc_now()
+            ))
 
         # Deactivate any existing active tokens for this user
-        db.query(AuthToken).filter(
-            AuthToken.user_id == user.id, AuthToken.is_active
-        ).update({"is_active": False})
+        deactivate_query = """
+            UPDATE auth_tokens
+            SET is_active = FALSE, updated_at = NOW()
+            WHERE user_id = %s AND is_active = TRUE
+        """
+        execute_write(conn, deactivate_query, (user['id'],))
 
         # Create new token with GitHub App OAuth support
-        auth_token = AuthToken(
-            user_id=user.id,
-            access_token=access_token,
-            token_type="bearer",
-            scope="repo user:email read:org public_repo",  # GitHub App OAuth scopes
-            expires_at=utc_now() + timedelta(hours=8),
-            is_active=True,
-            # GitHub App specific fields
-            github_app_id=GITHUB_APP_ID,
-            installation_id=installation_id,
-            permissions=permissions,
-            repositories_url=repositories_url,
-        )
-        db.add(auth_token)
-
-        db.commit()
-        db.refresh(user)
+        token_query = """
+            INSERT INTO auth_tokens (
+                user_id, access_token, token_type, scope, expires_at, is_active,
+                github_app_id, installation_id, permissions, repositories_url, created_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            RETURNING id
+        """
+        execute_one(conn, token_query, (
+            user['id'],
+            access_token,
+            "bearer",
+            "repo user:email read:org public_repo",
+            utc_now() + timedelta(hours=8),
+            True,
+            GITHUB_APP_ID,
+            installation_id,
+            json.dumps(permissions) if permissions else None,
+            repositories_url
+        ))
 
         return user
 
     except Exception as e:
-        db.rollback()
         raise GitHubOAuthError(f"Failed to create or update user: {str(e)}")
 
 
@@ -358,7 +393,7 @@ def generate_session_token(length: int = 32) -> str:
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
-def create_session_token(db: Session, user_id: int, expires_in_hours: int = 24) -> SessionToken:
+def create_session_token(conn: Connection, user_id: int, expires_in_hours: int = 24) -> Dict[str, Any]:
     """Create a new session token for a user"""
     try:
         print(f"[Auth] Creating session token for user_id: {user_id}")
@@ -368,30 +403,32 @@ def create_session_token(db: Session, user_id: int, expires_in_hours: int = 24) 
         expires_at = utc_now() + timedelta(hours=expires_in_hours)
 
         # Create new session token
-        db_session_token = SessionToken(
-            user_id=user_id,
-            session_token=session_token,
-            expires_at=expires_at,
-            is_active=True
-        )
+        query = """
+            INSERT INTO session_tokens (
+                user_id, session_token, expires_at, is_active, created_at
+            )
+            VALUES (%s, %s, %s, %s, NOW())
+            RETURNING id, user_id, session_token, expires_at, is_active, created_at, updated_at
+        """
+        db_session_token = execute_one(conn, query, (
+            user_id,
+            session_token,
+            expires_at,
+            True
+        ))
 
-        db.add(db_session_token)
-        db.commit()
-        db.refresh(db_session_token)
-
-        print(f"[Auth] Successfully created session token with ID: {db_session_token.id}")
+        print(f"[Auth] Successfully created session token with ID: {db_session_token['id']}")
         return db_session_token
 
     except Exception as e:
         print(f"[Auth] Error creating session token for user {user_id}: {str(e)}")
-        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create session token"
         )
 
 
-def validate_session_token(db: Session, session_token: str) -> Optional[User]:
+def validate_session_token(conn: Connection, session_token: str) -> Optional[Dict[str, Any]]:
     """Validate a session token and return the associated user"""
     try:
         if not session_token:
@@ -400,29 +437,40 @@ def validate_session_token(db: Session, session_token: str) -> Optional[User]:
 
         print(f"[Auth] Validating session token: {session_token[:10]}...")
 
-        # Find active session token
-        db_session_token = db.query(SessionToken).filter(
-            SessionToken.session_token == session_token,
-            SessionToken.is_active
-        ).first()
+        # Find active session token and join with user
+        query = """
+            SELECT u.id, u.github_username, u.github_user_id, u.email,
+                   u.display_name, u.avatar_url, u.created_at, u.updated_at, u.last_login,
+                   st.expires_at
+            FROM session_tokens st
+            JOIN users u ON st.user_id = u.id
+            WHERE st.session_token = %s AND st.is_active = TRUE
+        """
+        result = execute_one(conn, query, (session_token,))
 
-        if not db_session_token:
+        if not result:
             print(f"[Auth] No active session token found: {session_token[:10]}...")
             return None
 
         # Check if token is expired
-        if db_session_token.expires_at < utc_now():
+        if result['expires_at'] < utc_now():
             print(f"[Auth] Session token expired: {session_token[:10]}...")
             return None
 
-        # Get user
-        user = db.query(User).filter(User.id == db_session_token.user_id).first()
+        # Extract user data
+        user = {
+            'id': result['id'],
+            'github_username': result['github_username'],
+            'github_user_id': result['github_user_id'],
+            'email': result['email'],
+            'display_name': result['display_name'],
+            'avatar_url': result['avatar_url'],
+            'created_at': result['created_at'],
+            'updated_at': result['updated_at'],
+            'last_login': result['last_login']
+        }
 
-        if not user:
-            print(f"[Auth] User not found for valid session token: {session_token[:10]}...")
-            return None
-
-        print(f"[Auth] Successfully validated session token for user: {user.github_username}")
+        print(f"[Auth] Successfully validated session token for user: {user['github_username']}")
         return user
 
     except Exception as e:
@@ -430,33 +478,28 @@ def validate_session_token(db: Session, session_token: str) -> Optional[User]:
         return None
 
 
-def deactivate_session_token(db: Session, session_token: str) -> bool:
+def deactivate_session_token(conn: Connection, session_token: str) -> bool:
     """Deactivate a session token by setting is_active=False"""
     try:
         print(f"[Auth] Deactivating session token: {session_token[:10]}...")
 
-        # Find the session token
-        db_session_token = db.query(SessionToken).filter(
-            SessionToken.session_token == session_token,
-            SessionToken.is_active
-        ).first()
+        # Deactivate the token
+        query = """
+            UPDATE session_tokens
+            SET is_active = FALSE, updated_at = NOW()
+            WHERE session_token = %s AND is_active = TRUE
+        """
+        rows_affected = execute_write(conn, query, (session_token,))
 
-        if not db_session_token:
+        if rows_affected == 0:
             print(f"[Auth] Session token not found or already inactive: {session_token[:10]}...")
             return False
-
-        # Deactivate the token
-        db_session_token.is_active = False
-        db_session_token.updated_at = utc_now()
-
-        db.commit()
 
         print(f"[Auth] Successfully deactivated session token: {session_token[:10]}...")
         return True
 
     except Exception as e:
         print(f"[Auth] Error deactivating session token: {str(e)}")
-        db.rollback()
         return False
 
 
@@ -466,54 +509,73 @@ security = HTTPBearer()
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db),
-) -> User:
+    conn: Connection = Depends(get_db_connection),
+) -> Dict[str, Any]:
     token = credentials.credentials
 
     # Always try session token first (frontend sends this)
-    session_token = (
-        db.query(SessionToken)
-        .filter(
-            SessionToken.session_token == token,
-            SessionToken.is_active,
-        )
-        .first()
-    )
+    session_token_query = """
+        SELECT st.id, st.user_id, st.expires_at,
+               u.id as user_id_full, u.github_username, u.github_user_id, u.email,
+               u.display_name, u.avatar_url, u.created_at, u.updated_at, u.last_login
+        FROM session_tokens st
+        JOIN users u ON st.user_id = u.id
+        WHERE st.session_token = %s AND st.is_active = TRUE
+    """
+    session_token = execute_one(conn, session_token_query, (token,))
 
-    if session_token and session_token.expires_at > utc_now():
-        user = db.query(User).filter(User.id == session_token.user_id).first()
-        if user:
-            return user
+    if session_token and session_token['expires_at'] > utc_now():
+        user = {
+            'id': session_token['user_id_full'],
+            'github_username': session_token['github_username'],
+            'github_user_id': session_token['github_user_id'],
+            'email': session_token['email'],
+            'display_name': session_token['display_name'],
+            'avatar_url': session_token['avatar_url'],
+            'created_at': session_token['created_at'],
+            'updated_at': session_token['updated_at'],
+            'last_login': session_token['last_login']
+        }
+        return user
 
     # Fallback to GitHub token only if needed
-    auth_token = (
-        db.query(AuthToken)
-        .filter(
-            AuthToken.access_token == token,
-            AuthToken.is_active,
-        )
-        .first()
-    )
+    auth_token_query = """
+        SELECT at.id, at.user_id, at.expires_at,
+               u.id as user_id_full, u.github_username, u.github_user_id, u.email,
+               u.display_name, u.avatar_url, u.created_at, u.updated_at, u.last_login
+        FROM auth_tokens at
+        JOIN users u ON at.user_id = u.id
+        WHERE at.access_token = %s AND at.is_active = TRUE
+    """
+    auth_token = execute_one(conn, auth_token_query, (token,))
 
     if auth_token:
         # Check expiry for auth token
-        if auth_token.expires_at and auth_token.expires_at < utc_now():
+        if auth_token['expires_at'] and auth_token['expires_at'] < utc_now():
             # Deactivate expired token
-            auth_token.is_active = False
-            db.commit()
+            deactivate_query = """
+                UPDATE auth_tokens
+                SET is_active = FALSE, updated_at = NOW()
+                WHERE id = %s
+            """
+            execute_write(conn, deactivate_query, (auth_token['id'],))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authentication token has expired",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        user = db.query(User).filter(User.id == auth_token.user_id).first()
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+        user = {
+            'id': auth_token['user_id_full'],
+            'github_username': auth_token['github_username'],
+            'github_user_id': auth_token['github_user_id'],
+            'email': auth_token['email'],
+            'display_name': auth_token['display_name'],
+            'avatar_url': auth_token['avatar_url'],
+            'created_at': auth_token['created_at'],
+            'updated_at': auth_token['updated_at'],
+            'last_login': auth_token['last_login']
+        }
         return user
 
     # Neither a valid session token nor a valid auth token
@@ -524,14 +586,14 @@ async def get_current_user(
     )
 
 
-def get_github_api(user_id: int, db: Session):
+def get_github_api(user_id: int, conn: Connection):
     """
     Get GitHub API client for authenticated user
     Uses user access token from GitHub App OAuth
 
     Args:
         user_id: User ID
-        db: Database session
+        conn: Database connection
 
     Returns:
         GitHub API client instance
@@ -540,11 +602,13 @@ def get_github_api(user_id: int, db: Session):
         HTTPException: If user not found or no valid token
     """
     # Get user's active token
-    auth_token = (
-        db.query(AuthToken)
-        .filter(AuthToken.user_id == user_id, AuthToken.is_active)
-        .first()
-    )
+    query = """
+        SELECT id, access_token, expires_at
+        FROM auth_tokens
+        WHERE user_id = %s AND is_active = TRUE
+        LIMIT 1
+    """
+    auth_token = execute_one(conn, query, (user_id,))
 
     if not auth_token:
         raise HTTPException(
@@ -553,10 +617,14 @@ def get_github_api(user_id: int, db: Session):
         )
 
     # Check if token is expired
-    if auth_token.expires_at and auth_token.expires_at < utc_now():
+    if auth_token['expires_at'] and auth_token['expires_at'] < utc_now():
         # Deactivate expired token
-        auth_token.is_active = False
-        db.commit()
+        deactivate_query = """
+            UPDATE auth_tokens
+            SET is_active = FALSE, updated_at = NOW()
+            WHERE id = %s
+        """
+        execute_write(conn, deactivate_query, (auth_token['id'],))
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication token has expired",
@@ -573,7 +641,7 @@ def get_github_api(user_id: int, db: Session):
         )
 
     try:
-        return GhApi(token=auth_token.access_token)
+        return GhApi(token=auth_token['access_token'])
     except Exception as e:
         print(f"Error initializing GhApi: {e}")
         raise HTTPException(

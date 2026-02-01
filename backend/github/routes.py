@@ -9,29 +9,28 @@ Provides endpoints for:
 Backed by daifuUserAgent.githubOps.GitHubOps using the logged-in user's token.
 """
 
-from typing import List
+from typing import List, Dict, Any
 
 from auth.github_oauth import get_current_user
 from daifuUserAgent.githubOps import GitHubOps
-from db.database import get_db
+from db.database import get_db_connection
 from fastapi import APIRouter, Depends, HTTPException, status
-from models import User
-from sqlalchemy.orm import Session
+from psycopg import Connection
 
 router = APIRouter(tags=["github"])
 
 
 @router.get("/repositories", response_model=List[dict])
 async def list_user_repositories(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    conn: Connection = Depends(get_db_connection),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     List repositories accessible by the authenticated user using their GitHub token.
     """
     try:
-        ops = GitHubOps(db)
-        repos = await ops.get_user_repositories(user_id=current_user.id)
+        ops = GitHubOps(conn)
+        repos = await ops.get_user_repositories(user_id=current_user['id'])
         return repos
     except HTTPException:
         raise
@@ -46,15 +45,15 @@ async def list_user_repositories(
 async def list_repository_branches(
     owner: str,
     repo: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    conn: Connection = Depends(get_db_connection),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     List branches for a specific repository the authenticated user can access.
     """
     try:
-        ops = GitHubOps(db)
-        branches = await ops.fetch_repository_branches(owner, repo, current_user.id)
+        ops = GitHubOps(conn)
+        branches = await ops.fetch_repository_branches(owner, repo, current_user['id'])
         # Normalize shape to include name and commit object for frontend types
         normalized = [
             {

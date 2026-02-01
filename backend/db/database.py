@@ -5,11 +5,12 @@ Database configuration and session management for YudaiV3
 import os
 import uuid
 from datetime import timedelta
+from contextlib import contextmanager
 
 import requests
+import psycopg
+from psycopg.rows import dict_row
 
-# Import Base from unified models
-from models import Base
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
@@ -48,7 +49,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():
     """
-    Dependency function to get database session
+    Dependency function to get database session (ORM - kept for backward compatibility during migration)
     """
     db = SessionLocal()
     try:
@@ -57,12 +58,35 @@ def get_db():
         db.close()
 
 
+@contextmanager
+def get_raw_connection():
+    """Get raw psycopg3 connection using same connection string as SQLAlchemy"""
+    conn = psycopg.connect(
+        DATABASE_URL,
+        row_factory=dict_row  # Return rows as dicts
+    )
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def get_db_connection():
+    """FastAPI dependency for database connection (vanilla SQL)"""
+    with get_raw_connection() as conn:
+        yield conn
+
+
 def init_db():
     """
-    Initialize database - create all tables using SQLAlchemy models
+    Initialize database - create all tables using SQL schema file
     """
     try:
-        print("Initializing database with SQLAlchemy models...")
+        print("Initializing database with SQL schema...")
 
         # Create pgvector extension for PostgreSQL
         if DATABASE_URL.startswith("postgresql"):
@@ -74,15 +98,20 @@ def init_db():
             except Exception as e:
                 print(f"⚠ Warning: Could not enable pgvector extension: {e}")
 
-        # Import all models here to ensure they are registered with SQLAlchemy
+        # Execute init.sql to create all tables
+        init_sql_path = os.path.join(os.path.dirname(__file__), "init.sql")
+        with open(init_sql_path, "r") as f:
+            sql_script = f.read()
 
-        # Create all tables
-        Base.metadata.create_all(bind=engine)
-        print("✓ Database initialized successfully with SQLAlchemy models")
+        with engine.connect() as conn:
+            # Execute the SQL script
+            conn.execute(text(sql_script))
+            conn.commit()
+
+        print("✓ Database initialized successfully with SQL schema")
         return True
     except Exception as e:
-        print(f"✗ Failed to initialize database with SQLAlchemy models: {e}")
-        print("Falling back to standalone SQL initialization...")
+        print(f"✗ Failed to initialize database: {e}")
         return False
 
 
@@ -91,113 +120,136 @@ def fetch_and_add_openrouter_models() -> None:
     Fetch OpenRouter models from API and add to the database.
     Maps OpenRouter API response to AIModel schema.
     """
-
-    from models import AIModel
-
+    import json
+    from db.sql_helpers import execute_one, execute_write
     from utils import utc_now
 
-    db = SessionLocal()
     try:
-        models_endpoint = "https://openrouter.ai/api/v1/models"
-        response = requests.get(models_endpoint, timeout=10)
-        if not response.ok:
-            print(f"✗ Failed to fetch OpenRouter models: {response.status_code}")
-            return
-        models_data = response.json().get("data", [])
-        if not models_data:
-            print("✗ No model data found in response")
-            return
+        with get_raw_connection() as conn:
+            models_endpoint = "https://openrouter.ai/api/v1/models"
+            response = requests.get(models_endpoint, timeout=10)
+            if not response.ok:
+                print(f"✗ Failed to fetch OpenRouter models: {response.status_code}")
+                return
+            models_data = response.json().get("data", [])
+            if not models_data:
+                print("✗ No model data found in response")
+                return
 
-        created_models = []
-        updated_models = []
+            created_models = []
+            updated_models = []
 
-        for model in models_data:
-            model_id = model.get("id")
-            if not model_id:
-                continue
+            for model in models_data:
+                model_id = model.get("id")
+                if not model_id:
+                    continue
 
-            # Extract provider from model_id (e.g., "openai/gpt-4" -> "openai")
-            provider_parts = model_id.split("/")
-            provider = provider_parts[0] if len(provider_parts) > 1 else "openrouter"
+                # Extract provider from model_id (e.g., "openai/gpt-4" -> "openai")
+                provider_parts = model_id.split("/")
+                provider = provider_parts[0] if len(provider_parts) > 1 else "openrouter"
 
-            # Avoid duplicates by checking if the model already exists in DB
-            existing_model = db.query(AIModel).filter_by(model_id=model_id).first()
+                # Check if the model already exists in DB
+                check_query = "SELECT id FROM ai_models WHERE model_id = %s"
+                existing_model = execute_one(conn, check_query, (model_id,))
 
-            # Extract pricing information
-            pricing_info = model.get("pricing", {})
-            top_provider_info = model.get("top_provider", {})
+                # Extract pricing information
+                pricing_info = model.get("pricing", {})
+                top_provider_info = model.get("top_provider", {})
 
-            # Get context length from model or top_provider
-            context_length = (
-                model.get("context_length")
-                or top_provider_info.get("context_length")
-                or None
-            )
+                # Get context length from model or top_provider
+                context_length = (
+                    model.get("context_length")
+                    or top_provider_info.get("context_length")
+                    or None
+                )
 
-            # Extract pricing per million tokens
-            input_price = pricing_info.get("prompt") or top_provider_info.get(
-                "input_price_per_million_tokens"
-            )
-            output_price = pricing_info.get("completion") or top_provider_info.get(
-                "output_price_per_million_tokens"
-            )
+                # Extract pricing per million tokens
+                input_price = pricing_info.get("prompt") or top_provider_info.get(
+                    "input_price_per_million_tokens"
+                )
+                output_price = pricing_info.get("completion") or top_provider_info.get(
+                    "output_price_per_million_tokens"
+                )
 
-            # Prepare model data
-            model_data = {
-                "name": model.get("name") or model_id,
-                "provider": provider,
-                "model_id": model_id,
-                "canonical_slug": model.get("id"),  # Use model ID as canonical slug
-                "description": model.get("description") or "",
-                "context_length": context_length,
-                "architecture": model.get("architecture"),
-                "pricing": pricing_info if pricing_info else None,
-                "top_provider": top_provider_info if top_provider_info else None,
-                "per_request_limits": model.get("per_request_limits"),
-                "supported_parameters": model.get("supported_parameters", []),
-                "default_parameters": model.get("default_parameters"),
-                "config": model,  # Store full model data as config
-                "input_price_per_million_tokens": float(input_price)
-                if input_price
-                else None,
-                "output_price_per_million_tokens": float(output_price)
-                if output_price
-                else None,
-                "currency": pricing_info.get("currency", "USD")
-                if pricing_info
-                else "USD",
-                "last_price_refresh_at": utc_now(),
-                "is_active": True,
-            }
+                if existing_model:
+                    # Update existing model with latest data
+                    update_query = """
+                        UPDATE ai_models
+                        SET name = %s, provider = %s, canonical_slug = %s,
+                            description = %s, context_length = %s, architecture = %s,
+                            pricing = %s, top_provider = %s, per_request_limits = %s,
+                            supported_parameters = %s, default_parameters = %s,
+                            config = %s, input_price_per_million_tokens = %s,
+                            output_price_per_million_tokens = %s, currency = %s,
+                            last_price_refresh_at = %s, is_active = %s, updated_at = NOW()
+                        WHERE model_id = %s
+                    """
+                    execute_write(conn, update_query, (
+                        model.get("name") or model_id,
+                        provider,
+                        model.get("id"),
+                        model.get("description") or "",
+                        context_length,
+                        model.get("architecture"),
+                        json.dumps(pricing_info) if pricing_info else None,
+                        json.dumps(top_provider_info) if top_provider_info else None,
+                        json.dumps(model.get("per_request_limits")) if model.get("per_request_limits") else None,
+                        json.dumps(model.get("supported_parameters", [])),
+                        json.dumps(model.get("default_parameters")) if model.get("default_parameters") else None,
+                        json.dumps(model),
+                        float(input_price) if input_price else None,
+                        float(output_price) if output_price else None,
+                        pricing_info.get("currency", "USD") if pricing_info else "USD",
+                        utc_now(),
+                        True,
+                        model_id
+                    ))
+                    updated_models.append(model.get("name", model_id))
+                else:
+                    # Create new model
+                    insert_query = """
+                        INSERT INTO ai_models (
+                            name, provider, model_id, canonical_slug, description,
+                            context_length, architecture, pricing, top_provider,
+                            per_request_limits, supported_parameters, default_parameters,
+                            config, input_price_per_million_tokens,
+                            output_price_per_million_tokens, currency,
+                            last_price_refresh_at, is_active, created_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    """
+                    execute_write(conn, insert_query, (
+                        model.get("name") or model_id,
+                        provider,
+                        model_id,
+                        model.get("id"),
+                        model.get("description") or "",
+                        context_length,
+                        model.get("architecture"),
+                        json.dumps(pricing_info) if pricing_info else None,
+                        json.dumps(top_provider_info) if top_provider_info else None,
+                        json.dumps(model.get("per_request_limits")) if model.get("per_request_limits") else None,
+                        json.dumps(model.get("supported_parameters", [])),
+                        json.dumps(model.get("default_parameters")) if model.get("default_parameters") else None,
+                        json.dumps(model),
+                        float(input_price) if input_price else None,
+                        float(output_price) if output_price else None,
+                        pricing_info.get("currency", "USD") if pricing_info else "USD",
+                        utc_now(),
+                        True
+                    ))
+                    created_models.append(model.get("name", model_id))
 
-            if existing_model:
-                # Update existing model with latest data
-                for key, value in model_data.items():
-                    if value is not None:
-                        setattr(existing_model, key, value)
-                updated_models.append(model.get("name", model_id))
-            else:
-                # Create new model
-                ai_model = AIModel(**model_data)
-                db.add(ai_model)
-                created_models.append(model.get("name", model_id))
-
-        db.commit()
-
-        if created_models:
-            print(f"✓ Added {len(created_models)} new OpenRouter models")
-        if updated_models:
-            print(f"✓ Updated {len(updated_models)} existing OpenRouter models")
-        if not created_models and not updated_models:
-            print("No OpenRouter models added or updated.")
+            if created_models:
+                print(f"✓ Added {len(created_models)} new OpenRouter models")
+            if updated_models:
+                print(f"✓ Updated {len(updated_models)} existing OpenRouter models")
+            if not created_models and not updated_models:
+                print("No OpenRouter models added or updated.")
     except Exception as e:
-        db.rollback()
         print(f"✗ Error adding OpenRouter models: {e}")
         import traceback
-
         traceback.print_exc()
-    finally:
-        db.close()
 
 
 def create_sample_data():
