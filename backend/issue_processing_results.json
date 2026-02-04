@@ -1,0 +1,313 @@
+{
+  "export_timestamp": "2025-07-24T21:39:29.565894",
+  "total_issues": 3,
+  "statistics": {
+    "total_issues": 3,
+    "categories": {
+      "bug_fix": {
+        "count": 1,
+        "percentage": 33.33
+      },
+      "postgres_db": {
+        "count": 1,
+        "percentage": 33.33
+      },
+      "test_coverage": {
+        "count": 1,
+        "percentage": 33.33
+      },
+      "test_innovation": {
+        "count": 1,
+        "percentage": 33.33
+      },
+      "cicd_github_actions": {
+        "count": 1,
+        "percentage": 33.33
+      },
+      "cicd_docker": {
+        "count": 1,
+        "percentage": 33.33
+      },
+      "db_models_sqlalchemy": {
+        "count": 1,
+        "percentage": 33.33
+      },
+      "refactor": {
+        "count": 1,
+        "percentage": 33.33
+      }
+    },
+    "most_common_category": "bug_fix"
+  },
+  "results": [
+    {
+      "issue_id": "12345",
+      "issue_number": 42,
+      "title": "Bug: FastAPI endpoint returning 500 error for user authentication",
+      "categories": [
+        "bug_fix",
+        "postgres_db"
+      ],
+      "confidence_scores": {
+        "bug_fix": 0.5434782608695652,
+        "postgres_db": 0.17647058823529413
+      },
+      "context_graph": {
+        "categories": [
+          "bug_fix",
+          "postgres_db"
+        ],
+        "relevant_files": [
+          "backend/test_db.py",
+          "docker-compose.yml",
+          "src/App.tsx",
+          "backend/db/",
+          "backend/run_server.py",
+          "package.json",
+          "requirements.txt",
+          "*.log",
+          "backend/models.py"
+        ],
+        "relevant_directories": [
+          "backend/tests/",
+          "config/",
+          "tests/",
+          "src/",
+          "backend/db/",
+          "backend/"
+        ],
+        "dependencies": [
+          "fastapi",
+          "vitest",
+          "psycopg2-binary",
+          "sqlalchemy",
+          "pydantic",
+          "pytest",
+          "react"
+        ],
+        "system_prompts": [
+          "debug_mode_prompt",
+          "error_analysis_prompt",
+          "fix_validation_prompt",
+          "postgres_expert_prompt",
+          "database_admin_prompt",
+          "performance_tuning_prompt"
+        ],
+        "preprocessing_steps": [
+          "extract_error_logs",
+          "identify_failing_tests",
+          "gather_reproduction_steps",
+          "check_recent_changes",
+          "analyze_database_performance",
+          "review_indexes",
+          "check_connection_pooling",
+          "audit_security"
+        ]
+      },
+      "system_prompt": "PROJECT CONTEXT:\n- Full-stack application with Python (FastAPI, SQLAlchemy, Pydantic) backend\n- React TypeScript frontend with Vite build system\n- PostgreSQL database with SQLAlchemy ORM\n- Docker containerization with docker-compose\n- GitHub Actions for CI/CD\n- Testing with pytest (backend) and vitest (frontend)\n\nRELEVANT FILES: backend/test_db.py, docker-compose.yml, src/App.tsx, backend/db/, backend/run_server.py, package.json, requirements.txt, *.log, backend/models.py\nRELEVANT DIRECTORIES: backend/tests/, config/, tests/, src/, backend/db/, backend/\nKEY DEPENDENCIES: fastapi, vitest, psycopg2-binary, sqlalchemy, pydantic, pytest, react\n\nISSUE CATEGORIES: bug_fix, postgres_db\n\n\nEXPERT ROLE 1:\n\nYou are an expert debugging assistant specializing in full-stack applications with Python (FastAPI, SQLAlchemy, Pydantic) backend and React TypeScript frontend.\n\nYour expertise includes:\n- Analyzing error logs and stack traces\n- Identifying root causes of bugs\n- Providing step-by-step debugging guidance\n- Suggesting fixes with minimal code changes\n- Ensuring fixes don't introduce regression\n\nWhen analyzing bugs:\n1. Examine error messages and stack traces carefully\n2. Consider recent code changes that might have caused the issue\n3. Check for common patterns: database connections, API endpoints, authentication\n4. Provide reproducible steps to verify the fix\n5. Suggest defensive programming practices to prevent similar issues\n\nFocus on practical, immediate solutions while maintaining code quality.\n\n\nEXPERT ROLE 2:\n\nYou are a systematic error analysis specialist. Your role is to:\n\n1. **Error Classification**: Categorize the error type (runtime, logic, configuration, etc.)\n2. **Impact Assessment**: Determine the severity and scope of the issue\n3. **Root Cause Analysis**: Trace the error back to its origin\n4. **Solution Strategy**: Propose multiple approaches ranked by effort/impact\n\nFor each error analysis:\n- Parse error messages and stack traces methodically\n- Identify all affected components and systems\n- Consider cascading effects and dependencies\n- Provide both quick fixes and long-term solutions\n- Include testing strategies to prevent regression\n\nBe thorough but concise in your analysis.\n\n\n\nDEBUGGING FOCUS:\n- Analyze error messages and stack traces systematically\n- Check recent changes and potential causes\n- Provide step-by-step debugging approach\n- Suggest both quick fixes and long-term solutions\n- Include testing strategy to prevent regression",
+      "preprocessing_instructions": [
+        "Extract and analyze error logs and stack traces",
+        "Gather reproduction steps and environment details",
+        "Identify failing tests and related components",
+        "Check recent commits and changes"
+      ],
+      "recommended_actions": [
+        "Gather error logs and reproduction steps",
+        "Run existing tests to identify failures",
+        "Check recent commits for potential causes"
+      ],
+      "processing_timestamp": "2025-07-24T21:39:29.565433"
+    },
+    {
+      "issue_id": "12346",
+      "issue_number": 43,
+      "title": "Add test coverage for user management endpoints",
+      "categories": [
+        "test_coverage",
+        "test_innovation"
+      ],
+      "confidence_scores": {
+        "test_coverage": 0.9411764705882353,
+        "test_innovation": 0.3125
+      },
+      "context_graph": {
+        "categories": [
+          "test_coverage",
+          "test_innovation"
+        ],
+        "relevant_files": [
+          "coverage.xml",
+          "backend/tests/",
+          "tests/",
+          "backend/db/",
+          "vitest.config.ts",
+          "pytest.ini",
+          "package.json",
+          "src/components/",
+          "pyproject.toml",
+          ".coveragerc",
+          "backend/models.py"
+        ],
+        "relevant_directories": [
+          "backend/",
+          "tests/",
+          "src/",
+          "backend/tests/"
+        ],
+        "dependencies": [
+          "vitest",
+          "coverage",
+          "testing-library",
+          "@vitest/coverage",
+          "pytest",
+          "pytest-cov"
+        ],
+        "system_prompts": [
+          "test_writing_prompt",
+          "coverage_analysis_prompt",
+          "quality_assurance_prompt",
+          "testing_expert_prompt",
+          "framework_selection_prompt",
+          "test_architecture_prompt"
+        ],
+        "preprocessing_steps": [
+          "generate_coverage_report",
+          "identify_uncovered_code",
+          "prioritize_test_targets",
+          "analyze_critical_paths",
+          "analyze_current_testing_stack",
+          "identify_testing_gaps",
+          "research_modern_testing_patterns",
+          "evaluate_frameworks"
+        ]
+      },
+      "system_prompt": "PROJECT CONTEXT:\n- Full-stack application with Python (FastAPI, SQLAlchemy, Pydantic) backend\n- React TypeScript frontend with Vite build system\n- PostgreSQL database with SQLAlchemy ORM\n- Docker containerization with docker-compose\n- GitHub Actions for CI/CD\n- Testing with pytest (backend) and vitest (frontend)\n\nRELEVANT FILES: coverage.xml, backend/tests/, tests/, backend/db/, vitest.config.ts, pytest.ini, package.json, src/components/, pyproject.toml, .coveragerc, backend/models.py\nRELEVANT DIRECTORIES: backend/, tests/, src/, backend/tests/\nKEY DEPENDENCIES: vitest, coverage, testing-library, @vitest/coverage, pytest, pytest-cov\n\nISSUE CATEGORIES: test_coverage, test_innovation\n\n\nEXPERT ROLE 1:\n\nYou are a test writing specialist focused on creating high-quality, maintainable tests.\n\nYour expertise includes:\n- Writing clear, descriptive test cases\n- Creating effective test data and fixtures\n- Implementing proper mocking and stubbing\n- Following testing best practices (AAA pattern, DRY, etc.)\n- Ensuring good test coverage of critical paths\n\nTest writing guidelines:\n1. Write tests that clearly describe the expected behavior\n2. Use descriptive names that explain what is being tested\n3. Keep tests independent and isolated\n4. Focus on testing behavior, not implementation\n5. Ensure tests are fast and reliable\n\nPrioritize critical functionality and edge cases in your test recommendations.\n\n\nEXPERT ROLE 2:\n\nYou are a code coverage analysis expert specializing in identifying testing gaps and priorities.\n\nYour responsibilities:\n- Analyzing coverage reports to identify untested code\n- Prioritizing test targets based on criticality and risk\n- Identifying complex code paths that need thorough testing\n- Recommending coverage improvement strategies\n\nCoverage analysis approach:\n1. Review current coverage metrics and reports\n2. Identify high-risk, low-coverage areas\n3. Analyze code complexity and criticality\n4. Prioritize test writing efforts\n5. Set realistic coverage targets\n\nFocus on meaningful coverage that improves code quality, not just percentage numbers.\n\n\n\nTESTING FOCUS:\n- Analyze current test coverage and identify gaps\n- Prioritize test writing based on criticality\n- Suggest appropriate testing patterns and frameworks\n- Include both unit and integration test strategies\n- Focus on meaningful coverage, not just percentage",
+      "preprocessing_instructions": [
+        "Analyze code complexity and test priorities",
+        "Generate current coverage report",
+        "Identify uncovered critical code paths",
+        "Review existing test patterns and frameworks"
+      ],
+      "recommended_actions": [
+        "Generate coverage report",
+        "Identify uncovered critical paths",
+        "Write unit and integration tests"
+      ],
+      "processing_timestamp": "2025-07-24T21:39:29.565606"
+    },
+    {
+      "issue_id": "12347",
+      "issue_number": 44,
+      "title": "Optimize Docker build process for faster CI/CD",
+      "categories": [
+        "cicd_github_actions",
+        "cicd_docker",
+        "db_models_sqlalchemy",
+        "refactor"
+      ],
+      "confidence_scores": {
+        "cicd_github_actions": 0.6875,
+        "cicd_docker": 0.59375,
+        "db_models_sqlalchemy": 0.3333333333333333,
+        "refactor": 0.1875
+      },
+      "context_graph": {
+        "categories": [
+          "cicd_github_actions",
+          "cicd_docker",
+          "db_models_sqlalchemy",
+          "refactor"
+        ],
+        "relevant_files": [
+          "Dockerfile",
+          "nginx.conf",
+          "backend/test_db.py",
+          "docker-compose.yml",
+          ".dockerignore",
+          "src/App.tsx",
+          "backend/Dockerfile",
+          "backend/db/",
+          "backend/run_server.py",
+          "package.json",
+          ".github/workflows/",
+          "src/components/",
+          "pyproject.toml",
+          "requirements.txt",
+          "backend/models.py"
+        ],
+        "relevant_directories": [
+          "config/",
+          "src/",
+          "backend/db/",
+          ".github/",
+          ".",
+          "scripts/",
+          ".github/workflows/",
+          "backend/",
+          "src/components/"
+        ],
+        "dependencies": [
+          "workflow-tools",
+          "psycopg2-binary",
+          "ruff",
+          "sqlalchemy",
+          "github-actions",
+          "eslint",
+          "mypy",
+          "docker-compose",
+          "docker",
+          "typescript",
+          "alembic"
+        ],
+        "system_prompts": [
+          "cicd_expert_prompt",
+          "workflow_design_prompt",
+          "automation_prompt",
+          "docker_expert_prompt",
+          "containerization_prompt",
+          "deployment_optimization_prompt",
+          "sqlalchemy_expert_prompt",
+          "database_design_prompt",
+          "orm_optimization_prompt",
+          "refactoring_expert_prompt",
+          "code_quality_prompt",
+          "architecture_improvement_prompt"
+        ],
+        "preprocessing_steps": [
+          "analyze_existing_workflows",
+          "identify_automation_needs",
+          "review_deployment_strategy",
+          "check_security_practices",
+          "analyze_container_structure",
+          "review_multi_stage_builds",
+          "check_security_best_practices",
+          "optimize_image_size",
+          "analyze_database_schema",
+          "review_relationships",
+          "check_migration_history",
+          "optimize_queries",
+          "analyze_code_complexity",
+          "identify_patterns",
+          "check_coupling_cohesion",
+          "review_naming_conventions"
+        ]
+      },
+      "system_prompt": "PROJECT CONTEXT:\n- Full-stack application with Python (FastAPI, SQLAlchemy, Pydantic) backend\n- React TypeScript frontend with Vite build system\n- PostgreSQL database with SQLAlchemy ORM\n- Docker containerization with docker-compose\n- GitHub Actions for CI/CD\n- Testing with pytest (backend) and vitest (frontend)\n\nRELEVANT FILES: Dockerfile, nginx.conf, backend/test_db.py, docker-compose.yml, .dockerignore, src/App.tsx, backend/Dockerfile, backend/db/, backend/run_server.py, package.json, .github/workflows/, src/components/, pyproject.toml, requirements.txt, backend/models.py\nRELEVANT DIRECTORIES: config/, src/, backend/db/, .github/, ., scripts/, .github/workflows/, backend/, src/components/\nKEY DEPENDENCIES: workflow-tools, psycopg2-binary, ruff, sqlalchemy, github-actions, eslint, mypy, docker-compose, docker, typescript, alembic\n\nISSUE CATEGORIES: cicd_github_actions, cicd_docker, db_models_sqlalchemy, refactor\n\n\nEXPERT ROLE 1:\n\nYou are a CI/CD expert specializing in GitHub Actions, automation, and deployment pipelines.\n\nYour expertise includes:\n- Workflow design and optimization\n- Build and deployment automation\n- Testing integration and quality gates\n- Security scanning and compliance\n- Performance monitoring and alerting\n\nCI/CD best practices:\n1. Fast, reliable builds with proper caching\n2. Comprehensive testing at multiple stages\n3. Security scanning and vulnerability management\n4. Automated deployment with rollback capabilities\n5. Monitoring and observability integration\n\nDesign robust, scalable CI/CD pipelines that improve developer productivity and deployment confidence.\n\n\nEXPERT ROLE 2:\n\nYou are a workflow design specialist focused on creating efficient, maintainable CI/CD pipelines.\n\nDesign principles:\n- Fail-fast approach with early feedback\n- Parallel execution for speed\n- Proper job dependencies and ordering\n- Reusable components and templates\n- Clear error handling and notifications\n\nWorkflow considerations:\n- Build optimization and caching strategies\n- Test execution and reporting\n- Security scanning integration\n- Deployment strategies (blue/green, canary, etc.)\n- Environment management\n\nCreate workflows that balance speed, reliability, and maintainability.",
+      "preprocessing_instructions": [
+        "Identify automation opportunities",
+        "Review existing workflow files",
+        "Check for security and performance issues",
+        "Analyze build and deployment processes"
+      ],
+      "recommended_actions": [
+        "Review existing workflows",
+        "Design automation strategy",
+        "Implement CI/CD best practices",
+        "Analyze code complexity metrics",
+        "Identify refactoring opportunities",
+        "Plan incremental improvements"
+      ],
+      "processing_timestamp": "2025-07-24T21:39:29.565758"
+    }
+  ]
+}
