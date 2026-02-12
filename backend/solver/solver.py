@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from models import (
     CancelSolveResponse,
     SolveStatusResponse,
+    SolveTrajectoryResponse,
     StartSolveRequest,
     StartSolveResponse,
     User,
@@ -71,5 +72,26 @@ async def cancel_solve(
     return await solver_manager.cancel_solve(
         session_id=session_id,
         solve_id=solve_id,
+        user=current_user,
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/solve/trajectory/{solve_id}/{run_id}",
+    response_model=SolveTrajectoryResponse,
+)
+async def get_solve_trajectory(
+    session_id: str,
+    solve_id: str,
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+) -> SolveTrajectoryResponse:
+    """
+    Retrieve the latest trajectory snapshot for a specific solve run.
+    """
+    return await solver_manager.get_trajectory(
+        session_id=session_id,
+        solve_id=solve_id,
+        run_id=run_id,
         user=current_user,
     )
