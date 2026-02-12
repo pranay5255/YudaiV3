@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useRepository } from '../hooks/useRepository';
 import { useSessionManagement } from '../hooks/useSessionManagement';
 import { useAuthStore } from '../stores/authStore';
+import { TrajectoryViewer } from './TrajectoryViewer';
 import type {
   SolveStatusResponse,
   StartSolveRequest,
@@ -77,20 +78,89 @@ const DEFAULT_SOLVER_LIMITS = {
   max_cost: 7.5,
 };
 
+type ArenaStrategy = 'minimal-fix' | 'test-first' | 'balanced';
+
+const ARENA_STRATEGIES: Array<{ id: ArenaStrategy; label: string; description: string }> = [
+  {
+    id: 'minimal-fix',
+    label: 'Minimal Fix',
+    description: 'Smallest possible diff with direct issue focus.',
+  },
+  {
+    id: 'test-first',
+    label: 'Test First',
+    description: 'Bias toward test validation before code edits.',
+  },
+  {
+    id: 'balanced',
+    label: 'Balanced',
+    description: 'Trade off speed, correctness, and readability.',
+  },
+];
+
+interface SolveLaunchOptions {
+  issueId: number;
+  modelIds: number[];
+  smallChange: boolean;
+  bestEffort: boolean;
+  arenaMode: boolean;
+  arenaStrategies: ArenaStrategy[];
+}
+
 interface IssueModalProps {
   issue: GitHubIssue;
   onClose: () => void;
-  onStartSolve: (issueId: number, modelId: number, smallChange: boolean, bestEffort: boolean) => void;
+  onStartSolve: (options: SolveLaunchOptions) => void;
   availableModels: AIModel[];
   isLoading: boolean;
 }
 
 function IssueModal({ issue, onClose, onStartSolve, availableModels, isLoading }: IssueModalProps) {
   const [selectedModelId, setSelectedModelId] = useState<number>(availableModels[0]?.id || 0);
+  const [selectedModelIds, setSelectedModelIds] = useState<number[]>(
+    availableModels[0] ? [availableModels[0].id] : []
+  );
   const [smallChange, setSmallChange] = useState(false);
   const [bestEffort, setBestEffort] = useState(false);
+  const [arenaMode, setArenaMode] = useState(false);
+  const [arenaStrategies, setArenaStrategies] = useState<ArenaStrategy[]>(
+    ARENA_STRATEGIES.map((strategy) => strategy.id)
+  );
+
+  useEffect(() => {
+    if (availableModels.length === 0) return;
+    setSelectedModelId((current) => current || availableModels[0].id);
+    setSelectedModelIds((current) =>
+      current.length > 0 ? current : [availableModels[0].id]
+    );
+  }, [availableModels]);
 
   const isYudaiGenerated = issue.labels.includes('chat-generated');
+  const hasSelectableModel = arenaMode ? selectedModelIds.length > 0 : Boolean(selectedModelId);
+  const hasSelectedStrategies = arenaStrategies.length > 0;
+  const estimatedContestants = arenaMode
+    ? selectedModelIds.length * arenaStrategies.length
+    : 1;
+
+  const toggleModel = (modelId: number) => {
+    setSelectedModelIds((current) => {
+      if (current.includes(modelId)) {
+        if (current.length === 1) return current;
+        return current.filter((id) => id !== modelId);
+      }
+      return [...current, modelId];
+    });
+  };
+
+  const toggleArenaStrategy = (strategy: ArenaStrategy) => {
+    setArenaStrategies((current) => {
+      if (current.includes(strategy)) {
+        if (current.length === 1) return current;
+        return current.filter((value) => value !== strategy);
+      }
+      return [...current, strategy];
+    });
+  };
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -159,29 +229,119 @@ function IssueModal({ issue, onClose, onStartSolve, availableModels, isLoading }
           <div className="space-y-4 pt-4 border-t border-border">
             <h3 className="text-lg font-mono font-semibold text-fg">Solve Configuration</h3>
 
+            <label className="flex items-center gap-3 cursor-pointer p-3 bg-bg-tertiary border border-border rounded-lg hover:border-border-accent transition-colors">
+              <input
+                type="checkbox"
+                checked={arenaMode}
+                onChange={(event) => setArenaMode(event.target.checked)}
+                className="w-4 h-4 text-amber bg-bg border-border rounded focus:ring-amber accent-amber"
+                disabled={isLoading}
+              />
+              <div>
+                <span className="text-fg font-mono text-sm font-medium">Arena Mode</span>
+                <p className="text-xs text-muted font-mono">
+                  Run multiple contestants in parallel and pick the winner.
+                </p>
+              </div>
+            </label>
+
             {/* AI Model Selection */}
             <div>
               <label className="block text-xs font-mono uppercase tracking-wider text-muted mb-2">
-                Select AI Model
+                {arenaMode ? 'Select AI Models' : 'Select AI Model'}
               </label>
-              <select
-                value={selectedModelId}
-                onChange={(e) => setSelectedModelId(Number(e.target.value))}
-                className="w-full bg-bg-tertiary border border-border rounded-lg px-4 py-3 text-fg font-mono text-sm focus:outline-none focus:border-amber/50 focus:ring-2 focus:ring-amber/10 transition-all duration-200"
-                disabled={isLoading}
-              >
-                {availableModels.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.name} ({model.provider})
-                  </option>
-                ))}
-              </select>
-              {availableModels.find(m => m.id === selectedModelId)?.description && (
+              {!arenaMode ? (
+                <select
+                  value={selectedModelId}
+                  onChange={(e) => {
+                    const nextModelId = Number(e.target.value);
+                    setSelectedModelId(nextModelId);
+                    setSelectedModelIds([nextModelId]);
+                  }}
+                  className="w-full bg-bg-tertiary border border-border rounded-lg px-4 py-3 text-fg font-mono text-sm focus:outline-none focus:border-amber/50 focus:ring-2 focus:ring-amber/10 transition-all duration-200"
+                  disabled={isLoading}
+                >
+                  {availableModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name} ({model.provider})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="space-y-2">
+                  {availableModels.map((model) => {
+                    const checked = selectedModelIds.includes(model.id);
+                    return (
+                      <label
+                        key={model.id}
+                        className={`flex items-center gap-3 p-3 rounded-lg border transition-colors cursor-pointer ${
+                          checked
+                            ? 'border-amber/40 bg-amber/5'
+                            : 'border-border bg-bg-tertiary hover:border-border-accent'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleModel(model.id)}
+                          className="w-4 h-4 text-amber bg-bg border-border rounded focus:ring-amber accent-amber"
+                          disabled={isLoading}
+                        />
+                        <div className="min-w-0">
+                          <p className="font-mono text-sm text-fg truncate">
+                            {model.name} ({model.provider})
+                          </p>
+                          <p className="font-mono text-xs text-muted truncate">{model.model_id}</p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              {availableModels.find((m) => m.id === selectedModelId)?.description && !arenaMode && (
                 <p className="text-xs text-muted font-mono mt-2">
-                  {availableModels.find(m => m.id === selectedModelId)?.description}
+                  {availableModels.find((m) => m.id === selectedModelId)?.description}
                 </p>
               )}
             </div>
+
+            {arenaMode && (
+              <div>
+                <label className="block text-xs font-mono uppercase tracking-wider text-muted mb-2">
+                  Arena Strategies
+                </label>
+                <div className="space-y-2">
+                  {ARENA_STRATEGIES.map((strategy) => {
+                    const checked = arenaStrategies.includes(strategy.id);
+                    return (
+                      <label
+                        key={strategy.id}
+                        className={`flex items-center gap-3 p-3 rounded-lg border transition-colors cursor-pointer ${
+                          checked
+                            ? 'border-cyan/40 bg-cyan/5'
+                            : 'border-border bg-bg-tertiary hover:border-border-accent'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleArenaStrategy(strategy.id)}
+                          className="w-4 h-4 text-cyan bg-bg border-border rounded focus:ring-cyan accent-cyan"
+                          disabled={isLoading}
+                        />
+                        <div>
+                          <p className="font-mono text-sm text-fg">{strategy.label}</p>
+                          <p className="font-mono text-xs text-muted">{strategy.description}</p>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-muted font-mono mt-2">
+                  Estimated contestants: {estimatedContestants}
+                </p>
+              </div>
+            )}
 
             {/* Options Checkboxes */}
             <div className="space-y-3">
@@ -226,12 +386,22 @@ function IssueModal({ issue, onClose, onStartSolve, availableModels, isLoading }
             Cancel
           </button>
           <button
-            onClick={() => issue.id && onStartSolve(issue.id, selectedModelId, smallChange, bestEffort)}
+            onClick={() =>
+              issue.id &&
+              onStartSolve({
+                issueId: issue.id,
+                modelIds: arenaMode ? selectedModelIds : [selectedModelId],
+                smallChange,
+                bestEffort,
+                arenaMode,
+                arenaStrategies,
+              })
+            }
             className="px-6 py-2.5 bg-amber hover:bg-amber/90 text-bg-primary rounded-lg font-mono text-sm font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed glow-amber flex items-center gap-2"
-            disabled={isLoading || !selectedModelId || !issue.id}
+            disabled={isLoading || !hasSelectableModel || !issue.id || (arenaMode && !hasSelectedStrategies)}
           >
             {isLoading && <div className="animate-spin rounded-full h-4 w-4 border-2 border-bg-primary/20 border-t-bg-primary" />}
-            {isLoading ? 'Starting Solve...' : 'Start Solve'}
+            {isLoading ? 'Starting Solve...' : arenaMode ? 'Start Arena' : 'Start Solve'}
           </button>
         </div>
       </div>
@@ -240,12 +410,13 @@ function IssueModal({ issue, onClose, onStartSolve, availableModels, isLoading }
 }
 
 interface SolveProgressModalProps {
+  sessionId: string;
   solveStatus: SolveStatusResponse;
   onClose: () => void;
   onCancel: () => void;
 }
 
-function SolveProgressModal({ solveStatus, onClose, onCancel }: SolveProgressModalProps) {
+function SolveProgressModal({ sessionId, solveStatus, onClose, onCancel }: SolveProgressModalProps) {
   const isComplete = isCompleteStatus(solveStatus.status);
   const canCancel = canCancelStatus(solveStatus.status);
 
@@ -357,6 +528,20 @@ function SolveProgressModal({ solveStatus, onClose, onCancel }: SolveProgressMod
                   View Pull Request &rarr;
                 </a>
               )}
+            </div>
+          )}
+
+          {solveStatus.runs.length > 0 && (
+            <div className="bg-bg-tertiary border border-border rounded-xl p-4">
+              <h3 className="text-lg font-mono font-semibold text-fg mb-3">Trajectory Stream</h3>
+              <div className="h-[420px] rounded-lg border border-border overflow-hidden bg-bg-secondary">
+                <TrajectoryViewer
+                  sessionId={sessionId}
+                  solveId={solveStatus.solve_session_id}
+                  runs={solveStatus.runs}
+                  pollIntervalMs={2000}
+                />
+              </div>
             </div>
           )}
 
@@ -494,34 +679,27 @@ export function SolveIssues() {
   useEffect(() => {
     if (!activeSolveId || !activeSessionId) return;
 
+    const shouldPoll = !solveStatus || !isCompleteStatus(solveStatus.status);
+    if (!shouldPoll) return;
+
     const pollStatus = async () => {
       try {
         const data = await apiCall(
           `/api/daifu/sessions/${activeSessionId}/solve/status/${activeSolveId}`
         );
         setSolveStatus(data);
-
-        // Stop polling if solve is complete
-        if (isCompleteStatus(data.status)) {
-          setActiveSolveId(null);
-        }
       } catch (err) {
         console.error('Failed to fetch solve status:', err);
       }
     };
 
     pollStatus();
-    const interval = setInterval(pollStatus, 3000); // Poll every 3 seconds
+    const interval = setInterval(pollStatus, 2000);
 
     return () => clearInterval(interval);
-  }, [activeSolveId, activeSessionId]);
+  }, [activeSolveId, activeSessionId, solveStatus]);
 
-  const handleStartSolve = async (
-    issueId: number,
-    modelId: number,
-    smallChange: boolean,
-    bestEffort: boolean
-  ) => {
+  const handleStartSolve = async (options: SolveLaunchOptions) => {
     if (!activeSessionId || !selectedRepository) {
       setError('No active session or repository selected');
       return;
@@ -535,16 +713,24 @@ export function SolveIssues() {
       const repoOwner = selectedRepository.repository.owner?.login ||
                         selectedRepository.repository.full_name.split('/')[0];
       const repoName = selectedRepository.repository.name;
+      const selectedModelIds = options.modelIds.filter(Boolean);
+
+      if (selectedModelIds.length === 0) {
+        throw new Error('At least one AI model must be selected');
+      }
 
       const solverPayload: StartSolveRequest = {
-        issue_id: issueId,
-        ai_model_id: modelId,
+        issue_id: options.issueId,
         repo_url: `https://github.com/${repoOwner}/${repoName}`,
         branch_name: selectedRepository.branch || 'main',
-        small_change: smallChange,
-        best_effort: bestEffort,
+        small_change: options.smallChange,
+        best_effort: options.bestEffort,
         max_iterations: DEFAULT_SOLVER_LIMITS.max_iterations,
         max_cost: DEFAULT_SOLVER_LIMITS.max_cost,
+        arena_mode: options.arenaMode,
+        arena_strategies: options.arenaMode ? options.arenaStrategies : undefined,
+        ai_model_ids: options.arenaMode ? selectedModelIds : undefined,
+        ai_model_id: options.arenaMode ? undefined : selectedModelIds[0],
       };
 
       const data = await apiCall(`/api/daifu/sessions/${activeSessionId}/solve/start`, {
@@ -563,7 +749,7 @@ export function SolveIssues() {
           runs_failed: 0,
           runs_running: 0,
           last_update: new Date().toISOString(),
-          message: 'Starting solve...',
+          message: options.arenaMode ? 'Starting arena...' : 'Starting solve...',
         },
         runs: [],
       });
@@ -733,8 +919,9 @@ export function SolveIssues() {
         />
       )}
 
-      {solveStatus && activeSolveId && (
+      {solveStatus && activeSolveId && activeSessionId && (
         <SolveProgressModal
+          sessionId={activeSessionId}
           solveStatus={solveStatus}
           onClose={() => {
             setActiveSolveId(null);
