@@ -1,8 +1,8 @@
 """
-E2B Sandbox operations for solver execution.
+Modal Sandbox operations for solver execution.
 
 This module handles all sandbox-related operations including:
-- E2B sandbox creation and lifecycle management
+- Modal sandbox creation and lifecycle management
 - Sandbox environment configuration
 - Agent script and config artifact upload
 - Sandbox command execution with streaming output support
@@ -39,7 +39,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from e2b import Sandbox
+import modal
 from solver.agentScriptGen import AgentScriptParams, build_agent_script
 
 from utils import utc_now
@@ -67,6 +67,45 @@ REMOTE_TFBD_PATH = "/home/user/tfbd.yaml"
 REMOTE_AGENT_SCRIPT_PATH = "/home/user/run_agent.py"
 MINI_SWE_AGENT_PATH = "/home/user/mini-swe-agent"
 MINI_SWE_AGENT_REPO = "https://github.com/pranay5255/yudai-swe-agent.git"
+SOLVER_IMAGE = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("git", "curl")
+    .pip_install("requests", "pyyaml")
+)
+
+_modal_app: Optional[modal.App] = None
+_modal_app_lock = asyncio.Lock()
+
+
+async def _call_modal_async(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """
+    Call Modal APIs using async variants when available.
+
+    Modal exposes `.aio` wrappers on many methods. We use them when present and
+    fall back to a worker thread for sync-only methods.
+    """
+
+    aio_fn = getattr(fn, "aio", None)
+    if aio_fn is not None:
+        return await aio_fn(*args, **kwargs)
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+async def _get_modal_app() -> modal.App:
+    """Lazily initialize and cache the Modal app for sandbox creation."""
+
+    global _modal_app
+    if _modal_app is not None:
+        return _modal_app
+
+    async with _modal_app_lock:
+        if _modal_app is None:
+            _modal_app = await _call_modal_async(
+                modal.App.lookup,
+                "yudai-solver",
+                create_if_missing=True,
+            )
+    return _modal_app
 
 
 # ============================================================================
@@ -170,24 +209,20 @@ def build_tfbd_config(params: AgentScriptParams) -> str:
     )
 
 
-def _stringify_env(env: Dict[str, Any]) -> Dict[str, str]:
-    """Convert Env dict values to strings to satisfy E2B requirements."""
-
-    return {key: str(value) for key, value in env.items() if value not in (None, "")}
-
-
 def build_sandbox_env_bundle(
     *,
     openrouter_api_key: str,
     github_token: Optional[str],
 ) -> Tuple[Dict[str, str], Dict[str, str]]:
-    """Construct sandbox and command environments following E2B guidance."""
+    """Construct sandbox and command environments for Modal sandbox execution."""
 
     base_env: Dict[str, Any] = {"OPENROUTER_API_KEY": openrouter_api_key}
     if github_token:
         base_env["GITHUB_TOKEN"] = github_token
 
-    sandbox_env = _stringify_env(base_env)
+    sandbox_env = {
+        key: value for key, value in base_env.items() if value not in (None, "")
+    }
     command_env = sandbox_env.copy()
     return sandbox_env, command_env
 
@@ -267,10 +302,29 @@ class SandboxExecutionError(Exception):
 
 
 @dataclass
-class SandboxClient:
-    """Thin asynchronous adapter around the E2B Sandbox SDK."""
+class CommandResult:
+    """Result object returned by sandbox command execution."""
 
-    _sandbox: Sandbox
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
+def _coerce_stream_chunk(chunk: Any) -> str:
+    """Normalize stream chunks to text."""
+
+    if chunk is None:
+        return ""
+    if isinstance(chunk, bytes):
+        return chunk.decode("utf-8", errors="replace")
+    return str(chunk)
+
+
+@dataclass
+class SandboxClient:
+    """Thin asynchronous adapter around the Modal Sandbox SDK."""
+
+    _sandbox: modal.Sandbox
 
     @classmethod
     async def create(
@@ -280,22 +334,79 @@ class SandboxClient:
         metadata: Optional[Dict[str, str]] = None,
         timeout: int = 1800,  # 30 minutes default for agent execution
     ) -> "SandboxClient":
-        sanitized_envs = _stringify_env(envs or {})
-        sanitized_metadata = _stringify_env(metadata or {})
+        sanitized_envs = {
+            key: value for key, value in (envs or {}).items() if value not in (None, "")
+        }
+        sanitized_metadata = {
+            key: str(value)
+            for key, value in (metadata or {}).items()
+            if value not in (None, "")
+        }
         logger.info(
-            "Creating sandbox with envs=%s metadata=%s timeout=%ds",
+            "Creating Modal sandbox with env=%s metadata=%s timeout=%ds",
             sanitized_envs,
             sanitized_metadata,
             timeout,
         )
 
-        sandbox = await asyncio.to_thread(
-            Sandbox.create,
+        app = await _get_modal_app()
+        sandbox = await _call_modal_async(
+            modal.Sandbox.create,
+            app=app,
+            image=SOLVER_IMAGE,
+            env=sanitized_envs or None,
             timeout=timeout,
-            envs=sanitized_envs or None,
-            metadata=sanitized_metadata or None,
         )
-        return cls(_sandbox=sandbox)
+        client = cls(_sandbox=sandbox)
+        if sanitized_metadata:
+            await _call_modal_async(client._sandbox.set_tags, sanitized_metadata)
+        return client
+
+    async def _consume_stream(
+        self,
+        stream: Any,
+        sink: List[str],
+        callback: Optional[Callable[[str], None]],
+    ) -> None:
+        if stream is None:
+            return
+
+        if hasattr(stream, "__aiter__"):
+            async for chunk in stream:
+                text = _coerce_stream_chunk(chunk)
+                if not text:
+                    continue
+                sink.append(text)
+                if callback:
+                    callback(text)
+            return
+
+        def _consume_sync() -> None:
+            for chunk in stream:
+                text = _coerce_stream_chunk(chunk)
+                if not text:
+                    continue
+                sink.append(text)
+                if callback:
+                    callback(text)
+
+        await asyncio.to_thread(_consume_sync)
+
+    async def _resolve_return_code(self, process: Any) -> int:
+        exit_code = getattr(process, "returncode", None)
+        if isinstance(exit_code, int):
+            return exit_code
+
+        wait_fn = getattr(process, "wait", None)
+        if callable(wait_fn):
+            wait_result = await _call_modal_async(wait_fn)
+            if isinstance(wait_result, int):
+                return wait_result
+            maybe_code = getattr(wait_result, "returncode", None)
+            if isinstance(maybe_code, int):
+                return maybe_code
+
+        return 0
 
     async def run_command(
         self,
@@ -305,7 +416,7 @@ class SandboxClient:
         timeout: int = 0,  # 0 disables timeout for long-running agent commands
         on_stdout: Optional[Callable[[str], None]] = None,
         on_stderr: Optional[Callable[[str], None]] = None,
-    ):
+    ) -> CommandResult:
         """
         Run a command in the sandbox with optional streaming callbacks.
 
@@ -316,18 +427,42 @@ class SandboxClient:
             on_stdout: Callback function for stdout streaming (receives str chunks)
             on_stderr: Callback function for stderr streaming (receives str chunks)
         """
-        sanitized_envs = _stringify_env(envs or {})
+        sanitized_envs = {
+            key: value for key, value in (envs or {}).items() if value not in (None, "")
+        }
+        exec_kwargs: Dict[str, Any] = {"env": sanitized_envs or None}
+        if timeout and timeout > 0:
+            exec_kwargs["timeout"] = timeout
 
-        def _run_with_callbacks():
-            return self._sandbox.commands.run(
-                command,
-                timeout=timeout,
-                envs=sanitized_envs or None,
-                on_stdout=on_stdout,
-                on_stderr=on_stderr,
-            )
+        process = await _call_modal_async(
+            self._sandbox.exec,
+            "bash",
+            "-c",
+            command,
+            **exec_kwargs,
+        )
 
-        return await asyncio.to_thread(_run_with_callbacks)
+        stdout_chunks: List[str] = []
+        stderr_chunks: List[str] = []
+        await asyncio.gather(
+            self._consume_stream(
+                getattr(process, "stdout", None),
+                stdout_chunks,
+                on_stdout,
+            ),
+            self._consume_stream(
+                getattr(process, "stderr", None),
+                stderr_chunks,
+                on_stderr,
+            ),
+        )
+
+        exit_code = await self._resolve_return_code(process)
+        return CommandResult(
+            exit_code=exit_code,
+            stdout="".join(stdout_chunks),
+            stderr="".join(stderr_chunks),
+        )
 
     async def run_command_with_logging(
         self,
@@ -337,7 +472,7 @@ class SandboxClient:
         timeout: int = 0,
         logger: Optional[logging.Logger] = None,
         log_prefix: str = "",
-    ):
+    ) -> CommandResult:
         """
         Run a command with automatic stdout/stderr logging.
 
@@ -351,13 +486,13 @@ class SandboxClient:
         if logger is None:
             logger = logging.getLogger(__name__)
 
-        def log_stdout(chunk: str):
+        def log_stdout(chunk: str) -> None:
             if chunk.strip():
-                logger.info(f"{log_prefix}STDOUT: {chunk.strip()}")
+                logger.info("%sSTDOUT: %s", log_prefix, chunk.strip())
 
-        def log_stderr(chunk: str):
+        def log_stderr(chunk: str) -> None:
             if chunk.strip():
-                logger.warning(f"{log_prefix}STDERR: {chunk.strip()}")
+                logger.warning("%sSTDERR: %s", log_prefix, chunk.strip())
 
         return await self.run_command(
             command,
@@ -367,23 +502,39 @@ class SandboxClient:
             on_stderr=log_stderr,
         )
 
-    async def write_file(self, path: str, content: str):
-        await asyncio.to_thread(self._sandbox.files.write, path, content)
+    async def write_file(self, path: str, content: str) -> None:
+        def _write() -> None:
+            handle = self._sandbox.open(path, "w")
+            try:
+                handle.write(content)
+            finally:
+                handle.close()
+
+        await asyncio.to_thread(_write)
 
     async def read_file(self, path: str) -> bytes:
         """Read file content from sandbox."""
-        return await asyncio.to_thread(self._sandbox.files.read, path)
 
-    async def close(self):
-        await asyncio.to_thread(self._sandbox.close)
+        def _read() -> bytes:
+            handle = self._sandbox.open(path, "rb")
+            try:
+                return handle.read()
+            finally:
+                handle.close()
+
+        return await asyncio.to_thread(_read)
+
+    async def close(self) -> None:
+        await _call_modal_async(self._sandbox.terminate)
 
     async def get_id(self) -> str:
-        info = await asyncio.to_thread(self._sandbox.get_info)
-        return info.sandbox_id
+        return str(self._sandbox.object_id)
 
     async def get_metadata(self) -> Dict[str, str]:
-        info = await asyncio.to_thread(self._sandbox.get_info)
-        return getattr(info, "metadata", {}) or {}
+        tags = await _call_modal_async(self._sandbox.get_tags)
+        if not isinstance(tags, dict):
+            return {}
+        return {str(key): str(value) for key, value in tags.items()}
 
 
 # ============================================================================
@@ -520,10 +671,10 @@ async def download_trajectory_file(
 
 class HeadlessSandboxExecutor:
     """
-    Executes mini-swe-agent in E2B sandboxes using Python bindings.
+    Executes mini-swe-agent in Modal sandboxes using Python bindings.
 
     This executor:
-    1. Creates an E2B sandbox with required dependencies
+    1. Creates a Modal sandbox with required dependencies
     2. Generates execution artifacts (tfbd.yaml + runner script)
     3. Executes the uploaded script which performs repository setup and agent run
     4. Captures execution results and trajectory data
@@ -537,7 +688,7 @@ class HeadlessSandboxExecutor:
 
     async def run(self, request: HeadlessSandboxRequest) -> SandboxRunResult:
         """
-        Execute mini-swe-agent in E2B sandbox using Python bindings.
+        Execute mini-swe-agent in Modal sandbox using Python bindings.
 
         Args:
             request: Sandbox execution request with issue URL, repo, model, etc.
@@ -573,8 +724,8 @@ class HeadlessSandboxExecutor:
                     delay_str,
                 )
 
-            # Create E2B sandbox
-            logger.info("Creating E2B sandbox with mini-swe-agent...")
+            # Create Modal sandbox
+            logger.info("Creating Modal sandbox with mini-swe-agent...")
             metadata = self._build_metadata(request)
             async with self._lock:
                 if self._cancelled:
@@ -755,7 +906,6 @@ class HeadlessSandboxExecutor:
             ("if [ ! -d {path} ]; then git clone --depth 1 {repo} {path}; fi").format(
                 path=MINI_SWE_AGENT_PATH, repo=MINI_SWE_AGENT_REPO
             ),
-            "python3 -m pip install --no-cache-dir requests pyyaml",
             f"python3 -m pip install --no-cache-dir -e {MINI_SWE_AGENT_PATH}",
         ]
 
