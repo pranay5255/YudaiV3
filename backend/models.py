@@ -1052,6 +1052,8 @@ class StartSolveRequest(BaseModel):
     best_effort: bool = False
     max_iterations: int = 50
     max_cost: float = 10.0
+    arena_mode: bool = False
+    arena_strategies: Optional[List[str]] = None
 
     @validator("repo_url")
     def validate_repo_url(cls, value: str) -> str:
@@ -1075,6 +1077,30 @@ class StartSolveRequest(BaseModel):
                     seen.add(model_id)
                     deduped.append(model_id)
             self.ai_model_ids = deduped
+
+        if self.arena_strategies:
+            allowed = {"minimal-fix", "test-first", "balanced"}
+            normalized: List[str] = []
+            seen_strategies: set[str] = set()
+
+            for strategy in self.arena_strategies:
+                if not strategy:
+                    continue
+                normalized_strategy = str(strategy).strip().lower()
+                if normalized_strategy not in allowed:
+                    raise ValueError(
+                        "arena_strategies must only include: minimal-fix, test-first, balanced"
+                    )
+                if normalized_strategy not in seen_strategies:
+                    seen_strategies.add(normalized_strategy)
+                    normalized.append(normalized_strategy)
+
+            if not normalized:
+                raise ValueError("arena_strategies cannot be empty when provided")
+
+            self.arena_strategies = normalized
+            self.arena_mode = True
+
         return self
 
 
@@ -1095,6 +1121,20 @@ class SolveStatusResponse(BaseModel):
     champion_run: Optional[SolveRunOut] = None
     error_message: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+
+
+class SolveTrajectoryResponse(BaseModel):
+    """Trajectory payload returned while a run is executing or after completion."""
+
+    solve_session_id: str
+    run_id: str
+    run_status: SolveStatus
+    source: str
+    is_live: bool = False
+    message_count: int = 0
+    trajectory: Dict[str, Any] = Field(default_factory=dict)
+    error_message: Optional[str] = None
+    updated_at: datetime
 
 
 class CancelSolveResponse(BaseModel):
