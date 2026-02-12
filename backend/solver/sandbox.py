@@ -30,6 +30,7 @@ Streaming Example:
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -65,6 +66,7 @@ model:
 
 REMOTE_TFBD_PATH = "/home/user/tfbd.yaml"
 REMOTE_AGENT_SCRIPT_PATH = "/home/user/run_agent.py"
+REMOTE_TRAJECTORY_PATH = "/home/user/last_mini_run.traj.json"
 MINI_SWE_AGENT_PATH = "/home/user/mini-swe-agent"
 MINI_SWE_AGENT_REPO = "https://github.com/pranay5255/yudai-swe-agent.git"
 
@@ -248,6 +250,7 @@ class HeadlessSandboxRequest:
     solve_run_id: Optional[str] = None
     issue_text: Optional[str] = None
     verbose: bool = False
+    github_token: Optional[str] = None
     openrouter_call_delay: float = 0.0
     create_pr: bool = True
     timeout: int = 1800  # 30 minutes default for agent execution
@@ -446,6 +449,182 @@ def parse_trajectory_metadata(trajectory_data: Dict[str, Any]) -> TrajectoryMeta
     )
 
 
+def normalize_trajectory_payload(payload: Any) -> Dict[str, Any]:
+    """
+    Normalize trajectory data into a stable shape expected by the frontend.
+
+    Returns:
+        {"info": {...}, "messages": [{"role": "...", "content": "..."}]}
+    """
+
+    if not isinstance(payload, dict):
+        return {"info": {}, "messages": []}
+
+    info = payload.get("info", {})
+    if not isinstance(info, dict):
+        info = {}
+
+    normalized_messages: List[Dict[str, str]] = []
+    raw_messages = payload.get("messages", [])
+    if isinstance(raw_messages, list):
+        for item in raw_messages:
+            if not isinstance(item, dict):
+                continue
+            role = item.get("role")
+            content = item.get("content")
+            if role is None and content is None:
+                continue
+            normalized_messages.append(
+                {
+                    "role": str(role or "assistant"),
+                    "content": str(content or ""),
+                }
+            )
+
+    return {"info": info, "messages": normalized_messages}
+
+
+def _decode_json_string(value: str) -> str:
+    """Decode a JSON string literal fragment safely."""
+
+    try:
+        return json.loads(f'"{value}"')
+    except Exception:
+        return value
+
+
+def _extract_partial_string(raw_text: str, key: str) -> Optional[str]:
+    match = re.search(
+        rf'"{re.escape(key)}"\s*:\s*"(?P<value>(?:\\.|[^"\\])*)"',
+        raw_text,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return None
+    return _decode_json_string(match.group("value"))
+
+
+def _extract_partial_number(raw_text: str, key: str) -> Optional[float]:
+    match = re.search(
+        rf'"{re.escape(key)}"\s*:\s*(?P<value>-?\d+(?:\.\d+)?)',
+        raw_text,
+    )
+    if not match:
+        return None
+    try:
+        return float(match.group("value"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_partial_messages(raw_text: str) -> List[Dict[str, str]]:
+    """
+    Best-effort extraction of complete message objects from partial JSON.
+
+    This intentionally only captures fully quoted role/content pairs and ignores
+    any trailing incomplete object while the file is still being written.
+    """
+
+    pattern = re.compile(
+        r'\{\s*"role"\s*:\s*"(?P<role>(?:\\.|[^"\\])*)"\s*,\s*"content"\s*:\s*"(?P<content>(?:\\.|[^"\\])*)"',
+        flags=re.DOTALL,
+    )
+    messages: List[Dict[str, str]] = []
+    for match in pattern.finditer(raw_text):
+        role = _decode_json_string(match.group("role"))
+        content = _decode_json_string(match.group("content"))
+        messages.append({"role": role or "assistant", "content": content or ""})
+    return messages
+
+
+def parse_trajectory_text(
+    raw_text: str,
+    *,
+    previous: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Parse complete or partial trajectory JSON into a normalized payload."""
+
+    if not raw_text:
+        return copy.deepcopy(previous) if previous else None
+
+    try:
+        parsed = json.loads(raw_text)
+        return normalize_trajectory_payload(parsed)
+    except json.JSONDecodeError:
+        pass
+
+    fallback_messages = _extract_partial_messages(raw_text)
+    previous_payload = normalize_trajectory_payload(previous or {})
+    info = dict(previous_payload.get("info", {}))
+
+    exit_status = _extract_partial_string(raw_text, "exit_status")
+    if exit_status:
+        info["exit_status"] = exit_status
+
+    submission = _extract_partial_string(raw_text, "submission")
+    if submission:
+        info["submission"] = submission
+
+    mini_version = _extract_partial_string(raw_text, "mini_version")
+    if mini_version:
+        info["mini_version"] = mini_version
+
+    model_name = _extract_partial_string(raw_text, "model_name")
+    if model_name:
+        config = info.get("config", {})
+        if not isinstance(config, dict):
+            config = {}
+        model_config = config.get("model", {})
+        if not isinstance(model_config, dict):
+            model_config = {}
+        model_config["model_name"] = model_name
+        config["model"] = model_config
+        info["config"] = config
+
+    instance_cost = _extract_partial_number(raw_text, "instance_cost")
+    api_calls = _extract_partial_number(raw_text, "api_calls")
+    if instance_cost is not None or api_calls is not None:
+        stats = info.get("model_stats", {})
+        if not isinstance(stats, dict):
+            stats = {}
+        if instance_cost is not None:
+            stats["instance_cost"] = float(instance_cost)
+        if api_calls is not None:
+            stats["api_calls"] = int(api_calls)
+        info["model_stats"] = stats
+
+    if not fallback_messages:
+        fallback_messages = previous_payload.get("messages", [])
+
+    if not fallback_messages and not info:
+        return copy.deepcopy(previous) if previous else None
+
+    return {"info": info, "messages": fallback_messages}
+
+
+def parse_trajectory_bytes(
+    payload: bytes,
+    *,
+    previous: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Decode bytes and parse trajectory text with partial fallback."""
+
+    if not payload:
+        return copy.deepcopy(previous) if previous else None
+    text = payload.decode("utf-8", errors="ignore")
+    return parse_trajectory_text(text, previous=previous)
+
+
+def load_trajectory_from_local_path(local_path: str) -> Optional[Dict[str, Any]]:
+    """Load and parse a trajectory file from local disk."""
+
+    try:
+        payload = Path(local_path).read_bytes()
+    except Exception:
+        return None
+    return parse_trajectory_bytes(payload)
+
+
 async def download_trajectory_file(
     *,
     sandbox: SandboxClient,
@@ -496,12 +675,15 @@ async def download_trajectory_file(
 
         # Parse metadata
         try:
-            trajectory_data = json.loads(trajectory_bytes.decode("utf-8"))
-            metadata = parse_trajectory_metadata(trajectory_data)
-            logger.info(
-                f"Trajectory metadata: exit_status={metadata.exit_status}, "
-                f"cost={metadata.instance_cost}, api_calls={metadata.api_calls}"
+            trajectory_data = parse_trajectory_bytes(trajectory_bytes)
+            metadata = (
+                parse_trajectory_metadata(trajectory_data) if trajectory_data else None
             )
+            if metadata:
+                logger.info(
+                    f"Trajectory metadata: exit_status={metadata.exit_status}, "
+                    f"cost={metadata.instance_cost}, api_calls={metadata.api_calls}"
+                )
         except Exception as e:
             logger.warning(f"Failed to parse trajectory metadata: {e}")
             metadata = None
@@ -534,6 +716,50 @@ class HeadlessSandboxExecutor:
         self._sandbox: Optional[SandboxClient] = None
         self._cancelled = False
         self._lock = asyncio.Lock()
+        self._latest_trajectory: Optional[Dict[str, Any]] = None
+        self._stream_log_messages: List[Dict[str, str]] = []
+
+    async def read_live_trajectory(self) -> Optional[Dict[str, Any]]:
+        """
+        Read the current trajectory snapshot from a running sandbox.
+
+        Returns the last known valid snapshot when the trajectory file is not yet
+        available or currently being written.
+        """
+
+        async with self._lock:
+            sandbox = self._sandbox
+            cached_snapshot = copy.deepcopy(self._latest_trajectory)
+
+        if not sandbox:
+            return cached_snapshot
+
+        try:
+            payload = await sandbox.read_file(REMOTE_TRAJECTORY_PATH)
+        except Exception as error:
+            logger.debug("Live trajectory not yet readable: %s", error)
+            if cached_snapshot:
+                return cached_snapshot
+            if self._stream_log_messages:
+                return {
+                    "info": {"exit_status": "running"},
+                    "messages": list(self._stream_log_messages),
+                }
+            return cached_snapshot
+
+        parsed = parse_trajectory_bytes(payload, previous=cached_snapshot)
+        if parsed:
+            async with self._lock:
+                self._latest_trajectory = parsed
+            return copy.deepcopy(parsed)
+
+        if self._stream_log_messages:
+            return {
+                "info": {"exit_status": "running"},
+                "messages": list(self._stream_log_messages),
+            }
+
+        return cached_snapshot
 
     async def run(self, request: HeadlessSandboxRequest) -> SandboxRunResult:
         """
@@ -552,7 +778,7 @@ class HeadlessSandboxExecutor:
         try:
             # Get required environment variables
             openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-            github_token = os.getenv("GITHUB_TOKEN")
+            github_token = request.github_token or os.getenv("GITHUB_TOKEN")
 
             if not openrouter_api_key:
                 raise SandboxExecutionError(
@@ -642,12 +868,38 @@ class HeadlessSandboxExecutor:
                 request.issue_url,
                 request.model_name,
             )
-            result = await sandbox.run_command_with_logging(
+            self._stream_log_messages = []
+
+            def on_stdout(chunk: str):
+                if not chunk:
+                    return
+                cleaned = chunk.strip()
+                if cleaned:
+                    logger.info("[Agent %s] STDOUT: %s", sandbox_id, cleaned)
+                    self._stream_log_messages.append(
+                        {"role": "assistant", "content": cleaned}
+                    )
+                    if len(self._stream_log_messages) > 400:
+                        self._stream_log_messages = self._stream_log_messages[-400:]
+
+            def on_stderr(chunk: str):
+                if not chunk:
+                    return
+                cleaned = chunk.strip()
+                if cleaned:
+                    logger.warning("[Agent %s] STDERR: %s", sandbox_id, cleaned)
+                    self._stream_log_messages.append(
+                        {"role": "system", "content": cleaned}
+                    )
+                    if len(self._stream_log_messages) > 400:
+                        self._stream_log_messages = self._stream_log_messages[-400:]
+
+            result = await sandbox.run_command(
                 f"python {script_path}",
                 envs=command_env,
                 timeout=0,  # Disable command timeout for agent execution
-                logger=logger,
-                log_prefix=f"[Agent {sandbox_id}] ",
+                on_stdout=on_stdout,
+                on_stderr=on_stderr,
             )
 
             # Calculate duration
