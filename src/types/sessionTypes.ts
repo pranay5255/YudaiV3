@@ -597,6 +597,8 @@ export interface StartSolveRequest {
   best_effort?: boolean;
   max_iterations?: number;
   max_cost?: number;
+  arena_mode?: boolean;
+  arena_strategies?: Array<'minimal-fix' | 'test-first' | 'balanced'>;
 }
 
 export interface StartSolveResponse {
@@ -651,6 +653,43 @@ export interface CancelSolveResponse {
   solve_session_id: string;
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
   message: string;
+}
+
+export interface SolveTrajectoryMessage {
+  role: string;
+  content: string;
+}
+
+export interface SolveTrajectoryInfo {
+  exit_status?: string;
+  submission?: string;
+  model_stats?: {
+    instance_cost?: number;
+    api_calls?: number;
+  };
+  mini_version?: string;
+  config?: {
+    model?: {
+      model_name?: string;
+    };
+  };
+}
+
+export interface SolveTrajectoryPayload {
+  info: SolveTrajectoryInfo;
+  messages: SolveTrajectoryMessage[];
+}
+
+export interface SolveTrajectoryResponse {
+  solve_session_id: string;
+  run_id: string;
+  run_status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  source: 'none' | 'live_sandbox' | 'local_cache' | string;
+  is_live: boolean;
+  message_count: number;
+  trajectory: SolveTrajectoryPayload;
+  error_message?: string;
+  updated_at: string;
 }
 
 export interface SolveSessionOut {
