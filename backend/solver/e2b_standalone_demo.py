@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Standalone E2B Sandbox Demo Script
+Standalone Modal Sandbox Demo Script
 
-This script demonstrates the full end-to-end execution of mini-swe-agent in an E2B sandbox
+This script demonstrates full end-to-end mini-swe-agent execution in a Modal sandbox
 without requiring database operations or the full manager infrastructure.
 
 Usage:
     1. Set environment variables:
        - OPENROUTER_API_KEY (required)
-       - E2B_API_KEY (required)
+       - MODAL_TOKEN_ID (required)
+       - MODAL_TOKEN_SECRET (required)
        - GITHUB_TOKEN (optional, but recommended for private repos)
 
     2. Modify the USER_CONFIG section below with your repo details
@@ -85,20 +86,23 @@ def validate_environment() -> tuple[str, Optional[str]]:
     Validate required environment variables are set.
 
     Returns:
-        Tuple of (openroutevalidate_environmentr_api_key, github_token)
+        Tuple of (openrouter_api_key, github_token)
 
     Raises:
         SystemExit if required variables are missing
     """
     openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-    e2b_api_key = os.getenv("E2B_API_KEY")
+    modal_token_id = os.getenv("MODAL_TOKEN_ID")
+    modal_token_secret = os.getenv("MODAL_TOKEN_SECRET")
     github_token = os.getenv("GITHUB_TOKEN")
 
     missing = []
     if not openrouter_api_key:
         missing.append("OPENROUTER_API_KEY")
-    if not e2b_api_key:
-        missing.append("E2B_API_KEY")
+    if not modal_token_id:
+        missing.append("MODAL_TOKEN_ID")
+    if not modal_token_secret:
+        missing.append("MODAL_TOKEN_SECRET")
 
     if missing:
         logger.error("Missing required environment variables: %s", ", ".join(missing))
@@ -119,7 +123,7 @@ def validate_environment() -> tuple[str, Optional[str]]:
 def display_config(config: dict):
     """Display the demo configuration."""
     logger.info("=" * 80)
-    logger.info("E2B Sandbox Demo Configuration")
+    logger.info("Modal Sandbox Demo Configuration")
     logger.info("=" * 80)
     for key in (
         "repo_url",
@@ -209,7 +213,7 @@ def build_demo_request(config: dict) -> HeadlessSandboxRequest:
 
 async def run_demo(config: dict) -> SandboxRunResult:
     """
-    Execute the e2b sandbox demo with the provided configuration.
+    Execute the Modal sandbox demo with the provided configuration.
 
     Args:
         config: Configuration dictionary with repo, issue, and model details

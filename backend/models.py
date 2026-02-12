@@ -914,7 +914,7 @@ class Solve(Base):
 
 
 class SolveRun(Base):
-    """Individual experiment run executed inside an E2B sandbox."""
+    """Individual experiment run executed inside a Modal sandbox."""
 
     __tablename__ = "solve_runs"
 
