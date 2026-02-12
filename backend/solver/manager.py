@@ -28,6 +28,7 @@ from context.facts_and_memories import (
 )
 from models import (
     AIModel,
+    AuthToken,
     CancelSolveResponse,
     ChatSession,
     ChatMessage,
@@ -38,6 +39,7 @@ from models import (
     SolveRunOut,
     SolveStatus,
     SolveStatusResponse,
+    SolveTrajectoryResponse,
     StartSolveRequest,
     StartSolveResponse,
     User,
@@ -47,6 +49,7 @@ from solver.sandbox import (
     HeadlessSandboxRequest,
     SandboxExecutionError,
     SandboxRunResult,
+    load_trajectory_from_local_path,
 )
 from sqlalchemy.orm import Session, joinedload
 
@@ -78,6 +81,8 @@ class ModelRunPlan:
     ai_model_id: int
     model_identifier: str
     temperature: float
+    strategy_name: str
+    strategy_prompt: str
 
 
 class SolverManager(ABC):
@@ -98,9 +103,35 @@ class SolverManager(ABC):
         self, *, session_id: str, solve_id: str, user: User
     ) -> CancelSolveResponse: ...
 
+    @abstractmethod
+    async def get_trajectory(
+        self,
+        *,
+        session_id: str,
+        solve_id: str,
+        run_id: str,
+        user: User,
+    ) -> SolveTrajectoryResponse: ...
+
 
 class DefaultSolverManager(SolverManager):
     """Concrete solver manager that runs one experiment per solve session."""
+
+    ARENA_STRATEGY_PROMPTS: Dict[str, str] = {
+        "minimal-fix": (
+            "Prioritize a minimal, surgical fix with the smallest safe diff possible. "
+            "Avoid refactors and only touch files directly tied to the issue."
+        ),
+        "test-first": (
+            "Start by validating the failure and, when practical, add or update tests "
+            "before implementing the fix. Ensure test intent is explicit."
+        ),
+        "balanced": (
+            "Balance correctness, maintainability, and scope. Prefer clear fixes with "
+            "reasonable test coverage and concise implementation."
+        ),
+    }
+    DEFAULT_ARENA_STRATEGIES: List[str] = ["minimal-fix", "test-first", "balanced"]
 
     def __init__(
         self, session_factory=SessionLocal, *, max_parallel: Optional[int] = None
@@ -110,6 +141,7 @@ class DefaultSolverManager(SolverManager):
         self._lock = asyncio.Lock()
         self._max_parallel = max_parallel or int(os.getenv("SOLVER_MAX_PARALLEL", "3"))
         self._time_budget_s = int(os.getenv("SOLVER_TIME_BUDGET_SECONDS", "5400"))
+        self._max_arena_runs = int(os.getenv("SOLVER_ARENA_MAX_RUNS", "6"))
 
     @staticmethod
     def _coerce_bool(value: Any, default: bool = False) -> bool:
@@ -141,6 +173,47 @@ class DefaultSolverManager(SolverManager):
             "max_iterations": self._coerce_int(matrix.get("max_iterations"), 50),
             "max_cost": self._coerce_float(matrix.get("max_cost"), 10.0),
         }
+
+    def _resolve_arena_strategies(
+        self, requested_strategies: Optional[List[str]]
+    ) -> List[str]:
+        if not requested_strategies:
+            return list(self.DEFAULT_ARENA_STRATEGIES)
+
+        resolved: List[str] = []
+        for strategy in requested_strategies:
+            normalized = str(strategy).strip().lower()
+            if normalized in self.ARENA_STRATEGY_PROMPTS and normalized not in resolved:
+                resolved.append(normalized)
+
+        return resolved or list(self.DEFAULT_ARENA_STRATEGIES)
+
+    @staticmethod
+    def _resolve_issue_text(
+        issue_title: str,
+        issue_body: Optional[str],
+        issue_url: str,
+        strategy_name: str,
+        strategy_prompt: str,
+    ) -> str:
+        """Build issue text with arena strategy guidance."""
+
+        trimmed_body = (issue_body or "").strip()
+        issue_sections = [
+            f"Issue URL: {issue_url}",
+            f"Issue Title: {issue_title}",
+            f"Arena Strategy ({strategy_name}): {strategy_prompt}",
+            "Issue Description:",
+            trimmed_body or "(No body provided on GitHub issue)",
+        ]
+        return "\n\n".join(issue_sections)
+
+    @staticmethod
+    def _extract_message_count(trajectory_payload: Dict[str, Any]) -> int:
+        messages = trajectory_payload.get("messages", [])
+        if isinstance(messages, list):
+            return len(messages)
+        return 0
 
     async def _build_solve_metadata(
         self,
@@ -215,7 +288,7 @@ class DefaultSolverManager(SolverManager):
                 ai_model_ids=request.ai_model_ids,
             )
             logger.info(
-                "Starting solve %s with %d model(s): %s",
+                "Starting solve %s with %d requested model(s): %s",
                 solve_id,
                 len(ai_models),
                 ", ".join(model.model_id for model in ai_models),
@@ -245,12 +318,52 @@ class DefaultSolverManager(SolverManager):
                     "generated_at": utc_now().isoformat(),
                 }
 
+            multi_model_requested = bool(
+                request.ai_model_ids and len(request.ai_model_ids) > 1
+            )
+            arena_mode = bool(request.arena_mode or multi_model_requested)
+            arena_strategies = (
+                self._resolve_arena_strategies(request.arena_strategies)
+                if arena_mode
+                else ["balanced"]
+            )
+
+            selected_models = ai_models if arena_mode else ai_models[:1]
+            planned_contestants: List[tuple[AIModel, str, str]] = []
+            if arena_mode:
+                for current_model in selected_models:
+                    for strategy_name in arena_strategies:
+                        planned_contestants.append(
+                            (
+                                current_model,
+                                strategy_name,
+                                self.ARENA_STRATEGY_PROMPTS[strategy_name],
+                            )
+                        )
+            else:
+                selected_model = selected_models[0]
+                planned_contestants.append(
+                    (
+                        selected_model,
+                        "balanced",
+                        self.ARENA_STRATEGY_PROMPTS["balanced"],
+                    )
+                )
+
+            if len(planned_contestants) > self._max_arena_runs:
+                logger.info(
+                    "Capping arena contestants from %d to %d for solve %s",
+                    len(planned_contestants),
+                    self._max_arena_runs,
+                    solve_id,
+                )
+                planned_contestants = planned_contestants[: self._max_arena_runs]
+
             experiments = []
             model_run_plans: List[ModelRunPlan] = []
             solve_runs: List[SolveRun] = []
-            selected_models = ai_models[:1]
 
-            for current_model in selected_models:
+            for current_model, strategy_name, strategy_prompt in planned_contestants:
                 run_id = uuid.uuid4().hex
                 temperature = self._extract_temperature(current_model)
                 experiments.append(
@@ -260,6 +373,7 @@ class DefaultSolverManager(SolverManager):
                         "temperature": temperature,
                         "mode": "yolo",
                         "ai_model_id": current_model.id,
+                        "strategy": strategy_name,
                     }
                 )
                 solve_runs.append(
@@ -269,7 +383,7 @@ class DefaultSolverManager(SolverManager):
                         model=current_model.model_id,
                         temperature=temperature,
                         max_edits=5,
-                        evolution="baseline",
+                        evolution=strategy_name,
                         status=SolveStatus.PENDING.value,
                     )
                 )
@@ -279,10 +393,12 @@ class DefaultSolverManager(SolverManager):
                         ai_model_id=current_model.id,
                         model_identifier=current_model.model_id,
                         temperature=temperature,
+                        strategy_name=strategy_name,
+                        strategy_prompt=strategy_prompt,
                     )
                 )
 
-            max_parallel = 1
+            max_parallel = max(1, min(len(model_run_plans), self._max_parallel))
 
             solve = Solve(
                 id=solve_id,
@@ -298,6 +414,13 @@ class DefaultSolverManager(SolverManager):
                     "best_effort": request.best_effort,
                     "max_iterations": request.max_iterations,
                     "max_cost": request.max_cost,
+                    "arena_mode": arena_mode,
+                    "arena_strategies": arena_strategies,
+                    "issue_context": {
+                        "title": issue.title,
+                        "body": issue.body,
+                        "url": issue_url,
+                    },
                     "metadata": solve_metadata,
                 },
                 limits={
@@ -330,8 +453,11 @@ class DefaultSolverManager(SolverManager):
                 solve_id=solve_id,
                 run_plans=model_run_plans,
                 issue_url=issue_url or "",
+                issue_title=issue.title,
+                issue_body=issue.body,
                 repo_url=repo_url,
                 branch_name=request.branch_name,
+                max_parallel=max_parallel,
                 executor_registry=executor_registry,
             ),
             name=f"solve-{solve_id}",
@@ -360,32 +486,45 @@ class DefaultSolverManager(SolverManager):
         solve_id: str,
         run_plans: List[ModelRunPlan],
         issue_url: str,
+        issue_title: str,
+        issue_body: Optional[str],
         repo_url: str,
         branch_name: str,
+        max_parallel: int,
         executor_registry: Dict[str, HeadlessSandboxExecutor],
     ):
-        """Execute each requested run sequentially inside its own sandbox."""
+        """Execute requested runs in parallel up to the configured cap."""
 
         if not run_plans:
             logger.error("No run plans available for solve %s", solve_id)
             return
 
-        try:
-            for plan in run_plans:
+        parallelism = max(1, min(max_parallel, len(run_plans)))
+        semaphore = asyncio.Semaphore(parallelism)
+        logger.info(
+            "Executing solve %s with %d run(s), parallelism=%d",
+            solve_id,
+            len(run_plans),
+            parallelism,
+        )
+
+        async def execute_plan(plan: ModelRunPlan):
+            async with semaphore:
                 if plan.run_id in executor_registry:
                     logger.warning(
                         "Run %s already has an executor registered. Skipping duplicate.",
                         plan.run_id,
                     )
-                    continue
+                    return
 
                 executor = HeadlessSandboxExecutor()
                 executor_registry[plan.run_id] = executor
                 logger.info(
-                    "Launching run %s for solve %s with model %s",
+                    "Launching run %s for solve %s with model %s strategy=%s",
                     plan.run_id,
                     solve_id,
                     plan.model_identifier,
+                    plan.strategy_name,
                 )
 
                 try:
@@ -393,15 +532,33 @@ class DefaultSolverManager(SolverManager):
                         solve_id=solve_id,
                         run_id=plan.run_id,
                         issue_url=issue_url,
+                        issue_title=issue_title,
+                        issue_body=issue_body,
                         repo_url=repo_url,
                         branch_name=branch_name,
                         model_name=plan.model_identifier,
+                        strategy_name=plan.strategy_name,
+                        strategy_prompt=plan.strategy_prompt,
                         executor=executor,
                     )
                 finally:
                     executor_registry.pop(plan.run_id, None)
+
+        tasks = [
+            asyncio.create_task(
+                execute_plan(plan),
+                name=f"solve-{solve_id}-run-{plan.run_id[:8]}",
+            )
+            for plan in run_plans
+        ]
+
+        try:
+            await asyncio.gather(*tasks)
         except asyncio.CancelledError:
             logger.info("Solve %s execution loop cancelled", solve_id)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             raise
 
     async def get_status(
@@ -438,6 +595,7 @@ class DefaultSolverManager(SolverManager):
                 )
 
             runs_out = [SolveRunOut.model_validate(run) for run in solve.runs]
+            runs_out.sort(key=lambda run: (run.created_at or datetime.min, run.id))
             progress = self._build_progress(solve, runs_out)
 
             champion = (
@@ -533,15 +691,129 @@ class DefaultSolverManager(SolverManager):
             message="Solve cancelled",
         )
 
+    async def get_trajectory(
+        self,
+        *,
+        session_id: str,
+        solve_id: str,
+        run_id: str,
+        user: User,
+    ) -> SolveTrajectoryResponse:
+        db = self._session_factory()
+        try:
+            chat_session = (
+                db.query(ChatSession)
+                .filter(
+                    ChatSession.session_id == session_id,
+                    ChatSession.user_id == user.id,
+                )
+                .first()
+            )
+            if not chat_session:
+                raise HTTPException(
+                    status.HTTP_404_NOT_FOUND, detail="Session not found for user"
+                )
+
+            solve = (
+                db.query(Solve)
+                .filter(
+                    Solve.id == solve_id,
+                    Solve.session_id == chat_session.id,
+                    Solve.user_id == user.id,
+                )
+                .first()
+            )
+            if not solve:
+                raise HTTPException(
+                    status.HTTP_404_NOT_FOUND, detail="Solve session not found"
+                )
+
+            run = (
+                db.query(SolveRun)
+                .filter(SolveRun.id == run_id, SolveRun.solve_id == solve.id)
+                .first()
+            )
+            if not run:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Run not found")
+
+            run_status = SolveStatus(run.status)
+            run_error = run.error_message
+            trajectory_data = run.trajectory_data or {}
+            local_path = (
+                trajectory_data.get("local_path")
+                if isinstance(trajectory_data, dict)
+                else None
+            )
+            updated_at = run.updated_at or run.started_at or solve.updated_at or utc_now()
+        finally:
+            db.close()
+
+        trajectory_payload: Optional[Dict[str, Any]] = None
+        source = "none"
+        is_live = False
+
+        if run_status in {SolveStatus.PENDING, SolveStatus.RUNNING}:
+            executor = await self._get_live_executor(solve_id=solve_id, run_id=run_id)
+            if executor:
+                trajectory_payload = await executor.read_live_trajectory()
+                if trajectory_payload:
+                    source = "live_sandbox"
+                    is_live = True
+
+        if not trajectory_payload and local_path:
+            trajectory_payload = load_trajectory_from_local_path(local_path)
+            if trajectory_payload:
+                source = "local_cache"
+
+        if not trajectory_payload:
+            trajectory_payload = {"info": {}, "messages": []}
+
+        return SolveTrajectoryResponse(
+            solve_session_id=solve_id,
+            run_id=run_id,
+            run_status=run_status,
+            source=source,
+            is_live=is_live,
+            message_count=self._extract_message_count(trajectory_payload),
+            trajectory=trajectory_payload,
+            error_message=run_error,
+            updated_at=updated_at,
+        )
+
+    async def _get_live_executor(
+        self, *, solve_id: str, run_id: str
+    ) -> Optional[HeadlessSandboxExecutor]:
+        async with self._lock:
+            state = self._tasks.get(solve_id)
+            if not state:
+                return None
+            return state.executors.get(run_id)
+
+    @staticmethod
+    def _resolve_github_token(db: Session, user_id: int) -> Optional[str]:
+        token_record = (
+            db.query(AuthToken)
+            .filter(AuthToken.user_id == user_id, AuthToken.is_active.is_(True))
+            .order_by(AuthToken.created_at.desc())
+            .first()
+        )
+        if token_record and token_record.access_token:
+            return token_record.access_token
+        return os.getenv("GITHUB_TOKEN")
+
     async def _execute_run(
         self,
         *,
         solve_id: str,
         run_id: str,
         issue_url: str,
+        issue_title: str,
+        issue_body: Optional[str],
         repo_url: str,
         branch_name: str,
         model_name: str,
+        strategy_name: str,
+        strategy_prompt: str,
         executor: HeadlessSandboxExecutor,
     ):
         db = self._session_factory()
@@ -553,10 +825,11 @@ class DefaultSolverManager(SolverManager):
                 return
 
             logger.info(
-                "Preparing run %s for solve %s (model=%s, issue=%s)",
+                "Preparing run %s for solve %s (model=%s, strategy=%s, issue=%s)",
                 run_id,
                 solve_id,
                 model_name,
+                strategy_name,
                 issue_url,
             )
 
@@ -568,6 +841,14 @@ class DefaultSolverManager(SolverManager):
             db.commit()
 
             options = self._extract_solve_options(solve)
+            issue_text = self._resolve_issue_text(
+                issue_title=issue_title,
+                issue_body=issue_body,
+                issue_url=issue_url,
+                strategy_name=strategy_name,
+                strategy_prompt=strategy_prompt,
+            )
+            github_token = self._resolve_github_token(db=db, user_id=solve.user_id)
 
             request = self._build_headless_request(
                 issue_url=issue_url,
@@ -577,6 +858,8 @@ class DefaultSolverManager(SolverManager):
                 run=run,
                 solve=solve,
                 options=options,
+                issue_text=issue_text,
+                github_token=github_token,
             )
 
             try:
@@ -615,6 +898,8 @@ class DefaultSolverManager(SolverManager):
         run: SolveRun,
         solve: Solve,
         options: Dict[str, Any],
+        issue_text: Optional[str],
+        github_token: Optional[str],
     ) -> HeadlessSandboxRequest:
         """Create a sandbox execution request for a solver run."""
 
@@ -630,6 +915,8 @@ class DefaultSolverManager(SolverManager):
             max_cost=options["max_cost"],
             solve_id=solve.id,
             solve_run_id=run.id,
+            issue_text=issue_text,
+            github_token=github_token,
             verbose=True,
         )
 
