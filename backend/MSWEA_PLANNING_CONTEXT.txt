@@ -330,3 +330,108 @@ Frontend:
 ================================================================================
 ## END OF CONTEXT DUMP
 ================================================================================
+
+## PROD ENV SETUP & TESTING REPORT (MSWEA ARENA MVP)
+Generated: 2026-02-12
+
+### Scope
+Environment variables needed to do **complete production setup and testing** for:
+- Arena mode (parallel contestants)
+- 2-second trajectory polling (`/solve/trajectory/...`)
+- GitHub issue solving + PR flow
+- Docker Compose production deployment
+
+### 1. Required `.env.prod` variables (set explicitly)
+
+| ENV | Required For | Why |
+|---|---|---|
+| `POSTGRES_DB` | DB container + backend DB URL | Creates/targets production DB |
+| `POSTGRES_USER` | DB container + backend DB URL | DB authentication |
+| `POSTGRES_PASSWORD` | DB container + backend DB URL | DB authentication |
+| `OPENROUTER_API_KEY` | Solver/LLM execution | Required by sandbox executor and LLM service |
+| `E2B_API_KEY` | Sandbox execution | Required to create/run E2B sandboxes |
+| `GITHUB_APP_ID` | GitHub App OAuth | App identity + server auth |
+| `GITHUB_APP_CLIENT_ID` | GitHub OAuth flow | User login/authorization |
+| `GITHUB_APP_CLIENT_SECRET` | GitHub OAuth flow | Token exchange |
+| `GITHUB_APP_INSTALLATION_ID` | GitHub App integration | Installation-scoped API operations |
+| `GITHUB_REDIRECT_URI` | OAuth callback | Must match GitHub App config |
+| `FRONTEND_URL` | CORS + OAuth | Backend allowlist + redirect flow |
+| `DOMAIN` | API/domain wiring | Used in backend domain config |
+| `SECRET_KEY` | App security | Backend secret use |
+| `JWT_SECRET` | Session/auth security | JWT signing/validation |
+
+### 2. Strongly recommended explicit vars (avoid relying on defaults)
+
+| ENV | Current Default | Why Set Explicitly in Prod |
+|---|---|---|
+| `BACKEND_URL` | `https://yudai.app/api` | Prevent wrong API origin in non-default domains |
+| `HOST` | `0.0.0.0` | Explicit bind behavior |
+| `PORT` | `8000` | Explicit runtime port |
+| `SALT` | `yudai-salt` | Avoid shared/default salt |
+| `PYTHONUNBUFFERED` | `1` | Deterministic container logging |
+| `PYTHONDONTWRITEBYTECODE` | `1` | Deterministic container behavior |
+
+### 3. Arena/solver tuning vars (recommended for full prod testing)
+
+| ENV | Suggested Test Value | Purpose |
+|---|---|---|
+| `SOLVER_MAX_PARALLEL` | `3` | Max concurrent solve sessions |
+| `SOLVER_TIME_BUDGET_SECONDS` | `5400` | Overall solve budget per solve |
+| `SOLVER_ARENA_MAX_RUNS` | `6` | Cap arena contestants per solve |
+| `TRAJECTORY_STORAGE_DIR` | `/tmp/yudai/trajectories` | Local trajectory cache path |
+
+### 4. Optional fallback var
+
+| ENV | When Needed | Notes |
+|---|---|---|
+| `GITHUB_TOKEN` | If user OAuth token is unavailable | Fallback token path for solver; OAuth user token is preferred for prod |
+
+### 5. Minimal `.env.prod` example for complete setup/testing
+
+```dotenv
+# Database
+POSTGRES_DB=yudai_prod
+POSTGRES_USER=yudai_user
+POSTGRES_PASSWORD=replace_me
+
+# Security
+SECRET_KEY=replace_me
+JWT_SECRET=replace_me
+SALT=replace_me
+
+# Domain / URLs
+DOMAIN=your-domain.com
+FRONTEND_URL=https://your-domain.com
+BACKEND_URL=https://your-domain.com/api
+GITHUB_REDIRECT_URI=https://your-domain.com/auth/callback
+HOST=0.0.0.0
+PORT=8000
+
+# Core integrations
+OPENROUTER_API_KEY=replace_me
+E2B_API_KEY=replace_me
+
+# GitHub App OAuth
+GITHUB_APP_ID=replace_me
+GITHUB_APP_CLIENT_ID=replace_me
+GITHUB_APP_CLIENT_SECRET=replace_me
+GITHUB_APP_INSTALLATION_ID=replace_me
+
+# Runtime
+PYTHONUNBUFFERED=1
+PYTHONDONTWRITEBYTECODE=1
+
+# Arena/solver tuning
+SOLVER_MAX_PARALLEL=3
+SOLVER_TIME_BUDGET_SECONDS=5400
+SOLVER_ARENA_MAX_RUNS=6
+TRAJECTORY_STORAGE_DIR=/tmp/yudai/trajectories
+
+# Optional fallback
+# GITHUB_TOKEN=replace_me
+```
+
+### 6. Non-env blocker to verify (required for setup completeness)
+- GitHub App private key file must exist and be mounted at:
+  - `./backend/yudaiv3.2025-09-07.private-key.pem`
+  - container path: `/app/yudaiv3.2025-09-07.private-key.pem`
