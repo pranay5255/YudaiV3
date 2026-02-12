@@ -733,6 +733,24 @@ class DefaultSolverManager(SolverManager):
         self._finalize_solve_if_complete(db, solve, completed_at=timestamp)
         db.commit()
 
+    def get_executor_for_run(
+        self, solve_id: str, run_id: str
+    ) -> Optional[HeadlessSandboxExecutor]:
+        """
+        Get the live executor for a specific run.
+
+        Args:
+            solve_id: Solve session identifier
+            run_id: Run identifier
+
+        Returns:
+            Live executor or None if not found or run completed
+        """
+        state = self._tasks.get(solve_id)
+        if not state:
+            return None
+        return state.executors.get(run_id)
+
     async def _cleanup_task(self, solve_id: str):
         async with self._lock:
             self._tasks.pop(solve_id, None)
