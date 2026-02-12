@@ -28,8 +28,7 @@ dependencies = [
     "numpy>=2.3.4",
     "sentence-transformers>=5.1.0",
     "torch>=2.9.0",
-    "e2b-code-interpreter>=2.0.0",
-    "e2b>=2.2.1",
+    "modal>=1.0.0",
     "pytest>=8.4.1",
  
 ]

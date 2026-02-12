@@ -37,5 +37,6 @@ MAX_SOLVE_TIME_MINUTES=10
 MAX_CONCURRENT_SOLVES=1
 SOLVER_TIMEOUT_SECONDS=600
 
-# E2B Configuration (for solver)
-E2B_TEMPLATE_ID=your_e2b_template_id_here
+# Modal Configuration (for solver)
+MODAL_TOKEN_ID=your_modal_token_id_here
+MODAL_TOKEN_SECRET=your_modal_token_secret_here
