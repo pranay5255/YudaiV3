@@ -1,0 +1,332 @@
+================================================================================
+MSWEA (Multi-agent Software Engineering Arena) - Planning Context
+Session Date: 2026-02-12
+================================================================================
+
+## USER REQUEST
+
+Help implement the idea from /home/pranay5255/YudaiV3/backend/docs/post.jpg:
+- "GitHub for Agents" concept where AI agents compete to solve issues
+- PR as Auction: Multiple agents compete, best solution wins
+- Agent Reputation: Track merged PRs, reverted commits, issue quality
+- Progressive Staking: First PR cheap, if reverted next costs 10x
+- Best-of-N Synthesis: Reviewer agent evaluates competing solutions
+
+User requirements:
+1. Must ship FAST
+2. Trajectory streaming to TrajectoryViewer (poll every 2s, NOT websockets)
+3. Must work with docker-compose.prod.yml deployment
+4. Simplify to MVP
+
+================================================================================
+## EXISTING CODEBASE ANALYSIS
+================================================================================
+
+### Backend Architecture (FastAPI + PostgreSQL + E2B Sandboxes)
+
+**Current Solver Flow:**
+1. User selects GitHub issue → POST /api/daifu/sessions/{id}/solve/start
+2. DefaultSolverManager creates Solve + SolveRun records
+3. Runs execute SEQUENTIALLY in E2B sandboxes (HeadlessSandboxExecutor)
+4. First successful run becomes champion (first-wins)
+5. Frontend polls GET /solve/status/{solveId} every 3 seconds
+6. Agent script generates trajectory file (.traj.json) saved to /tmp/yudai/trajectories/
+
+**Key Files:**
+- solver/manager.py (863 lines) - DefaultSolverManager orchestrates solve sessions
+- solver/sandbox.py (812 lines) - HeadlessSandboxExecutor manages E2B sandboxes
+- solver/agentScriptGen.py (752 lines) - Generates Python scripts for agent execution
+- solver/solver.py - FastAPI router with 3 endpoints (start, status, cancel)
+- models.py (1400+ lines) - SQLAlchemy + Pydantic models
+
+**Database Models:**
+- Solve: id, user_id, session_id, repo_url, issue_number, status, matrix (JSON),
+  champion_run_id, max_parallel, time_budget_s
+- SolveRun: id, solve_id, model, temperature, status, pr_url, tests_passed,
+  trajectory_data (JSON), diagnostics (JSON)
+- AIModel: id, name, provider, model_id, pricing info
+
+**CRITICAL: Multi-model support ALREADY EXISTS in types**
+```python
+# In StartSolveRequest
+ai_model_id?: number;      # Single model (current UI uses this)
+ai_model_ids?: number[];   # Multiple models (ALREADY DEFINED but unused)
+```
+
+**Trajectory Data Storage:**
+- Agent execution generates /home/user/last_mini_run.traj.json in E2B sandbox
+- HeadlessSandboxExecutor downloads to /tmp/yudai/trajectories/{repo}_{solve_id}_{run_id}.traj.json
+- Metadata stored in SolveRun.trajectory_data as JSON:
+  {
+    "remote_path": "...",
+    "local_path": "...",
+    "metadata": {
+      "exit_status": "...",
+      "instance_cost": 0.05,
+      "api_calls": 120,
+      "total_messages": 240
+    }
+  }
+
+**GitHub Integration:**
+- OAuth via GitHub App (auth/github_oauth.py)
+- User tokens stored in AuthToken table
+- GitHubOps class (daifuUserAgent/githubOps.py) for all GitHub API operations
+- CURRENT GAP: Solver uses server-wide GITHUB_TOKEN env var, not per-user OAuth tokens
+
+================================================================================
+## FRONTEND ARCHITECTURE (React + TypeScript + TanStack Query)
+================================================================================
+
+**Tech Stack:**
+- React 18.3.1 + TypeScript
+- Vite 5.4.19 (build tool)
+- React Router DOM v7.8.2
+- Zustand 5.0.8 (local state)
+- TanStack React Query 5.85.5 (server state/caching)
+- Tailwind CSS 3.4.1 (custom "Terminal Precision" design system)
+
+**Solver UI Components:**
+- src/components/SolveIssues.tsx (749 lines)
+  - IssueModal: Configuration dialog with model selector, checkboxes
+  - SolveProgressModal: Real-time status with 3s polling
+  - Already displays multiple runs + champion highlighting
+  - Already has progress stats (total, completed, running, failed)
+
+**Trajectory Viewer:**
+- src/components/TrajectoryViewer.tsx (253 lines)
+- Currently loads static JSON from src/data/last_mini_run.traj.json
+- Interface TrajectoryData:
+  {
+    info: {
+      exit_status: string,
+      submission: string,
+      model_stats: { instance_cost, api_calls },
+      mini_version: string,
+      config: { model: { model_name } }
+    },
+    messages: [{ role: string, content: string }]
+  }
+- Shows expandable message list with role badges (system/user/assistant)
+- Stats dashboard: cost, API calls, message count, status
+
+**USER REQUIREMENT: Arena must stream trajectory to TrajectoryViewer**
+- Poll E2B server every 2s for trajectory updates
+- Update TrajectoryViewer in real-time during agent execution
+- NO websockets (deployment complexity)
+
+**Type Definitions:**
+- src/types/sessionTypes.ts already has SolveStatusResponse with:
+  - progress: SolveProgress (runs_total, runs_completed, runs_failed, runs_running)
+  - runs: SolveRunOut[] (array of individual runs)
+  - champion_run?: SolveRunOut
+
+================================================================================
+## DEPLOYMENT INFRASTRUCTURE
+================================================================================
+
+**CRITICAL GAP: User mentioned docker-compose.prod.yml but exploration agents failed**
+
+Need to investigate:
+1. How is backend containerized? (Dockerfile, docker-compose.yml)
+2. How is frontend built and served? (nginx? static files?)
+3. What databases are configured? (PostgreSQL connection)
+4. What environment variables are needed?
+5. How are E2B API keys configured?
+6. Any reverse proxy setup?
+
+**This is a blocker for deployment planning.**
+
+================================================================================
+## TRAJECTORY STREAMING REQUIREMENTS
+================================================================================
+
+**User's Vision:**
+1. When arena starts, multiple contestants run in parallel
+2. Each contestant's trajectory must stream to UI in real-time
+3. Frontend polls E2B server every 2s to fetch latest trajectory
+4. TrajectoryViewer updates incrementally (append new messages)
+5. NO websockets (too complex for deployment)
+
+**Implementation Questions:**
+1. How to expose E2B sandbox trajectory during execution?
+   - E2B sandbox is ephemeral, runs in cloud
+   - Agent writes to /home/user/last_mini_run.traj.json progressively
+   - Need endpoint to fetch partial trajectory from running sandbox
+
+2. Where does trajectory polling endpoint live?
+   - Backend needs to proxy E2B sandbox file reads
+   - Endpoint: GET /api/daifu/arena/sessions/{sid}/trajectories/{contestant_id}
+   - Returns current state of trajectory (may be incomplete)
+
+3. How to handle multiple concurrent trajectories (arena with 3-4 agents)?
+   - Each contestant has own sandbox_id
+   - Each gets own trajectory stream
+   - UI tabs or split view to show all trajectories side-by-side?
+
+4. When to switch from polling to final trajectory?
+   - While status=RUNNING: poll every 2s for incremental updates
+   - When status=COMPLETED: fetch final trajectory from /tmp/yudai/trajectories/
+
+================================================================================
+## MVP SIMPLIFICATION STRATEGY
+================================================================================
+
+**Skip for V1:**
+1. LLM Evaluator (evaluator.py) - Use simple heuristic: first tests_passed=True wins
+2. Reputation System (reputation.py) - No reputation tracking or progressive staking
+3. AgentReputation table - No DB overhead
+4. Reduce strategies from 4 to 3: minimal-fix, test-first, balanced
+
+**Keep for V1:**
+1. Arena orchestrator with parallel execution (arena.py)
+2. Strategy system (strategies.py) - different agent personas
+3. Arena + ArenaContestant tables
+4. Trajectory streaming to TrajectoryViewer
+5. Arena mode toggle in UI
+
+**Deployment Constraints (MUST INVESTIGATE):**
+- Must work with docker-compose.prod.yml
+- Must handle E2B API keys securely
+- Must not add complex dependencies (no websockets)
+- Must support PostgreSQL connection pooling
+
+================================================================================
+## CRITICAL UNKNOWNS (NEED TO INVESTIGATE)
+================================================================================
+
+1. **Docker deployment config**
+   - docker-compose.prod.yml structure?
+   - Dockerfile for backend?
+   - nginx config for frontend?
+   - Environment variable management?
+
+2. **Trajectory streaming technical approach**
+   - Can we read from E2B sandbox mid-execution?
+   - E2B SDK support for file reads from running sandboxes?
+   - How to handle partial JSON reads (trajectory file being written)?
+
+3. **Frontend trajectory polling**
+   - Where to store trajectory state? (React Query? Zustand?)
+   - How to merge incremental updates? (append messages)
+   - UI for multi-contestant trajectory view?
+
+4. **Arena UI integration**
+   - Does TrajectoryViewer need tabs for each contestant?
+   - Where does arena mode live? (new tab or toggle in SolveIssues?)
+   - Strategy selection UI design?
+
+================================================================================
+## NEXT STEPS
+================================================================================
+
+1. READ docker-compose.prod.yml and Dockerfile to understand deployment
+2. READ E2B SDK docs to understand mid-execution file reads
+3. DESIGN trajectory streaming architecture
+4. DESIGN arena UI with trajectory integration
+5. UPDATE plan with deployment-aware implementation
+
+================================================================================
+## DESIGN SYSTEM (from design-doc.md)
+================================================================================
+
+**Terminal Precision Aesthetic:**
+- Monospace typography (JetBrains Mono, IBM Plex Mono)
+- Deep charcoal backgrounds (#0a0a0b, #111113, #1a1a1d)
+- Amber primary accent (#f59e0b), Cyan secondary (#22d3ee)
+- Border colors (#2a2a2e, #3d3d42)
+- Text colors (#f4f4f5, #a1a1aa, #71717a)
+
+**Component Patterns:**
+- Rounded corners (rounded-lg, rounded-xl)
+- Border styles (border border-border)
+- Hover effects (hover:border-amber/30)
+- Animation delays for staggered entry
+- Terminal-inspired noise texture overlay
+
+================================================================================
+## FILE STRUCTURE REFERENCE
+================================================================================
+
+Backend:
+/home/pranay5255/YudaiV3/backend/
+├── solver/
+│   ├── manager.py (DefaultSolverManager)
+│   ├── sandbox.py (HeadlessSandboxExecutor)
+│   ├── agentScriptGen.py
+│   ├── solver.py (FastAPI router)
+│   └── mswea/ (NEW - to be created)
+│       ├── __init__.py
+│       ├── models.py (Arena, ArenaContestant tables)
+│       ├── strategies.py (3 built-in strategies)
+│       ├── arena.py (ArenaOrchestrator)
+│       └── routes.py (3 FastAPI endpoints)
+├── models.py (unified SQLAlchemy + Pydantic)
+├── db/database.py
+├── run_server.py
+└── docs/post.jpg (original idea image)
+
+Frontend:
+/home/pranay5255/YudaiV3/src/
+├── components/
+│   ├── SolveIssues.tsx (IssueModal, SolveProgressModal)
+│   └── TrajectoryViewer.tsx (trajectory display)
+├── types/sessionTypes.ts
+├── hooks/
+│   ├── useSessionQueries.ts
+│   └── useSessionManagement.ts
+├── stores/
+│   ├── authStore.ts
+│   └── sessionStore.ts
+└── data/last_mini_run.traj.json (example trajectory)
+
+================================================================================
+## TRAJECTORY FILE FORMAT (from last_mini_run.traj.json)
+================================================================================
+
+{
+  "info": {
+    "exit_status": "submitted",
+    "submission": "...",
+    "model_stats": {
+      "instance_cost": 0.0524,
+      "api_calls": 123,
+      "tokens_sent": 45678,
+      "tokens_received": 23456,
+      "completion_cost": 0.0312,
+      "prompt_cost": 0.0212
+    },
+    "mini_version": "0.2.1",
+    "config": {
+      "model": {
+        "model_name": "anthropic/claude-sonnet-4-5-20250929",
+        "temperature": 0.1
+      }
+    }
+  },
+  "messages": [
+    { "role": "system", "content": "You are a software engineering agent..." },
+    { "role": "user", "content": "Please fix issue #123..." },
+    { "role": "assistant", "content": "I'll analyze the issue..." },
+    ...
+  ]
+}
+
+**Key observation:**
+- File is written incrementally by mini-swe-agent
+- Each message added as agent progresses
+- Final "info" section written at end
+- Need to handle partial reads (file may be incomplete during execution)
+
+================================================================================
+## BLOCKERS SUMMARY
+================================================================================
+
+1. **DEPLOYMENT CONFIG UNKNOWN** - Need docker-compose.prod.yml details
+2. **E2B TRAJECTORY STREAMING** - Need to verify E2B SDK supports mid-execution file reads
+3. **TRAJECTORY UI DESIGN** - Need to design multi-contestant trajectory view
+4. **ARENA UI PLACEMENT** - Where does arena mode toggle go? New tab vs modal toggle?
+
+================================================================================
+## END OF CONTEXT DUMP
+================================================================================
