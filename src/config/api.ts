@@ -33,6 +33,7 @@ export const API = {
       START: `${API_BASE}/daifu/sessions/{sessionId}/solve/start`,
       STATUS: `${API_BASE}/daifu/sessions/{sessionId}/solve/sessions/{solveSessionId}`,
       CANCEL: `${API_BASE}/daifu/sessions/{sessionId}/solve/sessions/{solveSessionId}/cancel`,
+      STREAM: `${API_BASE}/daifu/sessions/{sessionId}/solve/stream/{solveId}/{runId}`,
     },
   },
   SYSTEM: {

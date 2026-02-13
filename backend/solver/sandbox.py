@@ -881,6 +881,32 @@ class HeadlessSandboxExecutor:
         finally:
             await self._cleanup_sandbox()
 
+    async def read_trajectory(self) -> Optional[dict]:
+        """
+        Read trajectory file from the live sandbox.
+
+        Returns:
+            Trajectory data as dict, or None if sandbox unavailable or file doesn't exist
+        """
+        async with self._lock:
+            if not self._sandbox or self._cancelled:
+                return None
+
+            try:
+                trajectory_bytes = await self._sandbox.read_file(
+                    "/home/user/last_mini_run.traj.json"
+                )
+                trajectory_data = json.loads(trajectory_bytes.decode("utf-8"))
+                return trajectory_data
+            except Exception as e:
+                logger.debug(f"Failed to read trajectory file: {e}")
+                return None
+
+    @property
+    def is_active(self) -> bool:
+        """Check if sandbox is active and not cancelled."""
+        return self._sandbox is not None and not self._cancelled
+
     async def cancel(self):
         """Cancel the running sandbox execution."""
         async with self._lock:

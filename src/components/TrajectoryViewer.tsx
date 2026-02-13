@@ -1,61 +1,85 @@
-import React, { useState, useEffect } from 'react';
-import { FileText, ChevronRight, ChevronDown, DollarSign, MessageSquare, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { FileText, ChevronRight, ChevronDown, DollarSign, MessageSquare, Clock, CheckCircle, XCircle, AlertCircle, Radio } from 'lucide-react';
+import { useTrajectoryStream } from '../hooks/useTrajectoryStream';
+import type { TrajectoryData } from '../types/sessionTypes';
 import trajectoryData from '../data/last_mini_run.traj.json';
 
-interface TrajectoryMessage {
-  role: string;
-  content: string;
-}
-
-interface TrajectoryInfo {
-  exit_status: string;
-  submission: string;
-  model_stats: {
-    instance_cost: number;
-    api_calls: number;
-  };
-  mini_version: string;
-  config: {
-    model: {
-      model_name: string;
-    };
-  };
-}
-
-interface TrajectoryData {
-  info: TrajectoryInfo;
-  messages: TrajectoryMessage[];
-}
-
 interface TrajectoryViewerProps {
+  // Static mode props
+  staticData?: TrajectoryData;
+
+  // Live streaming mode props
+  isLive?: boolean;
   sessionId?: string;
+  solveId?: string;
+  runId?: string;
 }
 
-export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({ sessionId }) => {
-  const [trajectory, setTrajectory] = useState<TrajectoryData | null>(null);
-  const [loading, setLoading] = useState(true);
+export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({
+  staticData,
+  isLive = false,
+  sessionId = '',
+  solveId = '',
+  runId = '',
+}) => {
   const [expandedMessages, setExpandedMessages] = useState<Set<number>>(new Set());
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Live streaming hook
+  const {
+    trajectory: liveTrajectory,
+    streamStatus,
+    error: streamError,
+    messageCount: liveMessageCount,
+  } = useTrajectoryStream({
+    sessionId,
+    solveId,
+    runId,
+    enabled: isLive,
+  });
+
+  // Static fallback data
+  const [staticTrajectory, setStaticTrajectory] = useState<TrajectoryData | null>(null);
+  const [loading, setLoading] = useState(!isLive);
   const [error, setError] = useState<string | null>(null);
 
+  // Load static data if not in live mode
   useEffect(() => {
-    loadTrajectory();
-  }, [sessionId]);
+    if (isLive) return;
 
-  const loadTrajectory = async () => {
-    setLoading(true);
-    setError(null);
+    const loadStatic = async () => {
+      setLoading(true);
+      setError(null);
 
-    try {
-      // Import JSON file directly as a module (Vite supports this)
-      // This is more reliable than fetching from public directory
-      setTrajectory(trajectoryData as TrajectoryData);
-    } catch (err) {
-      console.error('Failed to load trajectory:', err);
-      setError(err instanceof Error ? err.message : 'Failed to load trajectory');
-    } finally {
-      setLoading(false);
+      try {
+        if (staticData) {
+          setStaticTrajectory(staticData);
+        } else {
+          // Fallback to imported JSON
+          setStaticTrajectory(trajectoryData as TrajectoryData);
+        }
+      } catch (err) {
+        console.error('Failed to load trajectory:', err);
+        setError(err instanceof Error ? err.message : 'Failed to load trajectory');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadStatic();
+  }, [isLive, staticData]);
+
+  // Auto-scroll to latest message in live mode
+  useEffect(() => {
+    if (isLive && liveTrajectory && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  };
+  }, [isLive, liveMessageCount]);
+
+  // Select data source based on mode
+  const trajectory = isLive ? liveTrajectory : staticTrajectory;
+  const currentError = isLive ? streamError : error;
+  const isLoading = isLive ? streamStatus === 'connecting' : loading;
 
   const toggleMessage = (index: number) => {
     const newExpanded = new Set(expandedMessages);
@@ -87,7 +111,7 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({ sessionId })
     return content.substring(0, maxLength) + '...';
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="text-center">
@@ -98,13 +122,13 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({ sessionId })
     );
   }
 
-  if (error) {
+  if (currentError) {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="text-center text-error">
           <XCircle className="w-12 h-12 mx-auto mb-4" />
           <p className="text-lg font-semibold mb-2">Failed to Load Trajectory</p>
-          <p className="text-sm text-fg/60">{error}</p>
+          <p className="text-sm text-fg/60">{currentError}</p>
         </div>
       </div>
     );
@@ -128,9 +152,17 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({ sessionId })
       {/* Header - Trajectory Info */}
       <div className="p-4 border-b border-zinc-800 bg-zinc-900/50">
         <div className="flex items-center gap-3 mb-3">
-          {getStatusIcon(info.exit_status)}
-          <div>
-            <h3 className="font-semibold text-fg">Agent Execution Trajectory</h3>
+          {getStatusIcon(info.exit_status || '')}
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-fg">Agent Execution Trajectory</h3>
+              {isLive && streamStatus === 'streaming' && (
+                <div className="flex items-center gap-1.5 px-2 py-1 bg-success/10 border border-success/30 rounded-lg">
+                  <Radio className="w-3 h-3 text-success animate-pulse" />
+                  <span className="text-xs font-medium text-success">LIVE</span>
+                </div>
+              )}
+            </div>
             <p className="text-xs text-fg/60">
               {info.config?.model?.model_name || 'Unknown Model'} • v{info.mini_version || 'N/A'}
             </p>
@@ -246,9 +278,10 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({ sessionId })
               </div>
             );
           })}
+          {/* Auto-scroll anchor for live mode */}
+          {isLive && <div ref={messagesEndRef} />}
         </div>
       </div>
     </div>
   );
 };
-

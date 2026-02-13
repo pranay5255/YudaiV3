@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useRepository } from '../hooks/useRepository';
 import { useSessionManagement } from '../hooks/useSessionManagement';
 import { useAuthStore } from '../stores/authStore';
+import { TrajectoryViewer } from './TrajectoryViewer';
 import type {
   SolveStatusResponse,
   StartSolveRequest,
@@ -241,13 +242,18 @@ function IssueModal({ issue, onClose, onStartSolve, availableModels, isLoading }
 
 interface SolveProgressModalProps {
   solveStatus: SolveStatusResponse;
+  sessionId: string;
   onClose: () => void;
   onCancel: () => void;
 }
 
-function SolveProgressModal({ solveStatus, onClose, onCancel }: SolveProgressModalProps) {
+function SolveProgressModal({ solveStatus, sessionId, onClose, onCancel }: SolveProgressModalProps) {
+  const [showTrajectory, setShowTrajectory] = useState(false);
   const isComplete = isCompleteStatus(solveStatus.status);
   const canCancel = canCancelStatus(solveStatus.status);
+
+  // Find active (running) run for live trajectory
+  const activeRun = solveStatus.runs.find((r) => r.status === 'running');
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -409,6 +415,32 @@ function SolveProgressModal({ solveStatus, onClose, onCancel }: SolveProgressMod
               ))}
             </div>
           </div>
+
+          {/* Live Trajectory Viewer */}
+          {activeRun && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-mono font-semibold text-fg">Live Trajectory</h3>
+                <button
+                  onClick={() => setShowTrajectory(!showTrajectory)}
+                  className="px-3 py-1.5 bg-amber/10 hover:bg-amber/20 text-amber border border-amber/30 rounded-lg font-mono text-sm font-semibold transition-colors"
+                >
+                  {showTrajectory ? 'Hide' : 'Show'} Live Trajectory
+                </button>
+              </div>
+
+              {showTrajectory && (
+                <div className="bg-bg-tertiary border border-border rounded-xl overflow-hidden" style={{ height: '500px' }}>
+                  <TrajectoryViewer
+                    isLive
+                    sessionId={sessionId}
+                    solveId={solveStatus.solve_session_id}
+                    runId={activeRun.id}
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -733,9 +765,10 @@ export function SolveIssues() {
         />
       )}
 
-      {solveStatus && activeSolveId && (
+      {solveStatus && activeSolveId && activeSessionId && (
         <SolveProgressModal
           solveStatus={solveStatus}
+          sessionId={activeSessionId}
           onClose={() => {
             setActiveSolveId(null);
             setSolveStatus(null);
