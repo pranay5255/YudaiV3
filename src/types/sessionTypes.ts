@@ -653,6 +653,51 @@ export interface CancelSolveResponse {
   message: string;
 }
 
+// ============================================================================
+// TRAJECTORY STREAMING TYPES
+// ============================================================================
+
+export interface TrajectoryMessage {
+  role: string;
+  content: string;
+  extra?: Record<string, unknown>;
+}
+
+export interface TrajectoryInfo {
+  exit_status?: string;
+  submission?: string;
+  model_stats?: {
+    instance_cost?: number;
+    api_calls?: number;
+  };
+  mini_version?: string;
+  config?: {
+    model?: {
+      model_name?: string;
+    };
+  };
+}
+
+export interface TrajectoryData {
+  info: TrajectoryInfo;
+  messages: TrajectoryMessage[];
+}
+
+export interface TrajectoryUpdateEvent {
+  messages: TrajectoryMessage[];
+  info: TrajectoryInfo;
+  message_count: number;
+  new_message_start_index: number;
+}
+
+export interface TrajectoryStatusEvent {
+  status: string;
+}
+
+export interface TrajectoryErrorEvent {
+  message: string;
+}
+
 export interface SolveSessionOut {
   id: number;
   user_id: number;
