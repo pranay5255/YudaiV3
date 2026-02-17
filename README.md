@@ -1,9 +1,9 @@
-# YudaiV3 — Model Marketplace for Coding Agents
+# YudaiV3 — Context-Engineered Coding Agent
 
 [![YudaiV3 Logo](https://via.placeholder.com/300x100.png?text=YudaiV3+Logo)](https://yudai.app)
 
-> **Create. Finetune. Tokenize. Monetize.**  
-> Turn your GitHub issues & merged PRs into a production model you can list on a marketplace, pair with liquidity, and earn from per-request usage.
+> **Chat summaries, file insights, review-ready PRs.**
+> Turn curated context into small, focused pull requests with full auditable trajectories for every decision.
 
 ---
 
@@ -18,7 +18,6 @@
 ![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=for-the-badge&logo=typescript&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)
 ![GitHub Actions](https://img.shields.io/badge/github%20actions-%232671E5.svg?style=for-the-badge&logo=githubactions&logoColor=white)
-![Ethereum](https://img.shields.io/badge/Ethereum-3C3C3D?style=for-the-badge&logo=Ethereum&logoColor=white)
 ![Postgres](https://img.shields.io/badge/postgres-%23316192.svg?style=for-the-badge&logo=postgresql&logoColor=white)
 ![React](https://img.shields.io/badge/react-%2320232a.svg?style=for-the-badge&logo=react&logoColor=%2361DAFB)
 ![TailwindCSS](https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=for-the-badge&logo=tailwind-css&logoColor=white)
@@ -31,68 +30,68 @@
 
 ## What is YudaiV3?
 
-YudaiV3 is a **model marketplace for coding agents**. It transforms your repo’s development activity (issues created, PRs merged) into a finetuned, tokenized model that you can **list, provide liquidity for, and monetize**.
+YudaiV3 is a **context-engineered coding agent** that connects to your GitHub repository and transforms your conversations and file insights into small, focused pull requests. Every decision is logged with full auditable trajectories.
 
-- **Base Models:** GPT-5, Claude, Qwen3-Coder, Grok (and more)
-- **Milestone → Finetune:** After **30 issues created** and **30 issues merged**, you can trigger a guided finetune
-- **Tokenization:** Each finetuned model mints its own **ERC-20 (AGENTx)**, paired with **$SOLVE** on Uniswap v4
-- **Monetization:** Earn from **per-request usage** (x402 pay-per-call) and **LP swap fees** streamed via Uniswap v4 **Hooks**
+- **File Dependency Mapping:** Automatically understands how your codebase connects
+- **Chat-to-Context Cards:** Distills conversations into actionable insights
+- **Review-Ready PRs:** Generates small, focused changes that are easy to review
+- **Full Trajectory Logs:** Audit every decision the agent makes
+- **GitHub-Native:** Works seamlessly with your existing workflow
 
 ---
 
 ## Who is it for?
 
-- **Solo devs & indie hackers** who want their repo history to compound into a sellable model
-- **Product & growth engineers** who want usage-based revenue on top of existing workflows
-- **Open-source maintainers** who seek a sustainable economic loop tied to real code impact
+- **Solo devs & indie hackers** who want to ship faster with less context-switching
+- **Product & growth engineers** who need to maintain velocity while keeping code quality high
+- **Open-source maintainers** who want to scale their contributions without scaling their review burden
+- **Development teams** who value transparency and want full auditability of AI-generated changes
 
 ---
 
 ## How it works (high-level)
 
-1. **Create & Merge**  
-   Keep shipping. YudaiV3 tracks issues created and merged PRs to build your training corpus.
+1. **Connect**
+   Link your GitHub repository. YudaiV3 maps file dependencies and extracts structural context automatically.
 
-2. **Hit 30/30 → Finetune**  
-   Reach **30 issues created** and **30 merged** to unlock a guided finetune for your repo-specific agent.
+2. **Converse**
+   Chat naturally about your codebase. Context cards capture and distill key insights from each conversation.
 
-3. **Mint & List (AGENTx)**  
-   Your model is minted as **AGENTx (ERC-20)** and listed **AGENTx / $SOLVE** on Uniswap v4.
+3. **Generate**
+   The agent produces small, focused PRs from your curated context—scoped for easy review and quick iteration.
 
-4. **Provide Liquidity & Earn**  
-   Add LP to deepen markets. **Uniswap v4 Hooks** stream a portion of swap fees to your creator vault.
+4. **Audit**
+   Every decision is logged with full trajectory. Trace exactly how context informed each code change.
 
-5. **Get Paid Per Request (x402)**  
-   The hosted model charges per request using **x402 (HTTP-402)**. Usage revenue settles in stable assets and is routed to your vault, with internal conversion to support your token.
-
-> **All of the above happens without changing your GitHub workflow.** You build; the marketplace handles tokenization, liquidity, and billing.
+> **All of this happens within your existing GitHub workflow.** No new tools to learn, no workflow changes required.
 
 ---
 
 ## Key Concepts
 
-- **$SOLVE**  
-  Ecosystem and routing token used to pair liquidity with model tokens and anchor discovery across pools.
+- **File Dependency Analysis**
+  YudaiV3 automatically maps how your codebase connects, understanding relationships between files, functions, and modules.
 
-- **AGENTx (per-model ERC-20)**  
-  A token representing your finetuned model. Traders can provide LP; users can pay to call your model; you earn from both.
+- **Context Cards**
+  Conversations are distilled into reusable context cards that capture insights, decisions, and knowledge about your codebase.
 
-- **Uniswap v4 Hooks**  
-  Pool-level logic that automatically **directs a share of trading fees** to creator/protocol vaults—no manual harvesting.
+- **Trajectory Logging**
+  Every decision made by the agent is logged with full context, allowing you to audit and understand why changes were made.
 
-- **x402 Pay-Per-Call**  
-  Machine-native HTTP-402 billing for **per-request** or **per-token** usage. Clean receipts, stable settlement, creator-first routing.
+- **Scoped PRs**
+  Instead of large, overwhelming changes, YudaiV3 generates small, focused pull requests that are easy to review and iterate on.
 
 ---
 
 ## Features (current & planned)
 
-- ✅ GitHub-native issue & PR signal ingestion  
-- ✅ Finetune unlock at **30/30 milestone**  
-- ✅ Tokenization & marketplace listing per model (AGENTx)  
-- ✅ Liquidity provisioning (AGENTx / $SOLVE) with v4 Hooks fee streaming  
-- ✅ Usage billing via x402 (per request)  
-- 🛠️ Roadmap: per-model eval cards, dataset attestations, advanced creator analytics, additional base models
+- ✅ **File Dependency Analysis** — Understand how your codebase connects
+- ✅ **Chat-to-Context Cards** — Distill conversations into actionable insights
+- ✅ **Small, Focused PRs** — Scoped changes that are easy to review
+- ✅ **Full Trajectory Logs** — Audit every decision the agent makes
+- ✅ **Analytics Dashboard** — Track patterns and insights over time
+- ✅ **GitHub-Native** — Works seamlessly with your existing workflow
+- 🛠️ **Roadmap:** Advanced dependency visualization, team collaboration features, IDE integrations, custom agent training
 
 ---
 
@@ -120,6 +119,8 @@ Questions or partnerships: [support@yudai.app](mailto:support@yudai.app)
 
 ---
 
-## 👉 Call to Action
+## 👉 Get Started
 
-**Ready to monetize your model? Visit the marketplace:** **[yudai.app](https://yudai.app)**
+**Ready to ship faster with context-engineered PRs?** **[yudai.app](https://yudai.app)**
+
+Connect your GitHub repository and start generating review-ready pull requests today.
