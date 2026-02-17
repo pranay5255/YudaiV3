@@ -23,8 +23,7 @@ Requires-Dist: pgvector>=0.4.1
 Requires-Dist: numpy>=2.3.4
 Requires-Dist: sentence-transformers>=5.1.0
 Requires-Dist: torch>=2.9.0
-Requires-Dist: e2b-code-interpreter>=2.0.0
-Requires-Dist: e2b>=2.2.1
+Requires-Dist: modal>=1.0.0
 Requires-Dist: pytest>=8.4.1
 Provides-Extra: dev
 Requires-Dist: datasets>=2.16.0; extra == "dev"
