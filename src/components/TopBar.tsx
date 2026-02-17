@@ -1,24 +1,70 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ChevronDown, Database, User } from 'lucide-react';
-import { ProgressStep } from '../types';
+import {
+  Bot,
+  CreditCard,
+  Database,
+  MessageCircle,
+  Route,
+  User,
+  Zap,
+} from 'lucide-react';
+import { TabType } from '../types';
 import { UserProfile } from './UserProfile';
 import { useAuth } from '../hooks/useAuth';
 import { useSessionStore } from '../stores/sessionStore';
 
 interface TopBarProps {
-  currentStep: ProgressStep;
-  errorStep?: ProgressStep;
+  activeTab: TabType;
+  onTabChange: (tab: TabType) => void;
 }
 
-const steps: ProgressStep[] = ['DAifu', 'Architect', 'Test-Writer', 'Coder'];
+const tabs: Array<{
+  id: TabType;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
+  { id: 'chat', label: 'Chat', icon: MessageCircle },
+  { id: 'context', label: 'Context', icon: CreditCard },
+  { id: 'ideas', label: 'Trajectory', icon: Route },
+  { id: 'solve', label: 'Solve', icon: Zap },
+];
 
-export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
+const sessionStatusLabel: Record<string, string> = {
+  no_repo: 'No Repo',
+  awaiting_session: 'Pending Session',
+  creating_session: 'Creating Session',
+  ready: 'Ready',
+  sending: 'Sending',
+  error: 'Error',
+};
+
+const sessionStatusTone: Record<string, string> = {
+  no_repo: 'text-muted border-border bg-bg-tertiary',
+  awaiting_session: 'text-cyan border-cyan/30 bg-cyan/10',
+  creating_session: 'text-cyan border-cyan/30 bg-cyan/10',
+  ready: 'text-success border-success/30 bg-success/10',
+  sending: 'text-amber border-amber/30 bg-amber/10',
+  error: 'text-error border-error/30 bg-error/10',
+};
+
+export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
   const { user, login, isLoading } = useAuth();
-  const { indexCodebaseEnabled, setIndexCodebaseEnabled } = useSessionStore(
+  const {
+    indexCodebaseEnabled,
+    setIndexCodebaseEnabled,
+    selectedRepository,
+    sessionStatus,
+    messages,
+    contextCards,
+  } = useSessionStore(
     useShallow((state) => ({
       indexCodebaseEnabled: state.indexCodebaseEnabled,
       setIndexCodebaseEnabled: state.setIndexCodebaseEnabled,
+      selectedRepository: state.selectedRepository,
+      sessionStatus: state.sessionStatus,
+      messages: state.messages,
+      contextCards: state.contextCards,
     }))
   );
 
@@ -28,93 +74,98 @@ export const TopBar: React.FC<TopBarProps> = ({ currentStep, errorStep }) => {
     }
   };
 
+  const repositoryLabel = selectedRepository
+    ? `${selectedRepository.repository.full_name}@${selectedRepository.branch}`
+    : 'No repository selected';
+
+  const statusClass = sessionStatusTone[sessionStatus] || sessionStatusTone.no_repo;
+  const statusText = sessionStatusLabel[sessionStatus] || sessionStatus;
+
   return (
-    <div className="flex h-14 items-center px-4 border-b border-border bg-bg-secondary backdrop-blur-sm">
-      {/* Logo & Project Switcher */}
-      <div className="flex items-center gap-2 mr-8">
-        <div className="w-8 h-8 bg-gradient-to-br from-accent-amber to-accent-amber/80 rounded-lg flex items-center justify-center shadow-lg shadow-accent-amber/20">
-          <span className="text-bg-primary font-bold text-sm font-mono">AI</span>
+    <header className="border-b border-border bg-bg-secondary/95 backdrop-blur-sm">
+      <div className="px-4 py-3 flex flex-wrap items-center gap-3 justify-between">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-lg bg-amber/10 border border-amber/30 flex items-center justify-center">
+            <Bot className="w-4 h-4 text-amber" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-fg font-mono font-semibold text-sm truncate">Yudai Chat Workspace</p>
+            <p className="text-xs text-muted font-mono truncate">{repositoryLabel}</p>
+          </div>
         </div>
-        <button className="flex items-center gap-1 text-text-primary hover:text-accent-amber transition-colors duration-200 group">
-          <span className="font-medium text-sm">Project Assistant</span>
-          <ChevronDown className="w-4 h-4 group-hover:translate-y-0.5 transition-transform duration-200" />
-        </button>
+
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <span
+            className={`px-2.5 py-1 rounded-md text-xs font-mono border ${statusClass}`}
+            title={`Session status: ${statusText}`}
+          >
+            {statusText}
+          </span>
+
+          <span className="px-2.5 py-1 rounded-md text-xs font-mono border border-border text-fg-secondary bg-bg-tertiary">
+            {messages.length} msg
+          </span>
+
+          <span className="px-2.5 py-1 rounded-md text-xs font-mono border border-border text-fg-secondary bg-bg-tertiary">
+            {contextCards.length} ctx
+          </span>
+
+          <button
+            type="button"
+            onClick={() => setIndexCodebaseEnabled(!indexCodebaseEnabled)}
+            className={`
+              flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-mono border transition-colors
+              ${indexCodebaseEnabled
+                ? 'bg-cyan/10 text-cyan border-cyan/30 hover:bg-cyan/15'
+                : 'bg-bg-tertiary text-fg-secondary border-border hover:text-fg'}
+            `}
+            aria-pressed={indexCodebaseEnabled}
+          >
+            <Database className="w-3.5 h-3.5" />
+            Index
+          </button>
+
+          {user ? (
+            <UserProfile />
+          ) : (
+            <button
+              onClick={handleLoginClick}
+              disabled={isLoading}
+              className="flex items-center gap-2 text-fg hover:text-amber bg-bg-tertiary border border-border rounded-md px-3 py-1.5 text-xs font-mono transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Sign in with GitHub"
+            >
+              <User className="w-4 h-4" />
+              {isLoading ? 'Signing in...' : 'Sign in'}
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Progress Stepper */}
-      <div className="flex items-center gap-3 flex-1">
-        <div className="flex items-center gap-2">
-          {steps.map((step, index) => {
-            const isActive = step === currentStep;
-            const isError = step === errorStep;
-            const isCompleted = steps.indexOf(currentStep) > index;
+      <div className="px-4 pb-3">
+        <div className="flex gap-2 overflow-x-auto">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
 
             return (
-              <div
-                key={step}
+              <button
+                key={tab.id}
+                onClick={() => onTabChange(tab.id)}
                 className={`
-                  relative px-3 py-1.5 rounded-md text-xs font-mono font-medium transition-all duration-300
+                  flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-mono whitespace-nowrap transition-all
                   ${isActive
-                    ? 'bg-accent-amber text-bg-primary shadow-lg shadow-accent-amber/30 animate-pulse-subtle'
-                    : isError
-                    ? 'bg-red-500/90 text-white border border-red-400/30'
-                    : isCompleted
-                    ? 'bg-accent-emerald/20 text-accent-emerald border border-accent-emerald/30'
-                    : 'bg-bg-tertiary text-text-muted border border-border hover:border-border-accent'
-                  }
+                    ? 'bg-amber/10 text-amber border-amber/40 shadow-[0_0_0_1px_rgba(245,158,11,0.12)]'
+                    : 'bg-bg-tertiary text-fg-secondary border-border hover:text-fg hover:border-border-accent'}
                 `}
-                role="status"
-                aria-current={isActive ? 'step' : undefined}
+                aria-current={isActive ? 'page' : undefined}
               >
-                {step}
-              </div>
+                <Icon className="w-4 h-4" />
+                <span>{tab.label}</span>
+              </button>
             );
           })}
         </div>
-        <button
-          type="button"
-          onClick={() => setIndexCodebaseEnabled(!indexCodebaseEnabled)}
-          className={`
-            relative flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-mono font-medium transition-all duration-200
-            ${indexCodebaseEnabled
-              ? 'bg-accent-cyan/15 text-accent-cyan border border-accent-cyan/30 hover:bg-accent-cyan/20 shadow-sm shadow-accent-cyan/10'
-              : 'bg-bg-tertiary text-text-secondary border border-border hover:border-border-accent hover:text-text-primary'
-            }
-          `}
-          aria-pressed={indexCodebaseEnabled}
-        >
-          <Database className={`w-3.5 h-3.5 transition-transform duration-200 ${indexCodebaseEnabled ? 'scale-110' : ''}`} />
-          Index codebase
-        </button>
       </div>
-
-      {/* Right Side Controls */}
-      <div className="flex items-center gap-3">
-        {user ? (
-          // Show full UserProfile component when logged in
-          <UserProfile />
-        ) : (
-          // Show login button when not logged in
-          <button
-            onClick={handleLoginClick}
-            disabled={isLoading}
-            className="flex items-center gap-2 text-text-primary hover:text-accent-amber transition-all duration-200 bg-bg-tertiary hover:bg-bg-tertiary/80 border border-border hover:border-border-accent rounded-md px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed group"
-            aria-label="Sign in with GitHub"
-          >
-            {isLoading ? (
-              <>
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current" />
-                <span className="text-xs font-medium font-mono">Signing in...</span>
-              </>
-            ) : (
-              <>
-                <User className="w-4 h-4 group-hover:scale-110 transition-transform duration-200" />
-                <span className="text-xs font-medium font-mono">Sign in</span>
-              </>
-            )}
-          </button>
-        )}
-      </div>
-    </div>
+    </header>
   );
 };
