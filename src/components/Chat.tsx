@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Send, Plus } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { Message } from '../types';
 import type {
   ChatContextMessage,
@@ -9,17 +10,6 @@ import type {
   UserIssueResponse,
   ChatAction
 } from '../types/sessionTypes';
-import { useQueryClient } from '@tanstack/react-query';
-import {
-  useChatMessages,
-  useContextCards,
-  useFileDependencies,
-  useAddContextCard,
-  useCreateIssueWithContext,
-  useCreateGitHubIssueFromUserIssue,
-  QueryKeys
-} from '../hooks/useSessionQueries';
-import { useSessionManagement } from '../hooks/useSessionManagement';
 import { useRepository } from '../hooks/useRepository';
 import { useSessionStore } from '../stores/sessionStore';
 import { useAuthStore } from '../stores/authStore';
@@ -235,22 +225,43 @@ const defaultIssueActions: ChatAction[] = [
 export const Chat: React.FC<ChatProps> = ({
   onShowError
 }) => {
-  // Session management hook for state management
-  const { activeSessionId } = useSessionManagement();
   const { selectedRepository } = useRepository();
   const sessionToken = useAuthStore((state) => state.sessionToken);
-
-  const queryClient = useQueryClient();
-  const { sendChatMessage } = useSessionStore();
+  const {
+    activeSessionId,
+    sessionStatus,
+    error: sessionError,
+    messages: chatMessages,
+    contextCards,
+    fileContext,
+    isLoadingMessages,
+    messageError,
+    sendChatMessage,
+    createContextCard,
+    createIssueWithContext,
+    createGitHubIssueFromUserIssue,
+    loadMessages,
+  } = useSessionStore(
+    useShallow((state) => ({
+      activeSessionId: state.activeSessionId,
+      sessionStatus: state.sessionStatus,
+      error: state.error,
+      messages: state.messages,
+      contextCards: state.contextCards,
+      fileContext: state.fileContext,
+      isLoadingMessages: state.isLoadingMessages,
+      messageError: state.messageError,
+      sendChatMessage: state.sendChatMessage,
+      createContextCard: state.createContextCard,
+      createIssueWithContext: state.createIssueWithContext,
+      createGitHubIssueFromUserIssue: state.createGitHubIssueFromUserIssue,
+      loadMessages: state.loadMessages,
+    }))
+  );
 
   // State for issue preview modal
   const [showIssuePreview, setShowIssuePreview] = useState(false);
   const [currentIssuePreview, setCurrentIssuePreview] = useState<IssuePreviewData | null>(null);
-
-  // Use the correct hooks from useSessionQueries
-  const { data: chatMessages = [] } = useChatMessages(activeSessionId || '');
-  const { data: contextCards = [] } = useContextCards(activeSessionId || '');
-  const { data: fileContext = [] } = useFileDependencies(activeSessionId || '');
 
   // Convert API messages to Message format for display
   const messages: Message[] = chatMessages.map((msg) => ({
@@ -265,8 +276,9 @@ export const Chat: React.FC<ChatProps> = ({
   // Simplified messages state without session management
   const [input, setInput] = useState('');
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const [isCreatingIssue, setIsCreatingIssue] = useState(false);
+  const isSending = isLoadingMessages || sessionStatus === 'sending';
+  const isSessionReady = sessionStatus === 'ready' && !!activeSessionId;
   // Extraction deprecated; indexing happens automatically.
 
   // Count user messages (messages that are not the initial system messages)
@@ -306,12 +318,11 @@ export const Chat: React.FC<ChatProps> = ({
     }
   }, [onShowError]);
 
-  // Session creation is now handled by useSessionManagement hook
-  // This component no longer needs to create sessions directly
-
-  const addContextCardMutation = useAddContextCard();
-  const createIssueMutation = useCreateIssueWithContext();
-  const createGitHubIssueMutation = useCreateGitHubIssueFromUserIssue();
+  useEffect(() => {
+    if (messageError) {
+      showError(messageError);
+    }
+  }, [messageError, showError]);
 
   const handleAddToContext = useCallback(async (content: string) => {
     if (!activeSessionId) {
@@ -319,56 +330,52 @@ export const Chat: React.FC<ChatProps> = ({
       return;
     }
 
-    addContextCardMutation.mutate({
-      sessionId: activeSessionId,
-      card: {
+    try {
+      await createContextCard({
         title: 'Chat Message',
         description: content.length > 100 ? content.substring(0, 100) + '...' : content,
         source: 'chat',
         tokens: Math.ceil(content.length / 4),
         content,
-      },
-    }, {
-      onError: () => showError('Failed to add to context'),
-    });
-  }, [activeSessionId, addContextCardMutation, showError]);
+      });
+    } catch (error) {
+      showError(`Failed to add to context: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }, [activeSessionId, createContextCard, showError]);
 
   const handleSend = useCallback(async () => {
-      if (!input.trim() || isLoading || !activeSessionId) {
-          return;
+    if (!input.trim() || isLoadingMessages) {
+      return;
+    }
+    if (!selectedRepository) {
+      showError('Select a repository first.');
+      return;
+    }
+    if (!activeSessionId || sessionStatus !== 'ready') {
+      if (sessionStatus === 'creating_session' || sessionStatus === 'awaiting_session') {
+        showError('Session is still being prepared. Please wait a moment and retry.');
+      } else {
+        showError('No active chat session available. Please re-select the repository.');
       }
+      return;
+    }
 
-      const currentInput = input;
-      setInput('');
-      setIsLoading(true);
+    const currentInput = input;
+    setInput('');
 
-      try {
-          // Use unified sessionStore method for sending chat messages
-          const response = await sendChatMessage(
-              currentInput,
-              contextCards.map((card) => card.id),
-              selectedRepository || undefined
-          );
-
-          if (response) {
-              console.log('[Chat] Message sent successfully:', response.message_id);
-
-              const { messages: latestMessages } = useSessionStore.getState();
-              queryClient.setQueryData(QueryKeys.messages(activeSessionId), latestMessages);
-
-              // Invalidate and refetch the messages to show the updated conversation
-              await queryClient.invalidateQueries({
-                queryKey: QueryKeys.messages(activeSessionId)
-              });
-          }
-
-      } catch (error) {
-          console.error('[Chat] Message sending failed:', error);
-          showError('Failed to send message. Please try again.');
-      } finally {
-          setIsLoading(false);
-      }
-  }, [input, isLoading, activeSessionId, contextCards, selectedRepository, sendChatMessage, showError, queryClient]);
+    try {
+      const response = await sendChatMessage(
+        currentInput,
+        contextCards.map((card) => card.id),
+        selectedRepository
+      );
+      console.log('[Chat] Message sent successfully:', response.message_id);
+    } catch (error) {
+      console.error('[Chat] Message sending failed:', error);
+      showError(error instanceof Error ? error.message : 'Failed to send message. Please try again.');
+      setInput(currentInput);
+    }
+  }, [input, isLoadingMessages, selectedRepository, activeSessionId, sessionStatus, sendChatMessage, contextCards, showError]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -431,9 +438,9 @@ export const Chat: React.FC<ChatProps> = ({
       };
 
       // Use the unified sessionStore method for creating issues with context
-      const response = await createIssueMutation.mutateAsync(request);
+      const response = await createIssueWithContext(request);
 
-      if (response && response.success) {
+      if (response.success) {
         const issuePreview: IssuePreviewData = {
           ...response.github_preview,
           userIssue: response.user_issue as UserIssueResponse,
@@ -455,7 +462,7 @@ export const Chat: React.FC<ChatProps> = ({
     } finally {
       setIsCreatingIssue(false);
     }
-  }, [isCreatingIssue, selectedRepository, messages, fileContext, showError, createIssueMutation]);
+  }, [isCreatingIssue, selectedRepository, messages, fileContext, showError, createIssueWithContext]);
 
   const handleConfirmCreateIssue = useCallback(async () => {
     if (!currentIssuePreview || !currentIssuePreview.userIssue) {
@@ -465,7 +472,7 @@ export const Chat: React.FC<ChatProps> = ({
     try {
       // Call the create GitHub issue API with proper parameters
       if (currentIssuePreview.userIssue?.issue_id) {
-        const result = await createGitHubIssueMutation.mutateAsync(currentIssuePreview.userIssue.issue_id);
+        const result = await createGitHubIssueFromUserIssue(currentIssuePreview.userIssue.issue_id);
 
         if (result?.success && result?.github_url) {
           console.log('[Chat] GitHub issue created successfully:', result.github_url);
@@ -480,7 +487,7 @@ export const Chat: React.FC<ChatProps> = ({
       console.error('[Chat] Failed to create GitHub issue:', error);
       showError(`Failed to create GitHub issue: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [currentIssuePreview, showError, createGitHubIssueMutation]);
+  }, [currentIssuePreview, showError, createGitHubIssueFromUserIssue]);
 
   const handleRegenerateIssue = useCallback(async () => {
     // Close the preview and regenerate
@@ -491,7 +498,7 @@ export const Chat: React.FC<ChatProps> = ({
   }, [handleCreateGitHubIssue]);
 
   const handleSolveIssue = useCallback(async (issueId: string) => {
-    if (!selectedRepository || !currentIssuePreview) {
+    if (!selectedRepository || !currentIssuePreview || !activeSessionId) {
       showError('No repository or issue selected for solving');
       return;
     }
@@ -504,7 +511,7 @@ export const Chat: React.FC<ChatProps> = ({
       setCurrentIssuePreview(null);
 
       // Call the solver endpoint using unified API
-      const response = await fetch(buildApiUrl(API.SESSIONS.SOLVER.START, { sessionId: activeSessionId || '' }), {
+      const response = await fetch(buildApiUrl(API.SESSIONS.SOLVER.START, { sessionId: activeSessionId }), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -524,10 +531,12 @@ export const Chat: React.FC<ChatProps> = ({
       const result = await response.json();
       console.log('[Chat] Solver started successfully:', result);
 
-      // Invalidate messages to show solver status updates
-      await queryClient.invalidateQueries({
-        queryKey: ['messages', activeSessionId]
-      });
+      // Best-effort refresh so solver status updates can surface in chat history.
+      if (activeSessionId) {
+        void loadMessages(activeSessionId).catch((refreshError) => {
+          console.warn('[Chat] Failed to refresh messages after solver start:', refreshError);
+        });
+      }
 
       // Show success message
       showError(`🚀 AI Solver started! Session ID: ${result.solve_session_id}. Watch the chat for progress updates.`);
@@ -536,31 +545,62 @@ export const Chat: React.FC<ChatProps> = ({
       console.error('[Chat] Failed to start solver:', error);
       showError(`Failed to start solver: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [selectedRepository, activeSessionId, currentIssuePreview, sessionToken, showError, queryClient]);
+  }, [selectedRepository, activeSessionId, currentIssuePreview, sessionToken, showError, loadMessages]);
 
 
 
   return (
     <div className="h-full flex flex-col bg-bg terminal-noise">
-      {/* Session Status Indicator */}
+      <div className="border-b border-border/70 bg-bg-secondary/70 px-4 py-3">
+        <div className="flex items-center flex-wrap gap-2 text-xs font-mono">
+          <span className="px-2.5 py-1 rounded-md bg-bg-tertiary border border-border text-fg">
+            Workspace Chat
+          </span>
+          <span className="px-2.5 py-1 rounded-md bg-bg-tertiary border border-border text-fg-secondary">
+            Repo: {selectedRepository ? `${selectedRepository.repository.full_name}@${selectedRepository.branch}` : 'None'}
+          </span>
+          <span className="px-2.5 py-1 rounded-md bg-bg-tertiary border border-border text-fg-secondary">
+            Messages: {messages.length}
+          </span>
+          <span className="px-2.5 py-1 rounded-md bg-bg-tertiary border border-border text-fg-secondary">
+            Context: {contextCards.length}
+          </span>
+        </div>
+      </div>
+
       {!selectedRepository && (
         <div className="bg-amber/10 border border-amber/30 rounded-lg p-4 m-4 animate-fade-in">
           <div className="flex items-center gap-2 mb-2">
             <span className="w-2 h-2 rounded-full bg-amber animate-pulse" style={{ boxShadow: '0 0 8px rgba(245, 158, 11, 0.5)' }} />
             <span className="text-amber font-mono font-medium text-sm">No Active Repository</span>
           </div>
-          <p className="text-amber/80 text-sm mb-3 font-mono">
-            Please select a repository to start a new session and begin chatting with Daifu.
+          <p className="text-amber/80 text-sm font-mono">
+            Select a repository from the picker to initialize a chat session.
           </p>
-          <button
-            onClick={() => {
-              // Trigger repository selection manually
-              window.location.reload();
-            }}
-            className="bg-amber hover:bg-amber/90 text-bg-primary px-4 py-2 rounded-lg text-sm font-mono font-semibold transition-all duration-200 glow-amber"
-          >
-            Select Repository
-          </button>
+        </div>
+      )}
+
+      {selectedRepository && (sessionStatus === 'awaiting_session' || sessionStatus === 'creating_session') && (
+        <div className="bg-cyan/10 border border-cyan/30 rounded-lg p-4 m-4 animate-fade-in">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="w-2 h-2 rounded-full bg-cyan animate-pulse" />
+            <span className="text-cyan font-mono font-medium text-sm">Preparing Session</span>
+          </div>
+          <p className="text-cyan/80 text-sm font-mono">
+            Repository selected. Creating your chat session now...
+          </p>
+        </div>
+      )}
+
+      {selectedRepository && sessionStatus === 'error' && (
+        <div className="bg-error/10 border border-error/30 rounded-lg p-4 m-4 animate-fade-in">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="w-2 h-2 rounded-full bg-error" />
+            <span className="text-error font-mono font-medium text-sm">Session Error</span>
+          </div>
+          <p className="text-error/90 text-sm font-mono">
+            {sessionError || messageError || 'A session error occurred. Re-select the repository to create a new session.'}
+          </p>
         </div>
       )}
 
@@ -595,6 +635,17 @@ export const Chat: React.FC<ChatProps> = ({
 
       {/* Messages Container */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {selectedRepository && isSessionReady && messages.length === 0 && !isSending && (
+          <div className="h-full min-h-[220px] flex items-center justify-center">
+            <div className="max-w-xl w-full bg-bg-secondary border border-border rounded-xl p-6 text-center">
+              <p className="text-fg font-mono text-sm mb-2">Start a conversation with your repository context</p>
+              <p className="text-muted font-mono text-xs">
+                Ask for bug analysis, implementation plans, or issue generation. Responses appear here instantly.
+              </p>
+            </div>
+          </div>
+        )}
+
         {messages.map((message, index) => {
           const parsedActions = extractButtonActions(message.content);
           const cleanedContent = stripButtonActions(message.content);
@@ -650,7 +701,7 @@ export const Chat: React.FC<ChatProps> = ({
           );
         })}
 
-        {isLoading && (
+        {isSending && (
           <div className="flex justify-start animate-fade-in">
             <div className="bg-bg-secondary border border-border text-fg rounded-xl p-4">
               <div className="flex items-center gap-3">
@@ -674,21 +725,27 @@ export const Chat: React.FC<ChatProps> = ({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder={selectedRepository ? "Type your message..." : "Select a repository to start chatting..."}
-            disabled={!selectedRepository || isLoading}
+            placeholder={
+              !selectedRepository
+                ? 'Select a repository to start chatting...'
+                : !isSessionReady
+                  ? 'Preparing session...'
+                  : 'Type your message...'
+            }
+            disabled={!selectedRepository || !isSessionReady || isSending}
             className="flex-1 bg-bg-tertiary border border-border rounded-lg px-4 py-3 text-fg placeholder:text-muted font-mono text-sm focus:outline-none focus:border-amber/50 focus:ring-2 focus:ring-amber/10 disabled:opacity-50 transition-all duration-200"
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isLoading || !selectedRepository}
+            disabled={!input.trim() || isSending || !selectedRepository || !isSessionReady}
             className="bg-amber hover:bg-amber/90 disabled:bg-bg-tertiary disabled:border-border disabled:cursor-not-allowed text-bg-primary disabled:text-muted px-5 py-3 rounded-lg flex items-center gap-2 font-mono text-sm font-semibold transition-all duration-200 border border-amber disabled:border-border glow-amber disabled:shadow-none"
           >
-            {isLoading ? (
+            {isSending ? (
               <div className="animate-spin rounded-full h-4 w-4 border-2 border-bg-primary/20 border-t-bg-primary" />
             ) : (
               <Send size={16} />
             )}
-            {isLoading ? 'Sending' : 'Send'}
+            {isSending ? 'Sending' : 'Send'}
           </button>
           <button
             onClick={handleCreateGitHubIssue}
