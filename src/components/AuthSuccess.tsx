@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useSessionStore } from '../stores/sessionStore';
-import { useQueryClient } from '@tanstack/react-query';
 
 /**
  * AuthSuccess component handles the OAuth callback from GitHub
@@ -12,7 +11,6 @@ export const AuthSuccess: React.FC = () => {
   const navigate = useNavigate();
   const { setAuthFromCallback, clearAuth } = useAuth();
   const clearSession = useSessionStore((state) => state.clearSession);
-  const queryClient = useQueryClient();
   const hasProcessed = useRef(false);
 
   useEffect(() => {
@@ -60,7 +58,6 @@ export const AuthSuccess: React.FC = () => {
         // Ensure any prior auth/session data is cleared before applying the new token.
         clearAuth();
         clearSession();
-        queryClient.clear();
 
         // Set up the session using the session store
         setAuthFromCallback({
@@ -80,7 +77,7 @@ export const AuthSuccess: React.FC = () => {
     };
 
     handleAuthSuccess();
-  }, [navigate, setAuthFromCallback, clearSession]);
+  }, [navigate, setAuthFromCallback, clearSession, clearAuth]);
 
   return (
     <div className="min-h-screen bg-zinc-900 flex items-center justify-center">
