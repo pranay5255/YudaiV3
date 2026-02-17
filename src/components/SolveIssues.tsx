@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useRepository } from '../hooks/useRepository';
-import { useSessionManagement } from '../hooks/useSessionManagement';
 import { useAuthStore } from '../stores/authStore';
+import { useSessionStore } from '../stores/sessionStore';
 import { TrajectoryViewer } from './TrajectoryViewer';
 import type {
   SolveStatusResponse,
@@ -469,7 +469,7 @@ function SolveProgressModal({ solveStatus, sessionId, onClose, onCancel }: Solve
 
 export function SolveIssues() {
   const { selectedRepository } = useRepository();
-  const { activeSessionId } = useSessionManagement();
+  const activeSessionId = useSessionStore((state) => state.activeSessionId);
 
   const [issues, setIssues] = useState<GitHubIssue[]>([]);
   const [availableModels, setAvailableModels] = useState<AIModel[]>([]);

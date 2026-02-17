@@ -9,7 +9,6 @@ import type {
   ContextCard
 } from '../types/sessionTypes';
 import { useRepository } from '../hooks/useRepository';
-import { useCreateIssueWithContext } from '../hooks/useSessionQueries';
 import { useSessionStore } from '../stores/sessionStore';
 
 interface IssuePreviewData extends GitHubIssuePreview {
@@ -48,11 +47,8 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   const { activeSessionId } = useSessionStore();
   const { selectedRepository } = useRepository();
 
-  const { deleteContextCard } = useSessionStore();
+  const { deleteContextCard, createIssueWithContext } = useSessionStore();
   const [isLoading, setIsLoading] = useState(false);
-
-  // FIXED: Move hook call to top level
-  const createIssueMutation = useCreateIssueWithContext();
 
   const showError = useCallback((message: string) => {
     if (onShowError) {
@@ -151,7 +147,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
       };
 
       // FIXED: Use the hook result instead of calling hook inside callback
-      const response = await createIssueMutation.mutateAsync(request);
+      const response = await createIssueWithContext(request);
 
       if (response && response.success && onShowIssuePreview) {
         const previewData: IssuePreviewData = {
@@ -177,8 +173,7 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
     cards,
     onShowIssuePreview,
     showError,
-    // FIXED: Add hook dependency
-    createIssueMutation
+    createIssueWithContext
   ]);
 
   return (

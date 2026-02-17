@@ -24,6 +24,38 @@ import {
 import { API, buildApiUrl } from '../config/api';
 import { useAuthStore } from './authStore';
 
+export type SessionStatus =
+  | 'no_repo'
+  | 'awaiting_session'
+  | 'creating_session'
+  | 'ready'
+  | 'sending'
+  | 'error';
+
+export class AppError extends Error {
+  code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'AppError';
+    this.code = code;
+  }
+}
+
+const toAppError = (
+  error: unknown,
+  code: string,
+  fallbackMessage: string
+): AppError => {
+  if (error instanceof AppError) {
+    return error;
+  }
+  if (error instanceof Error) {
+    return new AppError(code, error.message || fallbackMessage);
+  }
+  return new AppError(code, fallbackMessage);
+};
+
 // Helper function to get auth headers
 const getAuthHeaders = (sessionToken?: string): HeadersInit => {
   const headers: HeadersInit = { 'Content-Type': 'application/json' };
@@ -60,6 +92,7 @@ interface SessionState {
   isLoading: boolean;
   error: string | null;
   sessionInitialized: boolean;
+  sessionStatus: SessionStatus;
 
   // ============================================================================
   // REPOSITORY STATE (GitHub integration)
@@ -122,17 +155,17 @@ interface SessionState {
   // ============================================================================
   // SESSION MANAGEMENT ACTIONS (matches backend session APIs)
   // ============================================================================
-  createSessionForRepository: (repository: SelectedRepository) => Promise<string | null>;
-  loadSession: (sessionId: string) => Promise<boolean>;
+  createSessionForRepository: (repository: SelectedRepository) => Promise<string>;
+  loadSession: (sessionId: string) => Promise<void>;
   updateSession: (sessionId: string, updates: UpdateSessionRequest) => Promise<boolean>;
   deleteSession: (sessionId: string) => Promise<boolean>;
-  ensureSessionExists: (sessionId: string) => Promise<boolean>;
+  ensureSessionExists: (sessionId: string) => Promise<void>;
   setIndexCodebaseEnabled: (enabled: boolean) => void;
 
   // ============================================================================
   // REPOSITORY ACTIONS
   // ============================================================================
-  loadRepositories: () => Promise<void>;
+  loadRepositories: () => Promise<GitHubRepository[]>;
   setSelectedRepository: (repository: SelectedRepository | null) => void;
   setAvailableRepositories: (repositories: GitHubRepository[]) => void;
   setRepositoryLoading: (loading: boolean) => void;
@@ -144,7 +177,7 @@ interface SessionState {
   addMessage: (message: ChatMessage) => void;
   updateMessage: (messageId: string, updates: Partial<ChatMessage>) => Promise<boolean>;
   removeMessage: (messageId: string) => Promise<boolean>;
-  loadMessages: (sessionId: string) => Promise<void>;
+  loadMessages: (sessionId: string) => Promise<ChatMessage[]>;
   setMessages: (messages: ChatMessage[]) => void;
   setMessageLoading: (loading: boolean) => void;
   setMessageError: (error: string | null) => void;
@@ -152,10 +185,10 @@ interface SessionState {
   // ============================================================================
   // CONTEXT CARD ACTIONS (matches ContextCard APIs)
   // ============================================================================
-  createContextCard: (card: CreateContextCardRequest) => Promise<boolean>;
+  createContextCard: (card: CreateContextCardRequest) => Promise<ContextCard>;
   updateContextCard: (cardId: string, updates: Partial<CreateContextCardRequest>) => Promise<boolean>;
-  deleteContextCard: (cardId: string) => Promise<boolean>;
-  loadContextCards: (sessionId: string) => Promise<void>;
+  deleteContextCard: (cardId: string) => Promise<void>;
+  loadContextCards: (sessionId: string) => Promise<ContextCard[]>;
   setContextCards: (cards: ContextCard[]) => void;
   setContextCardLoading: (loading: boolean) => void;
   setContextCardError: (error: string | null) => void;
@@ -166,7 +199,7 @@ interface SessionState {
   createFileEmbedding: (embedding: CreateFileEmbeddingRequest) => Promise<boolean>;
   updateFileEmbedding: (fileId: string, updates: Partial<CreateFileEmbeddingRequest>) => Promise<boolean>;
   deleteFileEmbedding: (fileId: string) => Promise<boolean>;
-  loadFileDependencies: (sessionId: string) => Promise<void>;
+  loadFileDependencies: (sessionId: string) => Promise<FileItem[]>;
   setFileContext: (files: FileItem[]) => void;
   setFileContextLoading: (loading: boolean) => void;
   setFileContextError: (error: string | null) => void;
@@ -203,18 +236,19 @@ interface SessionState {
   setSessionLoadingEnabled: (enabled: boolean) => void;
   updateSessionStats: (tokens: number) => void;
   setConnectionStatus: (status: 'connected' | 'disconnected' | 'reconnecting') => void;
+  setSessionStatus: (status: SessionStatus) => void;
 
   // ============================================================================
   // CHAT MESSAGE SENDING (for sending messages through backend chat endpoint)
   // ============================================================================
 
-  sendChatMessage: (message: string, contextCards?: string[], repository?: SelectedRepository) => Promise<ChatResponse | null>;
+  sendChatMessage: (message: string, contextCards?: string[], repository?: SelectedRepository) => Promise<ChatResponse>;
 
   // ============================================================================
   // USER ISSUE CREATION (for creating issues with context)
   // ============================================================================
 
-  createIssueWithContext: (request: CreateIssueWithContextRequest) => Promise<IssueCreationResponse | null>;
+  createIssueWithContext: (request: CreateIssueWithContextRequest) => Promise<IssueCreationResponse>;
 
   // ============================================================================
   // FILE DEPENDENCY EXTRACTION (for extracting file dependencies for session)
@@ -251,6 +285,7 @@ export const useSessionStore = create<SessionState>()(
         isLoading: false,
         error: null,
         sessionInitialized: false,
+        sessionStatus: 'no_repo',
 
         // Repository state
         selectedRepository: null,
@@ -303,11 +338,11 @@ export const useSessionStore = create<SessionState>()(
           const sessionToken = useAuthStore.getState().sessionToken;
 
           if (!sessionToken) {
-            throw new Error('No session token available');
+            throw new AppError('AUTH_MISSING_TOKEN', 'No session token available');
           }
 
           try {
-            set({ isLoading: true, error: null });
+            set({ isLoading: true, error: null, sessionStatus: 'creating_session' });
 
             const repoOwner = repository.repository.owner?.login || repository.repository.full_name.split('/')[0];
             const repoName = repository.repository.name;
@@ -334,17 +369,20 @@ export const useSessionStore = create<SessionState>()(
               sessionInitialized: true,
               isLoading: false,
               error: null,
+              sessionStatus: 'ready',
               lastActivity: new Date(),
             });
 
             return sessionData.session_id;
           } catch (error) {
-            console.error('Failed to create session:', error);
+            const appError = toAppError(error, 'SESSION_CREATE_FAILED', 'Failed to create session');
+            console.error('Failed to create session:', appError);
             set({
               isLoading: false,
-              error: error instanceof Error ? error.message : 'Failed to create session'
+              error: appError.message,
+              sessionStatus: 'error',
             });
-            return null;
+            throw appError;
           }
         },
 
@@ -352,7 +390,7 @@ export const useSessionStore = create<SessionState>()(
           const sessionToken = useAuthStore.getState().sessionToken;
 
           if (!sessionToken) {
-            throw new Error('No session token available');
+            throw new AppError('AUTH_MISSING_TOKEN', 'No session token available');
           }
 
           try {
@@ -378,17 +416,18 @@ export const useSessionStore = create<SessionState>()(
               sessionInitialized: true,
               isLoading: false,
               error: null,
+              sessionStatus: 'ready',
               lastActivity: new Date(),
             });
-
-            return true;
           } catch (error) {
-            console.error('Failed to load session:', error);
+            const appError = toAppError(error, 'SESSION_LOAD_FAILED', 'Failed to load session');
+            console.error('Failed to load session:', appError);
             set({
               isLoading: false,
-              error: error instanceof Error ? error.message : 'Failed to load session'
+              error: appError.message,
+              sessionStatus: 'error',
             });
-            return false;
+            throw appError;
           }
         },
 
@@ -410,7 +449,7 @@ export const useSessionStore = create<SessionState>()(
             if (!sessionToken) {
               console.warn('[SessionStore] No session token available for session validation');
               get().clearSession();
-              return false;
+              throw new AppError('AUTH_MISSING_TOKEN', 'No session token available');
             }
 
             await handleApiResponse<SessionContext>(
@@ -424,9 +463,8 @@ export const useSessionStore = create<SessionState>()(
               activeSessionId: sessionId,
               sessionInitialized: true,
               error: null,
+              sessionStatus: 'ready',
             });
-
-            return true;
           } catch (error) {
             console.warn(`[SessionStore] Session ${sessionId} does not exist or is not accessible:`, error);
 
@@ -438,16 +476,19 @@ export const useSessionStore = create<SessionState>()(
             if (isSessionNotFound) {
               console.log('[SessionStore] Session not found, clearing invalid session');
               get().clearSession();
-              set({ error: 'Session not found - cleared invalid session' });
+              const notFoundError = new AppError('SESSION_NOT_FOUND', 'Session not found');
+              set({ error: notFoundError.message, sessionStatus: 'error' });
+              throw notFoundError;
             } else {
+              const appError = toAppError(error, 'SESSION_VALIDATE_FAILED', 'Session validation failed');
               set({
                 activeSessionId: null,
                 sessionInitialized: false,
-                error: 'Session validation failed',
+                error: appError.message,
+                sessionStatus: 'error',
               });
+              throw appError;
             }
-
-            return false;
           }
         },
 
@@ -477,17 +518,28 @@ export const useSessionStore = create<SessionState>()(
               isLoadingRepositories: false,
               repositoryError: null,
             });
+            return repositories;
           } catch (error) {
-            console.error('Failed to load repositories:', error);
+            const appError = toAppError(error, 'REPOSITORIES_LOAD_FAILED', 'Failed to load repositories');
+            console.error('Failed to load repositories:', appError);
             set({
               isLoadingRepositories: false,
-              repositoryError: error instanceof Error ? error.message : 'Failed to load repositories'
+              repositoryError: appError.message
             });
+            throw appError;
           }
         },
 
         setSelectedRepository: (repository: SelectedRepository | null) =>
-          set({ selectedRepository: repository, repositoryError: null }),
+          set((state) => ({
+            selectedRepository: repository,
+            repositoryError: null,
+            sessionStatus: repository
+              ? state.activeSessionId
+                ? 'ready'
+                : 'awaiting_session'
+              : 'no_repo',
+          })),
 
         setAvailableRepositories: (repositories: GitHubRepository[]) =>
           set({ availableRepositories: repositories }),
@@ -525,29 +577,39 @@ export const useSessionStore = create<SessionState>()(
         loadMessages: async (sessionId: string) => {
           const sessionToken = useAuthStore.getState().sessionToken;
 
+          if (!sessionToken) {
+            const authError = new AppError('AUTH_MISSING_TOKEN', 'No session token available');
+            set({
+              isLoadingMessages: false,
+              messageError: authError.message
+            });
+            throw authError;
+          }
+
           try {
             set({ isLoadingMessages: true, messageError: null });
 
-            const allMessages = await handleApiResponse<ChatMessage[]>(
+            const messages = await handleApiResponse<ChatMessage[]>(
               await fetch(buildApiUrl(API.SESSIONS.MESSAGES, { sessionId }), {
                 method: 'GET',
-                headers: getAuthHeaders(sessionToken || ''),
+                headers: getAuthHeaders(sessionToken),
               })
             );
-            
-            const messages = allMessages;
 
             set({
               messages,
               isLoadingMessages: false,
               messageError: null,
             });
+            return messages;
           } catch (error) {
-            console.error('Failed to load messages:', error);
+            const appError = toAppError(error, 'MESSAGES_LOAD_FAILED', 'Failed to load messages');
+            console.error('Failed to load messages:', appError);
             set({
               isLoadingMessages: false,
-              messageError: error instanceof Error ? error.message : 'Failed to load messages'
+              messageError: appError.message
             });
+            throw appError;
           }
         },
 
@@ -568,7 +630,7 @@ export const useSessionStore = create<SessionState>()(
           const sessionToken = useAuthStore.getState().sessionToken;
 
           if (!activeSessionId || !sessionToken) {
-            throw new Error('No active session or session token available');
+            throw new AppError('SESSION_NOT_READY', 'No active session or session token available');
           }
 
           try {
@@ -589,20 +651,29 @@ export const useSessionStore = create<SessionState>()(
                 description: newCard.description,
                 tokens: newCard.tokens,
                 source: newCard.source as 'chat' | 'file-deps' | 'upload',
+                content: newCard.content,
               }],
               isLoadingContextCards: false,
               totalTokens: state.totalTokens + newCard.tokens,
               lastActivity: new Date(),
             }));
 
-            return true;
+            return {
+              id: newCard.id.toString(),
+              title: newCard.title,
+              description: newCard.description,
+              tokens: newCard.tokens,
+              source: newCard.source as 'chat' | 'file-deps' | 'upload',
+              content: newCard.content,
+            };
           } catch (error) {
-            console.error('Failed to create context card:', error);
+            const appError = toAppError(error, 'CONTEXT_CARD_CREATE_FAILED', 'Failed to create context card');
+            console.error('Failed to create context card:', appError);
             set({
               isLoadingContextCards: false,
-              contextCardError: error instanceof Error ? error.message : 'Failed to create context card'
+              contextCardError: appError.message
             });
-            return false;
+            throw appError;
           }
         },
 
@@ -617,7 +688,7 @@ export const useSessionStore = create<SessionState>()(
           const sessionToken = useAuthStore.getState().sessionToken;
 
           if (!activeSessionId || !sessionToken) {
-            throw new Error('No active session or session token available');
+            throw new AppError('SESSION_NOT_READY', 'No active session or session token available');
           }
 
           try {
@@ -639,20 +710,28 @@ export const useSessionStore = create<SessionState>()(
                 lastActivity: new Date(),
               };
             });
-
-            return true;
           } catch (error) {
-            console.error('Failed to delete context card:', error);
+            const appError = toAppError(error, 'CONTEXT_CARD_DELETE_FAILED', 'Failed to delete context card');
+            console.error('Failed to delete context card:', appError);
             set({
               isLoadingContextCards: false,
-              contextCardError: error instanceof Error ? error.message : 'Failed to delete context card'
+              contextCardError: appError.message
             });
-            return false;
+            throw appError;
           }
         },
 
         loadContextCards: async (sessionId: string) => {
           const sessionToken = useAuthStore.getState().sessionToken;
+
+          if (!sessionToken) {
+            const authError = new AppError('AUTH_MISSING_TOKEN', 'No session token available');
+            set({
+              isLoadingContextCards: false,
+              contextCardError: authError.message
+            });
+            throw authError;
+          }
 
           try {
             set({ isLoadingContextCards: true, contextCardError: null });
@@ -660,7 +739,7 @@ export const useSessionStore = create<SessionState>()(
             const cards = await handleApiResponse<ContextCard[]>(
               await fetch(buildApiUrl(API.SESSIONS.CONTEXT_CARDS, { sessionId }), {
                 method: 'GET',
-                headers: getAuthHeaders(sessionToken || ''),
+                headers: getAuthHeaders(sessionToken),
               })
             );
 
@@ -677,12 +756,15 @@ export const useSessionStore = create<SessionState>()(
               isLoadingContextCards: false,
               contextCardError: null,
             });
+            return transformedCards;
           } catch (error) {
-            console.error('Failed to load context cards:', error);
+            const appError = toAppError(error, 'CONTEXT_CARDS_LOAD_FAILED', 'Failed to load context cards');
+            console.error('Failed to load context cards:', appError);
             set({
               isLoadingContextCards: false,
-              contextCardError: error instanceof Error ? error.message : 'Failed to load context cards'
+              contextCardError: appError.message
             });
+            throw appError;
           }
         },
 
@@ -723,13 +805,22 @@ export const useSessionStore = create<SessionState>()(
         loadFileDependencies: async (sessionId: string) => {
           const sessionToken = useAuthStore.getState().sessionToken;
 
+          if (!sessionToken) {
+            const authError = new AppError('AUTH_MISSING_TOKEN', 'No session token available');
+            set({
+              isLoadingFileContext: false,
+              fileContextError: authError.message
+            });
+            throw authError;
+          }
+
           try {
             set({ isLoadingFileContext: true, fileContextError: null });
 
             const deps = await handleApiResponse<FileItem[]>(
               await fetch(buildApiUrl(API.SESSIONS.FILE_DEPS_SESSION, { sessionId }), {
                 method: 'GET',
-                headers: getAuthHeaders(sessionToken || ''),
+                headers: getAuthHeaders(sessionToken),
               })
             );
 
@@ -748,12 +839,15 @@ export const useSessionStore = create<SessionState>()(
               isLoadingFileContext: false,
               fileContextError: null,
             });
+            return transformedFiles;
           } catch (error) {
-            console.error('Failed to load file dependencies:', error);
+            const appError = toAppError(error, 'FILE_DEPS_LOAD_FAILED', 'Failed to load file dependencies');
+            console.error('Failed to load file dependencies:', appError);
             set({
               isLoadingFileContext: false,
-              fileContextError: error instanceof Error ? error.message : 'Failed to load file dependencies'
+              fileContextError: appError.message
             });
+            throw appError;
           }
         },
 
@@ -813,7 +907,12 @@ export const useSessionStore = create<SessionState>()(
         // ============================================================================
 
         setActiveSession: (sessionId: string) =>
-          set({ activeSessionId: sessionId, error: null, sessionInitialized: true }),
+          set({
+            activeSessionId: sessionId,
+            error: null,
+            sessionInitialized: true,
+            sessionStatus: 'ready',
+          }),
 
         clearSession: () => {
           console.log('[SessionStore] Clearing session state');
@@ -823,6 +922,7 @@ export const useSessionStore = create<SessionState>()(
             sessionContext: null,
             error: null,
             sessionInitialized: false,
+            sessionStatus: get().selectedRepository ? 'awaiting_session' : 'no_repo',
             messages: [],
             contextCards: [],
             fileContext: [],
@@ -849,6 +949,8 @@ export const useSessionStore = create<SessionState>()(
         },
         setConnectionStatus: (status: 'connected' | 'disconnected' | 'reconnecting') =>
           set({ connectionStatus: status }),
+        setSessionStatus: (status: SessionStatus) =>
+          set({ sessionStatus: status }),
 
         // ============================================================================
         // CHAT MESSAGE SENDING IMPLEMENTATION
@@ -859,11 +961,11 @@ export const useSessionStore = create<SessionState>()(
           const sessionToken = useAuthStore.getState().sessionToken;
 
           if (!activeSessionId || !sessionToken) {
-            throw new Error('No active session or session token available');
+            throw new AppError('SESSION_NOT_READY', 'No active session or session token available');
           }
 
           try {
-            set({ isLoadingMessages: true, messageError: null });
+            set({ isLoadingMessages: true, messageError: null, sessionStatus: 'sending' });
 
             const chatRequest: ChatRequest = {
               session_id: activeSessionId,
@@ -886,29 +988,52 @@ export const useSessionStore = create<SessionState>()(
               })
             );
 
-            // Add the message to local state immediately
-            const newMessage = {
-              id: response.message_id ? (parseInt(response.message_id) || Date.now()) : Date.now(),
-              message_id: response.message_id || `msg_${Date.now()}`,
+            // Deterministic local append for both user and assistant response.
+            const now = new Date().toISOString();
+            const localUserMessage: ChatMessage = {
+              id: Date.now(),
+              message_id: `local_user_${Date.now()}`,
               message_text: message,
-              sender_type: 'user' as const,
-              role: 'user' as const,
-              tokens: 0, // Will be updated when message is processed
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
+              sender_type: 'user',
+              role: 'user',
+              tokens: Math.max(1, Math.ceil(message.length / 4)),
+              created_at: now,
+              updated_at: now,
+            };
+            const localAssistantMessage: ChatMessage = {
+              id: Date.now() + 1,
+              message_id: response.message_id || `local_assistant_${Date.now()}`,
+              message_text: response.reply || '',
+              sender_type: 'assistant',
+              role: 'assistant',
+              tokens: Math.max(1, Math.ceil((response.reply || '').length / 4)),
+              created_at: now,
+              updated_at: now,
             };
 
-            get().addMessage(newMessage);
+            set((state) => ({
+              messages: [...state.messages, localUserMessage, localAssistantMessage],
+              isLoadingMessages: false,
+              messageError: null,
+              sessionStatus: 'ready',
+              lastActivity: new Date(),
+            }));
 
-            set({ isLoadingMessages: false });
+            // Best-effort reconciliation with backend state.
+            void get().loadMessages(activeSessionId).catch((reconcileError) => {
+              console.warn('[SessionStore] Message reconciliation failed:', reconcileError);
+            });
+
             return response;
           } catch (error) {
-            console.error('Failed to send chat message:', error);
+            const appError = toAppError(error, 'CHAT_SEND_FAILED', 'Failed to send message');
+            console.error('Failed to send chat message:', appError);
             set({
               isLoadingMessages: false,
-              messageError: error instanceof Error ? error.message : 'Failed to send message'
+              messageError: appError.message,
+              sessionStatus: 'error',
             });
-            return null;
+            throw appError;
           }
         },
 
@@ -939,9 +1064,6 @@ export const useSessionStore = create<SessionState>()(
             let sessionIdToUse = activeSessionId;
             if (selectionInfo && (!sessionIdToUse || !sessionMatchesSelection)) {
               const newSessionId = await get().createSessionForRepository(selectedRepository);
-              if (!newSessionId) {
-                throw new Error('Failed to create session for selected repository');
-              }
               sessionIdToUse = newSessionId;
             }
 
@@ -969,12 +1091,13 @@ export const useSessionStore = create<SessionState>()(
             set({ isLoadingIssues: false });
             return response;
           } catch (error) {
-            console.error('Failed to create issue with context:', error);
+            const appError = toAppError(error, 'ISSUE_CREATE_FAILED', 'Failed to create issue');
+            console.error('Failed to create issue with context:', appError);
             set({
               isLoadingIssues: false,
-              issueError: error instanceof Error ? error.message : 'Failed to create issue'
+              issueError: appError.message
             });
-            return null;
+            throw appError;
           }
         },
 

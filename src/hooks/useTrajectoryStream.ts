@@ -113,7 +113,7 @@ export function useTrajectoryStream({
         const data = JSON.parse((event as MessageEvent).data) as TrajectoryErrorEvent;
         setError(data.message);
         setStreamStatus('error');
-      } catch (err) {
+      } catch {
         // EventSource error event (network issue, etc.)
         setError('Connection error');
         setStreamStatus('error');

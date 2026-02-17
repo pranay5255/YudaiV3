@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { TopBar } from './components/TopBar';
-import { Sidebar } from './components/Sidebar';
 import { Chat } from './components/Chat';
 import { ContextCards } from './components/ContextCards';
 import { TrajectoryViewer } from './components/TrajectoryViewer';
@@ -10,16 +9,15 @@ import { ToastContainer } from './components/Toast';
 import { RepositorySelectionToast } from './components/RepositorySelectionToast';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { SessionErrorBoundary } from './components/SessionErrorBoundary';
+import { SessionOrchestrator } from './components/SessionOrchestrator';
 import { AuthSuccess } from './components/AuthSuccess';
 import { AuthCallback } from './components/AuthCallback';
 import { LoginPage } from './components/LoginPage';
-import { Toast, ProgressStep, TabType, SelectedRepository } from './types';
+import { Toast, TabType, SelectedRepository } from './types';
 import { useAuth } from './hooks/useAuth';
 import { useRepository } from './hooks/useRepository';
 import { useSessionManagement } from './hooks/useSessionManagement';
-import { useSession, useContextCards, useRemoveContextCard } from './hooks/useSessionQueries';
 import { useSessionStore } from './stores/sessionStore';
-import { useQueryClient } from '@tanstack/react-query';
 
 /**
  * Main App Content Component
@@ -36,17 +34,13 @@ function AppContent() {
     activeSessionId,
     activeTab,
     setActiveTab,
-    sidebarCollapsed,
-    setSidebarCollapsed,
     clearSession
   } = useSessionManagement();
 
   const { currentSession } = useSessionStore();
-  
-  // React Query hooks for data fetching
-  const { data: sessionData, isLoading: isSessionLoading } = useSession(activeSessionId || '');
-  const { data: contextCards = [] } = useContextCards(activeSessionId || '');
-  const removeContextCardMutation = useRemoveContextCard();
+  const contextCards = useSessionStore((state) => state.contextCards);
+  const deleteContextCard = useSessionStore((state) => state.deleteContextCard);
+  const sessionStatus = useSessionStore((state) => state.sessionStatus);
 
   const isValidTab = (tab: unknown): tab is TabType =>
     tab === 'chat' || tab === 'context' || tab === 'ideas' || tab === 'solve';
@@ -60,7 +54,6 @@ function AppContent() {
   const currentTab: TabType = isValidTab(activeTab) ? activeTab : 'chat';
   
   // Local UI state
-  const [currentStep] = useState<ProgressStep>('DAifu');
   const [toasts, setToasts] = useState<Toast[]>([]);
   
   // Repository selection state - always show after login if no repository selected
@@ -100,12 +93,11 @@ function AppContent() {
     if (activeSessionId) {
       console.log('Session state:', {
         sessionId: activeSessionId,
-        sessionData: sessionData ? 'loaded' : 'loading',
+        sessionStatus,
         contextCardsCount: contextCards.length,
-        isLoading: isSessionLoading
       });
     }
-  }, [activeSessionId, sessionData, contextCards, isSessionLoading]);
+  }, [activeSessionId, sessionStatus, contextCards]);
 
   const handleRepositoryConfirm = async (selection: SelectedRepository) => {
     try {
@@ -167,13 +159,9 @@ function AppContent() {
       return;
     }
 
-    removeContextCardMutation.mutate({
-      sessionId: activeSessionId,
-      cardId: id,
-    }, {
-      onSuccess: () => addToast('Removed context card', 'info'),
-      onError: () => addToast('Failed to remove context card', 'error'),
-    });
+    void deleteContextCard(id)
+      .then(() => addToast('Removed context card', 'info'))
+      .catch(() => addToast('Failed to remove context card', 'error'));
   };
 
 
@@ -210,32 +198,17 @@ function AppContent() {
   };
 
   return (
-    <div className="flex h-screen bg-bg text-fg">
-      {/* Sidebar */}
-      <Sidebar
-        isCollapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        activeTab={currentTab}
-        onTabChange={handleTabChange}
-      />
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Bar */}
-        <TopBar
-          currentStep={currentStep}
-        />
-
-        {/* Main Content Area */}
+    <div className="min-h-screen bg-bg text-fg">
+      <SessionOrchestrator />
+      <div className="min-h-screen flex flex-col">
+        <TopBar activeTab={currentTab} onTabChange={handleTabChange} />
         <main className="flex-1 overflow-hidden">
           {renderTabContent()}
         </main>
       </div>
 
-      {/* Toast Container */}
       <ToastContainer toasts={toasts} onRemoveToast={removeToast} />
 
-      {/* Repository Selection Toast */}
       {showRepositorySelection && (
         <RepositorySelectionToast
           isOpen={showRepositorySelection}
@@ -251,7 +224,6 @@ function App() {
   const { isAuthenticated, sessionToken, initializeAuth } = useAuth();
   const clearSession = useSessionStore((state) => state.clearSession);
   const setSelectedRepository = useSessionStore((state) => state.setSelectedRepository);
-  const queryClient = useQueryClient();
   const previousTokenRef = useRef<string | null>(null);
 
   // Initialize authentication on app mount.
@@ -270,10 +242,9 @@ function App() {
     if (previousTokenRef.current !== sessionToken) {
       clearSession();
       setSelectedRepository(null);
-      queryClient.clear();
       previousTokenRef.current = sessionToken;
     }
-  }, [clearSession, queryClient, sessionToken, setSelectedRepository]);
+  }, [clearSession, sessionToken, setSelectedRepository]);
 
   // Auto-clear session store after 10 minutes of auth.
   useEffect(() => {
