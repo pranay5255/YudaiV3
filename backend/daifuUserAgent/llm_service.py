@@ -177,13 +177,16 @@ class LLMService:
         Raises:
             HTTPException: For API errors or configuration issues
         """
-        start_time = time.time()
-
         # Use defaults if not provided
         model = model or LLMService.DEFAULT_MODEL
         temperature = temperature or LLMService.DEFAULT_TEMPERATURE
         max_tokens = max_tokens or LLMService.DEFAULT_MAX_TOKENS
         timeout = timeout or LLMService.DEFAULT_TIMEOUT
+
+        # request_start is set just before the HTTP call so that logged durations
+        # reflect actual network time, not event-loop scheduling delays that can
+        # accumulate before this function gets its turn (e.g. blocking embed_text).
+        request_start: float = 0.0
 
         try:
             api_key = LLMService.get_api_key()
@@ -201,26 +204,35 @@ class LLMService:
                 "max_tokens": max_tokens,
             }
 
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            # Use explicit per-operation timeouts so that a long LLM generation
+            # (read) doesn't get confused with a slow connection (connect).
+            httpx_timeout = httpx.Timeout(
+                connect=10.0,
+                read=float(timeout),
+                write=30.0,
+                pool=5.0,
+            )
+            request_start = time.time()
+            async with httpx.AsyncClient(timeout=httpx_timeout) as client:
                 resp = await client.post(url, headers=headers, json=body)
                 resp.raise_for_status()
 
                 response_data = resp.json()
                 reply = response_data["choices"][0]["message"]["content"].strip()
 
-            processing_time = (time.time() - start_time) * 1000
+            processing_time = (time.time() - request_start) * 1000
             logger.info(f"LLM response generated in {processing_time:.2f}ms")
             return reply
 
         except httpx.TimeoutException as e:
-            processing_time = (time.time() - start_time) * 1000
+            processing_time = (time.time() - request_start) * 1000
             logger.error(f"LLM request timeout after {processing_time:.2f}ms: {e}")
             raise HTTPException(
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
                 detail="LLM request timed out",
             )
         except httpx.HTTPStatusError as e:
-            processing_time = (time.time() - start_time) * 1000
+            processing_time = (time.time() - request_start) * 1000
             content = e.response.text if e.response is not None else str(e)
             logger.error(
                 f"LLM HTTP error after {processing_time:.2f}ms: {e.response.status_code if e.response else 'unknown'} {content}"
@@ -230,7 +242,7 @@ class LLMService:
                 detail=f"LLM HTTP error: {content}",
             )
         except Exception as e:
-            processing_time = (time.time() - start_time) * 1000
+            processing_time = (time.time() - request_start) * 1000
             logger.exception(
                 f"LLM processing failed after {processing_time:.2f}ms: {str(e)}"
             )
