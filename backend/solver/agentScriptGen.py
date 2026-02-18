@@ -51,6 +51,8 @@ class AgentScriptParams:
     branch_name: str
     issue_url: str
     issue_text: Optional[str] = None
+    issue_title: Optional[str] = None
+    issue_body: Optional[str] = None
     verbose: bool = False
     temperature: float = 0.1
     max_tokens: int = 4000
@@ -83,6 +85,8 @@ class AgentScriptParams:
             branch_name=branch_name,
             issue_url=issue_url,
             issue_text=issue_text if isinstance(issue_text, str) else None,
+            issue_title=payload.get("issue_title") if isinstance(payload.get("issue_title"), str) else None,
+            issue_body=payload.get("issue_body") if isinstance(payload.get("issue_body"), str) else None,
             verbose=verbose,
             temperature=_safe_float(payload.get("temperature"), 0.1),
             max_tokens=_safe_int(payload.get("max_tokens"), 4000),
@@ -139,6 +143,23 @@ class AgentScriptParams:
         if not self.issue_text:
             return "None"
         return json.dumps(self.issue_text, ensure_ascii=True)
+
+    @property
+    def owner(self) -> str:
+        """Extract repository owner from repo_url."""
+        parts = self.repo_url.split("github.com/")[-1].strip("/").replace(".git", "").split("/")
+        return parts[0] if len(parts) >= 2 else ""
+
+    @property
+    def repo_name(self) -> str:
+        """Extract repository name from repo_url."""
+        parts = self.repo_url.split("github.com/")[-1].strip("/").replace(".git", "").split("/")
+        return parts[1] if len(parts) >= 2 else ""
+
+    @property
+    def issue_number(self) -> str:
+        """Extract issue number from issue_url."""
+        return self.issue_url.rstrip("/").split("/")[-1] if self.issue_url else "0"
 
     def substitutions(self) -> Mapping[str, Any]:
         """Values passed into the final Template.substitute call."""
@@ -749,3 +770,199 @@ def build_agent_script(params: AgentScriptParams) -> str:
     """
 
     return SCRIPT_TEMPLATE.substitute(params.substitutions())
+
+
+def build_pr_script(params: AgentScriptParams) -> str:
+    """
+    Generate a bash script that creates a deep PR with issue context, diff stats,
+    and trajectory metadata.
+
+    This script is designed to run in the same sandbox after the agent has made
+    code changes (Phase 2). It inspects the GitHub issue via `gh`, reads the diff,
+    parses trajectory data, then creates a single commit + detailed PR.
+
+    Parameters are substituted at generation time from AgentScriptParams.
+    The script uses $GITHUB_TOKEN from the sandbox environment.
+    """
+
+    owner = params.owner
+    repo = params.repo_name
+    issue_number = params.issue_number
+    branch_name = params.branch_name
+    model_name = params.model_name
+    issue_url = params.issue_url
+    repo_url = params.repo_url
+
+    # Escape fallback strings for safe embedding in bash
+    fallback_title = (params.issue_title or "").replace("'", "'\\''")
+    fallback_body = (params.issue_body or "").replace("'", "'\\''")[:500]
+
+    import time as _time
+    timestamp = int(_time.time())
+    pr_branch = f"yudai/fix-issue-{issue_number}-{timestamp}"
+
+    script = f"""#!/usr/bin/env bash
+set -euo pipefail
+
+OWNER='{owner}'
+REPO='{repo}'
+ISSUE_NUMBER='{issue_number}'
+BASE_BRANCH='{branch_name}'
+MODEL_NAME='{model_name}'
+ISSUE_URL='{issue_url}'
+REPO_URL='{repo_url}'
+PR_BRANCH='{pr_branch}'
+TESTBED='/home/user/testbed'
+TRAJ_PATH='/home/user/last_mini_run.traj.json'
+
+FALLBACK_TITLE='{fallback_title}'
+FALLBACK_BODY='{fallback_body}'
+
+cd "$TESTBED"
+
+# ── Step 1: Authenticate gh CLI ──
+echo "$GITHUB_TOKEN" | gh auth login --with-token 2>/dev/null || true
+
+# ── Step 2: Fetch issue context via gh ──
+ISSUE_JSON=$(gh issue view "$ISSUE_NUMBER" --repo "$OWNER/$REPO" \\
+    --json title,body,comments,labels 2>/dev/null || echo '{{}}')
+
+ISSUE_TITLE=$(python3 -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+print(data.get('title', '${{FALLBACK_TITLE}}'))
+" <<< "$ISSUE_JSON" 2>/dev/null || echo "$FALLBACK_TITLE")
+
+ISSUE_BODY_EXCERPT=$(python3 -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+body = data.get('body', '${{FALLBACK_BODY}}') or ''
+print(body[:500])
+" <<< "$ISSUE_JSON" 2>/dev/null || echo "$FALLBACK_BODY")
+
+ISSUE_LABELS=$(python3 -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+labels = data.get('labels', [])
+names = [l.get('name', '') for l in labels if isinstance(l, dict)]
+print(', '.join(names) if names else 'none')
+" <<< "$ISSUE_JSON" 2>/dev/null || echo "none")
+
+TOP_COMMENTS=$(python3 -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+comments = data.get('comments', [])[:3]
+for c in comments:
+    author = c.get('author', {{}}).get('login', 'unknown')
+    body = (c.get('body', '') or '')[:200]
+    print(f'> **@{{author}}**: {{body}}')
+    print()
+" <<< "$ISSUE_JSON" 2>/dev/null || echo "")
+
+# ── Step 3: Capture diff statistics ──
+DIFF_STAT=$(git diff --stat 2>/dev/null || echo "No changes")
+DIFF_FILES=$(git diff --name-only 2>/dev/null || echo "")
+DIFF_SHORT=$(git diff --shortstat 2>/dev/null || echo "0 files changed")
+FILES_CHANGED_COUNT=$(echo "$DIFF_FILES" | grep -c '.' 2>/dev/null || echo "0")
+
+# ── Step 4: Parse trajectory metadata ──
+TRAJ_STATS=$(python3 -c "
+import json, sys
+try:
+    with open('$TRAJ_PATH', 'r') as f:
+        data = json.load(f)
+    info = data.get('info', {{}})
+    model_stats = info.get('model_stats', {{}})
+    messages = data.get('messages', [])
+    print(f'Exit status: {{info.get(\"exit_status\", \"unknown\")}}')
+    print(f'API calls: {{model_stats.get(\"api_calls\", \"N/A\")}}')
+    print(f'Cost: \\${{model_stats.get(\"instance_cost\", \"N/A\")}}')
+    print(f'Total messages: {{len(messages)}}')
+except Exception as e:
+    print(f'Trajectory parsing failed: {{e}}')
+" 2>/dev/null || echo "Trajectory data unavailable")
+
+# ── Step 5: Check for changes ──
+if [ -z "$(git status --porcelain)" ]; then
+    echo "ERROR: No changes detected in testbed. Nothing to commit."
+    exit 1
+fi
+
+# ── Step 6: Git config, branch, commit ──
+git config user.name "Yudai Agent"
+git config user.email "agent@yudai.dev"
+
+git checkout -b "$PR_BRANCH"
+git add -A
+
+COMMIT_MSG="fix: resolve #${{ISSUE_NUMBER}} — ${{ISSUE_TITLE}}
+
+Automated fix generated by Yudai Agent (${{MODEL_NAME}}).
+Issue: ${{ISSUE_URL}}
+
+${{DIFF_SHORT}}"
+
+git commit -m "$COMMIT_MSG"
+
+# ── Step 7: Push ──
+AUTH_URL=$(echo "$REPO_URL" | sed "s|https://github.com/|https://${{GITHUB_TOKEN}}@github.com/|")
+if [[ ! "$AUTH_URL" == *.git ]]; then
+    AUTH_URL="${{AUTH_URL}}.git"
+fi
+git push -u "$AUTH_URL" "$PR_BRANCH"
+
+# ── Step 8: Create PR ──
+PR_BODY=$(cat <<'PRBODYEOF'
+## Summary
+
+fix: resolve #ISSUE_NUM_PLACEHOLDER — ISSUE_TITLE_PLACEHOLDER
+
+PRBODYEOF
+)
+
+# Build the full PR body dynamically
+PR_BODY="## Summary
+
+fix: resolve #${{ISSUE_NUMBER}} — ${{ISSUE_TITLE}}
+
+### Issue Context
+
+**Title:** ${{ISSUE_TITLE}}
+**Labels:** ${{ISSUE_LABELS}}
+
+${{ISSUE_BODY_EXCERPT}}
+
+### Top Comments
+${{TOP_COMMENTS}}
+
+### Diff Statistics
+
+\\`\\`\\`
+${{DIFF_STAT}}
+\\`\\`\\`
+
+**Files changed:** ${{FILES_CHANGED_COUNT}}
+${{DIFF_SHORT}}
+
+### Agent Trajectory
+
+\\`\\`\\`
+${{TRAJ_STATS}}
+\\`\\`\\`
+
+**Model:** ${{MODEL_NAME}}
+
+---
+*This PR was automatically generated by [Yudai](https://github.com/pranay5255/YudaiV3)*"
+
+gh pr create \\
+    --repo "$OWNER/$REPO" \\
+    --title "fix: resolve #${{ISSUE_NUMBER}} — ${{ISSUE_TITLE}}" \\
+    --body "$PR_BODY" \\
+    --base "$BASE_BRANCH" \\
+    --head "$PR_BRANCH"
+
+echo "Phase 2: Deep PR creation complete."
+"""
+
+    return script
