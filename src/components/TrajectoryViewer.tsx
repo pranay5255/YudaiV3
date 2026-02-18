@@ -74,7 +74,7 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({
     if (isLive && liveTrajectory && messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [isLive, liveMessageCount]);
+  }, [isLive, liveMessageCount, liveTrajectory]);
 
   // Select data source based on mode
   const trajectory = isLive ? liveTrajectory : staticTrajectory;
