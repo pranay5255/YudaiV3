@@ -29,3 +29,33 @@
     @apply bg-bg-primary text-text-primary antialiased;
   }
 }
+
+@layer utilities {
+  .terminal-noise {
+    background-image:
+      radial-gradient(circle at 20% 20%, rgb(255 255 255 / 0.02) 0, transparent 35%),
+      radial-gradient(circle at 80% 0, rgb(34 211 238 / 0.05) 0, transparent 30%);
+  }
+
+  .shadow-terminal {
+    box-shadow:
+      0 20px 45px rgb(0 0 0 / 0.45),
+      0 2px 0 rgb(255 255 255 / 0.03) inset;
+  }
+
+  .glow-amber {
+    box-shadow: 0 0 0 1px rgb(245 158 11 / 0.18), 0 0 24px rgb(245 158 11 / 0.18);
+  }
+
+  .glow-cyan {
+    box-shadow: 0 0 0 1px rgb(34 211 238 / 0.2), 0 0 22px rgb(34 211 238 / 0.16);
+  }
+
+  .glow-emerald {
+    box-shadow: 0 0 0 1px rgb(16 185 129 / 0.2), 0 0 22px rgb(16 185 129 / 0.16);
+  }
+
+  .border-3 {
+    border-width: 3px;
+  }
+}
