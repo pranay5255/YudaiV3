@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { TopBar } from './components/TopBar';
 import { Chat } from './components/Chat';
@@ -55,9 +55,18 @@ function AppContent() {
   
   // Local UI state
   const [toasts, setToasts] = useState<Toast[]>([]);
-  
+
   // Repository selection state - always show after login if no repository selected
   const [showRepositorySelection, setShowRepositorySelection] = useState(false);
+
+  const addToast = useCallback((message: string, type: Toast['type'] = 'info') => {
+    const newToast: Toast = {
+      id: Date.now().toString(),
+      message,
+      type,
+    };
+    setToasts(prev => [...prev, newToast]);
+  }, []);
 
   // Show repository selection after login if no repository is selected
   useEffect(() => {
@@ -66,7 +75,7 @@ function AppContent() {
       user: !!user,
       hasSelectedRepository
     });
-    
+
     // Always show repository selection after login if no repository is selected
     if (isAuthenticated && user && !hasSelectedRepository) {
       console.log('Showing repository selection toast');
@@ -74,7 +83,7 @@ function AppContent() {
       const timer = setTimeout(() => {
         setShowRepositorySelection(true);
       }, 1000);
-      
+
       return () => clearTimeout(timer);
     }
   }, [isAuthenticated, user, hasSelectedRepository]);
@@ -138,15 +147,6 @@ function AppContent() {
 
   const handleRepositoryCancel = () => {
     setShowRepositorySelection(false);
-  };
-
-  const addToast = (message: string, type: Toast['type'] = 'info') => {
-    const newToast: Toast = {
-      id: Date.now().toString(),
-      message,
-      type,
-    };
-    setToasts(prev => [...prev, newToast]);
   };
 
   const removeToast = (id: string) => {
