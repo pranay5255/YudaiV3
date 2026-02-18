@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRepository } from '../hooks/useRepository';
 import { useAuthStore } from '../stores/authStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { API, buildApiUrl } from '../config/api';
 import { TrajectoryViewer } from './TrajectoryViewer';
 import type {
   SolveStatusResponse,
@@ -56,6 +57,11 @@ interface AIModel {
   description?: string;
 }
 
+const isFreeModel = (model: AIModel): boolean => {
+  const searchable = `${model.name} ${model.provider} ${model.model_id} ${model.description || ''}`.toLowerCase();
+  return searchable.includes('free');
+};
+
 // Helper function to convert backend status (lowercase) to display format (uppercase)
 const toDisplayStatus = (status: string): string => {
   return status.toUpperCase();
@@ -87,11 +93,34 @@ interface IssueModalProps {
 }
 
 function IssueModal({ issue, onClose, onStartSolve, availableModels, isLoading }: IssueModalProps) {
-  const [selectedModelId, setSelectedModelId] = useState<number>(availableModels[0]?.id || 0);
+  const [selectedModelId, setSelectedModelId] = useState<number>(0);
   const [smallChange, setSmallChange] = useState(false);
   const [bestEffort, setBestEffort] = useState(false);
+  const freeModel = useMemo(
+    () => availableModels.find((model) => isFreeModel(model)),
+    [availableModels]
+  );
 
   const isYudaiGenerated = issue.labels.includes('chat-generated');
+
+  useEffect(() => {
+    if (!availableModels.length) {
+      setSelectedModelId(0);
+      return;
+    }
+
+    const selectedStillExists = availableModels.some((model) => model.id === selectedModelId);
+    if (selectedStillExists) {
+      return;
+    }
+
+    // Auto-select only a free model. If none exists, force explicit user choice.
+    if (freeModel) {
+      setSelectedModelId(freeModel.id);
+    } else {
+      setSelectedModelId(0);
+    }
+  }, [availableModels, freeModel, selectedModelId]);
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -169,14 +198,22 @@ function IssueModal({ issue, onClose, onStartSolve, availableModels, isLoading }
                 value={selectedModelId}
                 onChange={(e) => setSelectedModelId(Number(e.target.value))}
                 className="w-full bg-bg-tertiary border border-border rounded-lg px-4 py-3 text-fg font-mono text-sm focus:outline-none focus:border-amber/50 focus:ring-2 focus:ring-amber/10 transition-all duration-200"
-                disabled={isLoading}
+                disabled={isLoading || availableModels.length === 0}
               >
+                <option value={0} disabled>
+                  {availableModels.length === 0 ? 'No models available' : 'Select an AI model'}
+                </option>
                 {availableModels.map((model) => (
                   <option key={model.id} value={model.id}>
                     {model.name} ({model.provider})
                   </option>
                 ))}
               </select>
+              {freeModel && selectedModelId === freeModel.id && (
+                <p className="text-xs text-success font-mono mt-2">
+                  Free model selected by default: {freeModel.name}
+                </p>
+              )}
               {availableModels.find(m => m.id === selectedModelId)?.description && (
                 <p className="text-xs text-muted font-mono mt-2">
                   {availableModels.find(m => m.id === selectedModelId)?.description}
@@ -529,7 +566,10 @@ export function SolveIssues() {
     const pollStatus = async () => {
       try {
         const data = await apiCall(
-          `/api/daifu/sessions/${activeSessionId}/solve/status/${activeSolveId}`
+          buildApiUrl(API.SESSIONS.SOLVER.STATUS, {
+            sessionId: activeSessionId,
+            solveSessionId: activeSolveId,
+          })
         );
         setSolveStatus(data);
 
@@ -579,7 +619,9 @@ export function SolveIssues() {
         max_cost: DEFAULT_SOLVER_LIMITS.max_cost,
       };
 
-      const data = await apiCall(`/api/daifu/sessions/${activeSessionId}/solve/start`, {
+      const data = await apiCall(buildApiUrl(API.SESSIONS.SOLVER.START, {
+        sessionId: activeSessionId,
+      }), {
         method: 'POST',
         body: JSON.stringify(solverPayload),
       });
@@ -614,7 +656,10 @@ export function SolveIssues() {
 
     try {
       await apiCall(
-        `/api/daifu/sessions/${activeSessionId}/solve/cancel/${activeSolveId}`,
+        buildApiUrl(API.SESSIONS.SOLVER.CANCEL, {
+          sessionId: activeSessionId,
+          solveSessionId: activeSolveId,
+        }),
         {
           method: 'POST',
         }
@@ -631,6 +676,11 @@ export function SolveIssues() {
     if (filterYudai === 'others') return !issue.labels.includes('chat-generated');
     return true;
   });
+  const totalYudaiIssues = useMemo(
+    () => issues.filter((issue) => issue.labels.includes('chat-generated')).length,
+    [issues]
+  );
+  const totalOtherIssues = issues.length - totalYudaiIssues;
 
   if (!selectedRepository) {
     return (
@@ -651,17 +701,33 @@ export function SolveIssues() {
   return (
     <div className="h-full flex flex-col bg-bg terminal-noise">
       {/* Header */}
-      <div className="border-b border-border p-6 bg-bg-secondary">
-        <h1 className="text-xl font-mono font-semibold text-fg mb-2">Solve Issues</h1>
-        <p className="text-sm text-muted font-mono mb-4">
-          Select an issue to solve using AI-powered agents
-        </p>
+      <div className="border-b border-border bg-[linear-gradient(120deg,rgba(245,158,11,0.12)_0%,rgba(34,211,238,0.05)_40%,rgba(10,10,11,0.9)_100%)]">
+        <div className="p-6 space-y-5">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-cyan font-mono mb-2">Solve Console</p>
+              <h1 className="text-2xl font-mono font-semibold text-fg mb-1">Solve Issues</h1>
+              <p className="text-sm text-fg-secondary font-mono">
+                Prioritize one issue, launch solve runs, and compare outcomes from a single control surface.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="px-3 py-1.5 rounded-lg border border-border bg-bg-secondary text-fg font-mono text-xs">
+                Total {issues.length}
+              </span>
+              <span className="px-3 py-1.5 rounded-lg border border-amber/30 bg-amber/10 text-amber font-mono text-xs">
+                Yudai {totalYudaiIssues}
+              </span>
+              <span className="px-3 py-1.5 rounded-lg border border-cyan/30 bg-cyan/10 text-cyan font-mono text-xs">
+                Other {totalOtherIssues}
+              </span>
+            </div>
+          </div>
 
-        {/* Filter buttons */}
-        <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setFilterYudai('all')}
-            className={`px-4 py-2 rounded-lg font-mono text-sm transition-all duration-200 ${
+            className={`px-4 py-2.5 rounded-lg font-mono text-sm transition-all duration-200 ${
               filterYudai === 'all'
                 ? 'bg-amber text-bg-primary font-semibold glow-amber'
                 : 'bg-bg-tertiary text-muted hover:text-fg border border-border'
@@ -671,25 +737,26 @@ export function SolveIssues() {
           </button>
           <button
             onClick={() => setFilterYudai('yudai')}
-            className={`px-4 py-2 rounded-lg font-mono text-sm transition-all duration-200 ${
+            className={`px-4 py-2.5 rounded-lg font-mono text-sm transition-all duration-200 ${
               filterYudai === 'yudai'
                 ? 'bg-amber text-bg-primary font-semibold glow-amber'
                 : 'bg-bg-tertiary text-muted hover:text-fg border border-border'
             }`}
           >
-            Yudai Generated ({issues.filter((i) => i.labels.includes('chat-generated')).length})
+            Yudai Generated ({totalYudaiIssues})
           </button>
           <button
             onClick={() => setFilterYudai('others')}
-            className={`px-4 py-2 rounded-lg font-mono text-sm transition-all duration-200 ${
+            className={`px-4 py-2.5 rounded-lg font-mono text-sm transition-all duration-200 ${
               filterYudai === 'others'
                 ? 'bg-amber text-bg-primary font-semibold glow-amber'
                 : 'bg-bg-tertiary text-muted hover:text-fg border border-border'
             }`}
           >
-            Other Issues ({issues.filter((i) => !i.labels.includes('chat-generated')).length})
+            Other Issues ({totalOtherIssues})
           </button>
         </div>
+      </div>
       </div>
 
       {/* Issues Grid */}
@@ -709,31 +776,43 @@ export function SolveIssues() {
             <p className="text-muted font-mono">No issues found</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {filteredIssues.map((issue, index) => (
               <div
                 key={issue.number}
                 onClick={() => setSelectedIssue(issue)}
-                className="bg-bg-secondary border border-border rounded-xl p-4 cursor-pointer hover:border-amber/30 transition-all duration-200 animate-fade-in group"
+                className="bg-bg-secondary border border-border rounded-xl p-4 cursor-pointer hover:border-amber/40 hover:shadow-terminal transition-all duration-200 animate-fade-in group"
                 style={{ animationDelay: `${index * 50}ms` }}
               >
-                <div className="flex items-start justify-between mb-2">
-                  <span className="text-xs font-mono text-muted">#{issue.number}</span>
-                  {issue.labels.includes('chat-generated') && (
-                    <span className="px-2 py-0.5 bg-amber/10 text-amber border border-amber/20 text-xs font-mono font-semibold rounded-lg">
-                      Yudai
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-mono text-muted">#{issue.number}</span>
+                    <span className="px-2 py-0.5 rounded-md border border-border bg-bg-tertiary text-[11px] uppercase tracking-wide text-fg-secondary font-mono">
+                      {issue.state}
                     </span>
-                  )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {issue.labels.includes('chat-generated') && (
+                      <span className="px-2 py-0.5 bg-amber/10 text-amber border border-amber/20 text-xs font-mono font-semibold rounded-lg">
+                        Yudai
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <h3 className="font-mono font-medium text-fg text-sm mb-2 line-clamp-2 group-hover:text-amber transition-colors">{issue.title}</h3>
-                <p className="text-xs text-muted font-mono line-clamp-3 mb-3">
+
+                <h3 className="font-mono font-semibold text-fg text-base leading-snug mb-2 line-clamp-2 group-hover:text-amber transition-colors">
+                  {issue.title}
+                </h3>
+
+                <p className="text-xs text-fg-secondary font-mono line-clamp-3 mb-4 leading-relaxed">
                   {issue.body || 'No description'}
                 </p>
-                <div className="flex flex-wrap gap-1 mb-3">
+
+                <div className="flex flex-wrap gap-1.5 mb-4">
                   {issue.labels.slice(0, 3).map((label) => (
                     <span
                       key={label}
-                      className="px-2 py-0.5 bg-bg-tertiary text-xs font-mono rounded-lg border border-border"
+                      className="px-2 py-0.5 bg-bg-tertiary text-xs font-mono rounded-md border border-border text-fg-secondary"
                     >
                       {label}
                     </span>
@@ -744,9 +823,10 @@ export function SolveIssues() {
                     </span>
                   )}
                 </div>
-                <div className="flex items-center justify-between text-xs text-muted font-mono">
-                  <span>{new Date(issue.created_at).toLocaleDateString()}</span>
-                  <span>{issue.comments} comments</span>
+
+                <div className="pt-3 border-t border-border/70 flex items-center justify-between text-xs font-mono">
+                  <span className="text-fg-secondary">Opened {new Date(issue.created_at).toLocaleDateString()}</span>
+                  <span className="text-cyan">{issue.comments} comments</span>
                 </div>
               </div>
             ))}
