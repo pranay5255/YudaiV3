@@ -333,6 +333,9 @@ class DefaultSolverManager(SolverManager):
                 repo_url=repo_url,
                 branch_name=request.branch_name,
                 executor_registry=executor_registry,
+                github_token=github_token,
+                issue_title=issue.title,
+                issue_body=issue.body,
             ),
             name=f"solve-{solve_id}",
         )
@@ -363,6 +366,9 @@ class DefaultSolverManager(SolverManager):
         repo_url: str,
         branch_name: str,
         executor_registry: Dict[str, HeadlessSandboxExecutor],
+        github_token: Optional[str] = None,
+        issue_title: Optional[str] = None,
+        issue_body: Optional[str] = None,
     ):
         """Execute each requested run sequentially inside its own sandbox."""
 
@@ -397,6 +403,9 @@ class DefaultSolverManager(SolverManager):
                         branch_name=branch_name,
                         model_name=plan.model_identifier,
                         executor=executor,
+                        github_token=github_token,
+                        issue_title=issue_title,
+                        issue_body=issue_body,
                     )
                 finally:
                     executor_registry.pop(plan.run_id, None)
@@ -543,6 +552,9 @@ class DefaultSolverManager(SolverManager):
         branch_name: str,
         model_name: str,
         executor: HeadlessSandboxExecutor,
+        github_token: Optional[str] = None,
+        issue_title: Optional[str] = None,
+        issue_body: Optional[str] = None,
     ):
         db = self._session_factory()
         try:
@@ -577,6 +589,9 @@ class DefaultSolverManager(SolverManager):
                 run=run,
                 solve=solve,
                 options=options,
+                github_token=github_token,
+                issue_title=issue_title,
+                issue_body=issue_body,
             )
 
             try:
@@ -615,6 +630,9 @@ class DefaultSolverManager(SolverManager):
         run: SolveRun,
         solve: Solve,
         options: Dict[str, Any],
+        github_token: Optional[str] = None,
+        issue_title: Optional[str] = None,
+        issue_body: Optional[str] = None,
     ) -> HeadlessSandboxRequest:
         """Create a sandbox execution request for a solver run."""
 
@@ -631,6 +649,9 @@ class DefaultSolverManager(SolverManager):
             solve_id=solve.id,
             solve_run_id=run.id,
             verbose=True,
+            github_token=github_token,
+            issue_title=issue_title,
+            issue_body=issue_body,
         )
 
     def _record_success(
