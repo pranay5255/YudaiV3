@@ -21,6 +21,31 @@ interface SessionErrorBoundaryState {
 export class SessionErrorBoundary extends Component<SessionErrorBoundaryProps, SessionErrorBoundaryState> {
   private retryCount = 0;
   private maxRetries = 3;
+  private static sessionErrorCodes = new Set([
+    'AUTH_MISSING_TOKEN',
+    'SESSION_NOT_READY',
+    'SESSION_NOT_FOUND',
+    'SESSION_CREATE_FAILED',
+    'SESSION_LOAD_FAILED',
+    'SESSION_VALIDATE_FAILED',
+  ]);
+
+  private static sessionErrorPatterns = [
+    /session not found/i,
+    /session validation failed/i,
+    /no active session/i,
+    /authentication required/i,
+    /invalid or expired session/i,
+  ];
+
+  private static isSessionRelatedError(error: Error): boolean {
+    const typedError = error as Error & { code?: string };
+    if (typedError.code && SessionErrorBoundary.sessionErrorCodes.has(typedError.code)) {
+      return true;
+    }
+    const message = error.message || '';
+    return SessionErrorBoundary.sessionErrorPatterns.some((pattern) => pattern.test(message));
+  }
 
   constructor(props: SessionErrorBoundaryProps) {
     super(props);
@@ -33,11 +58,7 @@ export class SessionErrorBoundary extends Component<SessionErrorBoundaryProps, S
   }
 
   static getDerivedStateFromError(error: Error): Partial<SessionErrorBoundaryState> {
-    // Check if it's a session-related error
-    const isSessionError = error.message.includes('Session not found') ||
-                          error.message.includes('session') ||
-                          error.message.includes('404') ||
-                          error.message.includes('Authentication');
+    const isSessionError = SessionErrorBoundary.isSessionRelatedError(error);
 
     return {
       hasError: true,
@@ -55,7 +76,8 @@ export class SessionErrorBoundary extends Component<SessionErrorBoundaryProps, S
     });
 
     // If it's a session error, notify parent to handle session cleanup
-    if (this.state.isSessionError && this.props.onSessionError) {
+    const isSessionError = SessionErrorBoundary.isSessionRelatedError(error);
+    if (isSessionError && this.props.onSessionError) {
       this.props.onSessionError();
     }
   }

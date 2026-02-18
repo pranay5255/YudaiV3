@@ -26,7 +26,25 @@ export const useSessionManagement = () => {
     setError,
     setActiveTab,
     setSidebarCollapsed,
-  } = useSessionStore();
+  } = useSessionStore(
+    useShallow((state) => ({
+      activeSessionId: state.activeSessionId,
+      selectedRepository: state.selectedRepository,
+      sessionInitialized: state.sessionInitialized,
+      isLoading: state.isLoading,
+      error: state.error,
+      activeTab: state.activeTab,
+      sidebarCollapsed: state.sidebarCollapsed,
+      createSessionForRepository: state.createSessionForRepository,
+      ensureSessionExists: state.ensureSessionExists,
+      setActiveSession: state.setActiveSession,
+      clearSession: state.clearSession,
+      setSelectedRepository: state.setSelectedRepository,
+      setError: state.setError,
+      setActiveTab: state.setActiveTab,
+      setSidebarCollapsed: state.setSidebarCollapsed,
+    }))
+  );
 
   const { isAuthenticated, isLoading: authLoading, user } = useAuthStore(
     useShallow((state) => ({

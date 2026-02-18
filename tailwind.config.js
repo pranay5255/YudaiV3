@@ -5,10 +5,18 @@ export default {
     extend: {
       colors: {
         bg: {
+          DEFAULT: 'var(--bg-primary)',
           primary: 'var(--bg-primary)',
           secondary: 'var(--bg-secondary)',
           tertiary: 'var(--bg-tertiary)',
         },
+        fg: {
+          DEFAULT: 'var(--text-primary)',
+          secondary: 'var(--text-secondary)',
+          muted: 'var(--text-muted)',
+        },
+        primary: 'var(--accent-amber)',
+        muted: 'var(--text-muted)',
         amber: 'var(--accent-amber)',
         cyan: 'var(--accent-cyan)',
         success: 'var(--accent-emerald)',

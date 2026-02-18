@@ -1063,7 +1063,7 @@ export const useSessionStore = create<SessionState>()(
 
             let sessionIdToUse = activeSessionId;
             if (selectionInfo && (!sessionIdToUse || !sessionMatchesSelection)) {
-              const newSessionId = await get().createSessionForRepository(selectedRepository);
+              const newSessionId = await get().createSessionForRepository(selectedRepository!);
               sessionIdToUse = newSessionId;
             }
 

@@ -31,8 +31,8 @@ export const API = {
     },
     SOLVER: {
       START: `${API_BASE}/daifu/sessions/{sessionId}/solve/start`,
-      STATUS: `${API_BASE}/daifu/sessions/{sessionId}/solve/sessions/{solveSessionId}`,
-      CANCEL: `${API_BASE}/daifu/sessions/{sessionId}/solve/sessions/{solveSessionId}/cancel`,
+      STATUS: `${API_BASE}/daifu/sessions/{sessionId}/solve/status/{solveSessionId}`,
+      CANCEL: `${API_BASE}/daifu/sessions/{sessionId}/solve/cancel/{solveSessionId}`,
       STREAM: `${API_BASE}/daifu/sessions/{sessionId}/solve/stream/{solveId}/{runId}`,
     },
   },
