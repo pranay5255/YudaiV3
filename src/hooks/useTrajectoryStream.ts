@@ -39,17 +39,22 @@ export function useTrajectoryStream({
   const eventSourceRef = useRef<EventSource | null>(null);
   const sessionToken = useAuthStore((state) => state.sessionToken);
 
-  const disconnect = useCallback(() => {
+  const closeStream = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
-      setStreamStatus('idle');
     }
   }, []);
 
+  const disconnect = useCallback(() => {
+    closeStream();
+    setStreamStatus('idle');
+  }, [closeStream]);
+
   useEffect(() => {
     if (!enabled || !sessionToken) {
-      disconnect();
+      closeStream();
+      setStreamStatus('idle');
       return;
     }
 
@@ -113,15 +118,18 @@ export function useTrajectoryStream({
         const data = JSON.parse((event as MessageEvent).data) as TrajectoryErrorEvent;
         setError(data.message);
         setStreamStatus('error');
+        closeStream();
       } catch {
         // EventSource error event (network issue, etc.)
         setError('Connection error');
         setStreamStatus('error');
+        closeStream();
       }
     });
 
     eventSource.addEventListener('done', () => {
-      disconnect();
+      setStreamStatus('completed');
+      closeStream();
     });
 
     eventSource.addEventListener('heartbeat', () => {
@@ -131,14 +139,14 @@ export function useTrajectoryStream({
     eventSource.onerror = () => {
       setStreamStatus('error');
       setError('Connection lost');
-      disconnect();
+      closeStream();
     };
 
     // Cleanup on unmount
     return () => {
-      disconnect();
+      closeStream();
     };
-  }, [enabled, sessionId, solveId, runId, sessionToken, disconnect]);
+  }, [enabled, sessionId, solveId, runId, sessionToken, closeStream]);
 
   return {
     trajectory,
