@@ -520,7 +520,7 @@ class IssueService:
                 model="x-ai/grok-4-fast",  # Use the same model as chat
                 temperature=0.3,  # Lower temperature for more focused issue generation
                 max_tokens=2000,
-                timeout=60,
+                timeout=120,
             )
             processing_time = time.time() - start_time
 
