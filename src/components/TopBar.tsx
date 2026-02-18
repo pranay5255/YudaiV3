@@ -82,32 +82,24 @@ export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
   const statusText = sessionStatusLabel[sessionStatus] || sessionStatus;
 
   return (
-    <header className="border-b border-border bg-bg-secondary/95 backdrop-blur-sm">
-      <div className="px-4 py-3 flex flex-wrap items-center gap-3 justify-between">
+    <header className="border-b border-border bg-[linear-gradient(110deg,rgba(245,158,11,0.08)_0%,rgba(34,211,238,0.04)_34%,rgba(17,17,19,0.95)_100%)] backdrop-blur-sm">
+      <div className="px-4 pt-4 pb-3 flex flex-wrap items-start gap-4 justify-between">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-9 h-9 rounded-lg bg-amber/10 border border-amber/30 flex items-center justify-center">
-            <Bot className="w-4 h-4 text-amber" />
+          <div className="w-10 h-10 rounded-xl bg-amber/10 border border-amber/30 flex items-center justify-center glow-amber">
+            <Bot className="w-5 h-5 text-amber" />
           </div>
           <div className="min-w-0">
-            <p className="text-fg font-mono font-semibold text-sm truncate">Yudai Chat Workspace</p>
-            <p className="text-xs text-muted font-mono truncate">{repositoryLabel}</p>
+            <p className="text-fg font-mono font-semibold text-base truncate">Yudai Chat Workspace</p>
+            <p className="text-xs text-fg-secondary font-mono truncate mt-0.5">{repositoryLabel}</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <span
-            className={`px-2.5 py-1 rounded-md text-xs font-mono border ${statusClass}`}
+            className={`px-3 py-1.5 rounded-md text-xs font-mono border ${statusClass}`}
             title={`Session status: ${statusText}`}
           >
-            {statusText}
-          </span>
-
-          <span className="px-2.5 py-1 rounded-md text-xs font-mono border border-border text-fg-secondary bg-bg-tertiary">
-            {messages.length} msg
-          </span>
-
-          <span className="px-2.5 py-1 rounded-md text-xs font-mono border border-border text-fg-secondary bg-bg-tertiary">
-            {contextCards.length} ctx
+            Session {statusText}
           </span>
 
           <button
@@ -122,7 +114,7 @@ export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
             aria-pressed={indexCodebaseEnabled}
           >
             <Database className="w-3.5 h-3.5" />
-            Index
+            Indexing
           </button>
 
           {user ? (
@@ -141,7 +133,7 @@ export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
         </div>
       </div>
 
-      <div className="px-4 pb-3">
+      <div className="px-4 pb-4 flex flex-wrap items-center justify-between gap-3 border-t border-border/60">
         <div className="flex gap-2 overflow-x-auto">
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -154,7 +146,7 @@ export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
                 className={`
                   flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-mono whitespace-nowrap transition-all
                   ${isActive
-                    ? 'bg-amber/10 text-amber border-amber/40 shadow-[0_0_0_1px_rgba(245,158,11,0.12)]'
+                    ? 'bg-amber/10 text-amber border-amber/40 glow-amber'
                     : 'bg-bg-tertiary text-fg-secondary border-border hover:text-fg hover:border-border-accent'}
                 `}
                 aria-current={isActive ? 'page' : undefined}
@@ -164,6 +156,15 @@ export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
               </button>
             );
           })}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="px-2.5 py-1 rounded-md text-xs font-mono border border-border text-fg-secondary bg-bg-tertiary">
+            {messages.length} msg
+          </span>
+          <span className="px-2.5 py-1 rounded-md text-xs font-mono border border-border text-fg-secondary bg-bg-tertiary">
+            {contextCards.length} ctx
+          </span>
         </div>
       </div>
     </header>
