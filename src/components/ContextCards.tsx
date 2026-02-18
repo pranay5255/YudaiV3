@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Trash2, FileText, MessageCircle, Upload } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import type {
   ChatContextMessage,
   FileContextItem,
@@ -43,11 +44,12 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
   onShowError,
   repositoryInfo
 }) => {
-  // Zustand store for state management
-  const { activeSessionId } = useSessionStore();
   const { selectedRepository } = useRepository();
-
-  const { deleteContextCard, createIssueWithContext } = useSessionStore();
+  const { createIssueWithContext } = useSessionStore(
+    useShallow((state) => ({
+      createIssueWithContext: state.createIssueWithContext,
+    }))
+  );
   const [isLoading, setIsLoading] = useState(false);
 
   const showError = useCallback((message: string) => {
@@ -58,28 +60,10 @@ export const ContextCards: React.FC<ContextCardsProps> = ({
     }
   }, [onShowError]);
 
-  // Load context cards when session changes (cards are now passed as props from parent)
-  useEffect(() => {
-    if (activeSessionId && cards.length === 0) {
-      console.log('Context cards available:', cards.length);
-    }
-  }, [activeSessionId, cards]);
-
-  const removeContextCard = useCallback(async (cardId: string) => {
-    if (!activeSessionId) return;
-
-    try {
-      console.log('Removing context card:', cardId);
-      await deleteContextCard(cardId);
-      console.log('Context card removed successfully');
-      // Call the onRemoveCard callback to update the parent state
-      onRemoveCard(cardId);
-    } catch (error) {
-      console.error('Failed to remove context card:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to remove context card';
-      showError(`Failed to remove context card: ${errorMessage}`);
-    }
-  }, [activeSessionId, deleteContextCard, onRemoveCard, showError]);
+  const removeContextCard = useCallback((cardId: string) => {
+    // Parent owns deletion side effects and toasts to keep one source of truth.
+    onRemoveCard(cardId);
+  }, [onRemoveCard]);
 
   const getSourceIcon = (source: ContextCard['source']) => {
     switch (source) {
