@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import modal
-from solver.agentScriptGen import AgentScriptParams, build_agent_script
+from solver.agentScriptGen import AgentScriptParams, build_agent_script, build_pr_script
 
 from utils import utc_now
 
@@ -282,6 +282,8 @@ class HeadlessSandboxRequest:
     solve_id: Optional[str] = None
     solve_run_id: Optional[str] = None
     issue_text: Optional[str] = None
+    issue_title: Optional[str] = None
+    issue_body: Optional[str] = None
     verbose: bool = False
     openrouter_call_delay: float = 0.0
     create_pr: bool = True
@@ -746,6 +748,8 @@ class HeadlessSandboxExecutor:
                 logger.info("Sandbox metadata attached: %s", metadata)
 
             # Create tfbd.yaml config with the selected model and user options for traceability
+            # Phase 1: Agent makes code changes with PR creation disabled.
+            # PR creation is handled separately in Phase 2 for deeper context.
             script_params = AgentScriptParams.from_payload(
                 model_name=request.model_name,
                 repo_url=request.repo_url,
@@ -759,7 +763,9 @@ class HeadlessSandboxExecutor:
                     "max_cost": request.max_cost,
                     "small_change": request.small_change,
                     "best_effort": request.best_effort,
-                    "create_pr": request.create_pr,
+                    "create_pr": False,  # PR creation handled by Phase 2
+                    "issue_title": request.issue_title,
+                    "issue_body": request.issue_body,
                 },
                 verbose=request.verbose,
             )
@@ -810,8 +816,35 @@ class HeadlessSandboxExecutor:
                 if self._cancelled:
                     raise SandboxExecutionError("Execution cancelled")
 
-            # Parse output for PR URL and trajectory data
-            pr_url = self._extract_pr_url(result.stdout)
+            # Phase 2: Deep PR creation in the same sandbox
+            pr_url = None
+            if request.create_pr and result.exit_code == 0:
+                logger.info("Phase 2: Creating deep PR in sandbox %s", sandbox_id)
+                pr_script = build_pr_script(script_params)
+                await sandbox.write_file("/home/user/create_pr.sh", pr_script)
+                pr_result = await sandbox.run_command_with_logging(
+                    "bash /home/user/create_pr.sh",
+                    envs=command_env,
+                    timeout=120,
+                    logger=logger,
+                    log_prefix=f"[PR {sandbox_id}] ",
+                )
+                pr_url = self._extract_pr_url(pr_result.stdout)
+                if pr_url:
+                    logger.info("Phase 2: PR created: %s", pr_url)
+                else:
+                    logger.warning(
+                        "Phase 2: PR creation failed, stderr: %s",
+                        (pr_result.stderr or "")[-500:],
+                    )
+            elif not request.create_pr:
+                logger.info("PR creation disabled, skipping Phase 2")
+            else:
+                logger.info(
+                    "Agent exited with code %d, skipping Phase 2 PR creation",
+                    result.exit_code,
+                )
+
             trajectory_file = self._extract_trajectory_path(result.stdout)
 
             # Download trajectory file from sandbox
@@ -846,6 +879,22 @@ class HeadlessSandboxExecutor:
                     trajectory_file,
                     request.solve_id,
                     request.solve_run_id,
+                )
+
+            # Phase 3: Async video generation (fire-and-forget)
+            if pr_url and request.create_pr:
+                from solver.video import kick_off_video_generation
+
+                asyncio.create_task(
+                    kick_off_video_generation(
+                        pr_url=pr_url,
+                        repo_url=request.repo_url,
+                        issue_url=request.issue_url,
+                        branch_name=script_params.branch_name,
+                        github_token=github_token or "",
+                        solve_id=request.solve_id or "",
+                        run_id=request.solve_run_id or "",
+                    )
                 )
 
             logger.info(
