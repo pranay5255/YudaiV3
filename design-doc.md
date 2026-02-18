@@ -1,5 +1,71 @@
 # YudaiV3 Landing Page Redesign
 
+## Workspace UI Update (February 2026)
+
+### Scope Implemented
+
+This update expands beyond the login/landing view and standardizes the in-app workspace shell, chat view, and solve-issues board.
+
+### Interaction and Reliability Fixes
+
+1. **Context card deletion ownership fixed**
+   - `ContextCards` no longer deletes directly.
+   - Parent (`App`) is now the single owner of deletion side effects and toast feedback.
+
+2. **Trajectory stream status correctness**
+   - SSE close/disconnect no longer overwrites terminal status.
+   - `completed` and `error` states are preserved correctly.
+
+3. **Session error classification hardened**
+   - Session recovery now keys off explicit error codes and strict patterns.
+   - Removed broad `"session"` substring matching to avoid accidental session clears.
+
+4. **Zustand rerender pressure reduced**
+   - Replaced full-store subscriptions with selector + `useShallow` patterns in repository/session hooks and repository picker surfaces.
+
+5. **Solver endpoint consistency**
+   - Solver `status` and `cancel` paths are now centralized through `src/config/api.ts` and consumed via `buildApiUrl(...)`.
+
+6. **Model selection behavior**
+   - Solve modal now auto-selects **only free models** when available.
+   - If no free model exists, user must explicitly choose a model.
+
+### Visual Hierarchy Improvements
+
+1. **TopBar redesigned into a true two-tier command surface**
+   - Primary tier: workspace identity, repository context, session state, indexing toggle, auth control.
+   - Secondary tier: task navigation tabs + compact message/context counters.
+   - Added subtle directional gradient and stronger status grouping.
+
+2. **Solve Issues board information architecture upgraded**
+   - Added summary chips (Total / Yudai / Other) in header.
+   - Filter controls rebalanced with clearer affordance.
+   - Issue cards now emphasize:
+     - state + issue number first,
+     - title second,
+     - description and labels third,
+     - metadata row (opened date/comments) last.
+
+3. **Chat view readability refinement**
+   - Header now expresses conversation context and live session readiness explicitly.
+   - Message bubbles include role labels (`Assistant`, `You`, `System`) for faster scanning.
+   - Input key handling upgraded to `onKeyDown` + composition-safe enter behavior.
+
+### Design Token and Utility Stabilization
+
+To remove class/token drift and keep legacy utility usage working safely:
+
+- Added color aliases (`bg`, `fg`, `primary`, `muted`) in `tailwind.config.js`.
+- Added missing custom utilities in `src/index.css`:
+  - `terminal-noise`
+  - `shadow-terminal`
+  - `glow-amber`
+  - `glow-cyan`
+  - `glow-emerald`
+  - `border-3`
+
+This preserves the established "Terminal Precision" visual language while making class usage deterministic and maintainable.
+
 ## Design Brief
 
 **App Definition:**
