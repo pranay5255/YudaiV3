@@ -95,7 +95,7 @@ function AppContent() {
       // Optionally auto-create a session or prompt user
       addToast('Ready to start a chat session!', 'info');
     }
-  }, [isAuthenticated, user, activeSessionId, hasSelectedRepository]);
+  }, [isAuthenticated, user, activeSessionId, hasSelectedRepository, addToast]);
 
   // Debug log session and data state
   useEffect(() => {
