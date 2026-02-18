@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronDown, Github, GitBranch, Check, X, Loader2 } from 'lucide-react';
+import { useShallow } from 'zustand/react/shallow';
 import { GitHubRepository, GitHubBranch, SelectedRepository } from '../types';
 import { useSessionStore } from '../stores/sessionStore';
 
@@ -27,11 +28,21 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
   // Use session store for repository state - consolidated into single hook call
   const {
     loadRepositoryBranches,
+    loadRepositories,
     availableRepositories,
     isLoadingRepositories,
     repositoryError,
     setRepositoryLoading
-  } = useSessionStore();
+  } = useSessionStore(
+    useShallow((state) => ({
+      loadRepositoryBranches: state.loadRepositoryBranches,
+      loadRepositories: state.loadRepositories,
+      availableRepositories: state.availableRepositories,
+      isLoadingRepositories: state.isLoadingRepositories,
+      repositoryError: state.repositoryError,
+      setRepositoryLoading: state.setRepositoryLoading,
+    }))
+  );
 
   // Load repositories when toast opens
   useEffect(() => {
@@ -42,8 +53,7 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
         setError(null);
 
         try {
-          const { loadRepositories: loadReposFromStore } = useSessionStore.getState();
-          await loadReposFromStore();
+          await loadRepositories();
           console.log('Repositories loaded successfully via sessionStore');
         } catch (error) {
           console.error('Failed to load repositories:', error);
@@ -54,7 +64,7 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
       };
       loadRepos();
     }
-  }, [isOpen, availableRepositories.length, setRepositoryLoading]);
+  }, [isOpen, availableRepositories.length, setRepositoryLoading, loadRepositories]);
 
   // Load branches when repository is selected
   useEffect(() => {
