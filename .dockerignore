@@ -19,7 +19,6 @@ __pycache__
 .pytest_cache
 arch.png
 solo_data.json
-pnpm-lock.yaml
 uv.lock
 DEPLOYMENT_GUIDE.md
 README.md

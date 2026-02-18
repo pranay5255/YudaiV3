@@ -1,9 +1,6 @@
 # Simple development setup for React frontend with Vite
 FROM node:18-alpine
 
-# Install pnpm globally
-RUN npm install -g pnpm
-
 # Set work directory
 WORKDIR /app
 
@@ -12,10 +9,10 @@ ENV NODE_ENV=development
 ENV VITE_API_BASE_URL=http://localhost:8001
 
 # Copy package files first for better caching
-COPY package*.json pnpm-lock.yaml* ./
+COPY package*.json ./
 
 # Install dependencies
-RUN pnpm install
+RUN npm ci
 
 # Copy source code
 COPY . .
@@ -28,4 +25,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:3000 || exit 1
 
 # Start Vite development server
-CMD ["pnpm", "run", "dev", "--host", "0.0.0.0", "--port", "3000"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]

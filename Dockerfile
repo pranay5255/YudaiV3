@@ -1,9 +1,6 @@
 # Multi-stage build for React frontend
 FROM node:18-alpine AS builder
 
-# Install pnpm
-RUN npm install -g pnpm
-
 # Set work directory
 WORKDIR /app
 
@@ -12,16 +9,16 @@ ARG VITE_API_BASE_URL
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 # Copy package files
-COPY package*.json pnpm-lock.yaml* ./
+COPY package*.json ./
 
-# Install dependencies using pnpm
-RUN pnpm install
+# Install dependencies using npm
+RUN npm ci
 
 # Copy source code
 COPY . .
 
 # Build the application
-RUN pnpm run build
+RUN npm run build
 
 # Verify build output
 RUN ls -la /app/dist/ && test -f /app/dist/index.html
