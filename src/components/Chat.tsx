@@ -377,8 +377,8 @@ export const Chat: React.FC<ChatProps> = ({
     }
   }, [input, isLoadingMessages, selectedRepository, activeSessionId, sessionStatus, sendChatMessage, contextCards, showError]);
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSend();
     }
@@ -551,20 +551,34 @@ export const Chat: React.FC<ChatProps> = ({
 
   return (
     <div className="h-full flex flex-col bg-bg terminal-noise">
-      <div className="border-b border-border/70 bg-bg-secondary/70 px-4 py-3">
-        <div className="flex items-center flex-wrap gap-2 text-xs font-mono">
-          <span className="px-2.5 py-1 rounded-md bg-bg-tertiary border border-border text-fg">
-            Workspace Chat
-          </span>
-          <span className="px-2.5 py-1 rounded-md bg-bg-tertiary border border-border text-fg-secondary">
-            Repo: {selectedRepository ? `${selectedRepository.repository.full_name}@${selectedRepository.branch}` : 'None'}
-          </span>
-          <span className="px-2.5 py-1 rounded-md bg-bg-tertiary border border-border text-fg-secondary">
-            Messages: {messages.length}
-          </span>
-          <span className="px-2.5 py-1 rounded-md bg-bg-tertiary border border-border text-fg-secondary">
-            Context: {contextCards.length}
-          </span>
+      <div className="border-b border-border/70 bg-[linear-gradient(115deg,rgba(245,158,11,0.08)_0%,rgba(34,211,238,0.03)_40%,rgba(17,17,19,0.92)_100%)] px-4 py-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-cyan font-mono mb-1">Conversation</p>
+            <h2 className="text-base font-mono font-semibold text-fg">Workspace Chat</h2>
+            <p className="text-xs text-fg-secondary font-mono mt-1 truncate">
+              {selectedRepository
+                ? `${selectedRepository.repository.full_name}@${selectedRepository.branch}`
+                : 'No repository selected'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-xs font-mono">
+            <span className="px-2.5 py-1 rounded-md bg-bg-tertiary border border-border text-fg-secondary">
+              {messages.length} messages
+            </span>
+            <span className="px-2.5 py-1 rounded-md bg-bg-tertiary border border-border text-fg-secondary">
+              {contextCards.length} context
+            </span>
+            <span
+              className={`px-2.5 py-1 rounded-md border ${
+                isSessionReady
+                  ? 'bg-success/10 text-success border-success/30'
+                  : 'bg-cyan/10 text-cyan border-cyan/30'
+              }`}
+            >
+              {isSessionReady ? 'Session Ready' : 'Session Syncing'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -671,6 +685,9 @@ export const Chat: React.FC<ChatProps> = ({
                   : 'bg-amber/10 border border-amber/30 text-fg'
               }`}
             >
+              <p className="text-[11px] uppercase tracking-wider font-mono text-fg-secondary mb-2">
+                {message.role === 'assistant' ? 'Assistant' : message.role === 'user' ? 'You' : 'System'}
+              </p>
               <div className="whitespace-pre-wrap font-mono text-sm leading-relaxed">{cleanedContent}</div>
               {message.role === 'assistant' && actionsToRender.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-border/50 flex flex-wrap gap-2">
@@ -724,7 +741,7 @@ export const Chat: React.FC<ChatProps> = ({
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyDown}
             placeholder={
               !selectedRepository
                 ? 'Select a repository to start chatting...'
@@ -748,7 +765,9 @@ export const Chat: React.FC<ChatProps> = ({
             {isSending ? 'Sending' : 'Send'}
           </button>
           <button
-            onClick={handleCreateGitHubIssue}
+            onClick={() => {
+              void handleCreateGitHubIssue();
+            }}
             disabled={isCreatingIssue || userMessageCount < 1 || !selectedRepository}
             className="bg-success hover:bg-success/90 disabled:bg-bg-tertiary disabled:border-border disabled:cursor-not-allowed text-bg-primary disabled:text-muted px-5 py-3 rounded-lg flex items-center gap-2 font-mono text-sm font-semibold transition-all duration-200 border border-success disabled:border-border glow-emerald disabled:shadow-none"
             title={!selectedRepository ? 'Select a repository first' : userMessageCount < 1 ? 'Send at least one message' : 'Create GitHub issue from conversation'}
