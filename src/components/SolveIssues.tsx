@@ -100,27 +100,16 @@ function IssueModal({ issue, onClose, onStartSolve, availableModels, isLoading }
     () => availableModels.find((model) => isFreeModel(model)),
     [availableModels]
   );
+  const selectedModelStillExists = availableModels.some((model) => model.id === selectedModelId);
+  const resolvedSelectedModelId = selectedModelStillExists
+    ? selectedModelId
+    : freeModel?.id ?? 0;
+  const selectedModelDescription = availableModels.find((m) => m.id === resolvedSelectedModelId)?.description;
+  const modelSelectId = `solve-model-${issue.number}`;
+  const smallChangeId = `small-change-${issue.number}`;
+  const bestEffortId = `best-effort-${issue.number}`;
 
   const isYudaiGenerated = issue.labels.includes('chat-generated');
-
-  useEffect(() => {
-    if (!availableModels.length) {
-      setSelectedModelId(0);
-      return;
-    }
-
-    const selectedStillExists = availableModels.some((model) => model.id === selectedModelId);
-    if (selectedStillExists) {
-      return;
-    }
-
-    // Auto-select only a free model. If none exists, force explicit user choice.
-    if (freeModel) {
-      setSelectedModelId(freeModel.id);
-    } else {
-      setSelectedModelId(0);
-    }
-  }, [availableModels, freeModel, selectedModelId]);
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -191,11 +180,12 @@ function IssueModal({ issue, onClose, onStartSolve, availableModels, isLoading }
 
             {/* AI Model Selection */}
             <div>
-              <label className="block text-xs font-mono uppercase tracking-wider text-muted mb-2">
+              <label htmlFor={modelSelectId} className="block text-xs font-mono uppercase tracking-wider text-muted mb-2">
                 Select AI Model
               </label>
               <select
-                value={selectedModelId}
+                id={modelSelectId}
+                value={resolvedSelectedModelId}
                 onChange={(e) => setSelectedModelId(Number(e.target.value))}
                 className="w-full bg-bg-tertiary border border-border rounded-lg px-4 py-3 text-fg font-mono text-sm focus:outline-none focus:border-amber/50 focus:ring-2 focus:ring-amber/10 transition-all duration-200"
                 disabled={isLoading || availableModels.length === 0}
@@ -209,47 +199,49 @@ function IssueModal({ issue, onClose, onStartSolve, availableModels, isLoading }
                   </option>
                 ))}
               </select>
-              {freeModel && selectedModelId === freeModel.id && (
+              {freeModel && resolvedSelectedModelId === freeModel.id && (
                 <p className="text-xs text-success font-mono mt-2">
                   Free model selected by default: {freeModel.name}
                 </p>
               )}
-              {availableModels.find(m => m.id === selectedModelId)?.description && (
+              {selectedModelDescription && (
                 <p className="text-xs text-muted font-mono mt-2">
-                  {availableModels.find(m => m.id === selectedModelId)?.description}
+                  {selectedModelDescription}
                 </p>
               )}
             </div>
 
             {/* Options Checkboxes */}
             <div className="space-y-3">
-              <label className="flex items-center gap-3 cursor-pointer p-3 bg-bg-tertiary border border-border rounded-lg hover:border-border-accent transition-colors">
+              <div className="flex items-center gap-3 p-3 bg-bg-tertiary border border-border rounded-lg hover:border-border-accent transition-colors">
                 <input
+                  id={smallChangeId}
                   type="checkbox"
                   checked={smallChange}
                   onChange={(e) => setSmallChange(e.target.checked)}
                   className="w-4 h-4 text-amber bg-bg border-border rounded focus:ring-amber accent-amber"
                   disabled={isLoading}
                 />
-                <div>
+                <label htmlFor={smallChangeId} className="cursor-pointer">
                   <span className="text-fg font-mono text-sm font-medium">Small Change</span>
                   <p className="text-xs text-muted font-mono">Limit scope to minimal code changes</p>
-                </div>
-              </label>
+                </label>
+              </div>
 
-              <label className="flex items-center gap-3 cursor-pointer p-3 bg-bg-tertiary border border-border rounded-lg hover:border-border-accent transition-colors">
+              <div className="flex items-center gap-3 p-3 bg-bg-tertiary border border-border rounded-lg hover:border-border-accent transition-colors">
                 <input
+                  id={bestEffortId}
                   type="checkbox"
                   checked={bestEffort}
                   onChange={(e) => setBestEffort(e.target.checked)}
                   className="w-4 h-4 text-amber bg-bg border-border rounded focus:ring-amber accent-amber"
                   disabled={isLoading}
                 />
-                <div>
+                <label htmlFor={bestEffortId} className="cursor-pointer">
                   <span className="text-fg font-mono text-sm font-medium">Best Effort</span>
                   <p className="text-xs text-muted font-mono">Continue solving even if tests fail</p>
-                </div>
-              </label>
+                </label>
+              </div>
             </div>
           </div>
         </div>
@@ -264,9 +256,9 @@ function IssueModal({ issue, onClose, onStartSolve, availableModels, isLoading }
             Cancel
           </button>
           <button
-            onClick={() => issue.id && onStartSolve(issue.id, selectedModelId, smallChange, bestEffort)}
+            onClick={() => issue.id && onStartSolve(issue.id, resolvedSelectedModelId, smallChange, bestEffort)}
             className="px-6 py-2.5 bg-amber hover:bg-amber/90 text-bg-primary rounded-lg font-mono text-sm font-semibold transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed glow-amber flex items-center gap-2"
-            disabled={isLoading || !selectedModelId || !issue.id}
+            disabled={isLoading || !resolvedSelectedModelId || !issue.id}
           >
             {isLoading && <div className="animate-spin rounded-full h-4 w-4 border-2 border-bg-primary/20 border-t-bg-primary" />}
             {isLoading ? 'Starting Solve...' : 'Start Solve'}
@@ -508,23 +500,43 @@ export function SolveIssues() {
   const { selectedRepository } = useRepository();
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
 
-  const [issues, setIssues] = useState<GitHubIssue[]>([]);
-  const [availableModels, setAvailableModels] = useState<AIModel[]>([]);
-  const [selectedIssue, setSelectedIssue] = useState<GitHubIssue | null>(null);
-  const [activeSolveId, setActiveSolveId] = useState<string | null>(null);
-  const [solveStatus, setSolveStatus] = useState<SolveStatusResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [filterYudai, setFilterYudai] = useState<'all' | 'yudai' | 'others'>('all');
+  const [issuesState, setIssuesState] = useState<{
+    issues: GitHubIssue[];
+    availableModels: AIModel[];
+  }>({
+    issues: [],
+    availableModels: [],
+  });
+  const [solveUiState, setSolveUiState] = useState<{
+    selectedIssue: GitHubIssue | null;
+    activeSolveId: string | null;
+    solveStatus: SolveStatusResponse | null;
+  }>({
+    selectedIssue: null,
+    activeSolveId: null,
+    solveStatus: null,
+  });
+  const [viewState, setViewState] = useState<{
+    isLoading: boolean;
+    error: string | null;
+    filterYudai: 'all' | 'yudai' | 'others';
+  }>({
+    isLoading: false,
+    error: null,
+    filterYudai: 'all',
+  });
+  const { issues, availableModels } = issuesState;
+  const { selectedIssue, activeSolveId, solveStatus } = solveUiState;
+  const { isLoading, error, filterYudai } = viewState;
 
   // Fetch GitHub issues
   useEffect(() => {
     if (!selectedRepository) return;
 
     const fetchIssues = async () => {
+      setViewState((prev) => ({ ...prev, isLoading: true, error: null }));
+
       try {
-        setIsLoading(true);
-        setError(null);
         // Extract owner correctly - owner is an object, need to use .login or fallback to full_name
         const repoOwner = selectedRepository.repository.owner?.login ||
                           selectedRepository.repository.full_name.split('/')[0];
@@ -532,17 +544,23 @@ export function SolveIssues() {
         const data = await apiCall(
           `/api/daifu/github/repositories/${repoOwner}/${repoName}/issues`
         );
-        setIssues(data);
+        setIssuesState((prev) => ({
+          ...prev,
+          issues: data as GitHubIssue[],
+        }));
+        setViewState((prev) => ({ ...prev, isLoading: false, error: null }));
       } catch (err) {
         console.error('Failed to fetch issues:', err);
-        const error = err as Error;
-        setError(error.message || 'Failed to fetch issues');
-      } finally {
-        setIsLoading(false);
+        const fetchError = err as Error;
+        setViewState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: fetchError.message || 'Failed to fetch issues',
+        }));
       }
     };
 
-    fetchIssues();
+    void fetchIssues();
   }, [selectedRepository]);
 
   // Fetch available AI models
@@ -550,18 +568,23 @@ export function SolveIssues() {
     const fetchModels = async () => {
       try {
         const data = await apiCall('/api/daifu/ai-models');
-        setAvailableModels(data);
+        setIssuesState((prev) => ({
+          ...prev,
+          availableModels: data as AIModel[],
+        }));
       } catch (err) {
         console.error('Failed to fetch AI models:', err);
       }
     };
 
-    fetchModels();
+    void fetchModels();
   }, []);
 
   // Poll solve status when active
   useEffect(() => {
     if (!activeSolveId || !activeSessionId) return;
+
+    let intervalId: ReturnType<typeof setInterval> | null = null;
 
     const pollStatus = async () => {
       try {
@@ -571,21 +594,31 @@ export function SolveIssues() {
             solveSessionId: activeSolveId,
           })
         );
-        setSolveStatus(data);
+        setSolveUiState((prev) => ({
+          ...prev,
+          solveStatus: data as SolveStatusResponse,
+        }));
 
         // Stop polling if solve is complete
-        if (isCompleteStatus(data.status)) {
-          setActiveSolveId(null);
+        if (isCompleteStatus((data as SolveStatusResponse).status) && intervalId) {
+          clearInterval(intervalId);
+          intervalId = null;
         }
       } catch (err) {
         console.error('Failed to fetch solve status:', err);
       }
     };
 
-    pollStatus();
-    const interval = setInterval(pollStatus, 3000); // Poll every 3 seconds
+    void pollStatus();
+    intervalId = setInterval(() => {
+      void pollStatus();
+    }, 3000); // Poll every 3 seconds
 
-    return () => clearInterval(interval);
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
   }, [activeSolveId, activeSessionId]);
 
   const handleStartSolve = async (
@@ -595,13 +628,15 @@ export function SolveIssues() {
     bestEffort: boolean
   ) => {
     if (!activeSessionId || !selectedRepository) {
-      setError('No active session or repository selected');
+      setViewState((prev) => ({
+        ...prev,
+        error: 'No active session or repository selected',
+      }));
       return;
     }
 
     try {
-      setIsLoading(true);
-      setError(null);
+      setViewState((prev) => ({ ...prev, isLoading: true, error: null }));
 
       // Extract owner correctly - owner is an object, need to use .login or fallback to full_name
       const repoOwner = selectedRepository.repository.owner?.login ||
@@ -627,27 +662,33 @@ export function SolveIssues() {
       });
 
       const response = data as StartSolveResponse;
-      setActiveSolveId(response.solve_session_id);
-      setSolveStatus({
-        solve_session_id: response.solve_session_id,
-        status: response.status,
-        progress: {
-          runs_total: 0,
-          runs_completed: 0,
-          runs_failed: 0,
-          runs_running: 0,
-          last_update: new Date().toISOString(),
-          message: 'Starting solve...',
+      setSolveUiState((prev) => ({
+        ...prev,
+        activeSolveId: response.solve_session_id,
+        solveStatus: {
+          solve_session_id: response.solve_session_id,
+          status: response.status,
+          progress: {
+            runs_total: 0,
+            runs_completed: 0,
+            runs_failed: 0,
+            runs_running: 0,
+            last_update: new Date().toISOString(),
+            message: 'Starting solve...',
+          },
+          runs: [],
         },
-        runs: [],
-      });
-      setSelectedIssue(null);
+        selectedIssue: null,
+      }));
     } catch (err) {
       console.error('Failed to start solve:', err);
-      const error = err as Error;
-      setError(error.message || 'Failed to start solve');
+      const startError = err as Error;
+      setViewState((prev) => ({
+        ...prev,
+        error: startError.message || 'Failed to start solve',
+      }));
     } finally {
-      setIsLoading(false);
+      setViewState((prev) => ({ ...prev, isLoading: false }));
     }
   };
 
@@ -664,8 +705,11 @@ export function SolveIssues() {
           method: 'POST',
         }
       );
-      setActiveSolveId(null);
-      setSolveStatus(null);
+      setSolveUiState((prev) => ({
+        ...prev,
+        activeSolveId: null,
+        solveStatus: null,
+      }));
     } catch (err) {
       console.error('Failed to cancel solve:', err);
     }
@@ -676,10 +720,7 @@ export function SolveIssues() {
     if (filterYudai === 'others') return !issue.labels.includes('chat-generated');
     return true;
   });
-  const totalYudaiIssues = useMemo(
-    () => issues.filter((issue) => issue.labels.includes('chat-generated')).length,
-    [issues]
-  );
+  const totalYudaiIssues = issues.filter((issue) => issue.labels.includes('chat-generated')).length;
   const totalOtherIssues = issues.length - totalYudaiIssues;
 
   if (!selectedRepository) {
@@ -726,7 +767,7 @@ export function SolveIssues() {
 
           <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => setFilterYudai('all')}
+            onClick={() => setViewState((prev) => ({ ...prev, filterYudai: 'all' }))}
             className={`px-4 py-2.5 rounded-lg font-mono text-sm transition-all duration-200 ${
               filterYudai === 'all'
                 ? 'bg-amber text-bg-primary font-semibold glow-amber'
@@ -736,7 +777,7 @@ export function SolveIssues() {
             All Issues ({issues.length})
           </button>
           <button
-            onClick={() => setFilterYudai('yudai')}
+            onClick={() => setViewState((prev) => ({ ...prev, filterYudai: 'yudai' }))}
             className={`px-4 py-2.5 rounded-lg font-mono text-sm transition-all duration-200 ${
               filterYudai === 'yudai'
                 ? 'bg-amber text-bg-primary font-semibold glow-amber'
@@ -746,7 +787,7 @@ export function SolveIssues() {
             Yudai Generated ({totalYudaiIssues})
           </button>
           <button
-            onClick={() => setFilterYudai('others')}
+            onClick={() => setViewState((prev) => ({ ...prev, filterYudai: 'others' }))}
             className={`px-4 py-2.5 rounded-lg font-mono text-sm transition-all duration-200 ${
               filterYudai === 'others'
                 ? 'bg-amber text-bg-primary font-semibold glow-amber'
@@ -778,10 +819,11 @@ export function SolveIssues() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {filteredIssues.map((issue, index) => (
-              <div
+              <button
+                type="button"
                 key={issue.number}
-                onClick={() => setSelectedIssue(issue)}
-                className="bg-bg-secondary border border-border rounded-xl p-4 cursor-pointer hover:border-amber/40 hover:shadow-terminal transition-all duration-200 animate-fade-in group"
+                onClick={() => setSolveUiState((prev) => ({ ...prev, selectedIssue: issue }))}
+                className="bg-bg-secondary border border-border rounded-xl p-4 cursor-pointer hover:border-amber/40 hover:shadow-terminal transition-all duration-200 animate-fade-in group text-left"
                 style={{ animationDelay: `${index * 50}ms` }}
               >
                 <div className="flex items-start justify-between gap-2 mb-3">
@@ -828,7 +870,7 @@ export function SolveIssues() {
                   <span className="text-fg-secondary">Opened {new Date(issue.created_at).toLocaleDateString()}</span>
                   <span className="text-cyan">{issue.comments} comments</span>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
@@ -838,7 +880,7 @@ export function SolveIssues() {
       {selectedIssue && (
         <IssueModal
           issue={selectedIssue}
-          onClose={() => setSelectedIssue(null)}
+          onClose={() => setSolveUiState((prev) => ({ ...prev, selectedIssue: null }))}
           onStartSolve={handleStartSolve}
           availableModels={availableModels}
           isLoading={isLoading}
@@ -850,8 +892,11 @@ export function SolveIssues() {
           solveStatus={solveStatus}
           sessionId={activeSessionId}
           onClose={() => {
-            setActiveSolveId(null);
-            setSolveStatus(null);
+            setSolveUiState((prev) => ({
+              ...prev,
+              activeSolveId: null,
+              solveStatus: null,
+            }));
           }}
           onCancel={handleCancelSolve}
         />
