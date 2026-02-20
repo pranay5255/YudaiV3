@@ -10,18 +10,39 @@ interface RepositorySelectionToastProps {
   onCancel: () => void;
 }
 
+interface RepositorySelectionState {
+  branches: GitHubBranch[];
+  selectedRepository: GitHubRepository | null;
+  selectedBranch: string;
+  loadingBranches: boolean;
+  isRepoDropdownOpen: boolean;
+  isBranchDropdownOpen: boolean;
+  error: string | null;
+}
+
 export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> = ({
   isOpen,
   onConfirm,
   onCancel
 }) => {
-  const [branches, setBranches] = useState<GitHubBranch[]>([]);
-  const [selectedRepository, setSelectedRepository] = useState<GitHubRepository | null>(null);
-  const [selectedBranch, setSelectedBranch] = useState<string>('');
-  const [loadingBranches, setLoadingBranches] = useState(false);
-  const [isRepoDropdownOpen, setIsRepoDropdownOpen] = useState(false);
-  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [state, setState] = useState<RepositorySelectionState>({
+    branches: [],
+    selectedRepository: null,
+    selectedBranch: '',
+    loadingBranches: false,
+    isRepoDropdownOpen: false,
+    isBranchDropdownOpen: false,
+    error: null,
+  });
+  const {
+    branches,
+    selectedRepository,
+    selectedBranch,
+    loadingBranches,
+    isRepoDropdownOpen,
+    isBranchDropdownOpen,
+    error,
+  } = state;
   const selectedRepoFullName = selectedRepository?.full_name ?? '';
   const selectedRepoDefaultBranch = selectedRepository?.default_branch ?? '';
 
@@ -32,7 +53,6 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
     availableRepositories,
     isLoadingRepositories,
     repositoryError,
-    setRepositoryLoading
   } = useSessionStore(
     useShallow((state) => ({
       loadRepositoryBranches: state.loadRepositoryBranches,
@@ -40,31 +60,33 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
       availableRepositories: state.availableRepositories,
       isLoadingRepositories: state.isLoadingRepositories,
       repositoryError: state.repositoryError,
-      setRepositoryLoading: state.setRepositoryLoading,
     }))
   );
 
   // Load repositories when toast opens
   useEffect(() => {
-    if (isOpen && availableRepositories.length === 0) {
-      console.log('Loading repositories...');
-      const loadRepos = async () => {
-        setRepositoryLoading(true);
-        setError(null);
-
-        try {
-          await loadRepositories();
-          console.log('Repositories loaded successfully via sessionStore');
-        } catch (error) {
-          console.error('Failed to load repositories:', error);
-          setError('Failed to load repositories. Please try again.');
-        } finally {
-          setRepositoryLoading(false);
-        }
-      };
-      loadRepos();
+    if (!isOpen || availableRepositories.length > 0) {
+      return;
     }
-  }, [isOpen, availableRepositories.length, setRepositoryLoading, loadRepositories]);
+
+    console.log('Loading repositories...');
+    const loadRepos = async () => {
+      setState((prev) => ({ ...prev, error: null }));
+
+      try {
+        await loadRepositories();
+        console.log('Repositories loaded successfully via sessionStore');
+      } catch (loadError) {
+        console.error('Failed to load repositories:', loadError);
+        setState((prev) => ({
+          ...prev,
+          error: 'Failed to load repositories. Please try again.',
+        }));
+      }
+    };
+
+    void loadRepos();
+  }, [isOpen, availableRepositories.length, loadRepositories]);
 
   // Load branches when repository is selected
   useEffect(() => {
@@ -72,9 +94,13 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
 
     console.log('Loading branches for repository:', selectedRepoFullName);
     const loadBranchesForRepo = async () => {
-      setLoadingBranches(true);
-      setSelectedBranch('');
-      setBranches([]);
+      setState((prev) => ({
+        ...prev,
+        loadingBranches: true,
+        selectedBranch: '',
+        branches: [],
+        error: null,
+      }));
 
       try {
         const [owner, repo] = selectedRepoFullName.split('/');
@@ -89,38 +115,39 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
           protected: false // API doesn't provide this, set default
         }));
 
-        console.log('Transformed branches:', transformedBranches);
-        setBranches(transformedBranches);
-
         // Auto-select main or master branch if available, or default branch
         const defaultBranch = transformedBranches.find(b => (
           b.name === 'main' || b.name === 'master' || b.name === selectedRepoDefaultBranch
         ));
+        const nextSelectedBranch = defaultBranch
+          ? defaultBranch.name
+          : transformedBranches[0]?.name || '';
+
+        console.log('Transformed branches:', transformedBranches);
         if (defaultBranch) {
           console.log('Auto-selecting default branch:', defaultBranch.name);
-          setSelectedBranch(defaultBranch.name);
         } else if (transformedBranches.length > 0) {
           console.log('Auto-selecting first branch:', transformedBranches[0].name);
-          setSelectedBranch(transformedBranches[0].name);
         }
+        setState((prev) => ({
+          ...prev,
+          branches: transformedBranches,
+          selectedBranch: nextSelectedBranch,
+          loadingBranches: false,
+        }));
       } catch (error) {
         console.error('Failed to load branches:', error);
-        setError('Failed to load branches. Please try again.');
-      } finally {
-        setLoadingBranches(false);
+        setState((prev) => ({
+          ...prev,
+          loadingBranches: false,
+          error: 'Failed to load branches. Please try again.',
+        }));
       }
     };
 
-    loadBranchesForRepo();
+    void loadBranchesForRepo();
   }, [selectedRepoFullName, selectedRepoDefaultBranch, loadRepositoryBranches]);
-
-  // Set error from repository context
-  useEffect(() => {
-    if (repositoryError) {
-      console.log('Repository error:', repositoryError);
-      setError(repositoryError);
-    }
-  }, [repositoryError]);
+  const displayError = repositoryError || error;
 
   const handleConfirm = () => {
     if (selectedRepository && selectedBranch) {
@@ -137,14 +164,20 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
 
   const handleRepositorySelect = (repo: GitHubRepository) => {
     console.log('Repository selected:', repo.full_name);
-    setSelectedRepository(repo);
-    setIsRepoDropdownOpen(false);
+    setState((prev) => ({
+      ...prev,
+      selectedRepository: repo,
+      isRepoDropdownOpen: false,
+    }));
   };
 
   const handleBranchSelect = (branchName: string) => {
     console.log('Branch selected:', branchName);
-    setSelectedBranch(branchName);
-    setIsBranchDropdownOpen(false);
+    setState((prev) => ({
+      ...prev,
+      selectedBranch: branchName,
+      isBranchDropdownOpen: false,
+    }));
   };
 
   if (!isOpen) return null;
@@ -178,21 +211,26 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
           </div>
 
           {/* Error Message */}
-          {error && (
+          {displayError && (
             <div className="mb-4 p-3 bg-error/10 border border-error/30 rounded-lg animate-fade-in">
-              <p className="text-sm text-error font-mono">{error}</p>
+              <p className="text-sm text-error font-mono">{displayError}</p>
             </div>
           )}
 
           {/* Repository Selection */}
           <div className="space-y-4">
             <div>
-              <label className="block text-xs font-mono font-medium text-muted uppercase tracking-wider mb-2">
+              <p className="block text-xs font-mono font-medium text-muted uppercase tracking-wider mb-2">
                 Repository
-              </label>
+              </p>
               <div className="relative">
                 <button
-                  onClick={() => setIsRepoDropdownOpen(!isRepoDropdownOpen)}
+                  onClick={() =>
+                    setState((prev) => ({
+                      ...prev,
+                      isRepoDropdownOpen: !prev.isRepoDropdownOpen,
+                    }))
+                  }
                   disabled={isLoadingRepositories}
                   className="w-full flex items-center justify-between px-4 py-3 bg-bg-tertiary border border-border rounded-lg text-fg hover:border-border-accent transition-all duration-200 disabled:opacity-50"
                 >
@@ -247,12 +285,17 @@ export const RepositorySelectionToast: React.FC<RepositorySelectionToastProps> =
 
             {/* Branch Selection */}
             <div>
-              <label className="block text-xs font-mono font-medium text-muted uppercase tracking-wider mb-2">
+              <p className="block text-xs font-mono font-medium text-muted uppercase tracking-wider mb-2">
                 Branch
-              </label>
+              </p>
               <div className="relative">
                 <button
-                  onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
+                  onClick={() =>
+                    setState((prev) => ({
+                      ...prev,
+                      isBranchDropdownOpen: !prev.isBranchDropdownOpen,
+                    }))
+                  }
                   disabled={!selectedRepository || loadingBranches}
                   className="w-full flex items-center justify-between px-4 py-3 bg-bg-tertiary border border-border rounded-lg text-fg hover:border-border-accent transition-all duration-200 disabled:opacity-50"
                 >
