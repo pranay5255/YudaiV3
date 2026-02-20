@@ -40,7 +40,6 @@ function AppContent() {
   const { currentSession } = useSessionStore();
   const contextCards = useSessionStore((state) => state.contextCards);
   const deleteContextCard = useSessionStore((state) => state.deleteContextCard);
-  const sessionStatus = useSessionStore((state) => state.sessionStatus);
 
   const isValidTab = (tab: unknown): tab is TabType =>
     tab === 'chat' || tab === 'context' || tab === 'ideas' || tab === 'solve';
@@ -96,17 +95,6 @@ function AppContent() {
       addToast('Ready to start a chat session!', 'info');
     }
   }, [isAuthenticated, user, activeSessionId, hasSelectedRepository, addToast]);
-
-  // Debug log session and data state
-  useEffect(() => {
-    if (activeSessionId) {
-      console.log('Session state:', {
-        sessionId: activeSessionId,
-        sessionStatus,
-        contextCardsCount: contextCards.length,
-      });
-    }
-  }, [activeSessionId, sessionStatus, contextCards]);
 
   const handleRepositoryConfirm = async (selection: SelectedRepository) => {
     try {
@@ -169,33 +157,33 @@ function AppContent() {
     setActiveTab(newTab);
   };
 
-  const renderTabContent = () => {
-    switch (currentTab) {
-      case 'chat':
-        return (
-          <Chat
-            onShowError={addToast}
-          />
-        );
-      case 'context':
-        return (
-          <ContextCards
-            cards={contextCards}
-            onRemoveCard={removeContextCardHandler}
-          />
-        );
-      case 'ideas':
-        return (
-          <TrajectoryViewer
-            sessionId={activeSessionId || undefined}
-          />
-        );
-      case 'solve':
-        return <SolveIssues />;
-      default:
-        return null;
-    }
-  };
+  let tabContent = null;
+  switch (currentTab) {
+    case 'chat':
+      tabContent = <Chat onShowError={addToast} />;
+      break;
+    case 'context':
+      tabContent = (
+        <ContextCards
+          cards={contextCards}
+          onRemoveCard={removeContextCardHandler}
+        />
+      );
+      break;
+    case 'ideas':
+      tabContent = (
+        <TrajectoryViewer
+          sessionId={activeSessionId || undefined}
+        />
+      );
+      break;
+    case 'solve':
+      tabContent = <SolveIssues />;
+      break;
+    default:
+      tabContent = null;
+      break;
+  }
 
   return (
     <div className="min-h-screen bg-bg text-fg">
@@ -203,7 +191,7 @@ function AppContent() {
       <div className="min-h-screen flex flex-col">
         <TopBar activeTab={currentTab} onTabChange={handleTabChange} />
         <main className="flex-1 overflow-hidden">
-          {renderTabContent()}
+          {tabContent}
         </main>
       </div>
 
