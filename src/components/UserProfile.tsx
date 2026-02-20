@@ -51,8 +51,10 @@ export const UserProfile: React.FC = () => {
       {isDropdownOpen && (
         <>
           {/* Backdrop */}
-          <div
-            className="fixed inset-0 z-10"
+          <button
+            type="button"
+            aria-label="Close profile menu"
+            className="fixed inset-0 z-10 bg-transparent"
             onClick={() => setIsDropdownOpen(false)}
           />
           
