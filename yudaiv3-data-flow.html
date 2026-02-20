@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YudaiV3 — Backend Architecture &amp; Dead Code Analysis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #07071a;
+    --surface: #0f0f2a;
+    --surface2: #181835;
+    --border: rgba(255,255,255,0.07);
+    --border-bright: rgba(255,255,255,0.15);
+    --text: #dde4f0;
+    --text-dim: #7a88a8;
+
+    --violet: #7c3aed;
+    --violet-dim: rgba(124,58,237,0.14);
+    --violet-bright: #a78bfa;
+    --cyan: #06b6d4;
+    --cyan-dim: rgba(6,182,212,0.12);
+    --cyan-bright: #22d3ee;
+    --amber: #f59e0b;
+    --amber-dim: rgba(245,158,11,0.12);
+    --amber-bright: #fbbf24;
+    --emerald: #10b981;
+    --emerald-dim: rgba(16,185,129,0.12);
+    --emerald-bright: #34d399;
+    --rose: #f43f5e;
+    --rose-dim: rgba(244,63,94,0.12);
+    --rose-bright: #fb7185;
+    --gray: #6b7280;
+    --gray-dim: rgba(107,114,128,0.12);
+
+    --font-body: 'Space Grotesk', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f3ff;
+      --surface: #ffffff;
+      --surface2: #ede9fe;
+      --border: rgba(0,0,0,0.08);
+      --border-bright: rgba(0,0,0,0.15);
+      --text: #1e1b4b;
+      --text-dim: #6d6891;
+      --violet: #6d28d9;
+      --violet-dim: rgba(109,40,217,0.08);
+      --violet-bright: #5b21b6;
+      --cyan: #0891b2;
+      --cyan-dim: rgba(8,145,178,0.08);
+      --cyan-bright: #0e7490;
+      --amber: #d97706;
+      --amber-dim: rgba(217,119,6,0.08);
+      --amber-bright: #b45309;
+      --emerald: #059669;
+      --emerald-dim: rgba(5,150,105,0.08);
+      --emerald-bright: #047857;
+      --rose: #e11d48;
+      --rose-dim: rgba(225,29,72,0.08);
+      --rose-bright: #be123c;
+      --gray: #9ca3af;
+      --gray-dim: rgba(156,163,175,0.08);
+    }
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(ellipse at 15% 0%, var(--violet-dim) 0%, transparent 45%),
+      radial-gradient(ellipse at 85% 90%, var(--cyan-dim) 0%, transparent 45%),
+      radial-gradient(ellipse at 50% 50%, var(--emerald-dim) 0%, transparent 60%);
+    color: var(--text);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    line-height: 1.6;
+  }
+
+  .page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 52px 24px 80px;
+  }
+
+  .hero {
+    text-align: center;
+    margin-bottom: 60px;
+    animation: fadeUp 0.5s ease both;
+  }
+
+  .hero-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--violet-bright);
+    background: var(--violet-dim);
+    border: 1px solid rgba(167,139,250,0.25);
+    display: inline-block;
+    padding: 4px 14px;
+    border-radius: 100px;
+    margin-bottom: 20px;
+  }
+
+  .hero h1 {
+    font-size: 44px;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    line-height: 1.1;
+    margin-bottom: 14px;
+    background: linear-gradient(125deg, var(--text) 0%, var(--violet-bright) 45%, var(--cyan-bright) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-sub {
+    font-size: 16px;
+    color: var(--text-dim);
+    max-width: 680px;
+    margin: 0 auto 28px;
+  }
+
+  .hero-stats {
+    display: flex;
+    gap: 24px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+
+  .stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+
+  .stat-num {
+    font-size: 28px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+  }
+
+  .stat-num.active { color: var(--emerald-bright); }
+  .stat-num.dead { color: var(--rose-bright); }
+  .stat-num.ambiguous { color: var(--amber-bright); }
+
+  .stat-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .hero-tags {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border-bright);
+    color: var(--text-dim);
+  }
+
+  .tag.active { border-color: var(--emerald); color: var(--emerald-bright); }
+  .tag.dead { border-color: var(--rose); color: var(--rose-bright); }
+
+  .section {
+    margin-bottom: 52px;
+    animation: fadeUp 0.5s ease both;
+  }
+
+  .section:nth-child(2) { animation-delay: 0.1s; }
+  .section:nth-child(3) { animation-delay: 0.2s; }
+  .section:nth-child(4) { animation-delay: 0.3s; }
+  .section:nth-child(5) { animation-delay: 0.4s; }
+  .section:nth-child(6) { animation-delay: 0.5s; }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .section-pip {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+  }
+
+  .section-desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-left: auto;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mermaid-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .mermaid-wrap.dead {
+    border-color: rgba(244,63,94,0.3);
+    background: linear-gradient(135deg, var(--surface) 0%, var(--rose-dim) 100%);
+  }
+
+  .mermaid-inner {
+    padding: 20px;
+    overflow: hidden;
+    cursor: grab;
+    user-select: none;
+    min-height: 200px;
+  }
+
+  .mermaid-inner:active { cursor: grabbing; }
+
+  .mermaid-inner .mermaid svg {
+    max-width: 100%;
+    display: block;
+    transform-origin: 0 0;
+  }
+
+  .zoom-ctrl {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    gap: 3px;
+    z-index: 10;
+  }
+
+  .z-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border-bright);
+    color: var(--text-dim);
+    border-radius: 6px;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+    font-family: var(--font-mono);
+  }
+
+  .z-btn:hover {
+    background: var(--violet-dim);
+    color: var(--violet-bright);
+    border-color: var(--violet);
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--surface2);
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+  }
+
+  .leg-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  .three-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+  }
+
+  .file-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+
+  .file-card.active { border-left: 3px solid var(--emerald); }
+  .file-card.dead { border-left: 3px solid var(--rose); opacity: 0.7; }
+
+  .file-card h4 {
+    font-size: 13px;
+    font-family: var(--font-mono);
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .file-card h4 .status {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .file-card h4 .status.active { background: var(--emerald-dim); color: var(--emerald-bright); }
+  .file-card h4 .status.dead { background: var(--rose-dim); color: var(--rose-bright); }
+
+  .file-card p {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+  }
+
+  .cleanup-box {
+    background: linear-gradient(135deg, var(--rose-dim) 0%, var(--surface) 100%);
+    border: 1px solid rgba(244,63,94,0.3);
+    border-radius: 12px;
+    padding: 20px 24px;
+  }
+
+  .cleanup-box h3 {
+    font-size: 14px;
+    margin-bottom: 12px;
+    color: var(--rose-bright);
+    font-family: var(--font-mono);
+  }
+
+  .cleanup-box code {
+    display: block;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  @media (max-width: 900px) {
+    .three-col { grid-template-columns: 1fr 1fr; }
+  }
+
+  @media (max-width: 760px) {
+    .two-col, .three-col { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 28px; }
+    .section-desc { display: none; }
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(18px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="hero">
+    <div class="hero-eyebrow">Tech Debt Analysis · Backend Architecture</div>
+    <h1>YudaiV3 Backend Flow</h1>
+    <p class="hero-sub">Complete import chain from run_server.py through all routers. Active modules connected to sessions API vs dead code not reachable from entry point. Identifies tech debt for codebase revamp.</p>
+    <div class="hero-stats">
+      <div class="stat">
+        <span class="stat-num active">36</span>
+        <span class="stat-label">Active Files</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num dead">9</span>
+        <span class="stat-label">Dead Files</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num ambiguous">7</span>
+        <span class="stat-label">Utility Scripts</span>
+      </div>
+    </div>
+    <div class="hero-tags">
+      <span class="tag active">session_routes.py</span>
+      <span class="tag active">solver.py</span>
+      <span class="tag active">ChatOps.py</span>
+      <span class="tag dead">yudai-grep/</span>
+      <span class="tag dead">demo_script.py</span>
+      <span class="tag dead">config/routes.py</span>
+    </div>
+  </header>
+
+  <div class="section">
+    <div class="section-header">
+      <div class="section-pip" style="background: var(--violet)"></div>
+      <span class="section-label" style="color: var(--violet-bright)">01 · Entry Point &amp; Router Mounting</span>
+      <span class="section-desc">run_server.py → FastAPI App → 4 Routers</span>
+    </div>
+    <div class="mermaid-wrap" id="wrap1">
+      <div class="zoom-ctrl">
+        <button class="z-btn" onclick="zIn('wrap1')">+</button>
+        <button class="z-btn" onclick="zOut('wrap1')">−</button>
+        <button class="z-btn" onclick="zReset('wrap1')">↺</button>
+      </div>
+      <div class="mermaid-inner" id="inner1">
+        <div class="mermaid">
+flowchart TD
+    subgraph ENTRY["🚀 Entry Point"]
+        RunServer["run_server.py<br/><code>if __name__ == '__main__'</code>"]
+    end
+
+    subgraph FASTAPI["⚡ FastAPI App"]
+        App["app = FastAPI()<br/>lifespan: init_db()"]
+    end
+
+    RunServer --> App
+
+    App --> AuthRouter["/auth → auth_router<br/><code>from auth import auth_router</code>"]
+    App --> GithubRouter["/github → github_router<br/><code>from github import github_router</code>"]
+    App --> SessionRouter["/daifu → session_router<br/><code>from daifuUserAgent.session_routes</code>"]
+    App --> SolverRouter["/daifu → solver_router<br/><code>from solver.solver import router</code>"]
+
+    AuthRouter --> AuthInit["auth/__init__.py<br/>exports auth_router"]
+    GithubRouter --> GhInit["github/__init__.py<br/>exports github_router"]
+    SessionRouter --> SessRoutes["session_routes.py<br/>36+ endpoints"]
+    SolverRouter --> SolverPy["solver.py<br/>SSE streaming + Modal"]
+
+    style ENTRY fill:var(--violet-dim),stroke:var(--violet)
+    style FASTAPI fill:var(--cyan-dim),stroke:var(--cyan)
+        </div>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><div class="leg-dot" style="background: var(--violet)"></div>Entry Point</div>
+        <div class="legend-item"><div class="leg-dot" style="background: var(--cyan)"></div>FastAPI App</div>
+        <div class="legend-item"><div class="leg-dot" style="background: var(--emerald)"></div>Active Routers</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <div class="section-pip" style="background: var(--emerald)"></div>
+      <span class="section-label" style="color: var(--emerald-bright)">02 · Active Import Chain (Session Routes)</span>
+      <span class="section-desc">daifuUserAgent/ → context/ → repo_processorGitIngest/</span>
+    </div>
+    <div class="mermaid-wrap" id="wrap2">
+      <div class="zoom-ctrl">
+        <button class="z-btn" onclick="zIn('wrap2')">+</button>
+        <button class="z-btn" onclick="zOut('wrap2')">−</button>
+        <button class="z-btn" onclick="zReset('wrap2')">↺</button>
+      </div>
+      <div class="mermaid-inner" id="inner2">
+        <div class="mermaid">
+flowchart LR
+    subgraph DAIFU["📁 daifuUserAgent/"]
+        SessRoutes["session_routes.py<br/>Main router, 36+ endpoints"]
+        LLM["llm_service.py<br/>OpenRouter API calls"]
+        SessSvc["session_service.py<br/>DB operations"]
+        ChatOps["ChatOps.py<br/>Chat processing"]
+        IssueOps["IssueOps.py<br/>Issue creation"]
+        GithubOps["githubOps.py<br/>GitHub API wrapper"]
+    end
+
+    subgraph CONTEXT["📁 context/"]
+        ChatCtx["chat_context.py<br/>Conversation history"]
+        FactsMem["facts_and_memories.py<br/>Embeddings + snapshots"]
+        CacheMeta["cache_metadata.py<br/>Cache utilities"]
+    end
+
+    subgraph SOLVER["📁 solver/"]
+        SolverPy["solver.py<br/>Solver router"]
+        Manager["manager.py<br/>Solve orchestration"]
+        Sandbox["sandbox.py<br/>Modal execution"]
+        AgentScript["agentScriptGen.py<br/>Script generation"]
+        Video["video.py<br/>Video processing"]
+    end
+
+    subgraph REPO["📁 repo_processorGitIngest/"]
+        Scraper["scraper_script.py<br/>GitIngest wrapper"]
+    end
+
+    SessRoutes --> LLM
+    SessRoutes --> SessSvc
+    SessRoutes --> ChatOps
+    SessRoutes --> GithubOps
+    SessSvc --> IssueOps
+    ChatOps --> ChatCtx
+    ChatOps --> FactsMem
+    ChatOps --> LLM
+    IssueOps --> GithubOps
+    FactsMem --> Scraper
+    FactsMem --> LLM
+    SolverPy --> Manager
+    Manager --> Sandbox
+    Manager --> FactsMem
+    Sandbox --> AgentScript
+    Sandbox --> Video
+
+    style DAIFU fill:var(--emerald-dim),stroke:var(--emerald)
+    style CONTEXT fill:var(--cyan-dim),stroke:var(--cyan)
+    style SOLVER fill:var(--amber-dim),stroke:var(--amber)
+    style REPO fill:var(--violet-dim),stroke:var(--violet)
+        </div>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><div class="leg-dot" style="background: var(--emerald)"></div>daifuUserAgent/</div>
+        <div class="legend-item"><div class="leg-dot" style="background: var(--cyan)"></div>context/</div>
+        <div class="legend-item"><div class="leg-dot" style="background: var(--amber)"></div>solver/</div>
+        <div class="legend-item"><div class="leg-dot" style="background: var(--violet)"></div>repo_processorGitIngest/</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <div class="section-pip" style="background: var(--cyan)"></div>
+      <span class="section-label" style="color: var(--cyan-bright)">03 · Active Modules by Folder</span>
+      <span class="section-desc">All files in the request chain from entry point</span>
+    </div>
+    <div class="three-col">
+      <div class="file-card active">
+        <h4>daifuUserAgent/ <span class="status active">7 files</span></h4>
+        <p>session_routes.py, session_service.py, llm_service.py, ChatOps.py, IssueOps.py, githubOps.py, __init__.py</p>
+      </div>
+      <div class="file-card active">
+        <h4>solver/ <span class="status active">6 files</span></h4>
+        <p>solver.py, manager.py, sandbox.py, agentScriptGen.py, video.py, __init__.py</p>
+      </div>
+      <div class="file-card active">
+        <h4>context/ <span class="status active">4 files</span></h4>
+        <p>__init__.py, chat_context.py, facts_and_memories.py, cache_metadata.py</p>
+      </div>
+      <div class="file-card active">
+        <h4>auth/ <span class="status active">3 files</span></h4>
+        <p>__init__.py, auth_routes.py, github_oauth.py</p>
+      </div>
+      <div class="file-card active">
+        <h4>github/ <span class="status active">2 files</span></h4>
+        <p>__init__.py, routes.py</p>
+      </div>
+      <div class="file-card active">
+        <h4>db/ <span class="status active">3 files</span></h4>
+        <p>__init__.py, database.py, init_db.py</p>
+      </div>
+      <div class="file-card active">
+        <h4>utils/ <span class="status active">2 files</span></h4>
+        <p>__init__.py, chunking.py</p>
+      </div>
+      <div class="file-card active">
+        <h4>repo_processorGitIngest/ <span class="status active">2 files</span></h4>
+        <p>__init__.py, scraper_script.py</p>
+      </div>
+      <div class="file-card active">
+        <h4>Root <span class="status active">2 files</span></h4>
+        <p>models.py, utils.py</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <div class="section-pip" style="background: var(--rose)"></div>
+      <span class="section-label" style="color: var(--rose-bright)">04 · Dead Code (Not Connected to API)</span>
+      <span class="section-desc">Files not imported by any active module</span>
+    </div>
+    <div class="mermaid-wrap dead" id="wrap3">
+      <div class="zoom-ctrl">
+        <button class="z-btn" onclick="zIn('wrap3')">+</button>
+        <button class="z-btn" onclick="zOut('wrap3')">−</button>
+        <button class="z-btn" onclick="zReset('wrap3')">↺</button>
+      </div>
+      <div class="mermaid-inner" id="inner3">
+        <div class="mermaid">
+flowchart TD
+    subgraph DEAD["❌ DEAD CODE - NOT IMPORTED"]
+        subgraph YUDAI["context/yudai-grep/ - Optional ML Model"]
+            YGMain["main.py<br/>predict_action()"]
+            YGModel["src/model.py<br/>GrepModel class"]
+            YGRuntime["src/runtime.py<br/>load_model()"]
+            YGTrain["src/train.py<br/>Training script"]
+            YGForward["src/openai_forwarder.py<br/>API forwarder"]
+            YGBuild["build/lib/*<br/>Build artifacts"]
+        end
+
+        subgraph DEMOS["solver/ - Demo Scripts"]
+            DemoScript["demo_script.py<br/>Standalone demo"]
+            E2BDemo["e2b_standalone_demo.py<br/>Modal sandbox demo"]
+            DemoArtifacts["sandbox_demo_artifacts/<br/>Generated files"]
+        end
+
+        subgraph OTHER["Other Dead Files"]
+            ConfigRoutes["config/routes.py<br/>Route constants - NOT IMPORTED"]
+            DownloadModel["download_model.py<br/>Docker build utility"]
+        end
+    end
+
+    FactsMem -.->|"try/except<br/>YUDAI_GREP_AVAILABLE"| YGMain
+    FactsMem -->|"fallback works"| NoYudai["Graceful fallback<br/>YUDAI_GREP_AVAILABLE=False"]
+
+    style DEAD fill:var(--rose-dim),stroke:var(--rose)
+    style YUDAI fill:rgba(244,63,94,0.1),stroke:var(--rose)
+    style DEMOS fill:rgba(244,63,94,0.1),stroke:var(--rose)
+    style OTHER fill:rgba(244,63,94,0.1),stroke:var(--rose)
+    style NoYudai fill:var(--emerald-dim),stroke:var(--emerald)
+        </div>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><div class="leg-dot" style="background: var(--rose)"></div>Dead Code</div>
+        <div class="legend-item"><div class="leg-dot" style="background: var(--gray)"></div>Optional Import (has fallback)</div>
+        <div class="legend-item"><div class="leg-dot" style="background: var(--emerald)"></div>Safe Fallback</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <div class="section-pip" style="background: var(--amber)"></div>
+      <span class="section-label" style="color: var(--amber-bright)">05 · Dead Files Summary</span>
+      <span class="section-desc">9 files safe to remove</span>
+    </div>
+    <div class="two-col">
+      <div class="file-card dead">
+        <h4>context/yudai-grep/ <span class="status dead">6 files</span></h4>
+        <p>ML model for code search prediction. Optional import with try/except in facts_and_memories.py. Not required for API to function.</p>
+      </div>
+      <div class="file-card dead">
+        <h4>solver/demo_script.py <span class="status dead">DEAD</span></h4>
+        <p>Standalone demo with if __name__ == '__main__' entry. Not imported anywhere. Used for local testing only.</p>
+      </div>
+      <div class="file-card dead">
+        <h4>solver/e2b_standalone_demo.py <span class="status dead">DEAD</span></h4>
+        <p>Modal sandbox demo script. Entry point only, not imported. For manual testing.</p>
+      </div>
+      <div class="file-card dead">
+        <h4>solver/sandbox_demo_artifacts/ <span class="status dead">DEAD</span></h4>
+        <p>Generated artifacts folder. Not source code, can be regenerated.</p>
+      </div>
+      <div class="file-card dead">
+        <h4>config/routes.py <span class="status dead">DEAD</span></h4>
+        <p>Route constants class. NOT IMPORTED anywhere. Dead code from old architecture.</p>
+      </div>
+      <div class="file-card dead">
+        <h4>download_model.py <span class="status dead">UTILITY</span></h4>
+        <p>Docker build utility to pre-cache SentenceTransformer model. Not runtime code, only used during build.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <div class="section-pip" style="background: var(--rose)"></div>
+      <span class="section-label" style="color: var(--rose-bright)">06 · Cleanup Commands</span>
+      <span class="section-desc">Safe to run - removes dead code</span>
+    </div>
+    <div class="cleanup-box">
+      <h3>🧹 Remove Dead Code</h3>
+      <code># Remove entire yudai-grep folder (optional ML model)
+rm -rf backend/context/yudai-grep/
+
+# Remove demo scripts
+rm backend/solver/demo_script.py
+rm backend/solver/e2b_standalone_demo.py
+rm -rf backend/solver/sandbox_demo_artifacts/
+
+# Remove unused config
+rm backend/config/routes.py
+
+# Move build utility (optional)
+mkdir -p scripts/
+mv backend/download_model.py scripts/</code>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">
+      <div class="section-pip" style="background: var(--violet)"></div>
+      <span class="section-label" style="color: var(--violet-bright)">07 · Recommended Next Steps</span>
+      <span class="section-desc">Tech debt reduction priorities</span>
+    </div>
+    <div class="mermaid-wrap" id="wrap4">
+      <div class="zoom-ctrl">
+        <button class="z-btn" onclick="zIn('wrap4')">+</button>
+        <button class="z-btn" onclick="zOut('wrap4')">−</button>
+        <button class="z-btn" onclick="zReset('wrap4')">↺</button>
+      </div>
+      <div class="mermaid-inner" id="inner4">
+        <div class="mermaid">
+flowchart LR
+    subgraph P1["Priority 1 - Immediate"]
+        RemoveDead["Remove dead files<br/>~500 lines"]
+        Simplify["Simplify facts_and_memories.py<br/>Remove yudai-grep try/except"]
+    end
+
+    subgraph P2["Priority 2 - Architecture"]
+        Consolidate["Consolidate routers<br/>session_routes.py is 1500+ lines"]
+        TestCoverage["Add test coverage<br/>tests/ only has 1 file"]
+    end
+
+    subgraph P3["Priority 3 - Maintainability"]
+        Docs["Add inline documentation<br/>Many functions undocumented"]
+        TypeHints["Improve type hints<br/>Some functions missing hints"]
+        Linting["Add ruff/black<br/>Code style enforcement"]
+    end
+
+    RemoveDead --> Consolidate
+    Simplify --> Consolidate
+    Consolidate --> Docs
+    TestCoverage --> Docs
+    Docs --> TypeHints
+    TypeHints --> Linting
+
+    style P1 fill:var(--rose-dim),stroke:var(--rose)
+    style P2 fill:var(--amber-dim),stroke:var(--amber)
+    style P3 fill:var(--cyan-dim),stroke:var(--cyan)
+        </div>
+      </div>
+      <div class="legend">
+        <div class="legend-item"><div class="leg-dot" style="background: var(--rose)"></div>Priority 1 - Immediate</div>
+        <div class="legend-item"><div class="leg-dot" style="background: var(--amber)"></div>Priority 2 - Architecture</div>
+        <div class="legend-item"><div class="leg-dot" style="background: var(--cyan)"></div>Priority 3 - Maintainability</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+const dark = !window.matchMedia('(prefers-color-scheme: light)').matches;
+
+mermaid.initialize({
+  startOnLoad: true,
+  theme: 'base',
+  look: 'classic',
+  themeVariables: {
+    primaryColor:        dark ? '#1a1040' : '#ede9fe',
+    primaryBorderColor:  dark ? '#7c3aed' : '#8b5cf6',
+    primaryTextColor:    dark ? '#dde4f0' : '#1e1b4b',
+    secondaryColor:      dark ? '#0c2030' : '#ecfeff',
+    secondaryBorderColor:dark ? '#06b6d4' : '#0891b2',
+    secondaryTextColor:  dark ? '#dde4f0' : '#1e1b4b',
+    tertiaryColor:       dark ? '#0c1f18' : '#d1fae5',
+    tertiaryBorderColor: dark ? '#10b981' : '#059669',
+    tertiaryTextColor:   dark ? '#dde4f0' : '#1e1b4b',
+    lineColor:           dark ? '#3d4a63' : '#94a3b8',
+    edgeLabelBackground: dark ? '#0f0f2a' : '#f5f3ff',
+    clusterBkg:          dark ? '#111130' : '#f0f0ff',
+    clusterBorder:       dark ? '#2a2a5a' : '#c4b5fd',
+    fontSize: '13px',
+  },
+  flowchart: {
+    htmlLabels: true,
+    curve: 'basis',
+    padding: 16,
+    nodeSpacing: 40,
+    rankSpacing: 50,
+  },
+});
+
+const S = {};
+
+function initWrap(wrapId, innerId) {
+  S[wrapId] = { scale: 1, tx: 0, ty: 0, drag: false, sx: 0, sy: 0 };
+  const inner = document.getElementById(innerId);
+  const svg = inner.querySelector('svg');
+  if (!svg) return;
+  svg.style.transformOrigin = '0 0';
+  svg.style.transition = 'none';
+
+  inner.addEventListener('wheel', (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    const s = S[wrapId];
+    s.scale = Math.max(0.25, Math.min(5, s.scale * (e.deltaY > 0 ? 0.85 : 1.18)));
+    applyT(wrapId, innerId);
+  }, { passive: false });
+
+  inner.addEventListener('mousedown', (e) => {
+    const s = S[wrapId]; s.drag = true;
+    s.sx = e.clientX - s.tx; s.sy = e.clientY - s.ty;
+  });
+  window.addEventListener('mousemove', (e) => {
+    const s = S[wrapId]; if (!s || !s.drag) return;
+    s.tx = e.clientX - s.sx; s.ty = e.clientY - s.sy;
+    applyT(wrapId, innerId);
+  });
+  window.addEventListener('mouseup', () => { if (S[wrapId]) S[wrapId].drag = false; });
+}
+
+function applyT(wrapId, innerId) {
+  const inner = document.getElementById(innerId);
+  const svg = inner.querySelector('svg');
+  if (!svg) return;
+  const { scale: sc, tx, ty } = S[wrapId];
+  svg.style.transform = `translate(${tx}px,${ty}px) scale(${sc})`;
+}
+
+const pairs = [
+  ['wrap1','inner1'], ['wrap2','inner2'],
+  ['wrap3','inner3'], ['wrap4','inner4'],
+];
+
+window.zIn    = (id) => { const p = pairs.find(p=>p[0]===id); if(!p)return; S[id].scale = Math.min(5, S[id].scale*1.25); applyT(p[0],p[1]); };
+window.zOut   = (id) => { const p = pairs.find(p=>p[0]===id); if(!p)return; S[id].scale = Math.max(0.25, S[id].scale*0.8); applyT(p[0],p[1]); };
+window.zReset = (id) => { const p = pairs.find(p=>p[0]===id); if(!p)return; Object.assign(S[id],{scale:1,tx:0,ty:0}); applyT(p[0],p[1]); };
+
+setTimeout(() => { pairs.forEach(([w,i]) => initWrap(w, i)); }, 1500);
+</script>
+</body>
+</html>
