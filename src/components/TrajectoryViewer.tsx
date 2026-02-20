@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { FileText, ChevronRight, ChevronDown, DollarSign, MessageSquare, Clock, CheckCircle, XCircle, AlertCircle, Radio } from 'lucide-react';
 import { useTrajectoryStream } from '../hooks/useTrajectoryStream';
 import type { TrajectoryData } from '../types/sessionTypes';
@@ -39,34 +39,35 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({
   });
 
   // Static fallback data
-  const [staticTrajectory, setStaticTrajectory] = useState<TrajectoryData | null>(null);
-  const [loading, setLoading] = useState(!isLive);
-  const [error, setError] = useState<string | null>(null);
+  const [staticState, setStaticState] = useState<{
+    trajectory: TrajectoryData | null;
+    loading: boolean;
+    error: string | null;
+  }>({
+    trajectory: null,
+    loading: !isLive,
+    error: null,
+  });
 
   // Load static data if not in live mode
   useEffect(() => {
     if (isLive) return;
 
-    const loadStatic = async () => {
-      setLoading(true);
-      setError(null);
-
-      try {
-        if (staticData) {
-          setStaticTrajectory(staticData);
-        } else {
-          // Fallback to imported JSON
-          setStaticTrajectory(trajectoryData as TrajectoryData);
-        }
-      } catch (err) {
-        console.error('Failed to load trajectory:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load trajectory');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadStatic();
+    try {
+      const resolvedTrajectory = staticData ?? (trajectoryData as TrajectoryData);
+      setStaticState({
+        trajectory: resolvedTrajectory,
+        loading: false,
+        error: null,
+      });
+    } catch (err) {
+      console.error('Failed to load trajectory:', err);
+      setStaticState({
+        trajectory: null,
+        loading: false,
+        error: err instanceof Error ? err.message : 'Failed to load trajectory',
+      });
+    }
   }, [isLive, staticData]);
 
   // Auto-scroll to latest message in live mode
@@ -77,9 +78,30 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({
   }, [isLive, liveMessageCount, liveTrajectory]);
 
   // Select data source based on mode
-  const trajectory = isLive ? liveTrajectory : staticTrajectory;
-  const currentError = isLive ? streamError : error;
-  const isLoading = isLive ? streamStatus === 'connecting' : loading;
+  const trajectory = isLive ? liveTrajectory : staticState.trajectory;
+  const currentError = isLive ? streamError : staticState.error;
+  const isLoading = isLive ? streamStatus === 'connecting' : staticState.loading;
+  const messagesWithKeys = useMemo(() => {
+    const sourceMessages = trajectory?.messages ?? [];
+    const counts = new Map<string, number>();
+
+    return sourceMessages.map((message) => {
+      const extra = message.extra as Record<string, unknown> | undefined;
+      const explicitId = typeof extra?.id === 'string'
+        ? extra.id
+        : typeof extra?.message_id === 'string'
+          ? extra.message_id
+          : null;
+      const baseKey = explicitId ?? `${message.role}:${message.content}`;
+      const occurrence = counts.get(baseKey) ?? 0;
+      counts.set(baseKey, occurrence + 1);
+
+      return {
+        key: `${baseKey}:${occurrence}`,
+        message,
+      };
+    });
+  }, [trajectory]);
 
   const toggleMessage = (index: number) => {
     const newExpanded = new Set(expandedMessages);
@@ -223,7 +245,7 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({
       {/* Messages List */}
       <div className="flex-1 overflow-y-auto p-4">
         <div className="space-y-2">
-          {messages.map((message, index) => {
+          {messagesWithKeys.map(({ message, key }, index) => {
             const isExpanded = expandedMessages.has(index);
             const isSystem = message.role === 'system';
             const isUser = message.role === 'user';
@@ -231,7 +253,7 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({
 
             return (
               <div
-                key={index}
+                key={key}
                 className={`
                   border rounded-lg transition-colors
                   ${isSystem ? 'bg-zinc-800/30 border-zinc-700/50' : ''}
