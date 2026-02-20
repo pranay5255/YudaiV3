@@ -37,8 +37,10 @@ interface ContextCardsProps {
   };
 }
 
+const EMPTY_CONTEXT_CARDS: ContextCard[] = [];
+
 export const ContextCards: React.FC<ContextCardsProps> = ({
-  cards = [],
+  cards = EMPTY_CONTEXT_CARDS,
   onRemoveCard = () => {},
   onShowIssuePreview,
   onShowError,
