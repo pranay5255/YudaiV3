@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yudai.app/schemas/artifact-bundle.schema.json",
+  "title": "Session Artifact Bundle Metadata",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "session_id",
+    "runtime_id",
+    "sandbox_id",
+    "identity_key",
+    "exported_at",
+    "checksums"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "phase0.v1"
+    },
+    "session_id": { "type": "string" },
+    "runtime_id": { "type": "string" },
+    "sandbox_id": { "type": "string" },
+    "identity_key": { "type": "string" },
+    "exported_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "cache_manifest_path": { "type": "string" },
+    "bundle_path": { "type": "string" },
+    "checksums": {
+      "type": "object",
+      "required": ["bundle_sha256"],
+      "properties": {
+        "bundle_sha256": { "type": "string" },
+        "manifest_sha256": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "object_store": {
+      "type": "object",
+      "properties": {
+        "provider": { "type": "string", "enum": ["s3"] },
+        "etag": { "type": "string" },
+        "key": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "runtime_summary": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string" },
+        "issue_created": { "type": "boolean" },
+        "pr_created": { "type": "boolean" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "completed_at": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
+
