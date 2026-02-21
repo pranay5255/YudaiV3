@@ -1,0 +1,185 @@
+openapi: 3.1.0
+info:
+  title: Yudai Controller API (Phase 0 Freeze)
+  version: 0.1.0
+servers:
+  - url: https://yudai.app/api
+components:
+  schemas:
+    SandboxCreateRequest:
+      type: object
+      required: [org, repo_owner, repo_name, environment]
+      properties:
+        org:
+          type: string
+          example: yudai
+        repo_owner:
+          type: string
+          example: octocat
+        repo_name:
+          type: string
+          example: yudaiv3
+        environment:
+          type: string
+          example: main
+        repo_branch:
+          type: string
+          example: main
+    SandboxResponse:
+      type: object
+      properties:
+        sandbox_id:
+          type: string
+          example: sbx_01JT8BKHGCE4A5T8G7V6P2M0A3
+        identity_key:
+          type: string
+          example: yudai:octocat/yudaiv3:main
+        status:
+          type: string
+          enum: [provisioning, running, stopped, terminated]
+        tunnel_url:
+          type: string
+          example: https://sbx-abc123.modal.run
+        tunnel_token_ttl_seconds:
+          type: integer
+          example: 3600
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+          example: TUNNEL_UNREACHABLE
+        message:
+          type: string
+          example: Unable to reach sandbox tunnel. Please create a new session.
+        retryable:
+          type: boolean
+          example: false
+paths:
+  /controller/sandboxes:
+    post:
+      summary: Create sandbox runtime for org/repo/environment identity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SandboxCreateRequest"
+      responses:
+        "201":
+          description: sandbox provision started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SandboxResponse"
+  /controller/sandboxes/{sandbox_id}:
+    get:
+      summary: Fetch sandbox lifecycle state
+      parameters:
+        - in: path
+          name: sandbox_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: sandbox state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SandboxResponse"
+    delete:
+      summary: Terminate sandbox immediately
+      parameters:
+        - in: path
+          name: sandbox_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: terminated
+  /controller/sandboxes/{sandbox_id}/resolve-tunnel:
+    post:
+      summary: Resolve active tunnel URL for direct frontend access
+      parameters:
+        - in: path
+          name: sandbox_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: tunnel details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sandbox_id:
+                    type: string
+                  tunnel_url:
+                    type: string
+                  signed_tunnel_url:
+                    type: string
+                    example: https://sbx-abc123.modal.run?sig=...
+                  token_strategy:
+                    type: string
+                    example: session_jwt_passthrough
+                  token_ttl_seconds:
+                    type: integer
+                    example: 3600
+                  signed_url_ttl_seconds:
+                    type: integer
+                    example: 300
+  /controller/sandboxes/{sandbox_id}/heartbeat:
+    post:
+      summary: Update liveness heartbeat from controller monitor
+      parameters:
+        - in: path
+          name: sandbox_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: heartbeat recorded
+  /controller/sandboxes/cleanup:
+    post:
+      summary: Sweep stopped/terminated stale sandboxes
+      responses:
+        "200":
+          description: cleanup summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scanned:
+                    type: integer
+                  terminated:
+                    type: integer
+  /realtime/flags:
+    get:
+      summary: Return rollout flags and contract version
+      responses:
+        "200":
+          description: feature flag state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  flags:
+                    type: object
+                    properties:
+                      controller_split_enabled:
+                        type: boolean
+                      tunnel_mode_enabled:
+                        type: boolean
+                      ws_chat_enabled:
+                        type: boolean
+                      sse_stream_enabled:
+                        type: boolean
+                      contract_version:
+                        type: string
