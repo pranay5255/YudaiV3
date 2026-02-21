@@ -4,6 +4,7 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { API, buildApiUrl } from '../config/api';
+import { realtimeFeatureFlags } from '../config/realtimeFlags';
 import { useAuthStore } from '../stores/authStore';
 import { useSessionStore } from '../stores/sessionStore';
 import type {
@@ -45,6 +46,28 @@ const getAuthHeaders = (sessionToken?: string): HeadersInit => {
     headers['Authorization'] = `Bearer ${sessionToken}`;
   }
   return headers;
+};
+
+const buildSessionTargetUrl = (
+  endpoint: string,
+  params: Record<string, string>
+): string => {
+  const resolved = buildApiUrl(endpoint, params);
+  if (!realtimeFeatureFlags.tunnelModeEnabled) {
+    return resolved;
+  }
+
+  const tunnelUrl =
+    useSessionStore.getState().runtime?.tunnel_url ||
+    useSessionStore.getState().currentSession?.tunnel_url;
+  if (!tunnelUrl) {
+    throw new Error('Sandbox tunnel is unavailable. Please create a new session.');
+  }
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+  const parsed = new URL(resolved, origin);
+  const tunnelPath = parsed.pathname.replace(/^\/api\/daifu/, '');
+  return `${tunnelUrl.replace(/\/$/, '')}${tunnelPath}${parsed.search}`;
 };
 
 const toError = (error: unknown, fallback: string): Error =>
@@ -328,7 +351,8 @@ export const useStartSolveSession = () => {
       throw new Error('No active session or session token available');
     }
 
-    const response = await fetch(buildApiUrl(API.SESSIONS.SOLVER.START, { sessionId: activeSessionId }), {
+    const startUrl = buildSessionTargetUrl(API.SESSIONS.SOLVER.START, { sessionId: activeSessionId });
+    const response = await fetch(startUrl, {
       method: 'POST',
       headers: getAuthHeaders(sessionToken),
       body: JSON.stringify(request),
@@ -355,10 +379,11 @@ export const useGetSolveSession = (solveSessionId: string) => {
         throw new Error('No active session or session token available');
       }
 
-      const response = await fetch(buildApiUrl(API.SESSIONS.SOLVER.STATUS, {
+      const statusUrl = buildSessionTargetUrl(API.SESSIONS.SOLVER.STATUS, {
         sessionId: activeSessionId,
         solveSessionId,
-      }), {
+      });
+      const response = await fetch(statusUrl, {
         method: 'GET',
         headers: getAuthHeaders(sessionToken),
       });
@@ -386,10 +411,11 @@ export const useCancelSolveSession = () => {
       throw new Error('No active session or session token available');
     }
 
-    const response = await fetch(buildApiUrl(API.SESSIONS.SOLVER.CANCEL, {
+    const cancelUrl = buildSessionTargetUrl(API.SESSIONS.SOLVER.CANCEL, {
       sessionId: activeSessionId,
       solveSessionId,
-    }), {
+    });
+    const response = await fetch(cancelUrl, {
       method: 'POST',
       headers: getAuthHeaders(sessionToken),
     });
@@ -415,4 +441,3 @@ export type {
   IssueCreationResponse,
   CreateGitHubIssueResponse,
 };
-
