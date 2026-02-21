@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuthStore } from '../stores/authStore';
+import { useSessionStore } from '../stores/sessionStore';
 import { buildApiUrl, API } from '../config/api';
+import { realtimeFeatureFlags } from '../config/realtimeFlags';
 import type {
   TrajectoryData,
   TrajectoryUpdateEvent,
@@ -38,6 +40,8 @@ export function useTrajectoryStream({
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const sessionToken = useAuthStore((state) => state.sessionToken);
+  const runtime = useSessionStore((state) => state.runtime);
+  const currentSession = useSessionStore((state) => state.currentSession);
 
   const closeStream = useCallback(() => {
     if (eventSourceRef.current) {
@@ -59,11 +63,23 @@ export function useTrajectoryStream({
     }
 
     // Build SSE URL with token query parameter
-    const streamUrl = buildApiUrl(API.SESSIONS.SOLVER.STREAM, {
+    let streamUrl = buildApiUrl(API.SESSIONS.SOLVER.STREAM, {
       sessionId,
       solveId,
       runId,
     });
+    if (realtimeFeatureFlags.tunnelModeEnabled) {
+      const tunnelUrl = runtime?.tunnel_url || currentSession?.tunnel_url;
+      if (!tunnelUrl) {
+        setStreamStatus('error');
+        setError('Sandbox tunnel is unavailable. Please create a new session.');
+        return;
+      }
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+      const parsed = new URL(streamUrl, origin);
+      const tunnelPath = parsed.pathname.replace(/^\/api\/daifu/, '');
+      streamUrl = `${tunnelUrl.replace(/\/$/, '')}${tunnelPath}${parsed.search}`;
+    }
     const urlWithToken = `${streamUrl}?token=${encodeURIComponent(sessionToken)}`;
 
     setStreamStatus('connecting');
@@ -146,7 +162,7 @@ export function useTrajectoryStream({
     return () => {
       closeStream();
     };
-  }, [enabled, sessionId, solveId, runId, sessionToken, closeStream]);
+  }, [enabled, sessionId, solveId, runId, sessionToken, runtime, currentSession, closeStream]);
 
   return {
     trajectory,
