@@ -12,6 +12,7 @@ import uvicorn
 
 # Import routers
 from auth import auth_router
+from config.realtime_flags import get_realtime_feature_flags
 from daifuUserAgent.session_routes import router as session_router
 
 # Import database
@@ -19,6 +20,7 @@ from db.database import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from github import github_router
+from realtime.controller_routes import router as controller_router
 from solver.solver import router as solver_router
 
 
@@ -61,6 +63,7 @@ app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(github_router, prefix="/github", tags=["github"])
 app.include_router(session_router, prefix="/daifu", tags=["sessions"])
 app.include_router(solver_router, prefix="/daifu", tags=["solver"])
+app.include_router(controller_router, tags=["realtime-controller"])
 
 
 # Root endpoint
@@ -78,6 +81,13 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "yudai-v3-backend"}
+
+
+@app.get("/realtime/flags")
+async def realtime_flags():
+    """Expose phase rollout flags for frontend/controller coordination."""
+    flags = get_realtime_feature_flags()
+    return {"flags": flags.as_dict()}
 
 
 if __name__ == "__main__":
