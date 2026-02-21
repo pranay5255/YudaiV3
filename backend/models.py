@@ -117,6 +117,28 @@ class EditType(str, Enum):
     DELETE = "delete"
 
 
+class SandboxStatus(str, Enum):
+    PROVISIONING = "provisioning"
+    RUNNING = "running"
+    STOPPED = "stopped"
+    TERMINATED = "terminated"
+
+
+class SessionRuntimeStatus(str, Enum):
+    PROVISIONING = "provisioning"
+    RUNNING = "running"
+    STOPPED = "stopped"
+    TERMINATED = "terminated"
+
+
+class SessionAuditEventName(str, Enum):
+    SANDBOX_START = "sandbox_start"
+    SOLVE_START = "solve_start"
+    GITHUB_ISSUE_CREATE = "github_issue_create"
+    PR_CREATE = "pr_create"
+    SANDBOX_TERMINATE = "sandbox_terminate"
+
+
 # ============================================================================
 # SQLALCHEMY MODELS (Database Schema)
 # ============================================================================
@@ -168,6 +190,14 @@ class User(Base):
     )
     solves: Mapped[List["Solve"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
+    )
+    sandboxes: Mapped[List["Sandbox"]] = relationship(
+        back_populates="created_by",
+        foreign_keys="Sandbox.created_by_user_id",
+    )
+    session_audit_events: Mapped[List["SessionAuditEvent"]] = relationship(
+        back_populates="user",
+        foreign_keys="SessionAuditEvent.user_id",
     )
 
 
@@ -479,6 +509,15 @@ class ChatSession(Base):
         back_populates="session", cascade="all, delete-orphan"
     )
     solves: Mapped[List["Solve"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+    runtime_records: Mapped[List["SessionRuntime"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+    artifacts: Mapped[List["SessionArtifact"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+    audit_events: Mapped[List["SessionAuditEvent"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
 
@@ -963,6 +1002,205 @@ class SolveRun(Base):
 
 
 # ============================================================================
+# REAL-TIME SESSION LIFECYCLE MODELS (Phase 0 contract freeze targets)
+# ============================================================================
+
+
+class Sandbox(Base):
+    """Persistent sandbox lifecycle metadata tracked by the controller."""
+
+    __tablename__ = "sandboxes"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    identity_key: Mapped[str] = mapped_column(
+        String(512), nullable=False, unique=True, index=True
+    )
+    org_slug: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    repo_owner: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    repo_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    environment: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    repo_branch: Mapped[str] = mapped_column(String(255), nullable=False, default="main")
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=SandboxStatus.PROVISIONING.value, index=True
+    )
+    tunnel_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    tunnel_auth_mode: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="session_jwt_passthrough"
+    )
+    tunnel_token_ttl_seconds: Mapped[int] = mapped_column(Integer, default=3600)
+    last_heartbeat_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    terminated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
+    active_session_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("chat_sessions.id"), nullable=True, index=True
+    )
+    lifecycle_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )
+
+    created_by: Mapped[Optional["User"]] = relationship(
+        back_populates="sandboxes", foreign_keys=[created_by_user_id]
+    )
+    active_session: Mapped[Optional["ChatSession"]] = relationship(
+        foreign_keys=[active_session_id]
+    )
+    runtimes: Mapped[List["SessionRuntime"]] = relationship(
+        back_populates="sandbox", cascade="all, delete-orphan"
+    )
+    audit_events: Mapped[List["SessionAuditEvent"]] = relationship(
+        back_populates="sandbox", cascade="all, delete-orphan"
+    )
+
+
+class SessionRuntime(Base):
+    """Runtime state that links a session to its active sandbox."""
+
+    __tablename__ = "session_runtime"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    runtime_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, index=True
+    )
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sandbox_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("sandboxes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default=SessionRuntimeStatus.PROVISIONING.value,
+        index=True,
+    )
+    completion_issue_created: Mapped[bool] = mapped_column(Boolean, default=False)
+    completion_pr_created: Mapped[bool] = mapped_column(Boolean, default=False)
+    completion_detected: Mapped[bool] = mapped_column(Boolean, default=False)
+    completion_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    tunnel_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    tunnel_resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    tunnel_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    runtime_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )
+
+    session: Mapped["ChatSession"] = relationship(back_populates="runtime_records")
+    sandbox: Mapped[Optional["Sandbox"]] = relationship(back_populates="runtimes")
+    artifacts: Mapped[List["SessionArtifact"]] = relationship(
+        back_populates="runtime", cascade="all, delete-orphan"
+    )
+    audit_events: Mapped[List["SessionAuditEvent"]] = relationship(
+        back_populates="runtime", cascade="all, delete-orphan"
+    )
+
+
+class SessionArtifact(Base):
+    """Exported bundle metadata produced when a session reaches completion criteria."""
+
+    __tablename__ = "session_artifacts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    runtime_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("session_runtime.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    artifact_key: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    artifact_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="bundle_metadata"
+    )
+    cache_manifest_path: Mapped[Optional[str]] = mapped_column(
+        String(1000), nullable=True
+    )
+    bundle_path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    checksum_sha256: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    object_etag: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    byte_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    artifact_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
+    exported_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+    session: Mapped["ChatSession"] = relationship(back_populates="artifacts")
+    runtime: Mapped[Optional["SessionRuntime"]] = relationship(back_populates="artifacts")
+
+
+class SessionAuditEvent(Base):
+    """Audit rows for runtime lifecycle and external side-effects."""
+
+    __tablename__ = "session_audit_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    event_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, index=True
+    )
+    event_name: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
+    session_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("chat_sessions.id"), nullable=True, index=True
+    )
+    sandbox_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("sandboxes.id"), nullable=True, index=True
+    )
+    runtime_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("session_runtime.id"), nullable=True, index=True
+    )
+    event_payload: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+    user: Mapped[Optional["User"]] = relationship(
+        back_populates="session_audit_events", foreign_keys=[user_id]
+    )
+    session: Mapped[Optional["ChatSession"]] = relationship(back_populates="audit_events")
+    sandbox: Mapped[Optional["Sandbox"]] = relationship(back_populates="audit_events")
+    runtime: Mapped[Optional["SessionRuntime"]] = relationship(
+        back_populates="audit_events"
+    )
+
+
+# ============================================================================
 # AI SOLVER PYDANTIC SCHEMAS (Simplified - Only Used Models)
 # ============================================================================
 
@@ -1296,6 +1534,9 @@ class SessionResponse(BaseModel):
     last_activity: Optional[datetime] = None
     generate_embeddings: bool = False
     generate_facts_memories: bool = False
+    runtime_id: Optional[str] = None
+    sandbox_id: Optional[str] = None
+    tunnel_url: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
