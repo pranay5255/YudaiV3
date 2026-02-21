@@ -81,6 +81,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from auth.github_oauth import get_current_user
+from config.realtime_flags import get_realtime_feature_flags
 from context import (
     EmbeddingPipeline,
     FactsAndMemoriesService,
@@ -90,6 +91,8 @@ from context import (
 from daifuUserAgent.githubOps import GitHubOps
 from db.database import SessionLocal, get_db
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from realtime.errors import RealtimeErrorCode, error_payload
+from realtime.lifecycle import get_realtime_lifecycle_service
 
 # Import from filedeps.py
 from models import (
@@ -434,6 +437,53 @@ async def create_session(
         db.commit()
         db.refresh(db_session)
 
+        runtime_id: Optional[str] = None
+        sandbox_id: Optional[str] = None
+        tunnel_url: Optional[str] = None
+
+        # Phase 1: Provision sandbox/runtime immediately when rollout is enabled.
+        realtime_flags = get_realtime_feature_flags()
+        if realtime_flags.controller_split_enabled or realtime_flags.tunnel_mode_enabled:
+            lifecycle = get_realtime_lifecycle_service()
+            repo_url = f"https://github.com/{request.repo_owner}/{request.repo_name}.git"
+
+            try:
+                envelope = lifecycle.create_runtime_for_session(
+                    db,
+                    session=db_session,
+                    user_id=current_user.id,
+                    org=None,
+                    repo_owner=request.repo_owner,
+                    repo_name=request.repo_name,
+                    environment=request.repo_branch,
+                    repo_branch=request.repo_branch,
+                    repo_url=repo_url,
+                )
+                db.commit()
+                db.refresh(envelope.runtime)
+                db.refresh(envelope.sandbox)
+
+                runtime_id = envelope.runtime.runtime_id
+                sandbox_id = envelope.sandbox.id
+                tunnel_url = envelope.sandbox.tunnel_url
+            except HTTPException:
+                raise
+            except Exception as realtime_error:
+                db.rollback()
+                logger.error(
+                    "Failed to provision realtime runtime for session %s: %s",
+                    session_id,
+                    realtime_error,
+                )
+                if realtime_flags.tunnel_mode_enabled:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail=error_payload(
+                            RealtimeErrorCode.TUNNEL_UNAVAILABLE,
+                            detail=str(realtime_error),
+                        ),
+                    )
+
         # Kick off background indexing of the repository if requested
         if getattr(request, "index_codebase", True):
             try:
@@ -491,6 +541,9 @@ async def create_session(
             last_activity=db_session.last_activity,
             generate_embeddings=db_session.generate_embeddings,
             generate_facts_memories=db_session.generate_facts_memories,
+            runtime_id=runtime_id,
+            sandbox_id=sandbox_id,
+            tunnel_url=tunnel_url,
         )
 
     except Exception as e:
@@ -2241,6 +2294,17 @@ async def create_github_issue_from_user_issue_for_session(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="GitHub issue was created but no URL was returned",
             )
+
+        # Phase 1 completion tracking: issue creation event.
+        lifecycle = get_realtime_lifecycle_service()
+        lifecycle.mark_issue_created(
+            db,
+            session_public_id=session_id,
+            user_id=current_user.id,
+            issue_url=result.github_issue_url,
+            issue_number=result.github_issue_number,
+        )
+        db.commit()
 
         return CreateGitHubIssueResponse(
             success=True,
