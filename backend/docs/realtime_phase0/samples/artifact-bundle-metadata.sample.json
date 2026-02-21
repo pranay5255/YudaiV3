@@ -1,0 +1,27 @@
+{
+  "schema_version": "phase0.v1",
+  "session_id": "sess_01JT8CPANQY66TR5BYNBPV8D21",
+  "runtime_id": "rt_01JT8CQ4P4EP42F66XGEEZ5QDA",
+  "sandbox_id": "sbx_01JT8BKHGCE4A5T8G7V6P2M0A3",
+  "identity_key": "yudai:octocat/yudaiv3:main",
+  "exported_at": "2026-02-21T15:41:05Z",
+  "cache_manifest_path": "/home/yudai/.cache/session/sess_01JT8CPANQY66TR5BYNBPV8D21.json",
+  "bundle_path": "/home/yudai/.cache/artifacts/sess_01JT8CPANQY66TR5BYNBPV8D21.tar.gz",
+  "checksums": {
+    "bundle_sha256": "eea9f4bd794c8b4e62f7b41d59e3472d16f4b2bdfedb13d9194f2bf865df2c57",
+    "manifest_sha256": "16ce56d74f57cfaf73828c33c4ceced6aaebdf492f438ff3abbe8a27f978e601"
+  },
+  "object_store": {
+    "provider": "s3",
+    "etag": "f6f6a12228f71f95d0125a2f578f0f5c",
+    "key": "session-artifacts/yudai/octocat/yudaiv3/main/sess_01JT8CPANQY66TR5BYNBPV8D21.tar.gz"
+  },
+  "runtime_summary": {
+    "status": "terminated",
+    "issue_created": true,
+    "pr_created": true,
+    "started_at": "2026-02-21T15:32:16Z",
+    "completed_at": "2026-02-21T15:41:05Z"
+  }
+}
+
