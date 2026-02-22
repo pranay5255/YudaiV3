@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yudai.app/schemas/session-cache.schema.json",
+  "title": "Session Cache",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "session_id",
+    "sandbox_id",
+    "identity_key",
+    "created_at",
+    "events"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "phase0.v1"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "sandbox_id": {
+      "type": "string"
+    },
+    "runtime_id": {
+      "type": "string"
+    },
+    "identity_key": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["event_name", "timestamp"],
+        "properties": {
+          "event_name": {
+            "type": "string",
+            "enum": [
+              "sandbox_start",
+              "solve_start",
+              "github_issue_create",
+              "pr_create",
+              "sandbox_terminate"
+            ]
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "trajectory_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": { "type": "string" },
+          "bytes": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "github_refs": {
+      "type": "object",
+      "properties": {
+        "issue_number": { "type": "integer" },
+        "issue_url": { "type": "string" },
+        "pr_number": { "type": "integer" },
+        "pr_url": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
+

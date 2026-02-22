@@ -22,6 +22,23 @@ export interface Session {
   created_at: string;
   updated_at?: string;
   last_activity?: string;
+  runtime_id?: string;
+  sandbox_id?: string;
+  tunnel_url?: string;
+}
+
+export interface SessionRuntimeInfo {
+  runtime_id: string;
+  sandbox_id: string;
+  identity_key: string;
+  status: string;
+  tunnel_url?: string;
+  token_ttl_seconds: number;
+  tunnel_expires_at?: string;
+  completion_issue_created: boolean;
+  completion_pr_created: boolean;
+  completion_detected: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 export interface SessionContext {

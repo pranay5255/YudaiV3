@@ -1,0 +1,151 @@
+import os
+from pathlib import Path
+import sys
+
+from fastapi import HTTPException
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+# Ensure backend imports resolve in tests.
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+os.environ.setdefault("DATABASE_URL", "sqlite:///tmp/realtime-controller-tests.db")
+
+from models import Base, ChatSession, User  # noqa: E402
+from realtime.cache_store import SessionCacheStore  # noqa: E402
+from realtime.controller_routes import (  # noqa: E402
+    delete_sandbox,
+    ensure_runtime_for_session,
+    get_sandbox,
+    resolve_tunnel,
+)
+from realtime.lifecycle import RealtimeLifecycleService  # noqa: E402
+import realtime.lifecycle as lifecycle_module  # noqa: E402
+from realtime.schemas import RuntimeEnsureRequest  # noqa: E402
+
+
+@pytest.fixture
+def db_and_user(tmp_path, monkeypatch):
+    monkeypatch.setenv("SANDBOX_CACHE_ROOT", str(tmp_path / "cache"))
+    monkeypatch.setenv("SANDBOX_GIT_ROOT", str(tmp_path / "repos"))
+    monkeypatch.setenv("SANDBOX_TUNNEL_TEMPLATE", "http://sandbox.local/{sandbox_id}")
+
+    engine = create_engine("sqlite:///:memory:")
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(engine)
+
+    db = SessionLocal()
+    user = User(
+        github_username="tester",
+        github_user_id="5001",
+        email="tester@example.com",
+        display_name="Test User",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    session = ChatSession(
+        user_id=user.id,
+        session_id="session_controller_test",
+        title="Controller Session",
+        repo_owner="octocat",
+        repo_name="yudaiv3",
+        repo_branch="main",
+        is_active=True,
+        total_messages=0,
+        total_tokens=0,
+    )
+    db.add(session)
+    db.commit()
+
+    service = RealtimeLifecycleService(cache_store=SessionCacheStore())
+    service.sandbox_manager.ensure_git_bootstrap = lambda **_: {"status": "skipped"}
+    service._start_probe_if_possible = lambda **_: None
+    service._stop_probe_if_possible = lambda *_: None
+    lifecycle_module._service_singleton = service
+
+    try:
+        yield db, user, session
+    finally:
+        lifecycle_module._service_singleton = None
+        db.close()
+
+
+def test_runtime_ensure_and_resolve_tunnel(db_and_user):
+    db, user, session = db_and_user
+
+    runtime_response = ensure_runtime_for_session(
+        session_id=session.session_id,
+        request=RuntimeEnsureRequest(
+            org="yudai",
+            repo_owner="octocat",
+            repo_name="yudaiv3",
+            environment="main",
+            repo_branch="main",
+            repo_url="file:///tmp/unused",
+        ),
+        db=db,
+        current_user=user,
+    )
+
+    assert runtime_response.runtime_id.startswith("rt_")
+    assert runtime_response.sandbox_id.startswith("sbx_")
+    assert runtime_response.tunnel_url.startswith("http://sandbox.local/")
+
+    sandbox_id = runtime_response.sandbox_id
+
+    resolve_response = resolve_tunnel(
+        sandbox_id=sandbox_id,
+        db=db,
+        current_user=user,
+    )
+    assert resolve_response.sandbox_id == sandbox_id
+    assert resolve_response.token_strategy == "session_jwt_passthrough"
+
+    sandbox_response = get_sandbox(
+        sandbox_id=sandbox_id,
+        db=db,
+        current_user=user,
+    )
+    assert sandbox_response.status == "running"
+
+
+def test_terminated_sandbox_returns_hard_error(db_and_user):
+    db, user, session = db_and_user
+
+    runtime_response = ensure_runtime_for_session(
+        session_id=session.session_id,
+        request=RuntimeEnsureRequest(
+            org="yudai",
+            repo_owner="octocat",
+            repo_name="yudaiv3",
+            environment="main",
+            repo_branch="main",
+            repo_url="file:///tmp/unused",
+        ),
+        db=db,
+        current_user=user,
+    )
+
+    sandbox_id = runtime_response.sandbox_id
+
+    delete_response = delete_sandbox(
+        sandbox_id=sandbox_id,
+        db=db,
+        current_user=user,
+    )
+    assert delete_response.status_code == 204
+
+    with pytest.raises(HTTPException) as exc:
+        resolve_tunnel(
+            sandbox_id=sandbox_id,
+            db=db,
+            current_user=user,
+        )
+
+    assert exc.value.status_code == 410
+    assert exc.value.detail.get("code") == "TUNNEL_TERMINATED"

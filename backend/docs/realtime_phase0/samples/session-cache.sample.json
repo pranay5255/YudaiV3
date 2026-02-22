@@ -1,0 +1,49 @@
+{
+  "schema_version": "phase0.v1",
+  "session_id": "sess_01JT8CPANQY66TR5BYNBPV8D21",
+  "sandbox_id": "sbx_01JT8BKHGCE4A5T8G7V6P2M0A3",
+  "runtime_id": "rt_01JT8CQ4P4EP42F66XGEEZ5QDA",
+  "identity_key": "yudai:octocat/yudaiv3:main",
+  "created_at": "2026-02-21T15:32:14Z",
+  "updated_at": "2026-02-21T15:41:22Z",
+  "events": [
+    {
+      "event_name": "sandbox_start",
+      "timestamp": "2026-02-21T15:32:15Z",
+      "payload": {
+        "tunnel_url": "https://sbx-abc123.modal.run",
+        "token_ttl_seconds": 3600
+      }
+    },
+    {
+      "event_name": "github_issue_create",
+      "timestamp": "2026-02-21T15:36:08Z",
+      "payload": {
+        "issue_number": 97,
+        "issue_url": "https://github.com/octocat/yudaiv3/issues/97"
+      }
+    },
+    {
+      "event_name": "pr_create",
+      "timestamp": "2026-02-21T15:41:00Z",
+      "payload": {
+        "pr_number": 102,
+        "pr_url": "https://github.com/octocat/yudaiv3/pull/102"
+      }
+    }
+  ],
+  "trajectory_refs": [
+    {
+      "path": "/home/yudai/.cache/trajectory/solve_102_run_1.json",
+      "sha256": "fe61d13cb2f7f4ea94f425cd1dd18fdd3f9524b7567b2616e5ccf463f7a0ac4d",
+      "bytes": 40294
+    }
+  ],
+  "github_refs": {
+    "issue_number": 97,
+    "issue_url": "https://github.com/octocat/yudaiv3/issues/97",
+    "pr_number": 102,
+    "pr_url": "https://github.com/octocat/yudaiv3/pull/102"
+  }
+}
+

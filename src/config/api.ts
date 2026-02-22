@@ -36,8 +36,18 @@ export const API = {
       STREAM: `${API_BASE}/daifu/sessions/{sessionId}/solve/stream/{solveId}/{runId}`,
     },
   },
+  CONTROLLER: {
+    SANDBOXES: `${API_BASE}/controller/sandboxes`,
+    SANDBOX_DETAIL: `${API_BASE}/controller/sandboxes/{sandboxId}`,
+    RESOLVE_TUNNEL: `${API_BASE}/controller/sandboxes/{sandboxId}/resolve-tunnel`,
+    HEARTBEAT: `${API_BASE}/controller/sandboxes/{sandboxId}/heartbeat`,
+    CLEANUP: `${API_BASE}/controller/sandboxes/cleanup`,
+    RUNTIME_ENSURE: `${API_BASE}/controller/sessions/{sessionId}/runtime`,
+    RUNTIME_DETAIL: `${API_BASE}/controller/sessions/{sessionId}/runtime`,
+  },
   SYSTEM: {
     HEALTH: `${API_BASE}/health`,
+    REALTIME_FLAGS: `${API_BASE}/realtime/flags`,
   },
 } as const;
 

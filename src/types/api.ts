@@ -206,6 +206,9 @@ export interface SessionResponse {
   created_at: string;
   updated_at?: string;
   last_activity?: string;
+  runtime_id?: string;
+  sandbox_id?: string;
+  tunnel_url?: string;
 }
 
 export interface SessionContextResponse {

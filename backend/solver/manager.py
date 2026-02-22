@@ -28,6 +28,7 @@ from context.facts_and_memories import (
 )
 from models import (
     AIModel,
+    AuthToken,
     CancelSolveResponse,
     ChatSession,
     ChatMessage,
@@ -42,6 +43,7 @@ from models import (
     StartSolveResponse,
     User,
 )
+from realtime.lifecycle import get_realtime_lifecycle_service
 from solver.sandbox import (
     HeadlessSandboxExecutor,
     HeadlessSandboxRequest,
@@ -180,6 +182,9 @@ class DefaultSolverManager(SolverManager):
         solve_id = uuid.uuid4().hex
         model_run_plans: List[ModelRunPlan] = []
         issue_url: Optional[str] = None
+        issue_title: Optional[str] = None
+        issue_body: Optional[str] = None
+        github_token: Optional[str] = None
 
         db = self._session_factory()
         try:
@@ -208,6 +213,16 @@ class DefaultSolverManager(SolverManager):
                 raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Issue not found")
 
             issue_url = issue.html_url
+            issue_title = issue.title
+            issue_body = issue.body
+
+            auth_token = (
+                db.query(AuthToken)
+                .filter(AuthToken.user_id == user.id, AuthToken.is_active)
+                .order_by(AuthToken.created_at.desc())
+                .first()
+            )
+            github_token = auth_token.access_token if auth_token else None
 
             ai_models = self._select_models(
                 db,
@@ -318,6 +333,15 @@ class DefaultSolverManager(SolverManager):
             db.add(solve)
             for solve_run in solve_runs:
                 db.add(solve_run)
+
+            lifecycle = get_realtime_lifecycle_service()
+            lifecycle.record_solve_start(
+                db,
+                session_public_id=session_id,
+                user_id=user.id,
+                solve_id=solve_id,
+                run_ids=[plan.run_id for plan in model_run_plans],
+            )
             db.commit()
         finally:
             db.close()
@@ -334,8 +358,8 @@ class DefaultSolverManager(SolverManager):
                 branch_name=request.branch_name,
                 executor_registry=executor_registry,
                 github_token=github_token,
-                issue_title=issue.title,
-                issue_body=issue.body,
+                issue_title=issue_title,
+                issue_body=issue_body,
             ),
             name=f"solve-{solve_id}",
         )
@@ -703,6 +727,17 @@ class DefaultSolverManager(SolverManager):
             solve.champion_run_id = run.id
             solve.error_message = None
 
+        if run.pr_url:
+            lifecycle = get_realtime_lifecycle_service()
+            lifecycle.mark_pr_created(
+                db,
+                session_db_id=solve.session_id,
+                session_public_id=None,
+                user_id=solve.user_id,
+                pr_url=run.pr_url,
+                pr_number=self._extract_pr_number_from_url(run.pr_url),
+            )
+
         logger.info(
             "Run %s for solve %s completed (exit_code=%s, success=%s)",
             run.id,
@@ -818,6 +853,16 @@ class DefaultSolverManager(SolverManager):
         else:
             solve.status = SolveStatus.FAILED.value
             solve.error_message = solve.error_message or "All runs failed"
+
+    @staticmethod
+    def _extract_pr_number_from_url(pr_url: Optional[str]) -> Optional[int]:
+        if not pr_url:
+            return None
+        try:
+            pr_id = pr_url.rstrip("/").split("/")[-1]
+            return int(pr_id)
+        except (TypeError, ValueError):
+            return None
 
     def _select_models(
         self,
