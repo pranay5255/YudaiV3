@@ -1,0 +1,1603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>YudaiV3 — Architecture Deep-Dive Q&A</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0e17;
+    --surface: #111827;
+    --surface-2: #1a2236;
+    --border: #1e2d4a;
+    --border-accent: #2563eb40;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --text-muted: #64748b;
+    --accent: #3b82f6;
+    --accent-bright: #60a5fa;
+    --green: #22c55e;
+    --green-bg: #22c55e18;
+    --yellow: #eab308;
+    --yellow-bg: #eab30818;
+    --red: #ef4444;
+    --red-bg: #ef444418;
+    --purple: #a855f7;
+    --purple-bg: #a855f718;
+    --orange: #f97316;
+    --orange-bg: #f9731618;
+    --cyan: #06b6d4;
+    --cyan-bg: #06b6d418;
+    --code-bg: #0d1321;
+    --radius: 10px;
+    --radius-sm: 6px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    padding: 0;
+  }
+
+  /* --- NAV / TOC --- */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0;
+    width: 280px;
+    height: 100vh;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    z-index: 100;
+    padding: 24px 0;
+    transition: transform 0.3s;
+  }
+  .sidebar.collapsed { transform: translateX(-280px); }
+  .sidebar-toggle {
+    position: fixed;
+    top: 16px; left: 16px;
+    z-index: 200;
+    background: var(--accent);
+    border: none;
+    color: #fff;
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+    transition: left 0.3s;
+  }
+  .sidebar-toggle.shifted { left: 296px; }
+
+  .sidebar h2 {
+    padding: 0 20px 16px;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--accent-bright);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+
+  .toc-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 20px;
+    text-decoration: none;
+    color: var(--text-dim);
+    font-size: 13px;
+    transition: all 0.15s;
+    border-left: 3px solid transparent;
+  }
+  .toc-item:hover {
+    background: var(--surface-2);
+    color: var(--text);
+    border-left-color: var(--accent);
+  }
+  .toc-item.active {
+    color: var(--accent-bright);
+    border-left-color: var(--accent);
+    background: var(--accent)10;
+  }
+  .toc-num {
+    flex-shrink: 0;
+    width: 24px; height: 24px;
+    background: var(--accent)20;
+    color: var(--accent-bright);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  /* --- MAIN --- */
+  .main {
+    margin-left: 280px;
+    padding: 40px 48px 120px;
+    max-width: 1100px;
+    transition: margin-left 0.3s;
+  }
+  .main.expanded { margin-left: 0; }
+
+  .page-title {
+    font-size: 32px;
+    font-weight: 800;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, var(--accent-bright), var(--cyan));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .page-subtitle {
+    color: var(--text-muted);
+    font-size: 15px;
+    margin-bottom: 48px;
+  }
+
+  /* --- QUESTION CARD --- */
+  .q-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 32px;
+    overflow: hidden;
+    scroll-margin-top: 24px;
+  }
+  .q-header {
+    padding: 20px 24px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    user-select: none;
+    transition: background 0.15s;
+  }
+  .q-header:hover { background: var(--surface-2); }
+
+  .q-num {
+    flex-shrink: 0;
+    width: 36px; height: 36px;
+    background: linear-gradient(135deg, var(--accent), #7c3aed);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px;
+    font-weight: 800;
+    color: #fff;
+  }
+  .q-title {
+    flex: 1;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .q-chevron {
+    font-size: 18px;
+    color: var(--text-muted);
+    transition: transform 0.25s;
+  }
+  .q-card.open .q-chevron { transform: rotate(180deg); }
+
+  .q-body {
+    display: none;
+    padding: 0 24px 24px;
+    border-top: 1px solid var(--border);
+  }
+  .q-card.open .q-body { display: block; }
+
+  .q-tags {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    margin: 16px 0;
+  }
+  .tag {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .tag-phase1 { background: var(--green-bg); color: var(--green); border: 1px solid var(--green)30; }
+  .tag-phase2 { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow)30; }
+  .tag-phase3 { background: var(--purple-bg); color: var(--purple); border: 1px solid var(--purple)30; }
+  .tag-design { background: var(--cyan-bg); color: var(--cyan); border: 1px solid var(--cyan)30; }
+  .tag-breaking { background: var(--red-bg); color: var(--red); border: 1px solid var(--red)30; }
+  .tag-deferred { background: var(--orange-bg); color: var(--orange); border: 1px solid var(--orange)30; }
+
+  /* --- CONTENT FORMATTING --- */
+  h3 { font-size: 15px; color: var(--accent-bright); margin: 20px 0 10px; font-weight: 700; }
+  h4 { font-size: 14px; color: var(--text); margin: 16px 0 8px; font-weight: 600; }
+
+  p, li { color: var(--text-dim); font-size: 14px; }
+  p { margin-bottom: 12px; }
+  ul, ol { padding-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+  strong { color: var(--text); }
+
+  code {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 12.5px;
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--accent-bright);
+    border: 1px solid var(--border);
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    overflow-x: auto;
+    margin: 12px 0;
+    font-size: 12.5px;
+    line-height: 1.6;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--text-dim);
+  }
+
+  .callout {
+    border-left: 3px solid;
+    padding: 12px 16px;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+  .callout-info { border-color: var(--accent); background: var(--accent)08; }
+  .callout-warn { border-color: var(--yellow); background: var(--yellow-bg); }
+  .callout-danger { border-color: var(--red); background: var(--red-bg); }
+  .callout-success { border-color: var(--green); background: var(--green-bg); }
+  .callout p { margin: 0; }
+  .callout strong { display: block; margin-bottom: 4px; }
+
+  .file-ref {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    padding: 4px 8px;
+    background: var(--code-bg);
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    display: inline-block;
+    margin: 2px 0;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+  th, td {
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    text-align: left;
+  }
+  th {
+    background: var(--surface-2);
+    color: var(--text);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  td { color: var(--text-dim); }
+  tr:hover td { background: var(--surface-2); }
+
+  .status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .status-done { background: var(--green-bg); color: var(--green); }
+  .status-partial { background: var(--yellow-bg); color: var(--yellow); }
+  .status-planned { background: var(--orange-bg); color: var(--orange); }
+  .status-gap { background: var(--red-bg); color: var(--red); }
+
+  .mermaid-wrapper {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 20px;
+    margin: 16px 0;
+    overflow-x: auto;
+  }
+
+  .expand-all {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 13px;
+    margin-bottom: 24px;
+    transition: all 0.15s;
+  }
+  .expand-all:hover { border-color: var(--accent); color: var(--text); }
+
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .sidebar-toggle { display: none; }
+    .main { margin-left: 0; padding: 24px 16px 100px; }
+  }
+</style>
+</head>
+<body>
+
+<button class="sidebar-toggle shifted" id="sidebarToggle" onclick="toggleSidebar()">&#9776;</button>
+
+<nav class="sidebar" id="sidebar">
+  <h2>Questions</h2>
+  <a class="toc-item" href="#q1"><span class="toc-num">1</span>Skip yudai-grep, return generic stubs</a>
+  <a class="toc-item" href="#q2"><span class="toc-num">2</span>Pluggable agent: zeroclaw / nanoclaw</a>
+  <a class="toc-item" href="#q3"><span class="toc-num">3</span>Remove legacy run_server.py?</a>
+  <a class="toc-item" href="#q4"><span class="toc-num">4</span>Diagram 03: Session API as entrypoint</a>
+  <a class="toc-item" href="#q5"><span class="toc-num">5</span>Bootstrap ordering: controller vs sandbox</a>
+  <a class="toc-item" href="#q6"><span class="toc-num">6</span>S3 object storage is metadata-only</a>
+  <a class="toc-item" href="#q7"><span class="toc-num">7</span>Complete WS chat endpoint</a>
+  <a class="toc-item" href="#q8"><span class="toc-num">8</span>Chat API instructs local SOLVE via mswea</a>
+  <a class="toc-item" href="#q9"><span class="toc-num">9</span>Phase 3 gaps: SSE + WS implementation</a>
+  <a class="toc-item" href="#q10"><span class="toc-num">10</span>Open questions &amp; system design impact</a>
+  <a class="toc-item" href="#q11"><span class="toc-num">11</span>High-priority untested/partial areas</a>
+</nav>
+
+<main class="main" id="main">
+  <h1 class="page-title">Architecture Deep-Dive Q&A</h1>
+  <p class="page-subtitle">
+    11 critical questions answered against the live codebase, questionnaire decisions, and Phase 1-3 architecture diagrams.
+    <br/>Generated from: <code>realtime-session-strategy.html</code>, <code>REAL_TIME_IMPLEMENTATION_QUESTIONNAIRE.md</code>,
+    <code>REAL_TIME_PHASE_TASK_LIST.md</code>, and all 11 diagram files.
+  </p>
+
+  <button class="expand-all" onclick="toggleAll()">Expand / Collapse All</button>
+
+  <!-- ============================================================ -->
+  <!-- Q1 -->
+  <!-- ============================================================ -->
+  <div class="q-card open" id="q1">
+    <div class="q-header" onclick="toggle(this)">
+      <span class="q-num">1</span>
+      <span class="q-title">Skip yudai-grep functionality for now &mdash; return generic text so the system works</span>
+      <span class="q-chevron">&#9662;</span>
+    </div>
+    <div class="q-body">
+      <div class="q-tags">
+        <span class="tag tag-phase2">Phase 2</span>
+        <span class="tag tag-deferred">Deferred</span>
+        <span class="tag tag-design">Design Decision</span>
+      </div>
+
+      <h3>Current State in Code</h3>
+      <p>
+        yudai-grep is currently <strong>optional and lazy-loaded</strong>. It is referenced in the architecture as a Phase 2 concern
+        (tasks P2-1 through P2-14). The questionnaire answer for Q46 says: <em>"hard failure with error message"</em> when the model
+        fails to load &mdash; but that was intended for Phase 2 production. For <strong>Phase 1 MVP</strong>, yudai-grep is not a blocker.
+      </p>
+
+      <h3>What to Do</h3>
+      <p>Create a <strong>stub module</strong> that satisfies the same interface yudai-grep would provide, returning generic/passthrough results:</p>
+
+      <pre><code># backend/services/grep_stub.py
+"""
+Stub replacement for yudai-grep until Phase 2 activation.
+Returns passthrough results so the system works without a trained model.
+"""
+
+class GrepStub:
+    """Drop-in replacement for yudai-grep query router."""
+
+    def __init__(self):
+        self.model_loaded = False
+        self.model_name = "stub-passthrough-v0"
+
+    def query(self, query_text: str, file_tree: list, top_k: int = 10) -> list:
+        """Return empty results - context services handle their own retrieval."""
+        return []
+
+    def rank_files(self, query: str, candidates: list, top_k: int = 10) -> list:
+        """Return candidates unranked (pass-through)."""
+        return candidates[:top_k]
+
+    def select_tools(self, query: str) -> list:
+        """Return default tool set."""
+        return ["search", "read", "edit"]
+
+    def health(self) -> dict:
+        return {"status": "stub", "model": self.model_name, "loaded": False}
+
+
+def get_grep_service():
+    return GrepStub()</code></pre>
+
+      <h3>Files Affected</h3>
+      <ul>
+        <li><span class="file-ref">backend/services/grep_stub.py</span> &mdash; new stub module</li>
+        <li>Any import of yudai-grep query router &mdash; replace with <code>grep_stub.get_grep_service()</code></li>
+        <li><span class="file-ref">backend/realtime/sandbox_routes.py</span> &mdash; add <code>/healthz</code> field: <code>"yudai_grep": "stub"</code></li>
+      </ul>
+
+      <h3>Impact on System Design</h3>
+      <div class="callout callout-success">
+        <strong>Zero functional impact on Phase 1 and Phase 3.</strong>
+        <p>Chat, solver, issue creation, PR creation, streaming &mdash; none of these depend on yudai-grep.
+        Context retrieval already works via embedding search (pgvector) and file tree indexing.
+        The stub simply means context ranking won't be model-enhanced until Phase 2.</p>
+      </div>
+
+      <h3>Architecture Diagram (yudai-grep decoupled)</h3>
+      <div class="mermaid-wrapper">
+        <div class="mermaid">
+flowchart LR
+  subgraph Phase1_Active["Phase 1 - Active"]
+    FE[Frontend] -->|HTTP/WS/SSE| S[Sandbox Server]
+    S --> CTX[Context Services<br/>embeddings + file tree]
+    S --> CHAT[ChatOps]
+    S --> SOL[Solver]
+  end
+
+  subgraph Phase2_Deferred["Phase 2 - Deferred"]
+    YG[yudai-grep model]
+    TRAIN[Training Script]
+  end
+
+  CTX -.->|"stub: passthrough"| STUB["GrepStub<br/>(returns unranked results)"]
+  STUB -.->|"Phase 2: replace with"| YG
+
+  style STUB fill:#eab308,stroke:#eab308,color:#eab308
+  style YG fill:#64748b,stroke:#64748b,color:#64748b
+  style TRAIN fill:#64748b,stroke:#64748b,color:#64748b
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Q2 -->
+  <!-- ============================================================ -->
+  <div class="q-card" id="q2">
+    <div class="q-header" onclick="toggle(this)">
+      <span class="q-num">2</span>
+      <span class="q-title">Option to replace sandbox session server with zeroclaw / picoclaw / nanoclaw</span>
+      <span class="q-chevron">&#9662;</span>
+    </div>
+    <div class="q-body">
+      <div class="q-tags">
+        <span class="tag tag-design">Design Decision</span>
+        <span class="tag tag-phase1">Phase 1</span>
+        <span class="tag tag-breaking">Architectural</span>
+      </div>
+
+      <h3>Current Architecture</h3>
+      <p>
+        The sandbox session server (<span class="file-ref">backend/run_sandbox_server.py</span>) is a FastAPI application that hosts:
+      </p>
+      <ul>
+        <li><strong>Session routes</strong> &mdash; chat, issues, context cards, file deps, messages</li>
+        <li><strong>Sandbox routes</strong> &mdash; healthz, WS chat shell</li>
+        <li><strong>Solver routes</strong> &mdash; start/status/cancel/stream</li>
+        <li><strong>Heartbeat loop</strong> &mdash; reports back to controller every 10s</li>
+      </ul>
+
+      <h3>The Pluggable Agent Pattern</h3>
+      <p>
+        To make the sandbox server replaceable by an alternative agent (zeroclaw, picoclaw, nanoclaw), you need a
+        <strong>contract boundary</strong> between the controller and whatever runs inside the sandbox.
+      </p>
+
+      <div class="callout callout-info">
+        <strong>The contract is already mostly defined:</strong>
+        <p>The controller only cares about: (1) <code>/healthz</code> responding OK, (2) the sandbox accepting the tunnel URL,
+        (3) the heartbeat mechanism. Everything else is internal to the sandbox.</p>
+      </div>
+
+      <h3>Required Interface (Sandbox Agent Contract)</h3>
+      <table>
+        <tr><th>Endpoint / Behavior</th><th>Required?</th><th>Purpose</th></tr>
+        <tr><td><code>GET /healthz</code></td><td>Yes</td><td>Controller liveness probe at 10s interval</td></tr>
+        <tr><td><code>GET /sessions/{id}</code></td><td>Yes</td><td>Frontend loads session context</td></tr>
+        <tr><td><code>POST /sessions/{id}/chat</code></td><td>Yes</td><td>Chat message processing</td></tr>
+        <tr><td><code>WS /sessions/{id}/ws/chat</code></td><td>Phase 3</td><td>Real-time chat (replaces REST)</td></tr>
+        <tr><td><code>GET /sessions/{id}/solve/stream/{solveId}/{runId}</code></td><td>Phase 3</td><td>SSE trajectory stream</td></tr>
+        <tr><td><code>POST /sessions/{id}/solve/start</code></td><td>Yes</td><td>Trigger solve execution</td></tr>
+        <tr><td><code>POST /sessions/{id}/issues/{id}/create-github-issue</code></td><td>Yes</td><td>GitHub issue creation + lifecycle hook</td></tr>
+        <tr><td>Heartbeat POST to controller</td><td>Yes</td><td>Background task reporting liveness</td></tr>
+      </table>
+
+      <h3>Implementation Strategy</h3>
+      <pre><code># Sandbox agent selection at container startup
+# Set via env var: SANDBOX_AGENT_TYPE=yudai|zeroclaw|picoclaw|nanoclaw
+
+SANDBOX_AGENT_TYPE = os.getenv("SANDBOX_AGENT_TYPE", "yudai")
+
+# Each agent must implement the contract endpoints above.
+# The heartbeat loop is agent-agnostic and can be shared.
+# The controller does not care what runs inside - only that
+# the contract is satisfied.</code></pre>
+
+      <h3>Architecture with Pluggable Agent</h3>
+      <div class="mermaid-wrapper">
+        <div class="mermaid">
+flowchart TB
+  CTR[Controller Host]
+
+  subgraph SB["Sandbox Container"]
+    direction TB
+    HB["Heartbeat Loop<br/>(shared, agent-agnostic)"]
+    HZ["GET /healthz<br/>(shared)"]
+
+    subgraph AgentSlot["Agent Slot (env: SANDBOX_AGENT_TYPE)"]
+      Y["yudai session server<br/>(current default)"]
+      Z["zeroclaw / picoclaw / nanoclaw<br/>(alternative agent)"]
+    end
+  end
+
+  CTR -->|"provision + monitor"| SB
+  HB --> CTR
+  FE[Frontend] -->|"tunnel_url"| AgentSlot
+  AgentSlot -->|"must implement contract"| CONTRACT["Contract:<br/>healthz, chat, solve, issues, WS, SSE"]
+
+  style Y fill:#22c55e,stroke:#22c55e
+  style Z fill:#a855f7,stroke:#a855f7
+  style CONTRACT fill:#3b82f6,stroke:#3b82f6
+        </div>
+      </div>
+
+      <h3>What Changes</h3>
+      <ol>
+        <li>Extract the heartbeat loop from <code>run_sandbox_server.py</code> into a shared utility</li>
+        <li>Define the contract as a base class or protocol (Python <code>Protocol</code>)</li>
+        <li>Each agent implementation registers its FastAPI routes</li>
+        <li>Container startup reads <code>SANDBOX_AGENT_TYPE</code> and launches the right entrypoint</li>
+        <li>Controller remains <strong>completely unchanged</strong> &mdash; it only hits <code>/healthz</code> and manages lifecycle</li>
+      </ol>
+
+      <div class="callout callout-warn">
+        <strong>Frontend coupling concern:</strong>
+        <p>The frontend currently hardcodes API paths like <code>/daifu/sessions/{id}/chat</code>.
+        If an alternative agent uses different paths, the frontend needs path abstraction or the agent must
+        mount routes at the same paths. <strong>Recommended: agents mount at the same paths</strong> for zero frontend changes.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Q3 -->
+  <!-- ============================================================ -->
+  <div class="q-card" id="q3">
+    <div class="q-header" onclick="toggle(this)">
+      <span class="q-num">3</span>
+      <span class="q-title">Any reason to remove legacy single-backend <code>run_server.py</code>?</span>
+      <span class="q-chevron">&#9662;</span>
+    </div>
+    <div class="q-body">
+      <div class="q-tags">
+        <span class="tag tag-phase1">Phase 1</span>
+        <span class="tag tag-design">Design Decision</span>
+      </div>
+
+      <h3>What <code>run_server.py</code> Does Today</h3>
+      <p>
+        <span class="file-ref">backend/run_server.py</span> is the <strong>legacy single-process backend</strong> that mounts
+        <em>everything</em> into one FastAPI app:
+      </p>
+      <ul>
+        <li><code>auth_router</code> at <code>/auth</code></li>
+        <li><code>github_router</code> at <code>/github</code></li>
+        <li><code>session_router</code> at <code>/daifu</code> (session CRUD, chat, issues, context)</li>
+        <li><code>solver_router</code> at <code>/daifu</code> (solve start/status/cancel/stream)</li>
+        <li><code>controller_router</code> (no prefix &mdash; sandbox lifecycle endpoints)</li>
+      </ul>
+
+      <h3>Verdict: Keep It (For Now)</h3>
+      <table>
+        <tr><th>Reason to Keep</th><th>Reason to Remove</th></tr>
+        <tr>
+          <td>Local development &mdash; run one process instead of two</td>
+          <td>Route duplication creates confusion about which entrypoint is canonical</td>
+        </tr>
+        <tr>
+          <td>Debugging &mdash; all routes visible in one Swagger UI</td>
+          <td>Risk of testing against <code>run_server.py</code> but deploying <code>run_controller.py</code> + <code>run_sandbox_server.py</code></td>
+        </tr>
+        <tr>
+          <td>Questionnaire answer Q11: <em>"keep one repo with two entrypoints first"</em></td>
+          <td>Code drift as controller and sandbox routes diverge</td>
+        </tr>
+        <tr>
+          <td>Fallback if split entrypoints have issues</td>
+          <td>Solver routes are mounted in both session_routes and run_server (double mount)</td>
+        </tr>
+      </table>
+
+      <div class="callout callout-info">
+        <strong>Recommendation: Keep <code>run_server.py</code> as a dev-mode convenience but mark it clearly.</strong>
+        <p>Add a startup banner: <code>"WARNING: Legacy single-backend mode. Use run_controller.py + run_sandbox_server.py for production."</code>
+        Feature flags (<code>REALTIME_CONTROLLER_SPLIT_ENABLED</code>) already handle routing differences.
+        Remove it only when the controller/sandbox split is battle-tested in staging.</p>
+      </div>
+
+      <div class="mermaid-wrapper">
+        <div class="mermaid">
+flowchart LR
+  subgraph dev["Dev Mode (keep)"]
+    RS["run_server.py<br/>(all routes, single process)"]
+  end
+
+  subgraph prod["Production Mode (target)"]
+    RC["run_controller.py<br/>(auth + controller + session create)"]
+    RSS["run_sandbox_server.py<br/>(session API + solver + WS/SSE)"]
+  end
+
+  RS -.->|"deprecate after<br/>staging validation"| prod
+
+  style RS fill:#eab308,stroke:#eab308
+  style RC fill:#22c55e,stroke:#22c55e
+  style RSS fill:#22c55e,stroke:#22c55e
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Q4 + Q5 (merged - same core confusion) -->
+  <!-- ============================================================ -->
+  <div class="q-card" id="q4">
+    <div class="q-header" onclick="toggle(this)">
+      <span class="q-num">4</span>
+      <span class="q-title">Diagram 03: Session API as entrypoint &mdash; but it's inside the sandbox?</span>
+      <span class="q-chevron">&#9662;</span>
+    </div>
+    <div class="q-body">
+      <div class="q-tags">
+        <span class="tag tag-phase1">Phase 1</span>
+        <span class="tag tag-breaking">Critical Clarification</span>
+      </div>
+
+      <h3>The Confusion</h3>
+      <p>
+        Diagram <code>03-phase1-session-provisioning-flow.md</code> shows:
+      </p>
+      <pre><code>User -> FE -> Session API (POST /daifu/sessions) -> DB -> ... session created
+FE -> Controller (POST /controller/sessions/ID/runtime) -> ... provisions sandbox</code></pre>
+      <p>
+        You're asking: <em>"If the Session API is inside the sandbox, how can it be hit first? The sandbox doesn't exist yet!"</em>
+      </p>
+
+      <h3>The Answer: The Session API is on BOTH sides</h3>
+      <div class="callout callout-warn">
+        <strong>Key insight: Session CREATION happens on the controller host, not inside the sandbox.</strong>
+        <p>The session CRUD endpoint (<code>POST /daifu/sessions</code>) is mounted on <code>run_controller.py</code> (line 54).
+        After the session record exists in PostgreSQL, the frontend calls the controller to provision the sandbox runtime.
+        Only AFTER the sandbox is running does the frontend switch to the tunnel URL for subsequent session operations.</p>
+      </div>
+
+      <h3>Correct Two-Phase Flow</h3>
+      <div class="mermaid-wrapper">
+        <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant FE as Frontend
+  participant CTR as Controller Host<br/>(run_controller.py)
+  participant DB as PostgreSQL
+  participant SB as Sandbox Server<br/>(run_sandbox_server.py)
+
+  Note over CTR: Session CREATE lives here<br/>(controller hosts /daifu/sessions)
+
+  U->>FE: Select repo + branch
+  FE->>CTR: POST /daifu/sessions<br/>(creates DB record)
+  CTR->>DB: INSERT ChatSession
+  CTR-->>FE: session_id
+
+  Note over FE,CTR: Sandbox does NOT exist yet
+
+  FE->>CTR: POST /controller/sessions/{id}/runtime
+  CTR->>CTR: RealtimeLifecycleService<br/>provisions sandbox
+  CTR->>DB: INSERT Sandbox + SessionRuntime
+  CTR-->>FE: tunnel_url + runtime_id
+
+  Note over FE,SB: NOW sandbox exists, frontend switches target
+
+  FE->>SB: POST tunnel_url/sessions/{id}/chat<br/>(all subsequent calls via tunnel)
+  FE->>SB: WS tunnel_url/sessions/{id}/ws/chat
+  FE->>SB: GET tunnel_url/sessions/{id}/solve/stream/...
+        </div>
+      </div>
+
+      <h3>Which Routes Live Where</h3>
+      <table>
+        <tr><th>Route</th><th>Hosted On</th><th>Why</th></tr>
+        <tr>
+          <td><code>POST /daifu/sessions</code></td>
+          <td>Controller (<code>run_controller.py</code>)</td>
+          <td>Session must exist in DB before sandbox can be provisioned</td>
+        </tr>
+        <tr>
+          <td><code>POST /controller/sessions/{id}/runtime</code></td>
+          <td>Controller</td>
+          <td>Controller manages sandbox lifecycle</td>
+        </tr>
+        <tr>
+          <td><code>GET /daifu/sessions/{id}</code></td>
+          <td>Both (controller for initial load, sandbox via tunnel after)</td>
+          <td>Frontend reads context from wherever it's connected</td>
+        </tr>
+        <tr>
+          <td><code>POST /sessions/{id}/chat</code></td>
+          <td>Sandbox only (via tunnel)</td>
+          <td>Chat processing runs inside sandbox with repo access</td>
+        </tr>
+        <tr>
+          <td><code>POST /sessions/{id}/solve/start</code></td>
+          <td>Sandbox only (via tunnel)</td>
+          <td>Solver executor runs inside sandbox</td>
+        </tr>
+        <tr>
+          <td><code>WS /sessions/{id}/ws/chat</code></td>
+          <td>Sandbox only (via tunnel)</td>
+          <td>WebSocket requires persistent connection to sandbox</td>
+        </tr>
+      </table>
+
+      <h3>Frontend Code Confirms This</h3>
+      <p>
+        In <span class="file-ref">src/stores/sessionStore.ts</span>, the <code>createSessionForRepository</code> action:
+      </p>
+      <ol>
+        <li>POSTs to <code>API.SESSIONS.BASE</code> (controller host) &rarr; gets <code>session_id</code></li>
+        <li>If realtime flags enabled, POSTs to <code>API.CONTROLLER.RUNTIME_ENSURE</code> &rarr; gets <code>tunnel_url</code></li>
+        <li>All subsequent calls use <code>buildSessionTargetUrl()</code> which rewrites paths through tunnel</li>
+      </ol>
+
+      <div class="callout callout-success">
+        <strong>The diagram is correct.</strong>
+        <p>The "Session API" box in diagram 03 refers to the session_routes mounted on the <strong>controller host</strong>, not the sandbox.
+        The label could be clearer &mdash; it should say "Session API (on controller)" to avoid confusion.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Q5 -->
+  <!-- ============================================================ -->
+  <div class="q-card" id="q5">
+    <div class="q-header" onclick="toggle(this)">
+      <span class="q-num">5</span>
+      <span class="q-title">How can Session API be hit first if controller provisions the sandbox?</span>
+      <span class="q-chevron">&#9662;</span>
+    </div>
+    <div class="q-body">
+      <div class="q-tags">
+        <span class="tag tag-phase1">Phase 1</span>
+        <span class="tag tag-design">Bootstrap Ordering</span>
+      </div>
+
+      <h3>This is answered by Q4 above &mdash; the bootstrap sequence is:</h3>
+
+      <div class="mermaid-wrapper">
+        <div class="mermaid">
+flowchart TD
+  A["1. Frontend calls Controller Host<br/>POST /daifu/sessions"] --> B["2. Controller creates session in DB<br/>(no sandbox yet)"]
+  B --> C["3. Frontend calls Controller Host<br/>POST /controller/sessions/{id}/runtime"]
+  C --> D["4. Controller provisions sandbox<br/>(Modal: create container, tunnel, git clone)"]
+  D --> E["5. Controller returns tunnel_url<br/>to frontend"]
+  E --> F["6. Frontend switches ALL subsequent<br/>calls to tunnel_url target"]
+  F --> G["7. Chat, Solve, Issues, WS, SSE<br/>all go through sandbox tunnel"]
+
+  style A fill:#3b82f6,stroke:#3b82f6
+  style B fill:#3b82f6,stroke:#3b82f6
+  style C fill:#22c55e,stroke:#22c55e
+  style D fill:#22c55e,stroke:#22c55e
+  style E fill:#22c55e,stroke:#22c55e
+  style F fill:#a855f7,stroke:#a855f7
+  style G fill:#a855f7,stroke:#a855f7
+        </div>
+      </div>
+
+      <h3>Key Code Evidence</h3>
+      <p><span class="file-ref">backend/run_controller.py:54</span> mounts <code>session_router</code> at <code>/daifu</code> &mdash; this is how the controller handles session creation.</p>
+      <p><span class="file-ref">backend/daifuUserAgent/session_routes.py:~line 200</span> in <code>create_session()</code>, after DB insert, it calls:</p>
+      <pre><code>lifecycle = get_realtime_lifecycle_service()
+runtime_resp = lifecycle.create_runtime_for_session(
+    session=chat_session, user=user, db=db
+)</code></pre>
+      <p>This means session creation <strong>eagerly provisions the sandbox</strong> as per questionnaire answer Q14: <em>"session creation"</em>.</p>
+
+      <div class="callout callout-info">
+        <strong>Two valid patterns exist in the code:</strong>
+        <p>
+          <strong>Pattern A (eager):</strong> Session create endpoint itself provisions sandbox inline.<br/>
+          <strong>Pattern B (two-step):</strong> Session create returns session_id, then frontend calls <code>/controller/sessions/{id}/runtime</code> separately.<br/>
+          The frontend code in <code>sessionStore.ts</code> implements Pattern B (two separate calls). The backend <code>session_routes.py</code> has scaffolding for Pattern A. Either works &mdash; Pattern B is safer because it separates concerns and lets the frontend handle provision failure gracefully.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Q6 -->
+  <!-- ============================================================ -->
+  <div class="q-card" id="q6">
+    <div class="q-header" onclick="toggle(this)">
+      <span class="q-num">6</span>
+      <span class="q-title">S3 object storage &mdash; metadata-only until artifacts are actually produced</span>
+      <span class="q-chevron">&#9662;</span>
+    </div>
+    <div class="q-body">
+      <div class="q-tags">
+        <span class="tag tag-deferred">Deferred</span>
+        <span class="tag tag-design">Storage</span>
+      </div>
+
+      <h3>Current State</h3>
+      <p>From the questionnaire:</p>
+      <ul>
+        <li>Q73: <em>"AWS S3 but has not been setup yet"</em></li>
+        <li>Q75: <em>"decide for yourself with best judgement"</em></li>
+        <li>Q76: <em>"ignore for now"</em></li>
+        <li>Q78: <em>"yes"</em> (PG metadata should include checksums/ETags)</li>
+      </ul>
+
+      <h3>What Exists Today</h3>
+      <p>
+        <span class="file-ref">backend/realtime/cache_store.py</span> already writes:
+      </p>
+      <ul>
+        <li><code>/home/yudai/.cache/session/SESSION_ID.json</code> &mdash; manifest with events, trajectory refs, github refs</li>
+        <li><code>/home/yudai/.cache/artifacts/SESSION_ID.tar.gz</code> &mdash; exported bundle</li>
+        <li><code>/home/yudai/.cache/artifact-metadata/SESSION_ID.metadata.json</code> &mdash; metadata with SHA-256 checksums</li>
+      </ul>
+      <p>
+        The <code>session_artifacts</code> table in PostgreSQL stores <code>checksum_sha256</code>, <code>byte_size</code>,
+        <code>bundle_path</code>, <code>artifact_key</code> &mdash; all S3-shaped fields.
+      </p>
+
+      <div class="callout callout-success">
+        <strong>Correct approach: Implement the metadata shape now, wire S3 upload later.</strong>
+        <p>The current code writes artifacts to local sandbox filesystem and records metadata in PG.
+        When S3 is ready, add an upload step between <code>export_bundle()</code> and <code>terminate_sandbox()</code>.
+        The metadata schema already supports it &mdash; just populate <code>artifact_key</code> with the S3 key and add an ETag field.</p>
+      </div>
+
+      <h3>Future S3 Integration Point</h3>
+      <div class="mermaid-wrapper">
+        <div class="mermaid">
+flowchart LR
+  EXPORT["export_bundle()<br/>writes .tar.gz locally"] --> LOCAL["Sandbox FS<br/>/home/yudai/.cache/artifacts/"]
+  LOCAL --> UPLOAD["S3 Upload<br/>(future: before terminate)"]
+  UPLOAD --> S3["s3://yudai-artifacts/<br/>org/repo/env/session_id.tar.gz"]
+  UPLOAD --> PG["session_artifacts<br/>artifact_key = S3 key<br/>checksum_sha256 = verified"]
+  LOCAL --> TERM["terminate_sandbox()<br/>(artifact lost from sandbox FS)"]
+
+  style UPLOAD fill:#eab308,stroke:#eab308,stroke-dasharray:5 5
+  style S3 fill:#eab308,stroke:#eab308,stroke-dasharray:5 5
+        </div>
+      </div>
+
+      <div class="callout callout-danger">
+        <strong>Risk: Without S3, artifacts are LOST when sandbox terminates.</strong>
+        <p>Current flow: export bundle &rarr; write metadata to PG &rarr; terminate sandbox &rarr; local <code>.tar.gz</code> is destroyed.
+        The metadata row exists but points to a dead path. For MVP, either: (a) copy artifacts to controller host before termination,
+        (b) defer termination until upload is wired, or (c) accept artifact loss for MVP and treat PG metadata as the only record.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Q7 -->
+  <!-- ============================================================ -->
+  <div class="q-card" id="q7">
+    <div class="q-header" onclick="toggle(this)">
+      <span class="q-num">7</span>
+      <span class="q-title">Complete WS chat endpoint &mdash; bare implementation</span>
+      <span class="q-chevron">&#9662;</span>
+    </div>
+    <div class="q-body">
+      <div class="q-tags">
+        <span class="tag tag-phase3">Phase 3</span>
+        <span class="tag tag-design">Implementation</span>
+      </div>
+
+      <h3>Current State</h3>
+      <p>
+        <span class="file-ref">backend/realtime/sandbox_routes.py</span> has a WS endpoint that:
+      </p>
+      <ul>
+        <li>Authenticates via JWT query param</li>
+        <li>Sends a <code>status: connected</code> message</li>
+        <li>Echoes all received messages back</li>
+      </ul>
+      <p>It does <strong>not</strong>: process chat through ChatOps, stream token chunks, emit tool events, or handle errors.</p>
+
+      <h3>Bare WS Chat Implementation Plan</h3>
+      <p>Keep it simple. The WS endpoint should wrap the existing <code>ChatOps.process_chat_message()</code> and stream the response.</p>
+
+      <h4>Message Types (Inbound from Client)</h4>
+      <table>
+        <tr><th>Type</th><th>Payload</th></tr>
+        <tr><td><code>chat_message</code></td><td><code>{ text, context_card_ids?, repository? }</code></td></tr>
+        <tr><td><code>ping</code></td><td><code>{}</code></td></tr>
+      </table>
+
+      <h4>Message Types (Outbound to Client)</h4>
+      <table>
+        <tr><th>Type</th><th>When</th><th>Payload</th></tr>
+        <tr><td><code>status</code></td><td>Connection established, state changes</td><td><code>{ status, session_id, message }</code></td></tr>
+        <tr><td><code>chat_reply</code></td><td>Full chat response ready</td><td><code>{ message_id, text, actions?, processing_time }</code></td></tr>
+        <tr><td><code>token_chunk</code></td><td>Streaming tokens (future LLM streaming)</td><td><code>{ chunk, message_id, index }</code></td></tr>
+        <tr><td><code>tool_event</code></td><td>Tool invocation during chat (future)</td><td><code>{ tool_name, status, result? }</code></td></tr>
+        <tr><td><code>error</code></td><td>Processing failure</td><td><code>{ code, message, recoverable }</code></td></tr>
+        <tr><td><code>pong</code></td><td>Response to ping</td><td><code>{}</code></td></tr>
+      </table>
+
+      <h4>Minimal Implementation Structure</h4>
+      <pre><code>@router.websocket("/sessions/{session_id}/ws/chat")
+async def websocket_chat(websocket, session_id, token, db):
+    # 1. Auth (existing)
+    user = validate_session_token(db, token)
+    if not user: close(4401); return
+
+    # 2. Accept + status
+    await websocket.accept()
+    send_json(type="status", status="connected")
+
+    # 3. Message loop
+    while True:
+        msg = await websocket.receive_json()
+
+        if msg["type"] == "ping":
+            send_json(type="pong")
+            continue
+
+        if msg["type"] == "chat_message":
+            try:
+                send_json(type="status", status="processing")
+
+                # Call existing ChatOps (same as REST endpoint)
+                response = ChatOps.process_chat_message(
+                    session_id, msg["text"],
+                    msg.get("context_card_ids", []),
+                    msg.get("repository"), db, user
+                )
+
+                send_json(type="chat_reply",
+                    message_id=response.message_id,
+                    text=response.reply,
+                    actions=response.actions,
+                    processing_time=response.processing_time)
+
+            except Exception as e:
+                send_json(type="error",
+                    code="CHAT_PROCESSING_FAILED",
+                    message=str(e),
+                    recoverable=True)</code></pre>
+
+      <div class="callout callout-info">
+        <strong>Note on future nanoclaw/zeroclaw refactor (Q2):</strong>
+        <p>If you replace the chat backend with an agent like nanoclaw, the WS endpoint stays the same &mdash;
+        you just swap <code>ChatOps.process_chat_message()</code> for <code>agent.handle_message()</code>.
+        The message schema is agent-agnostic.</p>
+      </div>
+
+      <h3>Frontend Changes Required</h3>
+      <p><span class="file-ref">src/components/Chat.tsx</span> currently calls <code>sendChatMessage()</code> via REST.
+      Replace with a WS client hook:</p>
+      <pre><code>// src/hooks/useChatWebSocket.ts
+// - Connect to tunnel_url + /sessions/{id}/ws/chat?token=jwt
+// - Send { type: "chat_message", text, context_card_ids }
+// - Receive { type: "chat_reply" | "error" | "status" }
+// - Retry up to 10 times with exponential backoff
+// - On final failure: hard error (no polling fallback)</code></pre>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Q8 -->
+  <!-- ============================================================ -->
+  <div class="q-card" id="q8">
+    <div class="q-header" onclick="toggle(this)">
+      <span class="q-num">8</span>
+      <span class="q-title">Chat API instructs local SOLVE via mini-swe-agent (mswea)</span>
+      <span class="q-chevron">&#9662;</span>
+    </div>
+    <div class="q-body">
+      <div class="q-tags">
+        <span class="tag tag-phase1">Phase 1</span>
+        <span class="tag tag-phase3">Phase 3</span>
+        <span class="tag tag-design">Solver Architecture</span>
+      </div>
+
+      <h3>The Two Terminal Tasks</h3>
+      <p>You described two tasks the sandbox chat/session API can instruct:</p>
+      <ol>
+        <li><strong>Create a GitHub issue</strong> on the local cloned repo &mdash; this is the first terminal task</li>
+        <li><strong>Solve that GitHub issue</strong> &mdash; second terminal task, produces a PR</li>
+      </ol>
+      <p>Both must complete to trigger session completion (questionnaire Q33).</p>
+
+      <h3>Current Solve Pipeline</h3>
+      <p>
+        <span class="file-ref">backend/solver/solver.py</span> already has the structure: <code>start_solve</code> receives an issue,
+        creates a <code>Solve</code> + <code>SolveRun</code>, and delegates to an executor (mini-swe-agent) that runs inside the sandbox.
+      </p>
+
+      <h3>How Chat Instructs Solve</h3>
+      <div class="mermaid-wrapper">
+        <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as User (Chat)
+  participant WS as WS Chat Endpoint
+  participant CHAT as ChatOps
+  participant ISSUE as IssueService
+  participant GH as GitHub API
+  participant SOL as Solver (mswea)
+  participant L as Lifecycle Service
+  participant DB as PostgreSQL
+
+  U->>WS: "Create issue for this bug"
+  WS->>CHAT: process_chat_message()
+  CHAT->>ISSUE: create_issue_with_context()
+  ISSUE->>DB: INSERT UserIssue
+  CHAT-->>WS: chat_reply (issue created locally)
+
+  U->>WS: "Push this to GitHub"
+  WS->>ISSUE: create_github_issue()
+  ISSUE->>GH: Create Issue (GitHub API)
+  GH-->>ISSUE: issue_url, issue_number
+  ISSUE->>L: mark_issue_created(session_id, issue_url)
+  L->>DB: completion_issue_created = true
+  WS-->>U: chat_reply (GitHub issue #N created)
+
+  U->>WS: "Solve this issue"
+  WS->>SOL: start_solve(issue_id)
+  SOL->>SOL: mini-swe-agent executes<br/>(reads repo, edits files, runs tests)
+  SOL->>GH: Create PR
+  GH-->>SOL: pr_url
+  SOL->>L: mark_pr_created(session_id, pr_url)
+  L->>DB: completion_pr_created = true
+  L->>L: Both conditions met → finalize
+  L->>DB: Export artifacts, terminate sandbox
+        </div>
+      </div>
+
+      <h3>Key Design Points</h3>
+      <ul>
+        <li><strong>mswea runs locally inside the sandbox</strong> &mdash; it has direct filesystem access to the cloned repo</li>
+        <li><strong>Chat can trigger solve</strong> &mdash; the WS chat handler can call <code>start_solve()</code> as a tool action</li>
+        <li><strong>Parallel solves = 1</strong> (questionnaire Q68) &mdash; no queue needed for MVP</li>
+        <li><strong>SSE streams the trajectory</strong> while mswea executes &mdash; frontend connects to SSE after solve starts</li>
+        <li><strong>Lifecycle service tracks both conditions</strong> and auto-terminates when both issue + PR exist</li>
+      </ul>
+
+      <div class="callout callout-warn">
+        <strong>Design consideration for nanoclaw (Q2):</strong>
+        <p>If nanoclaw replaces the session server, it still needs to invoke the solve executor (mswea or equivalent).
+        The solve pipeline should be a separate callable service/function, not tightly coupled to the session API routes.
+        Currently <code>solver.py</code> is imported as a FastAPI router &mdash; extract the core logic into a service class.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Q9 -->
+  <!-- ============================================================ -->
+  <div class="q-card" id="q9">
+    <div class="q-header" onclick="toggle(this)">
+      <span class="q-num">9</span>
+      <span class="q-title">Phase 3 Implementation Gaps: SSE + WS</span>
+      <span class="q-chevron">&#9662;</span>
+    </div>
+    <div class="q-body">
+      <div class="q-tags">
+        <span class="tag tag-phase3">Phase 3</span>
+        <span class="tag tag-breaking">Implementation Gaps</span>
+      </div>
+
+      <h3>Gap Analysis Table</h3>
+      <table>
+        <tr>
+          <th>Requirement</th>
+          <th>Status</th>
+          <th>Gap</th>
+          <th>Fix Required</th>
+        </tr>
+        <tr>
+          <td>SSE in sandbox server, new schema, 3s heartbeat, 10s forced reconnect</td>
+          <td><span class="status-badge status-partial">Partial</span></td>
+          <td>SSE lives in <code>backend/solver/solver.py</code>, not sandbox-specific routes. No 10s max stream duration enforcement.</td>
+          <td>
+            <strong>1.</strong> Move/copy SSE stream generator into <code>sandbox_routes.py</code><br/>
+            <strong>2.</strong> Add <code>asyncio.wait_for()</code> with 10s timeout on the stream generator<br/>
+            <strong>3.</strong> Change heartbeat interval from implicit (polling delay) to explicit 3s timer<br/>
+            <strong>4.</strong> Emit <code>reconnect_required</code> event at 10s mark before closing stream
+          </td>
+        </tr>
+        <tr>
+          <td>WS chat with auth + message types (plain/token/tool/status)</td>
+          <td><span class="status-badge status-partial">Partial</span></td>
+          <td>Auth works. Only sends <code>status</code> and echo. No ChatOps integration, no message type schema.</td>
+          <td>
+            <strong>1.</strong> Add message type dispatcher (see Q7 above)<br/>
+            <strong>2.</strong> Wire <code>ChatOps.process_chat_message()</code> for <code>chat_message</code> type<br/>
+            <strong>3.</strong> Add <code>error</code> type with structured codes<br/>
+            <strong>4.</strong> Add <code>ping/pong</code> keepalive
+          </td>
+        </tr>
+        <tr>
+          <td>Frontend chat over WS with reconnect (10 retries)</td>
+          <td><span class="status-badge status-planned">Planned</span></td>
+          <td><code>Chat.tsx</code> calls <code>sendChatMessage()</code> via REST. No WS client exists.</td>
+          <td>
+            <strong>1.</strong> Create <code>useChatWebSocket</code> hook<br/>
+            <strong>2.</strong> Implement exponential backoff reconnect (max 10)<br/>
+            <strong>3.</strong> Replace <code>sendChatMessage</code> call in <code>handleSend()</code><br/>
+            <strong>4.</strong> Add connection status indicator in UI<br/>
+            <strong>5.</strong> Hard error after 10 retries exhausted
+          </td>
+        </tr>
+        <tr>
+          <td>Frontend trajectory viewer uses new SSE schema + reconnect UI</td>
+          <td><span class="status-badge status-partial">Partial</span></td>
+          <td><code>useTrajectoryStream.ts</code> supports EventSource + tunnel mode but uses current schema, no forced reconnect handling.</td>
+          <td>
+            <strong>1.</strong> Update event listeners for new schema event names<br/>
+            <strong>2.</strong> Handle <code>reconnect_required</code> event (auto-reconnect)<br/>
+            <strong>3.</strong> Add reconnect counter + UI indicator<br/>
+            <strong>4.</strong> Hard error when stream repeatedly fails
+          </td>
+        </tr>
+      </table>
+
+      <h3>System Design Problems Highlighted</h3>
+
+      <h4>Problem 1: SSE Route Ownership</h4>
+      <div class="callout callout-danger">
+        <strong>SSE stream is in <code>solver.py</code> which is mounted on the session router, not the sandbox router.</strong>
+        <p>This means in the split architecture, the SSE endpoint is available on both controller AND sandbox server
+        (because both mount <code>session_router</code>). The controller should NOT serve SSE streams &mdash; only the sandbox should.
+        Fix: Move SSE to <code>sandbox_routes.py</code> or create a dedicated <code>sandbox_solver_routes.py</code>.</p>
+      </div>
+
+      <h4>Problem 2: 10s Max Stream Duration</h4>
+      <p>
+        The questionnaire says max SSE stream duration is 10s before forced reconnect (Q55).
+        But solver trajectories can run for minutes. This means:
+      </p>
+      <ul>
+        <li>The SSE stream must chunk into 10s segments</li>
+        <li>Each segment ends with a <code>reconnect_required</code> event</li>
+        <li>Frontend auto-reconnects and resumes from where it left off</li>
+        <li>This is effectively a <strong>long-poll-over-SSE pattern</strong></li>
+      </ul>
+
+      <h4>Problem 3: WS/REST Coexistence During Transition</h4>
+      <div class="callout callout-warn">
+        <strong>During the Phase 3 transition, both REST chat and WS chat will exist.</strong>
+        <p>Use the feature flag <code>REALTIME_WS_CHAT_ENABLED</code> to switch. Frontend should check
+        <code>realtimeFeatureFlags.wsChatEnabled</code> and choose between <code>sendChatMessage()</code> (REST)
+        and <code>useChatWebSocket</code> (WS). Both must work simultaneously until WS is validated.</p>
+      </div>
+
+      <h3>Implementation Dependency Graph</h3>
+      <div class="mermaid-wrapper">
+        <div class="mermaid">
+flowchart TD
+  A["Move SSE to sandbox_routes.py"] --> B["Add 3s heartbeat + 10s max duration"]
+  B --> C["Add reconnect_required event"]
+  C --> D["Update useTrajectoryStream.ts"]
+
+  E["Wire ChatOps into WS endpoint"] --> F["Add message type schema"]
+  F --> G["Create useChatWebSocket hook"]
+  G --> H["Replace sendChatMessage in Chat.tsx"]
+
+  I["Add feature flag checks"] --> H
+  I --> D
+
+  D --> J["Browser validation: SSE reconnect works"]
+  H --> K["Browser validation: WS chat works"]
+
+  style A fill:#ef4444,stroke:#ef4444
+  style E fill:#ef4444,stroke:#ef4444
+  style J fill:#22c55e,stroke:#22c55e
+  style K fill:#22c55e,stroke:#22c55e
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Q10 -->
+  <!-- ============================================================ -->
+  <div class="q-card" id="q10">
+    <div class="q-header" onclick="toggle(this)">
+      <span class="q-num">10</span>
+      <span class="q-title">Open Questions: Deep Analysis of System Design Impact</span>
+      <span class="q-chevron">&#9662;</span>
+    </div>
+    <div class="q-body">
+      <div class="q-tags">
+        <span class="tag tag-design">System Design</span>
+        <span class="tag tag-breaking">Critical</span>
+      </div>
+
+      <h3>Question 1: Which host/service actually provisions sandbox compute in production?</h3>
+      <div class="callout callout-danger">
+        <strong>Impact: HIGH &mdash; This is the single biggest unresolved question.</strong>
+      </div>
+      <p>
+        <strong>Current state:</strong> The code in <code>lifecycle.py</code> builds tunnel URLs and records lifecycle state,
+        but the actual provisioning call (Modal API <code>Sandbox.create()</code>, container image pull, tunnel assignment)
+        is represented by placeholder logic. The <code>SandboxManager</code> methods <code>build_tunnel_url()</code> and
+        <code>ensure_git_bootstrap()</code> are called but don't make real Modal API calls yet.
+      </p>
+      <p><strong>Design impact:</strong></p>
+      <ul>
+        <li><strong>Startup latency:</strong> Modal sandbox cold start is ~10-30s (questionnaire says target 10s). If provisioning is slow, session create will block the frontend.</li>
+        <li><strong>Tunnel URL format:</strong> Modal assigns tunnel URLs in a specific format. The controller currently generates synthetic URLs. Production URLs will look different.</li>
+        <li><strong>Error handling:</strong> Modal provisioning can fail (rate limits, image pull failures, resource exhaustion). The lifecycle service needs retry logic or clear error propagation.</li>
+        <li><strong>Git bootstrap:</strong> Cloning a private repo inside Modal requires auth token injection at sandbox start (questionnaire Q81: env vars only at start). Token must be available before sandbox boots.</li>
+      </ul>
+      <p><strong>Answer:</strong> For MVP, the controller's <code>create_runtime_for_session()</code> must make a real Modal API call. Build a thin <code>ModalSandboxProvider</code> class that wraps <code>modal.Sandbox.create()</code> with the image, env vars, and tunnel configuration. This is a Phase 1 hard blocker.</p>
+
+      <h3>Question 2: Should SSE remain in <code>solver.py</code> or move to sandbox-specific routes?</h3>
+      <div class="callout callout-warn">
+        <strong>Impact: MEDIUM &mdash; Affects route ownership and Phase 3 contract clarity.</strong>
+      </div>
+      <p><strong>Current state:</strong> SSE stream is in <code>backend/solver/solver.py</code> and mounted via <code>session_router</code>. Because <code>run_controller.py</code> also mounts <code>session_router</code>, the SSE endpoint is accidentally available on the controller host.</p>
+      <p><strong>Design impact:</strong></p>
+      <ul>
+        <li>If a user hits the SSE endpoint on the controller instead of the sandbox, they'll get a broken stream (no executor running on controller).</li>
+        <li>The Phase 3 contract calls for the SSE endpoint to live inside the sandbox server only.</li>
+        <li>Moving it to <code>sandbox_routes.py</code> makes ownership explicit.</li>
+      </ul>
+      <p><strong>Answer:</strong> Move SSE to sandbox routes. The solver <em>execution</em> logic stays in <code>solver.py</code> but the <em>streaming endpoint</em> should be in <code>sandbox_routes.py</code> or a new <code>sandbox_solver_routes.py</code>. The controller should not expose solver/stream routes.</p>
+
+      <h3>Question 3: What observability surface is required?</h3>
+      <div class="callout callout-info">
+        <strong>Impact: LOW for MVP &mdash; but accumulates technical debt.</strong>
+      </div>
+      <p><strong>Current state:</strong> Questionnaire says "not required for now in mvp, manual monitoring" (Q86, Q87). The audit event table exists but no dashboard, no metrics export, no structured logging.</p>
+      <p><strong>Design impact for later:</strong></p>
+      <ul>
+        <li>Without structured logs, debugging production sandbox failures will be painful.</li>
+        <li>Without metrics, you won't know sandbox startup latency, chat response times, or solve success rates.</li>
+        <li>The audit_events table is the minimum viable observability surface.</li>
+      </ul>
+      <p><strong>Answer:</strong> For MVP, rely on <code>session_audit_events</code> table + application logs. Add a simple <code>GET /admin/audit-events</code> endpoint for querying. Defer Prometheus/Grafana/etc.</p>
+
+      <h3>Question 4: How will S3 upload be integrated for artifact bundles?</h3>
+      <div class="callout callout-warn">
+        <strong>Impact: MEDIUM &mdash; Artifacts are lost on sandbox termination without this.</strong>
+      </div>
+      <p><strong>Current state:</strong> <code>cache_store.py</code> exports bundles to sandbox local filesystem. Metadata is written to PG with S3-shaped fields. No actual S3 client is wired.</p>
+      <p><strong>Design impact:</strong></p>
+      <ul>
+        <li>When <code>_finalize_on_completion()</code> terminates the sandbox, the <code>.tar.gz</code> bundle on sandbox FS is destroyed.</li>
+        <li>The <code>session_artifacts.bundle_path</code> in PG will point to a non-existent file.</li>
+        <li>Training pipeline (Phase 2) reads from exported trajectories &mdash; if they're gone, training has no data.</li>
+      </ul>
+      <p><strong>Answer:</strong> Three options for MVP:</p>
+      <ol>
+        <li><strong>Best:</strong> Add S3 upload in <code>_finalize_on_completion()</code> before termination. Simple boto3 call.</li>
+        <li><strong>Acceptable:</strong> Copy bundle to controller host via HTTP before termination (controller provides an artifact upload endpoint).</li>
+        <li><strong>Minimal:</strong> Keep bundle in PG as a BYTEA column (works for small artifacts only).</li>
+      </ol>
+
+      <h3>Impact Summary Matrix</h3>
+      <table>
+        <tr><th>Question</th><th>Impact</th><th>Blocks Phase</th><th>Recommendation</th></tr>
+        <tr>
+          <td>Sandbox provisioning</td>
+          <td><span class="status-badge status-gap">High</span></td>
+          <td>Phase 1</td>
+          <td>Build ModalSandboxProvider now</td>
+        </tr>
+        <tr>
+          <td>SSE route ownership</td>
+          <td><span class="status-badge status-partial">Medium</span></td>
+          <td>Phase 3</td>
+          <td>Move to sandbox_routes before Phase 3</td>
+        </tr>
+        <tr>
+          <td>Observability</td>
+          <td><span class="status-badge status-done">Low</span></td>
+          <td>None (MVP)</td>
+          <td>Audit table + admin endpoint</td>
+        </tr>
+        <tr>
+          <td>S3 upload</td>
+          <td><span class="status-badge status-partial">Medium</span></td>
+          <td>Phase 2 (training data)</td>
+          <td>Wire before Phase 2 or copy to controller</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Q11 -->
+  <!-- ============================================================ -->
+  <div class="q-card" id="q11">
+    <div class="q-header" onclick="toggle(this)">
+      <span class="q-num">11</span>
+      <span class="q-title">High-Priority Untested/Partial Areas &mdash; Deep Analysis</span>
+      <span class="q-chevron">&#9662;</span>
+    </div>
+    <div class="q-body">
+      <div class="q-tags">
+        <span class="tag tag-phase1">Phase 1</span>
+        <span class="tag tag-phase3">Phase 3</span>
+        <span class="tag tag-breaking">Validation Required</span>
+      </div>
+
+      <h3>Area 1: End-to-End Direct Tunnel in Real Deployment</h3>
+      <table>
+        <tr><th>Aspect</th><th>Status</th><th>Risk</th></tr>
+        <tr><td>Controller returns tunnel_url</td><td><span class="status-badge status-done">Done</span></td><td>Low &mdash; code exists in lifecycle.py</td></tr>
+        <tr><td>Frontend routes through tunnel_url</td><td><span class="status-badge status-done">Done</span></td><td>Low &mdash; sessionStore.ts implements buildSessionTargetUrl</td></tr>
+        <tr><td>Production DNS/TLS for tunnel</td><td><span class="status-badge status-gap">Not Tested</span></td><td><strong>High</strong> &mdash; Modal tunnels use their own domain, CORS must allow it</td></tr>
+        <tr><td>Browser CORS with tunnel origin</td><td><span class="status-badge status-gap">Not Tested</span></td><td><strong>High</strong> &mdash; CORS is set to yudai.app only, tunnel domain will differ</td></tr>
+        <tr><td>No-fallback policy enforcement</td><td><span class="status-badge status-done">Done</span></td><td>Low &mdash; code throws hard error, no proxy fallback</td></tr>
+      </table>
+
+      <div class="callout callout-danger">
+        <strong>Critical CORS issue:</strong>
+        <p>Questionnaire Q24 sets CORS to <code>https://yudai.app</code>. But the sandbox server is accessed via Modal's tunnel URL
+        (e.g., <code>https://sandbox-xxx.modal.run</code>). The browser will make cross-origin requests from <code>yudai.app</code>
+        to <code>sandbox-xxx.modal.run</code>. The <strong>sandbox server</strong> must set CORS to allow <code>https://yudai.app</code>
+        as origin. Currently <code>run_sandbox_server.py</code> has <code>allow_origins=["*"]</code> in dev &mdash; this needs to be
+        locked down to <code>https://yudai.app</code> in production. WebSocket connections are NOT subject to CORS preflight but
+        the browser still sends <code>Origin</code> header which the server should validate.</p>
+      </div>
+
+      <h3>Area 2: Browser Validation Gates (Phase 1)</h3>
+      <p>The full chain that must work end-to-end:</p>
+      <div class="mermaid-wrapper">
+        <div class="mermaid">
+flowchart TD
+  A["1. Sign in (GitHub OAuth)"] --> B["2. Select repo + branch"]
+  B --> C["3. Create session<br/>(POST /daifu/sessions)"]
+  C --> D["4. Provision sandbox<br/>(POST /controller/.../runtime)"]
+  D --> E["5. Receive tunnel_url"]
+  E --> F["6. Chat via tunnel"]
+  F --> G["7. Create issue<br/>(lifecycle: mark_issue_created)"]
+  G --> H["8. Start solve<br/>(mswea executes)"]
+  H --> I["9. PR created<br/>(lifecycle: mark_pr_created)"]
+  I --> J["10. Both conditions met<br/>→ _finalize_on_completion()"]
+  J --> K["11. Export artifact bundle"]
+  K --> L["12. Terminate sandbox"]
+  L --> M["13. UI shows terminal state"]
+
+  style A fill:#22c55e,stroke:#22c55e
+  style B fill:#22c55e,stroke:#22c55e
+  style C fill:#22c55e,stroke:#22c55e
+  style D fill:#eab308,stroke:#eab308
+  style E fill:#eab308,stroke:#eab308
+  style F fill:#eab308,stroke:#eab308
+  style G fill:#eab308,stroke:#eab308
+  style H fill:#ef4444,stroke:#ef4444
+  style I fill:#ef4444,stroke:#ef4444
+  style J fill:#ef4444,stroke:#ef4444
+  style K fill:#ef4444,stroke:#ef4444
+  style L fill:#ef4444,stroke:#ef4444
+  style M fill:#ef4444,stroke:#ef4444
+        </div>
+      </div>
+      <p>
+        <span style="color:var(--green)">Green</span> = tested/working,
+        <span style="color:var(--yellow)">Yellow</span> = code exists but not browser-validated,
+        <span style="color:var(--red)">Red</span> = code exists but untested end-to-end
+      </p>
+
+      <h3>Area 3: WS Chat Protocol (Phase 3)</h3>
+      <p><strong>What exists:</strong> Auth + echo shell.</p>
+      <p><strong>What's missing:</strong></p>
+      <ul>
+        <li>Message type dispatcher (plain/token/tool/status)</li>
+        <li>ChatOps integration (actual chat processing)</li>
+        <li>Backpressure handling (buffer + bounded queue + drop oldest, per questionnaire Q60)</li>
+        <li>Reconnect handling (server-side: clean disconnect with reason code)</li>
+        <li>10-retry client with exponential backoff</li>
+      </ul>
+      <p><strong>Design impact:</strong> Without this, Phase 3 cannot pass browser validation gate P3-B1.</p>
+
+      <h3>Area 4: SSE Final Phase 3 Semantics</h3>
+      <p><strong>What exists:</strong> SSE stream in <code>solver.py</code> with trajectory polling.</p>
+      <p><strong>What's missing:</strong></p>
+      <ul>
+        <li><strong>3s heartbeat:</strong> Current implementation polls every 3s but doesn't send explicit heartbeat SSE events between data events. It should send <code>event: heartbeat\ndata: {}\n\n</code> even when no trajectory update is available.</li>
+        <li><strong>10s forced reconnect:</strong> Stream runs indefinitely. Need <code>asyncio.wait_for(generator, timeout=10)</code> wrapper that emits <code>event: reconnect_required</code> then closes.</li>
+        <li><strong>Terminal events:</strong> <code>done</code> event exists but <code>cancelled</code> and <code>failed</code> are not consistently emitted.</li>
+      </ul>
+
+      <h3>Area 5: Mandatory yudai-grep Boot (Phase 2)</h3>
+      <p><strong>Deferred per Q1 above.</strong> Use stub. Hard-fail behavior only needed when Phase 2 activates.</p>
+
+      <h3>Area 6: Training Pipeline from Exported Trajectories (Phase 2)</h3>
+      <p><strong>Deferred.</strong> But depends on artifact persistence (Q6/Q10) &mdash; if artifacts are lost on termination, there's nothing to train on.</p>
+
+      <h3>Area 7: Cleanup and Liveness in Production</h3>
+      <p><strong>What exists:</strong> <code>lifecycle.py</code> has <code>cleanup_stale_sandboxes()</code> and probe task management.</p>
+      <p><strong>What's untested:</strong></p>
+      <ul>
+        <li>Probe tasks as asyncio background tasks &mdash; do they survive across request cycles?</li>
+        <li>Cleanup scheduler &mdash; who calls <code>cleanup_stale_sandboxes()</code> periodically? Need a cron/scheduler in the controller.</li>
+        <li>What happens when the controller restarts? Orphaned sandboxes need discovery and cleanup.</li>
+      </ul>
+
+      <h3>Area 8: Sandbox Git Bootstrap on Real Repos</h3>
+      <p><strong>What exists:</strong> Clone once + periodic fetch policy (questionnaire Q29).</p>
+      <p><strong>What's untested:</strong></p>
+      <ul>
+        <li><strong>Private repos:</strong> Need auth token in git config. Token must be injected via env var at sandbox start.</li>
+        <li><strong>Large repos:</strong> Clone time could exceed sandbox startup SLO (10s). May need shallow clone.</li>
+        <li><strong>Branch mismatch:</strong> User selects branch "feature-x" but it doesn't exist in the remote. Error handling needed.</li>
+        <li><strong>Periodic fetch interval:</strong> Not defined. Too frequent = noisy, too rare = stale.</li>
+      </ul>
+
+      <h3>Priority Matrix</h3>
+      <table>
+        <tr><th>Area</th><th>Priority</th><th>Blocks</th><th>Effort</th></tr>
+        <tr>
+          <td>Direct tunnel CORS/TLS</td>
+          <td><span class="status-badge status-gap">P0</span></td>
+          <td>Phase 1 browser gate</td>
+          <td>Small (config)</td>
+        </tr>
+        <tr>
+          <td>Browser validation E2E</td>
+          <td><span class="status-badge status-gap">P0</span></td>
+          <td>Phase 1 sign-off</td>
+          <td>Medium (test script)</td>
+        </tr>
+        <tr>
+          <td>WS chat protocol</td>
+          <td><span class="status-badge status-gap">P0</span></td>
+          <td>Phase 3</td>
+          <td>Medium (see Q7)</td>
+        </tr>
+        <tr>
+          <td>SSE Phase 3 semantics</td>
+          <td><span class="status-badge status-partial">P1</span></td>
+          <td>Phase 3</td>
+          <td>Small (timer + events)</td>
+        </tr>
+        <tr>
+          <td>Artifact persistence (S3 or alternative)</td>
+          <td><span class="status-badge status-partial">P1</span></td>
+          <td>Phase 2 training</td>
+          <td>Medium (boto3 wiring)</td>
+        </tr>
+        <tr>
+          <td>Git bootstrap for private repos</td>
+          <td><span class="status-badge status-partial">P1</span></td>
+          <td>Phase 1 real usage</td>
+          <td>Small (env var + git config)</td>
+        </tr>
+        <tr>
+          <td>Cleanup scheduler</td>
+          <td><span class="status-badge status-done">P2</span></td>
+          <td>Production ops</td>
+          <td>Small (cron task)</td>
+        </tr>
+        <tr>
+          <td>yudai-grep + training</td>
+          <td><span class="status-badge status-done">P2</span></td>
+          <td>Phase 2</td>
+          <td>Large (deferred)</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+</main>
+
+<script>
+  // --- Mermaid Init ---
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      darkMode: true,
+      background: '#0d1321',
+      primaryColor: '#1e3a5f',
+      primaryTextColor: '#e2e8f0',
+      primaryBorderColor: '#2563eb',
+      lineColor: '#3b82f6',
+      secondaryColor: '#1a2236',
+      tertiaryColor: '#111827',
+      noteTextColor: '#e2e8f0',
+      noteBkgColor: '#1a2236',
+      noteBorderColor: '#2563eb',
+      actorTextColor: '#e2e8f0',
+      actorBkg: '#1e3a5f',
+      actorBorder: '#2563eb',
+      signalColor: '#60a5fa',
+      signalTextColor: '#e2e8f0',
+    },
+    flowchart: { curve: 'basis', padding: 16 },
+    sequence: { mirrorActors: false, messageMargin: 40 },
+  });
+
+  // --- Accordion ---
+  function toggle(header) {
+    const card = header.closest('.q-card');
+    card.classList.toggle('open');
+    updateTocActive();
+  }
+
+  function toggleAll() {
+    const cards = document.querySelectorAll('.q-card');
+    const allOpen = [...cards].every(c => c.classList.contains('open'));
+    cards.forEach(c => {
+      if (allOpen) c.classList.remove('open');
+      else c.classList.add('open');
+    });
+  }
+
+  // --- Sidebar ---
+  function toggleSidebar() {
+    const sb = document.getElementById('sidebar');
+    const main = document.getElementById('main');
+    const btn = document.getElementById('sidebarToggle');
+    sb.classList.toggle('collapsed');
+    main.classList.toggle('expanded');
+    btn.classList.toggle('shifted');
+  }
+
+  // --- TOC highlighting ---
+  function updateTocActive() {
+    const items = document.querySelectorAll('.toc-item');
+    items.forEach(item => {
+      const target = document.querySelector(item.getAttribute('href'));
+      if (target && target.classList.contains('open')) {
+        item.classList.add('active');
+      } else {
+        item.classList.remove('active');
+      }
+    });
+  }
+
+  // TOC click opens card
+  document.querySelectorAll('.toc-item').forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.preventDefault();
+      const target = document.querySelector(item.getAttribute('href'));
+      if (target) {
+        if (!target.classList.contains('open')) {
+          target.classList.add('open');
+        }
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        updateTocActive();
+      }
+    });
+  });
+
+  // Scroll spy
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      const id = entry.target.id;
+      const tocItem = document.querySelector(`.toc-item[href="#${id}"]`);
+      if (tocItem) {
+        if (entry.isIntersecting) tocItem.style.fontWeight = '600';
+        else tocItem.style.fontWeight = '';
+      }
+    });
+  }, { rootMargin: '-20% 0px -60% 0px' });
+
+  document.querySelectorAll('.q-card').forEach(card => observer.observe(card));
+</script>
+</body>
+</html>
