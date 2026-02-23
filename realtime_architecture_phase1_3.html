@@ -542,37 +542,7 @@
             This is the combined architecture described by the phase docs and questionnaire, with current implementation status annotations.
           </p>
           <div class="diagram">
-            <pre class="mermaid">
-flowchart LR
-  U[User in Browser] --> FE[React Frontend<br/>Vite + Zustand]
-
-  FE -->|GitHub OAuth session| C[Controller Host API<br/>FastAPI]
-  FE -->|resolve runtime + tunnel_url| C
-  FE -->|Direct tunnel HTTP/SSE/WS using session JWT| S[Sandbox Session Server<br/>FastAPI]
-
-  C -->|Lifecycle metadata| PG[(PostgreSQL + pgvector)]
-  S -->|Session and runtime queries via shared DB connection| PG
-
-  C -->|Create monitor terminate sandbox plus heartbeat tracking| SM[Sandbox Manager / Lifecycle Service]
-  SM -->|liveness probe /healthz| S
-
-  S -->|GitHub issue/PR operations| GH[GitHub APIs]
-  S -->|Solver orchestration| SOLVER[Solver Manager + Executors]
-  SOLVER -->|trajectory files / PR output| S
-
-  S -->|append-only session cache| CACHE["Sandbox cache<br/>/home/yudai/.cache/"]
-  C -->|artifact metadata rows| PG
-  C -->|bundle export metadata| CACHE
-
-  subgraph Phase2["Phase 2 Target"]
-    YG[yudai-grep model runtime<br/>mandatory load at boot]
-    TRAIN[Admin training script<br/>controller codebase]
-  end
-
-  S -. repo context queries .-> YG
-  TRAIN -. reads exported trajectories .-> PG
-  TRAIN -. reads bundle metadata/cache refs .-> CACHE
-            </pre>
+            <pre class="mermaid" data-mermaid-src="./realtime_architecture_phase1_3_diagrams/01-system-context.md" data-mermaid-loaded="false">Loading diagram...</pre>
           </div>
           <div class="footer-note">
             Implemented foundation exists for controller routes, sandbox routes, lifecycle service, DB tables, cache export, SSE trajectory stream, and WS shell endpoint. Full Phase 2/3 behavior is partially complete.
@@ -585,45 +555,7 @@ flowchart LR
             The codebase already supports three backend entrypoints. The real-time plan uses the split controller + sandbox servers, while the legacy single backend remains useful for local/dev compatibility.
           </p>
           <div class="diagram">
-            <pre class="mermaid">
-flowchart TB
-  subgraph Frontend
-    FE["src/* (React app)<br/>sessionStore + hooks + components"]
-  end
-
-  subgraph Backend_Entrypoints["Backend Entrypoints"]
-    RS["backend/run_server.py<br/>single backend (legacy + mixed mode)"]
-    RC["backend/run_controller.py<br/>controller host (Phase 1)"]
-    RSS["backend/run_sandbox_server.py<br/>sandbox session server (Phase 1)"]
-  end
-
-  subgraph Shared_Modules["Shared Backend Modules (Imported by Entrypoints)"]
-    AUTH["auth/*"]
-    SESS["daifuUserAgent/session_routes.py"]
-    RT["backend/realtime/*<br/>controller_routes, lifecycle,<br/>sandbox_routes, cache_store"]
-    SOLV["backend/solver/*"]
-    DB["backend/db/* + backend/models.py"]
-  end
-
-  FE --> RC
-  FE --> RSS
-  FE --> RS
-
-  RC --> AUTH
-  RC --> SESS
-  RC --> RT
-  RC --> DB
-
-  RSS --> SESS
-  RSS --> RT
-  RSS --> DB
-
-  RS --> AUTH
-  RS --> SESS
-  RS --> SOLV
-  RS --> RT
-  RS --> DB
-            </pre>
+            <pre class="mermaid" data-mermaid-src="./realtime_architecture_phase1_3_diagrams/02-runtime-containers-entrypoints.md" data-mermaid-loaded="false">Loading diagram...</pre>
           </div>
 
           <table>
@@ -664,43 +596,7 @@ flowchart TB
             This is the core Phase 1 flow implemented in the store/controller/lifecycle stack: creating a session, ensuring a runtime, provisioning or reusing a sandbox, and returning a tunnel URL to the frontend.
           </p>
           <div class="diagram">
-            <pre class="mermaid">
-sequenceDiagram
-  autonumber
-  participant User
-  participant FE as Frontend (sessionStore)
-  participant API as Session API (/daifu/sessions)
-  participant CTR as Controller (/controller/sessions/:id/runtime)
-  participant L as RealtimeLifecycleService
-  participant DB as PostgreSQL
-  participant SM as SandboxManager
-
-  User->>FE: Select repo + branch
-  FE->>API: POST /daifu/sessions (Bearer session token)
-  API->>DB: Create ChatSession
-  API-->>FE: Session created (session_id)
-
-  FE->>CTR: POST /controller/sessions/SESSION_ID/runtime
-  CTR->>DB: Load ChatSession (owned by current user)
-  CTR->>L: create_runtime_for_session(...)
-  L->>DB: Resolve sandbox by identity_key (org:owner/repo:env)
-  alt Existing active sandbox for same identity and same session
-    L->>DB: Reuse sandbox + runtime
-  else No sandbox / terminated sandbox
-    L->>DB: Insert Sandbox (provisioning -> running)
-    L->>SM: build_tunnel_url(sandbox_id)
-    L->>SM: ensure_git_bootstrap(clone once / periodic fetch)
-    L->>DB: Insert SessionRuntime
-  else Active sandbox owned by another session
-    L-->>CTR: SINGLE_ACTIVE_EDITOR_CONFLICT (409 hard error)
-  end
-  L->>DB: Insert SessionAuditEvent (sandbox_start)
-  L->>L: Append cache event in /home/yudai/.cache/session/*.json
-  L->>SM: Start probe task (best-effort) for /healthz
-  CTR-->>FE: runtime + tunnel_url + token TTL
-
-  FE->>FE: Route future session HTTP calls to tunnel target
-            </pre>
+            <pre class="mermaid" data-mermaid-src="./realtime_architecture_phase1_3_diagrams/03-phase1-session-provisioning-flow.md" data-mermaid-loaded="false">Loading diagram...</pre>
           </div>
 
           <div class="grid-2">
@@ -731,47 +627,7 @@ sequenceDiagram
             The questionnaire defines session completion as <b>both</b> GitHub issue creation and PR creation. The lifecycle service already implements this completion detector and termination pipeline.
           </p>
           <div class="diagram">
-            <pre class="mermaid">
-sequenceDiagram
-  autonumber
-  participant FE as Frontend
-  participant S as Sandbox/Session API
-  participant GH as GitHub
-  participant SOL as Solver Manager
-  participant L as RealtimeLifecycleService
-  participant DB as PostgreSQL
-  participant C as SessionCacheStore
-
-  FE->>S: Create GitHub issue from session issue
-  S->>GH: Create Issue
-  GH-->>S: issue_url + issue_number
-  S->>L: mark_issue_created(session_id, issue_url, issue_number)
-  L->>DB: Update SessionRuntime.completion_issue_created = true
-  L->>DB: Insert audit event github_issue_create
-  L->>C: Append cache event + merge github_refs(issue)
-  L->>L: finalize_on_completion()? (waits for PR)
-
-  FE->>S: Start solve (issue_id)
-  S->>SOL: start_solve(...)
-  SOL->>L: record_solve_start(...)
-  L->>DB: Insert audit event solve_start
-  L->>C: Append cache event
-
-  SOL->>GH: Create PR (during successful run)
-  GH-->>SOL: pr_url
-  SOL->>L: mark_pr_created(session_db_id, pr_url, pr_number)
-  L->>DB: Update SessionRuntime.completion_pr_created = true
-  L->>DB: Insert audit event pr_create
-  L->>C: Append cache event + merge github_refs(pr)
-
-  L->>L: _finalize_on_completion() now true (issue && PR)
-  L->>DB: Set completion_detected + completion_reason + completed_at
-  L->>DB: Collect SolveRun trajectory refs
-  L->>C: Merge trajectory refs
-  L->>C: Export bundle (tar.gz + metadata JSON)
-  L->>DB: Insert session_artifacts row
-  L->>DB: Terminate sandbox + runtimes + audit event sandbox_terminate
-            </pre>
+            <pre class="mermaid" data-mermaid-src="./realtime_architecture_phase1_3_diagrams/04-completion-export-termination-flow.md" data-mermaid-loaded="false">Loading diagram...</pre>
           </div>
 
           <div class="note">
@@ -788,48 +644,12 @@ sequenceDiagram
 
           <h3>Target Streaming Architecture (Phase 3)</h3>
           <div class="diagram">
-            <pre class="mermaid">
-flowchart LR
-  FE[Frontend UI] -->|WS chat| WS[Sandbox WS endpoint]
-  FE -->|SSE trajectory| SSE[Sandbox SSE endpoint]
-
-  WS --> CHAT[Chat pipeline / ChatOps / LLM]
-  SSE --> SOLV[Solver status + trajectory reader]
-
-  CHAT --> DB[(PostgreSQL)]
-  SOLV --> DB
-  SOLV --> TRJ[Trajectory files]
-
-  FE --> RECON[Reconnect managers<br/>WS max 10 retries / SSE controlled reconnect]
-  RECON --> WS
-  RECON --> SSE
-            </pre>
+            <pre class="mermaid" data-mermaid-src="./realtime_architecture_phase1_3_diagrams/05-phase3-target-streaming-architecture.md" data-mermaid-loaded="false">Loading diagram...</pre>
           </div>
 
           <h3>Current Code Path Reality (as of snapshot)</h3>
           <div class="diagram">
-            <pre class="mermaid">
-sequenceDiagram
-  autonumber
-  participant FE as Frontend Chat.tsx
-  participant REST as REST chat endpoint
-  participant WS as WS chat endpoint (sandbox)
-  participant SSE as SSE trajectory endpoint
-  participant Solver as solver_manager
-
-  Note over FE,REST: Chat currently goes through REST endpoint (implemented)
-  FE->>REST: POST chat message
-  REST-->>FE: ChatResponse
-
-  Note over FE,WS: WS endpoint exists but is shell/echo (partial)
-  FE-->>WS: (Phase 3 target) WS chat messages
-  WS-->>FE: status + echo (today)
-
-  Note over FE,SSE: SSE trajectory stream implemented in solver router
-  FE->>SSE: EventSource ?token=session_jwt
-  SSE->>Solver: poll executor trajectory
-  SSE-->>FE: trajectory_update / status / heartbeat / done
-            </pre>
+            <pre class="mermaid" data-mermaid-src="./realtime_architecture_phase1_3_diagrams/06-current-code-path-reality-streaming.md" data-mermaid-loaded="false">Loading diagram...</pre>
           </div>
 
           <table>
@@ -874,32 +694,12 @@ sequenceDiagram
 
           <h3>Sandbox Lifecycle State Diagram</h3>
           <div class="diagram">
-            <pre class="mermaid">
-stateDiagram-v2
-  [*] --> provisioning : create_runtime_for_session()
-  provisioning --> running : tunnel assigned + runtime attached
-  running --> stopped : liveness probe failure / unhealthy
-  stopped --> running : heartbeat or healthy probe
-  running --> terminated : manual delete / cleanup / completion_detected
-  provisioning --> terminated : cleanup/manual failure handling
-  stopped --> terminated : cleanup/manual delete
-  terminated --> [*]
-            </pre>
+            <pre class="mermaid" data-mermaid-src="./realtime_architecture_phase1_3_diagrams/07-sandbox-lifecycle-state-diagram.md" data-mermaid-loaded="false">Loading diagram...</pre>
           </div>
 
           <h3>Session Runtime Completion Logic (Derived State)</h3>
           <div class="diagram">
-            <pre class="mermaid">
-flowchart TD
-  R0[Runtime running] --> I{Issue created?}
-  I -->|No| R0
-  I -->|Yes| P{PR created?}
-  P -->|No| W[Wait for solver PR]
-  W --> P
-  P -->|Yes| C[completion_detected = true]
-  C --> X[Export artifact bundle + metadata]
-  X --> T[Terminate sandbox immediately]
-            </pre>
+            <pre class="mermaid" data-mermaid-src="./realtime_architecture_phase1_3_diagrams/08-session-runtime-completion-logic.md" data-mermaid-loaded="false">Loading diagram...</pre>
           </div>
         </section>
 
@@ -912,112 +712,12 @@ flowchart TD
 
           <h3>Real-Time Lifecycle ERD (with links to existing session/solve data)</h3>
           <div class="diagram">
-            <pre class="mermaid">
-erDiagram
-  USERS ||--o{ SANDBOXES : creates
-  USERS ||--o{ SESSION_AUDIT_EVENTS : triggers
-  CHAT_SESSIONS ||--o{ SESSION_RUNTIME : has_runtime_records
-  SANDBOXES ||--o{ SESSION_RUNTIME : hosts
-  CHAT_SESSIONS ||--o{ SESSION_ARTIFACTS : exports
-  SESSION_RUNTIME ||--o{ SESSION_ARTIFACTS : produces
-  CHAT_SESSIONS ||--o{ SESSION_AUDIT_EVENTS : logs
-  SANDBOXES ||--o{ SESSION_AUDIT_EVENTS : logs
-  SESSION_RUNTIME ||--o{ SESSION_AUDIT_EVENTS : logs
-  CHAT_SESSIONS ||--o{ SOLVE : owns
-  SOLVE ||--o{ SOLVE_RUN : executes
-
-  SANDBOXES {
-    string id PK
-    string identity_key UK
-    string org_slug
-    string repo_owner
-    string repo_name
-    string environment
-    string status
-    string tunnel_url
-    int tunnel_token_ttl_seconds
-    datetime last_heartbeat_at
-    datetime terminated_at
-    int created_by_user_id FK
-    int active_session_id FK
-  }
-
-  SESSION_RUNTIME {
-    int id PK
-    string runtime_id UK
-    int session_id FK
-    string sandbox_id FK
-    string status
-    bool completion_issue_created
-    bool completion_pr_created
-    bool completion_detected
-    string completion_reason
-    string tunnel_url
-    datetime tunnel_expires_at
-    datetime started_at
-    datetime completed_at
-  }
-
-  SESSION_ARTIFACTS {
-    int id PK
-    int session_id FK
-    int runtime_id FK
-    string artifact_key
-    string artifact_type
-    string cache_manifest_path
-    string bundle_path
-    string checksum_sha256
-    int byte_size
-    datetime exported_at
-  }
-
-  SESSION_AUDIT_EVENTS {
-    int id PK
-    string event_id UK
-    string event_name
-    int user_id FK
-    int session_id FK
-    string sandbox_id FK
-    int runtime_id FK
-    json event_payload
-    datetime created_at
-  }
-
-  SOLVE {
-    string id PK
-    int session_id FK
-    string status
-  }
-
-  SOLVE_RUN {
-    string id PK
-    string solve_id FK
-    string status
-    json trajectory_data
-    string pr_url
-    datetime completed_at
-  }
-            </pre>
+            <pre class="mermaid" data-mermaid-src="./realtime_architecture_phase1_3_diagrams/09-realtime-lifecycle-erd.md" data-mermaid-loaded="false">Loading diagram...</pre>
           </div>
 
           <h3>Append-Only Cache + Artifact Export Flow</h3>
           <div class="diagram">
-            <pre class="mermaid">
-flowchart TB
-  E1[sandbox_start / solve_start / issue_create / pr_create] --> APPEND[SessionCacheStore.append_event()]
-  APPEND --> MANIFEST["/home/yudai/.cache/session/SESSION_ID.json"]
-
-  PR[PR created] --> FINALIZE[_finalize_on_completion()]
-  FINALIZE --> COLLECT[Collect trajectory refs from SolveRun.trajectory_data.local_path]
-  COLLECT --> MERGE[merge_trajectory_refs()]
-  MERGE --> EXPORT[export_bundle()]
-
-  EXPORT --> TAR["/home/yudai/.cache/artifacts/SESSION_ID.tar.gz"]
-  EXPORT --> META["/home/yudai/.cache/artifact-metadata/SESSION_ID.metadata.json"]
-  EXPORT --> DBROW[Insert session_artifacts row]
-
-  DBROW --> TERM[Terminate sandbox + runtimes]
-            </pre>
+            <pre class="mermaid" data-mermaid-src="./realtime_architecture_phase1_3_diagrams/10-cache-artifact-export-flow.md" data-mermaid-loaded="false">Loading diagram...</pre>
           </div>
 
           <div class="small">
@@ -1068,17 +768,7 @@ flowchart TB
 
           <h3>Phase Dependency Flow (Execution Order from Plan)</h3>
           <div class="diagram">
-            <pre class="mermaid">
-flowchart LR
-  P0[Phase 0<br/>contracts + schemas + flags] --> P1[Phase 1<br/>controller/sandbox lifecycle]
-  P1 --> P2[Phase 2<br/>mandatory yudai-grep + training]
-  P1 --> P3[Phase 3<br/>SSE + WS real-time streams]
-  P2 --> P3
-  P3 --> P4[Phase 4 scaffolding / future]
-
-  B1[P1 browser gate] --> P2
-  B2[P2 browser gate] --> P3
-            </pre>
+            <pre class="mermaid" data-mermaid-src="./realtime_architecture_phase1_3_diagrams/11-phase-dependency-flow.md" data-mermaid-loaded="false">Loading diagram...</pre>
           </div>
         </section>
 
@@ -1294,6 +984,37 @@ flowchart LR
         showSequenceNumbers: true
       }
     });
+
+    function extractMermaidCodeFromMarkdown(markdown) {
+      const fenced = markdown.match(/```mermaid\s*([\s\S]*?)```/i);
+      return (fenced ? fenced[1] : markdown).trim();
+    }
+
+    async function loadMermaidDiagrams() {
+      const blocks = Array.from(document.querySelectorAll('.mermaid[data-mermaid-src]'));
+      await Promise.all(blocks.map(async (block) => {
+        const src = block.getAttribute('data-mermaid-src');
+        if (!src) return;
+
+        try {
+          const response = await fetch(src, { cache: 'no-store' });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+          const markdown = await response.text();
+          const mermaidCode = extractMermaidCodeFromMarkdown(markdown);
+          if (!mermaidCode) throw new Error('Empty Mermaid diagram source');
+
+          block.textContent = mermaidCode;
+          block.dataset.mermaidLoaded = 'true';
+        } catch (error) {
+          console.error('Failed to load Mermaid diagram source:', src, error);
+          block.classList.remove('mermaid');
+          block.classList.add('code');
+          block.dataset.mermaidLoaded = 'false';
+          block.textContent = `Failed to load diagram source: ${src}`;
+        }
+      }));
+    }
 
     function getDiagramTitle(diagram) {
       const section = diagram.closest('section');
@@ -1602,7 +1323,8 @@ flowchart LR
       }
     }
 
-    await mermaid.run({ querySelector: '.mermaid' });
+    await loadMermaidDiagrams();
+    await mermaid.run({ querySelector: '.mermaid[data-mermaid-loaded="true"]' });
     installDiagramZoom();
   </script>
 </body>
