@@ -1,0 +1,1609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YudaiV3 Real-Time Architecture (Phases 1-3)</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #11182d;
+      --panel-2: #151f39;
+      --text: #e8eefc;
+      --muted: #a8b4d6;
+      --line: #283657;
+      --accent: #58d4ff;
+      --ok: #35d39a;
+      --warn: #ffbf5f;
+      --todo: #ff7f7f;
+      --chip: #1b2745;
+      --code: #0d1426;
+      --link: #7be0ff;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: radial-gradient(circle at 10% 0%, #122040 0%, var(--bg) 42%) fixed;
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.45;
+    }
+
+    a { color: var(--link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .page {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 24px 18px 80px;
+    }
+
+    .hero {
+      background: linear-gradient(180deg, rgba(88,212,255,0.08), rgba(88,212,255,0.02));
+      border: 1px solid rgba(88,212,255,0.2);
+      border-radius: 16px;
+      padding: 20px 20px 14px;
+      margin-bottom: 18px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    }
+
+    .hero h1 {
+      margin: 0 0 8px;
+      font-size: 1.6rem;
+      letter-spacing: 0.01em;
+    }
+
+    .hero p {
+      margin: 0 0 10px;
+      color: var(--muted);
+      max-width: 1000px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--chip);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .chip b { color: var(--text); }
+    .chip.ok { border-color: rgba(53,211,154,0.35); }
+    .chip.partial { border-color: rgba(255,191,95,0.35); }
+    .chip.todo { border-color: rgba(255,127,127,0.35); }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .toc {
+      position: sticky;
+      top: 14px;
+      background: rgba(17,24,45,0.95);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      backdrop-filter: blur(6px);
+    }
+
+    .toc h2 {
+      margin: 0 0 10px;
+      font-size: 0.95rem;
+    }
+
+    .toc ol {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .toc li { margin: 7px 0; }
+
+    .content {
+      display: grid;
+      gap: 14px;
+    }
+
+    section {
+      background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+    }
+
+    section h2 {
+      margin: 0 0 8px;
+      font-size: 1.05rem;
+      color: #f2f6ff;
+    }
+
+    section h3 {
+      margin: 14px 0 6px;
+      font-size: 0.96rem;
+      color: #dce8ff;
+    }
+
+    p, li { color: var(--muted); }
+    ul, ol { margin-top: 6px; }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .note, .warn, .ok-box {
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 0.92rem;
+    }
+    .note {
+      background: rgba(88,212,255,0.06);
+      border: 1px solid rgba(88,212,255,0.2);
+    }
+    .warn {
+      background: rgba(255,191,95,0.07);
+      border: 1px solid rgba(255,191,95,0.25);
+    }
+    .ok-box {
+      background: rgba(53,211,154,0.07);
+      border: 1px solid rgba(53,211,154,0.25);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+      font-size: 0.92rem;
+      overflow: hidden;
+      border-radius: 10px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: rgba(255,255,255,0.02);
+      color: #dce8ff;
+      font-weight: 600;
+    }
+
+    code {
+      background: var(--code);
+      border: 1px solid #1e2b49;
+      border-radius: 6px;
+      padding: 1px 6px;
+      color: #d9e9ff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.88em;
+    }
+
+    pre.code {
+      background: var(--code);
+      border: 1px solid #1e2b49;
+      border-radius: 10px;
+      padding: 10px;
+      color: #cfe2ff;
+      overflow: auto;
+      font-size: 0.85rem;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.02);
+      color: var(--muted);
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .dot.ok { background: var(--ok); }
+    .dot.partial { background: var(--warn); }
+    .dot.todo { background: var(--todo); }
+
+    .diagram {
+      background: rgba(255,255,255,0.01);
+      border: 1px solid rgba(255,255,255,0.04);
+      border-radius: 12px;
+      padding: 8px;
+      margin-top: 8px;
+      overflow: auto;
+      position: relative;
+    }
+
+    .mermaid {
+      min-width: 760px;
+    }
+
+    .diagram-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      justify-content: flex-end;
+      margin: -2px -2px 8px;
+      padding: 4px;
+      background: linear-gradient(180deg, rgba(11,16,32,0.92), rgba(11,16,32,0.65));
+      border-radius: 8px;
+      backdrop-filter: blur(4px);
+    }
+
+    .diagram-btn {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 5px 9px;
+      font-size: 12px;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    .diagram-btn:hover {
+      border-color: rgba(88,212,255,0.4);
+      color: #fff;
+    }
+
+    .diagram-zoom-label {
+      font-size: 12px;
+      color: var(--muted);
+      min-width: 52px;
+      text-align: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 4px 6px;
+      background: rgba(255,255,255,0.02);
+    }
+
+    .diagram .mermaid svg {
+      max-width: none !important;
+      height: auto !important;
+      display: block;
+      transition: width 120ms ease;
+    }
+
+    .diagram-lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: none;
+    }
+
+    .diagram-lightbox.is-open {
+      display: block;
+    }
+
+    .diagram-lightbox-backdrop {
+      position: absolute;
+      inset: 0;
+      background: rgba(4, 8, 16, 0.78);
+      backdrop-filter: blur(4px);
+    }
+
+    .diagram-lightbox-panel {
+      position: absolute;
+      inset: 3vh 3vw;
+      background: rgba(17, 24, 45, 0.98);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      overflow: hidden;
+      box-shadow: 0 28px 90px rgba(0, 0, 0, 0.45);
+    }
+
+    .diagram-lightbox-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.02);
+    }
+
+    .diagram-lightbox-title {
+      font-size: 0.92rem;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .diagram-lightbox-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .diagram-lightbox-btn {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    .diagram-lightbox-btn:hover {
+      border-color: rgba(88,212,255,0.4);
+      color: #fff;
+    }
+
+    .diagram-lightbox-zoom {
+      font-size: 12px;
+      color: var(--muted);
+      min-width: 58px;
+      text-align: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 5px 8px;
+      background: rgba(255,255,255,0.02);
+    }
+
+    .diagram-lightbox-stage {
+      position: relative;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 25% 15%, rgba(88,212,255,0.04), transparent 35%),
+        linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0));
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+    }
+
+    .diagram-lightbox-stage.dragging {
+      cursor: grabbing;
+    }
+
+    .diagram-lightbox-canvas {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+
+    .diagram-lightbox-content {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+
+    .diagram-lightbox-content svg {
+      display: block;
+      max-width: none !important;
+      height: auto !important;
+      background: rgba(255,255,255,0.02);
+      border-radius: 8px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.28);
+    }
+
+    .diagram-lightbox-footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 12px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+      color: var(--muted);
+      font-size: 12px;
+      background: rgba(255,255,255,0.015);
+    }
+
+    .small {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .footer-note {
+      margin-top: 10px;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    @media (max-width: 1060px) {
+      .layout { grid-template-columns: 1fr; }
+      .toc { position: static; }
+      .grid-2 { grid-template-columns: 1fr; }
+      .mermaid { min-width: 680px; }
+    }
+
+    @media print {
+      body { background: #fff; color: #000; }
+      .hero, section, .toc { box-shadow: none; background: #fff; border-color: #ccc; }
+      .toc { position: static; }
+      .mermaid { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="hero">
+      <h1>YudaiV3 Real-Time Sessions Architecture (Phases 1-3)</h1>
+      <p>
+        This page translates <code>REAL_TIME_PHASE_TASK_LIST.md</code> and
+        <code>REAL_TIME_IMPLEMENTATION_QUESTIONNAIRE.md</code> into a visual, code-grounded architecture map.
+        It shows the intended MVP design (Phases 1-3), what is already implemented in the current codebase,
+        and where the remaining gaps/risks are before final deployment.
+      </p>
+      <div class="meta">
+        <span class="chip"><b>Scope:</b> Phase 1-3 real-time sessions</span>
+        <span class="chip"><b>Sources:</b> Task list + questionnaire + current code</span>
+        <span class="chip ok"><b>Implemented:</b> Controller/sandbox lifecycle foundation</span>
+        <span class="chip partial"><b>Partial:</b> WS chat + Phase 2 model ops</span>
+        <span class="chip todo"><b>Pending:</b> Full Phase 3 client/server integration hardening</span>
+      </div>
+    </div>
+
+    <div class="layout">
+      <aside class="toc">
+        <h2>Contents</h2>
+        <ol>
+          <li><a href="#scope">Scope & Decision Snapshot</a></li>
+          <li><a href="#context">System Context</a></li>
+          <li><a href="#containers">Runtime Containers & Entrypoints</a></li>
+          <li><a href="#p1-flow">Phase 1 Session Provisioning Flow</a></li>
+          <li><a href="#completion">Completion / Export / Termination Flow</a></li>
+          <li><a href="#streaming">Phase 3 Streaming Split (SSE + WS)</a></li>
+          <li><a href="#states">State Models</a></li>
+          <li><a href="#data">Database & Cache Data Model</a></li>
+          <li><a href="#phase-map">Phase 1-3 Implementation Map</a></li>
+          <li><a href="#code-map">Code Map (Where Architecture Lives)</a></li>
+          <li><a href="#open-questions">Open questions</a></li>
+          <li><a href="#deployment-changes">Deployment Changes</a></li>
+        </ol>
+      </aside>
+
+      <main class="content">
+        <section id="scope">
+          <h2>Scope & Decision Snapshot</h2>
+          <p>
+            These are the key architectural constraints locked by the questionnaire and reflected in the phase plan.
+            They drive nearly every diagram below.
+          </p>
+
+          <div class="legend">
+            <span class="status"><span class="dot ok"></span>Implemented in code</span>
+            <span class="status"><span class="dot partial"></span>Partial / shell / integration missing</span>
+            <span class="status"><span class="dot todo"></span>Planned by docs, not fully implemented</span>
+          </div>
+
+          <div class="grid-2">
+            <div class="note">
+              <h3>Core MVP Decisions (Confirmed)</h3>
+              <ul>
+                <li>Sandbox identity key is <code>org + repo + environment</code></li>
+                <li>One repo, two entrypoints first (controller + sandbox server)</li>
+                <li>Direct tunnel from frontend to sandbox (no proxy fallback)</li>
+                <li>Streaming split is <b>SSE for solver trajectory</b> and <b>WebSocket for chat</b></li>
+                <li>PostgreSQL stores metadata; sandbox stores append-only JSON cache under <code>/home/yudai/.cache/</code></li>
+                <li>Session persistence ends only after both GitHub issue creation and PR creation</li>
+              </ul>
+            </div>
+            <div class="warn">
+              <h3>Operational Constraints</h3>
+              <ul>
+                <li>Sandbox created at session creation</li>
+                <li>Liveness probe / heartbeat every 10s</li>
+                <li>Tunnel auth reuses session JWT (TTL 1h, reusable)</li>
+                <li>CORS target for tunnel-facing server: <code>https://yudai.app</code></li>
+                <li>Single active editor semantics in Phase 1</li>
+                <li>Mandatory yudai-grep load at sandbox boot is a Phase 2 goal (not fully enforced yet)</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section id="context">
+          <h2>System Context (What talks to what)</h2>
+          <p>
+            This is the combined architecture described by the phase docs and questionnaire, with current implementation status annotations.
+          </p>
+          <div class="diagram">
+            <pre class="mermaid">
+flowchart LR
+  U[User in Browser] --> FE[React Frontend<br/>Vite + Zustand]
+
+  FE -->|GitHub OAuth session| C[Controller Host API<br/>FastAPI]
+  FE -->|resolve runtime + tunnel_url| C
+  FE -->|Direct tunnel HTTP/SSE/WS using session JWT| S[Sandbox Session Server<br/>FastAPI]
+
+  C -->|Lifecycle metadata| PG[(PostgreSQL + pgvector)]
+  S -->|Session and runtime queries via shared DB connection| PG
+
+  C -->|Create monitor terminate sandbox plus heartbeat tracking| SM[Sandbox Manager / Lifecycle Service]
+  SM -->|liveness probe /healthz| S
+
+  S -->|GitHub issue/PR operations| GH[GitHub APIs]
+  S -->|Solver orchestration| SOLVER[Solver Manager + Executors]
+  SOLVER -->|trajectory files / PR output| S
+
+  S -->|append-only session cache| CACHE["Sandbox cache<br/>/home/yudai/.cache/"]
+  C -->|artifact metadata rows| PG
+  C -->|bundle export metadata| CACHE
+
+  subgraph Phase2["Phase 2 Target"]
+    YG[yudai-grep model runtime<br/>mandatory load at boot]
+    TRAIN[Admin training script<br/>controller codebase]
+  end
+
+  S -. repo context queries .-> YG
+  TRAIN -. reads exported trajectories .-> PG
+  TRAIN -. reads bundle metadata/cache refs .-> CACHE
+            </pre>
+          </div>
+          <div class="footer-note">
+            Implemented foundation exists for controller routes, sandbox routes, lifecycle service, DB tables, cache export, SSE trajectory stream, and WS shell endpoint. Full Phase 2/3 behavior is partially complete.
+          </div>
+        </section>
+
+        <section id="containers">
+          <h2>Runtime Containers & Entrypoints (Current Code)</h2>
+          <p>
+            The codebase already supports three backend entrypoints. The real-time plan uses the split controller + sandbox servers, while the legacy single backend remains useful for local/dev compatibility.
+          </p>
+          <div class="diagram">
+            <pre class="mermaid">
+flowchart TB
+  subgraph Frontend
+    FE["src/* (React app)<br/>sessionStore + hooks + components"]
+  end
+
+  subgraph Backend_Entrypoints["Backend Entrypoints"]
+    RS["backend/run_server.py<br/>single backend (legacy + mixed mode)"]
+    RC["backend/run_controller.py<br/>controller host (Phase 1)"]
+    RSS["backend/run_sandbox_server.py<br/>sandbox session server (Phase 1)"]
+  end
+
+  subgraph Shared_Modules["Shared Backend Modules (Imported by Entrypoints)"]
+    AUTH["auth/*"]
+    SESS["daifuUserAgent/session_routes.py"]
+    RT["backend/realtime/*<br/>controller_routes, lifecycle,<br/>sandbox_routes, cache_store"]
+    SOLV["backend/solver/*"]
+    DB["backend/db/* + backend/models.py"]
+  end
+
+  FE --> RC
+  FE --> RSS
+  FE --> RS
+
+  RC --> AUTH
+  RC --> SESS
+  RC --> RT
+  RC --> DB
+
+  RSS --> SESS
+  RSS --> RT
+  RSS --> DB
+
+  RS --> AUTH
+  RS --> SESS
+  RS --> SOLV
+  RS --> RT
+  RS --> DB
+            </pre>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Entrypoint</th>
+                <th>Purpose</th>
+                <th>Status</th>
+                <th>Key Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>backend/run_controller.py</code></td>
+                <td>Controller host for sandbox lifecycle + metadata persistence</td>
+                <td><span class="status"><span class="dot ok"></span>Implemented</span></td>
+                <td>Includes auth, GitHub routes, session routes, and controller realtime routes</td>
+              </tr>
+              <tr>
+                <td><code>backend/run_sandbox_server.py</code></td>
+                <td>Sandbox session server with tunnel-facing APIs + heartbeat loop</td>
+                <td><span class="status"><span class="dot ok"></span>Implemented</span></td>
+                <td>CORS for tunnel host, <code>/healthz</code>, WS chat shell, heartbeat posts to controller</td>
+              </tr>
+              <tr>
+                <td><code>backend/run_server.py</code></td>
+                <td>Single backend mode (legacy/compat and local workflows)</td>
+                <td><span class="status"><span class="dot ok"></span>Implemented</span></td>
+                <td>Useful for local dev; not the final split deployment topology</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="p1-flow">
+          <h2>Phase 1 Session Provisioning Flow (Controller + Tunnel)</h2>
+          <p>
+            This is the core Phase 1 flow implemented in the store/controller/lifecycle stack: creating a session, ensuring a runtime, provisioning or reusing a sandbox, and returning a tunnel URL to the frontend.
+          </p>
+          <div class="diagram">
+            <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant User
+  participant FE as Frontend (sessionStore)
+  participant API as Session API (/daifu/sessions)
+  participant CTR as Controller (/controller/sessions/:id/runtime)
+  participant L as RealtimeLifecycleService
+  participant DB as PostgreSQL
+  participant SM as SandboxManager
+
+  User->>FE: Select repo + branch
+  FE->>API: POST /daifu/sessions (Bearer session token)
+  API->>DB: Create ChatSession
+  API-->>FE: Session created (session_id)
+
+  FE->>CTR: POST /controller/sessions/SESSION_ID/runtime
+  CTR->>DB: Load ChatSession (owned by current user)
+  CTR->>L: create_runtime_for_session(...)
+  L->>DB: Resolve sandbox by identity_key (org:owner/repo:env)
+  alt Existing active sandbox for same identity and same session
+    L->>DB: Reuse sandbox + runtime
+  else No sandbox / terminated sandbox
+    L->>DB: Insert Sandbox (provisioning -> running)
+    L->>SM: build_tunnel_url(sandbox_id)
+    L->>SM: ensure_git_bootstrap(clone once / periodic fetch)
+    L->>DB: Insert SessionRuntime
+  else Active sandbox owned by another session
+    L-->>CTR: SINGLE_ACTIVE_EDITOR_CONFLICT (409 hard error)
+  end
+  L->>DB: Insert SessionAuditEvent (sandbox_start)
+  L->>L: Append cache event in /home/yudai/.cache/session/*.json
+  L->>SM: Start probe task (best-effort) for /healthz
+  CTR-->>FE: runtime + tunnel_url + token TTL
+
+  FE->>FE: Route future session HTTP calls to tunnel target
+            </pre>
+          </div>
+
+          <div class="grid-2">
+            <div class="ok-box">
+              <h3>Implemented (Phase 1 foundation)</h3>
+              <ul>
+                <li>Controller runtime ensure/get endpoints</li>
+                <li>Sandbox create/get/delete/resolve-tunnel/heartbeat/cleanup endpoints</li>
+                <li>Identity normalization and single-active-editor conflict handling</li>
+                <li>Session runtime persistence and audit event writes</li>
+                <li>Frontend store can request runtime and reroute session calls to tunnel URL</li>
+              </ul>
+            </div>
+            <div class="warn">
+              <h3>Important MVP Behavior</h3>
+              <ul>
+                <li>No proxy fallback when tunnel is unavailable (hard error path required)</li>
+                <li>Tunnel auth reuses current session JWT (frontend bearer token / SSE query token)</li>
+                <li>Tunnel URL is currently a templated value from env (<code>SANDBOX_TUNNEL_TEMPLATE</code>)</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section id="completion">
+          <h2>Completion / Export / Termination Flow (Issue + PR criteria)</h2>
+          <p>
+            The questionnaire defines session completion as <b>both</b> GitHub issue creation and PR creation. The lifecycle service already implements this completion detector and termination pipeline.
+          </p>
+          <div class="diagram">
+            <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant FE as Frontend
+  participant S as Sandbox/Session API
+  participant GH as GitHub
+  participant SOL as Solver Manager
+  participant L as RealtimeLifecycleService
+  participant DB as PostgreSQL
+  participant C as SessionCacheStore
+
+  FE->>S: Create GitHub issue from session issue
+  S->>GH: Create Issue
+  GH-->>S: issue_url + issue_number
+  S->>L: mark_issue_created(session_id, issue_url, issue_number)
+  L->>DB: Update SessionRuntime.completion_issue_created = true
+  L->>DB: Insert audit event github_issue_create
+  L->>C: Append cache event + merge github_refs(issue)
+  L->>L: finalize_on_completion()? (waits for PR)
+
+  FE->>S: Start solve (issue_id)
+  S->>SOL: start_solve(...)
+  SOL->>L: record_solve_start(...)
+  L->>DB: Insert audit event solve_start
+  L->>C: Append cache event
+
+  SOL->>GH: Create PR (during successful run)
+  GH-->>SOL: pr_url
+  SOL->>L: mark_pr_created(session_db_id, pr_url, pr_number)
+  L->>DB: Update SessionRuntime.completion_pr_created = true
+  L->>DB: Insert audit event pr_create
+  L->>C: Append cache event + merge github_refs(pr)
+
+  L->>L: _finalize_on_completion() now true (issue && PR)
+  L->>DB: Set completion_detected + completion_reason + completed_at
+  L->>DB: Collect SolveRun trajectory refs
+  L->>C: Merge trajectory refs
+  L->>C: Export bundle (tar.gz + metadata JSON)
+  L->>DB: Insert session_artifacts row
+  L->>DB: Terminate sandbox + runtimes + audit event sandbox_terminate
+            </pre>
+          </div>
+
+          <div class="note">
+            The artifact export path already writes bundle metadata and checksums and stores a corresponding row in <code>session_artifacts</code>.
+            Object storage (S3) is represented in metadata shape but actual upload/integration remains a deployment/phase-hardening task.
+          </div>
+        </section>
+
+        <section id="streaming">
+          <h2>Phase 3 Streaming Split (SSE + WebSocket)</h2>
+          <p>
+            The questionnaire locks the split: <b>SSE for solver trajectory</b>, <b>WebSocket for chat</b>. The current repo shows partial implementation: SSE trajectory exists, but the WS chat endpoint is still a shell/echo endpoint and the frontend chat path still uses REST.
+          </p>
+
+          <h3>Target Streaming Architecture (Phase 3)</h3>
+          <div class="diagram">
+            <pre class="mermaid">
+flowchart LR
+  FE[Frontend UI] -->|WS chat| WS[Sandbox WS endpoint]
+  FE -->|SSE trajectory| SSE[Sandbox SSE endpoint]
+
+  WS --> CHAT[Chat pipeline / ChatOps / LLM]
+  SSE --> SOLV[Solver status + trajectory reader]
+
+  CHAT --> DB[(PostgreSQL)]
+  SOLV --> DB
+  SOLV --> TRJ[Trajectory files]
+
+  FE --> RECON[Reconnect managers<br/>WS max 10 retries / SSE controlled reconnect]
+  RECON --> WS
+  RECON --> SSE
+            </pre>
+          </div>
+
+          <h3>Current Code Path Reality (as of snapshot)</h3>
+          <div class="diagram">
+            <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant FE as Frontend Chat.tsx
+  participant REST as REST chat endpoint
+  participant WS as WS chat endpoint (sandbox)
+  participant SSE as SSE trajectory endpoint
+  participant Solver as solver_manager
+
+  Note over FE,REST: Chat currently goes through REST endpoint (implemented)
+  FE->>REST: POST chat message
+  REST-->>FE: ChatResponse
+
+  Note over FE,WS: WS endpoint exists but is shell/echo (partial)
+  FE-->>WS: (Phase 3 target) WS chat messages
+  WS-->>FE: status + echo (today)
+
+  Note over FE,SSE: SSE trajectory stream implemented in solver router
+  FE->>SSE: EventSource ?token=session_jwt
+  SSE->>Solver: poll executor trajectory
+  SSE-->>FE: trajectory_update / status / heartbeat / done
+            </pre>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Streaming Requirement (Phase 3)</th>
+                <th>Current Code Status</th>
+                <th>Gap</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>SSE in sandbox server, new schema, 3s heartbeat, 10s forced reconnect</td>
+                <td><span class="status"><span class="dot partial"></span>Partial</span></td>
+                <td>SSE exists in <code>backend/solver/solver.py</code> but not migrated into sandbox-specific route contract and does not enforce 10s max stream duration</td>
+              </tr>
+              <tr>
+                <td>WS chat endpoint with auth + message types (plain/token/tool/status)</td>
+                <td><span class="status"><span class="dot partial"></span>Partial</span></td>
+                <td><code>backend/realtime/sandbox_routes.py</code> has auth + WS shell, but only sends <code>status</code> and echo messages</td>
+              </tr>
+              <tr>
+                <td>Frontend chat over WS with reconnect (10 retries)</td>
+                <td><span class="status"><span class="dot todo"></span>Planned</span></td>
+                <td><code>src/components/Chat.tsx</code> still uses REST <code>sendChatMessage</code></td>
+              </tr>
+              <tr>
+                <td>Frontend trajectory viewer uses new SSE schema + reconnect UI</td>
+                <td><span class="status"><span class="dot partial"></span>Partial</span></td>
+                <td><code>src/hooks/useTrajectoryStream.ts</code> supports EventSource and tunnel mode, but current schema/reconnect behavior is not yet the final Phase 3 contract</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="states">
+          <h2>State Models (Sandbox + Runtime)</h2>
+          <p>
+            The questionnaire narrows sandbox states to <code>provisioning / running / stopped / terminated</code>.
+            The lifecycle service also tracks runtime completion flags independently.
+          </p>
+
+          <h3>Sandbox Lifecycle State Diagram</h3>
+          <div class="diagram">
+            <pre class="mermaid">
+stateDiagram-v2
+  [*] --> provisioning : create_runtime_for_session()
+  provisioning --> running : tunnel assigned + runtime attached
+  running --> stopped : liveness probe failure / unhealthy
+  stopped --> running : heartbeat or healthy probe
+  running --> terminated : manual delete / cleanup / completion_detected
+  provisioning --> terminated : cleanup/manual failure handling
+  stopped --> terminated : cleanup/manual delete
+  terminated --> [*]
+            </pre>
+          </div>
+
+          <h3>Session Runtime Completion Logic (Derived State)</h3>
+          <div class="diagram">
+            <pre class="mermaid">
+flowchart TD
+  R0[Runtime running] --> I{Issue created?}
+  I -->|No| R0
+  I -->|Yes| P{PR created?}
+  P -->|No| W[Wait for solver PR]
+  W --> P
+  P -->|Yes| C[completion_detected = true]
+  C --> X[Export artifact bundle + metadata]
+  X --> T[Terminate sandbox immediately]
+            </pre>
+          </div>
+        </section>
+
+        <section id="data">
+          <h2>Database & Cache Data Model</h2>
+          <p>
+            The phase docs require dedicated lifecycle/runtime/artifact persistence. Those tables are already present in
+            <code>backend/models.py</code> and SQL init/migration files.
+          </p>
+
+          <h3>Real-Time Lifecycle ERD (with links to existing session/solve data)</h3>
+          <div class="diagram">
+            <pre class="mermaid">
+erDiagram
+  USERS ||--o{ SANDBOXES : creates
+  USERS ||--o{ SESSION_AUDIT_EVENTS : triggers
+  CHAT_SESSIONS ||--o{ SESSION_RUNTIME : has_runtime_records
+  SANDBOXES ||--o{ SESSION_RUNTIME : hosts
+  CHAT_SESSIONS ||--o{ SESSION_ARTIFACTS : exports
+  SESSION_RUNTIME ||--o{ SESSION_ARTIFACTS : produces
+  CHAT_SESSIONS ||--o{ SESSION_AUDIT_EVENTS : logs
+  SANDBOXES ||--o{ SESSION_AUDIT_EVENTS : logs
+  SESSION_RUNTIME ||--o{ SESSION_AUDIT_EVENTS : logs
+  CHAT_SESSIONS ||--o{ SOLVE : owns
+  SOLVE ||--o{ SOLVE_RUN : executes
+
+  SANDBOXES {
+    string id PK
+    string identity_key UK
+    string org_slug
+    string repo_owner
+    string repo_name
+    string environment
+    string status
+    string tunnel_url
+    int tunnel_token_ttl_seconds
+    datetime last_heartbeat_at
+    datetime terminated_at
+    int created_by_user_id FK
+    int active_session_id FK
+  }
+
+  SESSION_RUNTIME {
+    int id PK
+    string runtime_id UK
+    int session_id FK
+    string sandbox_id FK
+    string status
+    bool completion_issue_created
+    bool completion_pr_created
+    bool completion_detected
+    string completion_reason
+    string tunnel_url
+    datetime tunnel_expires_at
+    datetime started_at
+    datetime completed_at
+  }
+
+  SESSION_ARTIFACTS {
+    int id PK
+    int session_id FK
+    int runtime_id FK
+    string artifact_key
+    string artifact_type
+    string cache_manifest_path
+    string bundle_path
+    string checksum_sha256
+    int byte_size
+    datetime exported_at
+  }
+
+  SESSION_AUDIT_EVENTS {
+    int id PK
+    string event_id UK
+    string event_name
+    int user_id FK
+    int session_id FK
+    string sandbox_id FK
+    int runtime_id FK
+    json event_payload
+    datetime created_at
+  }
+
+  SOLVE {
+    string id PK
+    int session_id FK
+    string status
+  }
+
+  SOLVE_RUN {
+    string id PK
+    string solve_id FK
+    string status
+    json trajectory_data
+    string pr_url
+    datetime completed_at
+  }
+            </pre>
+          </div>
+
+          <h3>Append-Only Cache + Artifact Export Flow</h3>
+          <div class="diagram">
+            <pre class="mermaid">
+flowchart TB
+  E1[sandbox_start / solve_start / issue_create / pr_create] --> APPEND[SessionCacheStore.append_event()]
+  APPEND --> MANIFEST["/home/yudai/.cache/session/SESSION_ID.json"]
+
+  PR[PR created] --> FINALIZE[_finalize_on_completion()]
+  FINALIZE --> COLLECT[Collect trajectory refs from SolveRun.trajectory_data.local_path]
+  COLLECT --> MERGE[merge_trajectory_refs()]
+  MERGE --> EXPORT[export_bundle()]
+
+  EXPORT --> TAR["/home/yudai/.cache/artifacts/SESSION_ID.tar.gz"]
+  EXPORT --> META["/home/yudai/.cache/artifact-metadata/SESSION_ID.metadata.json"]
+  EXPORT --> DBROW[Insert session_artifacts row]
+
+  DBROW --> TERM[Terminate sandbox + runtimes]
+            </pre>
+          </div>
+
+          <div class="small">
+            Cache schema and artifact schema examples are documented in <code>backend/docs/realtime_phase0/</code>.
+          </div>
+        </section>
+
+        <section id="phase-map">
+          <h2>Phase 1-3 Implementation Map (Docs vs Current Code)</h2>
+          <p>
+            This section is the bridge between the planning docs and the actual repository state. It is intentionally explicit so you can see what to trust in the current implementation.
+          </p>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Phase</th>
+                <th>Area</th>
+                <th>Status</th>
+                <th>What is in code now</th>
+                <th>Main remaining work</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Phase 1</td>
+                <td>Controller + sandbox split shell</td>
+                <td><span class="status"><span class="dot ok"></span>Strong foundation</span></td>
+                <td>Controller/sandbox entrypoints, lifecycle routes, heartbeat, cleanup, runtime ensure/get, tunnel resolution, cache store, audit logs, artifact export, completion detector</td>
+                <td>Browser validation gate, production tunnel infra, full deployment wiring, cleanup scheduling, sandbox creation orchestration beyond templated tunnel URL</td>
+              </tr>
+              <tr>
+                <td>Phase 2</td>
+                <td>Mandatory yudai-grep boot + admin training workflow</td>
+                <td><span class="status"><span class="dot partial"></span>Partial</span></td>
+                <td><code>yudai-grep</code> module exists; repo context service integrates it opportunistically; local train/runtime utilities exist</td>
+                <td>Make load mandatory at sandbox boot, hard-fail startup, diagnostics endpoint, admin training CLI reading exported trajectories, training run audit logging</td>
+              </tr>
+              <tr>
+                <td>Phase 3</td>
+                <td>Realtime streaming split (SSE + WS)</td>
+                <td><span class="status"><span class="dot partial"></span>Partial</span></td>
+                <td>SSE solver stream endpoint exists; frontend EventSource hook exists; sandbox WS endpoint shell exists with auth</td>
+                <td>Move/finalize SSE contract in sandbox server, WS chat message protocol, frontend WS chat client, reconnect UI/limits, backpressure warnings, failure injection tests</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3>Phase Dependency Flow (Execution Order from Plan)</h3>
+          <div class="diagram">
+            <pre class="mermaid">
+flowchart LR
+  P0[Phase 0<br/>contracts + schemas + flags] --> P1[Phase 1<br/>controller/sandbox lifecycle]
+  P1 --> P2[Phase 2<br/>mandatory yudai-grep + training]
+  P1 --> P3[Phase 3<br/>SSE + WS real-time streams]
+  P2 --> P3
+  P3 --> P4[Phase 4 scaffolding / future]
+
+  B1[P1 browser gate] --> P2
+  B2[P2 browser gate] --> P3
+            </pre>
+          </div>
+        </section>
+
+        <section id="code-map">
+          <h2>Code Map (Where the Architecture Lives)</h2>
+          <p>
+            Use this as a practical guide when reading or modifying the system.
+          </p>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Concern</th>
+                <th>Primary Files</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Controller entrypoint</td>
+                <td><code>backend/run_controller.py</code></td>
+                <td>Starts controller API with auth/github/session/controller routes</td>
+              </tr>
+              <tr>
+                <td>Sandbox entrypoint + heartbeat loop</td>
+                <td><code>backend/run_sandbox_server.py</code></td>
+                <td>Posts heartbeat to controller every 10s (configurable)</td>
+              </tr>
+              <tr>
+                <td>Controller lifecycle routes</td>
+                <td><code>backend/realtime/controller_routes.py</code></td>
+                <td>Sandbox create/get/delete, resolve tunnel, heartbeat, cleanup, runtime ensure/get</td>
+              </tr>
+              <tr>
+                <td>Lifecycle orchestration / completion detector</td>
+                <td><code>backend/realtime/lifecycle.py</code></td>
+                <td>Identity resolution, runtime provisioning, audit events, artifact export, termination logic</td>
+              </tr>
+              <tr>
+                <td>Tunnel/liveness + git bootstrap helpers</td>
+                <td><code>backend/realtime/sandbox_manager.py</code></td>
+                <td>Tunnel URL template, probes, clone/fetch policy</td>
+              </tr>
+              <tr>
+                <td>Cache + artifact export</td>
+                <td><code>backend/realtime/cache_store.py</code></td>
+                <td>Append-only JSON cache and tar bundle generation</td>
+              </tr>
+              <tr>
+                <td>Sandbox WS shell / health endpoint</td>
+                <td><code>backend/realtime/sandbox_routes.py</code></td>
+                <td>Current WS endpoint is auth + shell/echo MVP</td>
+              </tr>
+              <tr>
+                <td>Solver stream (SSE today)</td>
+                <td><code>backend/solver/solver.py</code></td>
+                <td>Trajectory EventSource stream endpoint with token query auth</td>
+              </tr>
+              <tr>
+                <td>Session/issue/chat APIs + lifecycle hooks</td>
+                <td><code>backend/daifuUserAgent/session_routes.py</code></td>
+                <td>Marks issue creation in lifecycle; includes solver router</td>
+              </tr>
+              <tr>
+                <td>PR completion lifecycle hook</td>
+                <td><code>backend/solver/manager.py</code></td>
+                <td>Calls <code>mark_pr_created()</code> on successful run with PR URL</td>
+              </tr>
+              <tr>
+                <td>Frontend runtime/tunnel routing</td>
+                <td><code>src/stores/sessionStore.ts</code>, <code>src/config/realtimeFlags.ts</code></td>
+                <td>Ensures runtime and rewrites session API calls to tunnel target when enabled</td>
+              </tr>
+              <tr>
+                <td>Frontend trajectory stream client</td>
+                <td><code>src/hooks/useTrajectoryStream.ts</code></td>
+                <td>EventSource with tunnel mode and session JWT query token</td>
+              </tr>
+              <tr>
+                <td>Realtime DB schema + SQL init/migrations</td>
+                <td><code>backend/models.py</code>, <code>backend/db/init.sql</code>, <code>backend/db/migrations/20260221_phase0_realtime_preflight.sql</code></td>
+                <td>Dedicated tables and indexes already present</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="open-questions">
+          <h2>Open questions</h2>
+          <p>
+            This section focuses on <b>still-untested or not fully validated areas</b> in the current codebase, not just theoretical questions from the docs.
+          </p>
+
+          <div class="warn">
+            <h3>High-priority untested/partial areas</h3>
+            <ul>
+              <li><b>End-to-end direct tunnel behavior in a real deployment:</b> controller returns tunnel URL, but production tunnel DNS/TLS/proxy rules and browser CORS behavior have not been fully validated against the documented no-fallback policy.</li>
+              <li><b>Browser validation gates from Phase 1:</b> the plan requires sign-in → session create → sandbox provision → issue → solve → PR → auto-terminate → artifact row verification. Code paths exist, but full browser smoke evidence is still needed.</li>
+              <li><b>WS chat protocol (Phase 3):</b> sandbox WS endpoint currently authenticates and echoes. The final message schema (plain/token/tool/status), reconnect handling, and backpressure warnings are not implemented/tested end-to-end.</li>
+              <li><b>SSE final Phase 3 semantics:</b> current SSE stream works, but the documented 3s heartbeat + 10s forced reconnect + explicit terminal contract in sandbox server is not fully implemented or validated.</li>
+              <li><b>Mandatory yudai-grep boot behavior (Phase 2):</b> current integration is optional/lazy. Hard-fail startup and diagnostics endpoint behavior are not wired/tested.</li>
+              <li><b>Training pipeline from exported trajectories (Phase 2):</b> yudai-grep training utilities exist, but no admin CLI currently reads <code>session_artifacts</code> metadata + exported cache to build a real dataset from session trajectories.</li>
+              <li><b>Cleanup and liveness operations in production:</b> liveness probe logic exists, but the lifecycle of probe tasks and periodic cleanup execution in deployed controller processes still needs staging validation.</li>
+              <li><b>Sandbox git bootstrap on real repos:</b> clone/fetch policy exists but needs validation for auth/private repos, branch mismatch, and failure handling under deployment conditions.</li>
+            </ul>
+          </div>
+
+          <h3>Questions to answer during validation (not necessarily design blockers)</h3>
+          <ul>
+            <li>Which host/service actually provisions sandbox compute in production (today the code builds/records tunnel URLs and lifecycle state, but provisioning orchestration is still mostly local/service-template oriented)?</li>
+            <li>Should SSE remain in <code>backend/solver/solver.py</code> or be fully moved behind sandbox-specific realtime routes for a cleaner Phase 3 contract?</li>
+            <li>What exact observability surface is required for runtime/sandbox state debugging (metrics, traces, audit dashboard, admin endpoints)?</li>
+            <li>How will object storage upload be integrated for artifact bundles (current metadata includes S3-shaped references, but no uploader is wired)?</li>
+          </ul>
+        </section>
+
+        <section id="deployment-changes">
+          <h2>Deployment Changes</h2>
+          <p>
+            These are the key things to get right or complete to ship the final split real-time deployment safely.
+          </p>
+
+          <div class="ok-box">
+            <h3>1) Deploy the split topology explicitly</h3>
+            <ul>
+              <li>Deploy <b>controller host</b> and <b>sandbox session server</b> as separate services/process roles (even if built from one repo/image).</li>
+              <li>Keep <code>backend/run_server.py</code> only for local/dev compatibility unless intentionally used in production.</li>
+              <li>Define health checks for both services (<code>/health</code> and <code>/healthz</code>).</li>
+            </ul>
+          </div>
+
+          <h3>2) Get tunnel routing + TLS + CORS correct</h3>
+          <ul>
+            <li>Provision a stable tunnel domain pattern that matches <code>SANDBOX_TUNNEL_TEMPLATE</code> and real sandbox addressing.</li>
+            <li>Ensure sandbox server CORS allows <code>https://yudai.app</code> exactly (per questionnaire).</li>
+            <li>Confirm frontend receives usable public tunnel URLs (not internal-only URLs).</li>
+            <li>Enforce no hidden proxy fallback in frontend and edge configs.</li>
+          </ul>
+
+          <h3>3) Wire required environment variables and secrets</h3>
+          <ul>
+            <li><code>DATABASE_URL</code> / <code>CONTROLLER_DATABASE_URL</code></li>
+            <li>Realtime flags: <code>REALTIME_* / VITE_REALTIME_*</code></li>
+            <li><code>CONTROLLER_BASE_URL</code>, <code>SANDBOX_ID</code>, <code>CONTROLLER_HEARTBEAT_SECRET</code></li>
+            <li>GitHub OAuth / app credentials and model provider secrets</li>
+            <li>Optional future: S3 credentials for artifact upload (currently metadata-only representation)</li>
+          </ul>
+
+          <h3>4) Run DB migrations and rehearse rollback</h3>
+          <ul>
+            <li>Apply the realtime lifecycle tables/indexes migration (already present in SQL files).</li>
+            <li>Validate rollback scripts in staging before production rollout.</li>
+            <li>Confirm indexes support lifecycle queries under expected traffic.</li>
+          </ul>
+
+          <h3>5) Persist and export sandbox cache artifacts safely</h3>
+          <ul>
+            <li>Ensure sandbox has writable storage for <code>/home/yudai/.cache/</code>.</li>
+            <li>Decide whether artifact bundles remain local-only temporarily or are uploaded to S3 during completion flow.</li>
+            <li>If using S3, implement upload + retry + checksum verification before marking artifact metadata complete.</li>
+          </ul>
+
+          <h3>6) Add production jobs/loops for cleanup and observability</h3>
+          <ul>
+            <li>Run a periodic controller cleanup job calling <code>/controller/sandboxes/cleanup</code> (or internal scheduler equivalent).</li>
+            <li>Centralize logs for sandbox lifecycle, heartbeat failures, stream disconnects, and audit events.</li>
+            <li>Add dashboards/alerts for terminated-on-completion rate, tunnel errors, heartbeat misses, and SSE/WS failures.</li>
+          </ul>
+
+          <h3>7) Complete Phase 2 and Phase 3 release-critical gaps</h3>
+          <ul>
+            <li>Phase 2: enforce mandatory yudai-grep load at sandbox boot + diagnostics endpoint + admin training CLI.</li>
+            <li>Phase 3: finalize WS chat protocol and frontend WS client/reconnect UI (10 retries), plus SSE final contract and forced reconnect behavior.</li>
+          </ul>
+
+          <h3>8) Validate frontend production build/runtime behavior</h3>
+          <ul>
+            <li>Confirm realtime feature flags are correctly injected at build time.</li>
+            <li>Verify direct tunnel routing works after auth refresh and session reload.</li>
+            <li>If React 19 upgrade is part of this release, run full typecheck/build/test/browser smoke on the upgraded frontend before cutover.</li>
+          </ul>
+
+          <h3>9) Execute the browser validation gates from the plan</h3>
+          <ul>
+            <li>Run the P1/P2/P3 browser gates in staging exactly as listed in <code>REAL_TIME_PHASE_TASK_LIST.md</code>.</li>
+            <li>Record evidence (screenshots/logs/DB rows/artifact files) for each gate before enabling flags in production.</li>
+          </ul>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'loose',
+      theme: 'neutral',
+      themeVariables: {
+        primaryColor: '#dff4ff',
+        primaryTextColor: '#11213b',
+        primaryBorderColor: '#5ab8de',
+        lineColor: '#5c6f96',
+        secondaryColor: '#edf3ff',
+        tertiaryColor: '#f8fbff',
+        fontSize: '14px'
+      },
+      flowchart: {
+        curve: 'basis'
+      },
+      sequence: {
+        mirrorActors: false,
+        showSequenceNumbers: true
+      }
+    });
+
+    function getDiagramTitle(diagram) {
+      const section = diagram.closest('section');
+      if (!section) return 'Mermaid Diagram';
+      const localHeading = (() => {
+        let node = diagram.previousElementSibling;
+        while (node) {
+          if (node.tagName === 'H3' || node.tagName === 'H2') return node.textContent?.trim();
+          node = node.previousElementSibling;
+        }
+        return null;
+      })();
+      const sectionHeading = section.querySelector('h2')?.textContent?.trim();
+      return [sectionHeading, localHeading].filter(Boolean).join(' — ') || 'Mermaid Diagram';
+    }
+
+    function createDiagramLightbox() {
+      const root = document.createElement('div');
+      root.className = 'diagram-lightbox';
+      root.setAttribute('aria-hidden', 'true');
+
+      root.innerHTML = `
+        <div class="diagram-lightbox-backdrop" data-close></div>
+        <div class="diagram-lightbox-panel" role="dialog" aria-modal="true" aria-label="Diagram viewer">
+          <div class="diagram-lightbox-header">
+            <div class="diagram-lightbox-title">Diagram viewer</div>
+            <div class="diagram-lightbox-toolbar">
+              <button type="button" class="diagram-lightbox-btn" data-action="zoom-out" title="Zoom out">−</button>
+              <span class="diagram-lightbox-zoom" data-zoom>100%</span>
+              <button type="button" class="diagram-lightbox-btn" data-action="zoom-in" title="Zoom in">+</button>
+              <button type="button" class="diagram-lightbox-btn" data-action="reset" title="Reset zoom and pan">Reset</button>
+              <button type="button" class="diagram-lightbox-btn" data-action="fit" title="Fit to window">Fit</button>
+              <button type="button" class="diagram-lightbox-btn" data-action="close" title="Close viewer">Close</button>
+            </div>
+          </div>
+          <div class="diagram-lightbox-stage">
+            <div class="diagram-lightbox-canvas">
+              <div class="diagram-lightbox-content"></div>
+            </div>
+          </div>
+          <div class="diagram-lightbox-footer">
+            <span>Wheel = zoom • Drag = pan • Double-click = reset</span>
+            <span>Esc = close</span>
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(root);
+
+      const titleEl = root.querySelector('.diagram-lightbox-title');
+      const stage = root.querySelector('.diagram-lightbox-stage');
+      const content = root.querySelector('.diagram-lightbox-content');
+      const zoomEl = root.querySelector('[data-zoom]');
+      const btnZoomIn = root.querySelector('[data-action="zoom-in"]');
+      const btnZoomOut = root.querySelector('[data-action="zoom-out"]');
+      const btnReset = root.querySelector('[data-action="reset"]');
+      const btnFit = root.querySelector('[data-action="fit"]');
+      const btnClose = root.querySelector('[data-action="close"]');
+
+      const state = {
+        open: false,
+        scale: 1,
+        x: 0,
+        y: 0,
+        baseWidth: 300,
+        baseHeight: 200,
+        dragging: false,
+        dragStartX: 0,
+        dragStartY: 0,
+        dragOriginX: 0,
+        dragOriginY: 0,
+      };
+
+      const clampScale = (s) => Math.min(8, Math.max(0.2, s));
+
+      const render = () => {
+        content.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
+        zoomEl.textContent = `${Math.round(state.scale * 100)}%`;
+      };
+
+      const setScaleAroundPoint = (nextScale, clientX, clientY) => {
+        const rect = stage.getBoundingClientRect();
+        const px = clientX - rect.left;
+        const py = clientY - rect.top;
+        const clamped = clampScale(nextScale);
+        const oldScale = state.scale;
+        if (clamped === oldScale) return;
+
+        // Keep the content point under cursor stable while zooming.
+        state.x = px - ((px - state.x) / oldScale) * clamped;
+        state.y = py - ((py - state.y) / oldScale) * clamped;
+        state.scale = clamped;
+        render();
+      };
+
+      const resetView = () => {
+        state.scale = 1;
+        state.x = Math.max(12, (stage.clientWidth - state.baseWidth) / 2);
+        state.y = Math.max(12, (stage.clientHeight - state.baseHeight) / 2);
+        render();
+      };
+
+      const fitView = () => {
+        const pad = 24;
+        const sx = (stage.clientWidth - pad * 2) / state.baseWidth;
+        const sy = (stage.clientHeight - pad * 2) / state.baseHeight;
+        state.scale = clampScale(Math.min(sx, sy, 1.5));
+        const fittedWidth = state.baseWidth * state.scale;
+        const fittedHeight = state.baseHeight * state.scale;
+        state.x = Math.max(8, (stage.clientWidth - fittedWidth) / 2);
+        state.y = Math.max(8, (stage.clientHeight - fittedHeight) / 2);
+        render();
+      };
+
+      const close = () => {
+        if (!state.open) return;
+        state.open = false;
+        root.classList.remove('is-open');
+        root.setAttribute('aria-hidden', 'true');
+        content.innerHTML = '';
+      };
+
+      const open = ({ sourceSvg, title, baseWidth, baseHeight }) => {
+        content.innerHTML = '';
+        const clone = sourceSvg.cloneNode(true);
+        clone.style.width = `${baseWidth}px`;
+        clone.style.height = 'auto';
+        clone.removeAttribute('id');
+        content.appendChild(clone);
+
+        state.baseWidth = Math.max(120, baseWidth);
+        state.baseHeight = Math.max(80, baseHeight);
+        titleEl.textContent = title || 'Mermaid Diagram';
+        state.open = true;
+        root.classList.add('is-open');
+        root.setAttribute('aria-hidden', 'false');
+
+        // Fit first for large diagrams; reset if already small.
+        fitView();
+      };
+
+      root.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (target.hasAttribute('data-close')) close();
+      });
+
+      btnClose.addEventListener('click', close);
+      btnZoomIn.addEventListener('click', () => {
+        const rect = stage.getBoundingClientRect();
+        setScaleAroundPoint(state.scale * 1.2, rect.left + rect.width / 2, rect.top + rect.height / 2);
+      });
+      btnZoomOut.addEventListener('click', () => {
+        const rect = stage.getBoundingClientRect();
+        setScaleAroundPoint(state.scale / 1.2, rect.left + rect.width / 2, rect.top + rect.height / 2);
+      });
+      btnReset.addEventListener('click', resetView);
+      btnFit.addEventListener('click', fitView);
+
+      stage.addEventListener('wheel', (event) => {
+        if (!state.open) return;
+        event.preventDefault();
+        const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
+        setScaleAroundPoint(state.scale * factor, event.clientX, event.clientY);
+      }, { passive: false });
+
+      stage.addEventListener('pointerdown', (event) => {
+        if (!state.open || event.button !== 0) return;
+        state.dragging = true;
+        state.dragStartX = event.clientX;
+        state.dragStartY = event.clientY;
+        state.dragOriginX = state.x;
+        state.dragOriginY = state.y;
+        stage.classList.add('dragging');
+        stage.setPointerCapture(event.pointerId);
+      });
+
+      stage.addEventListener('pointermove', (event) => {
+        if (!state.dragging) return;
+        state.x = state.dragOriginX + (event.clientX - state.dragStartX);
+        state.y = state.dragOriginY + (event.clientY - state.dragStartY);
+        render();
+      });
+
+      const endDrag = (event) => {
+        if (!state.dragging) return;
+        state.dragging = false;
+        stage.classList.remove('dragging');
+        if (event?.pointerId != null && stage.hasPointerCapture(event.pointerId)) {
+          stage.releasePointerCapture(event.pointerId);
+        }
+      };
+
+      stage.addEventListener('pointerup', endDrag);
+      stage.addEventListener('pointercancel', endDrag);
+      stage.addEventListener('dblclick', resetView);
+
+      window.addEventListener('keydown', (event) => {
+        if (!state.open) return;
+        if (event.key === 'Escape') close();
+      });
+
+      window.addEventListener('resize', () => {
+        if (state.open) fitView();
+      });
+
+      return { open, close };
+    }
+
+    function installDiagramZoom() {
+      const diagrams = Array.from(document.querySelectorAll('.diagram'));
+      const lightbox = createDiagramLightbox();
+
+      for (const diagram of diagrams) {
+        const mermaidBlock = diagram.querySelector('.mermaid');
+        const svg = mermaidBlock?.querySelector('svg');
+        if (!mermaidBlock || !svg) continue;
+
+        // Avoid duplicating controls if script reruns.
+        if (diagram.querySelector('.diagram-toolbar')) continue;
+
+        const toolbar = document.createElement('div');
+        toolbar.className = 'diagram-toolbar';
+
+        const zoomOutBtn = document.createElement('button');
+        zoomOutBtn.className = 'diagram-btn';
+        zoomOutBtn.type = 'button';
+        zoomOutBtn.textContent = '−';
+        zoomOutBtn.title = 'Zoom out';
+
+        const zoomInBtn = document.createElement('button');
+        zoomInBtn.className = 'diagram-btn';
+        zoomInBtn.type = 'button';
+        zoomInBtn.textContent = '+';
+        zoomInBtn.title = 'Zoom in';
+
+        const resetBtn = document.createElement('button');
+        resetBtn.className = 'diagram-btn';
+        resetBtn.type = 'button';
+        resetBtn.textContent = 'Reset';
+        resetBtn.title = 'Reset to 100%';
+
+        const fitBtn = document.createElement('button');
+        fitBtn.className = 'diagram-btn';
+        fitBtn.type = 'button';
+        fitBtn.textContent = 'Fit';
+        fitBtn.title = 'Fit diagram width to panel';
+
+        const openBtn = document.createElement('button');
+        openBtn.className = 'diagram-btn';
+        openBtn.type = 'button';
+        openBtn.textContent = 'Open';
+        openBtn.title = 'Open diagram in popup viewer';
+
+        const zoomLabel = document.createElement('span');
+        zoomLabel.className = 'diagram-zoom-label';
+        zoomLabel.textContent = '100%';
+
+        toolbar.append(zoomOutBtn, zoomLabel, zoomInBtn, resetBtn, fitBtn, openBtn);
+        diagram.insertBefore(toolbar, diagram.firstChild);
+
+        const baseWidth = Math.max(svg.getBBox?.().width || 0, svg.getBoundingClientRect().width || 0, 300);
+        const baseHeight = Math.max(svg.getBBox?.().height || 0, svg.getBoundingClientRect().height || 0, 180);
+        let scale = 1;
+
+        const applyZoom = () => {
+          const width = Math.max(120, Math.round(baseWidth * scale));
+          svg.style.width = `${width}px`;
+          svg.style.height = 'auto';
+          zoomLabel.textContent = `${Math.round(scale * 100)}%`;
+        };
+
+        const setScale = (nextScale) => {
+          scale = Math.min(4, Math.max(0.4, nextScale));
+          applyZoom();
+        };
+
+        const fitToWidth = () => {
+          const availableWidth = Math.max(220, diagram.clientWidth - 20);
+          setScale(availableWidth / baseWidth);
+        };
+
+        zoomInBtn.addEventListener('click', () => setScale(scale * 1.2));
+        zoomOutBtn.addEventListener('click', () => setScale(scale / 1.2));
+        resetBtn.addEventListener('click', () => setScale(1));
+        fitBtn.addEventListener('click', fitToWidth);
+        openBtn.addEventListener('click', () => {
+          lightbox.open({
+            sourceSvg: svg,
+            title: getDiagramTitle(diagram),
+            baseWidth,
+            baseHeight,
+          });
+        });
+
+        diagram.addEventListener('wheel', (event) => {
+          if (!event.ctrlKey) return;
+          event.preventDefault();
+          const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
+          setScale(scale * factor);
+        }, { passive: false });
+
+        mermaidBlock.addEventListener('dblclick', () => setScale(1));
+
+        applyZoom();
+      }
+    }
+
+    await mermaid.run({ querySelector: '.mermaid' });
+    installDiagramZoom();
+  </script>
+</body>
+</html>

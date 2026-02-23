@@ -1,125 +1,160 @@
-# YudaiV3 — Model Marketplace for Coding Agents
+# YudaiV3
 
-[![YudaiV3 Logo](https://via.placeholder.com/300x100.png?text=YudaiV3+Logo)](https://yudai.app)
+YudaiV3 is a GitHub-native AI coding workspace. You sign in with GitHub, pick a repo/branch, chat with the agent, generate implementation-ready issues, run solver workflows, and track solver trajectories in the UI.
 
-> **Create. Finetune. Tokenize. Monetize.**  
-> Turn your GitHub issues & merged PRs into a production model you can list on a marketplace, pair with liquidity, and earn from per-request usage.
+This repository contains the frontend, backend API, solver integration, and in-progress real-time session architecture (controller + sandbox session server split).
 
----
+## What You Can Do Today
 
-![NodeJS](https://img.shields.io/badge/node.js-6DA55F?style-for-the-badge&logo=node.js&logoColor=white)
-![Vite](https://img.shields.io/badge/vite-%23646CFF.svg?style-for-the-badge&logo=vite&logoColor=white)
-![GitHub](https://img.shields.io/badge/github-%23121011.svg?style-for-the-badge&logo=github&logoColor=white)
-![Ruff](https://img.shields.io/badge/Ruff-Python%20Linter-FF4500?style-for-the-badge&logo=python&logoColor=white)
+- Sign in with GitHub OAuth
+- Select a repository and branch
+- Create persistent chat sessions for a repo context
+- Generate context cards and file dependency context
+- Draft issues from chat context and create GitHub issues
+- Start solver runs for issues and track progress
+- View solver trajectories (SSE streaming path exists)
+- Use real-time session runtime/tunnel lifecycle APIs (controller/sandbox foundation)
 
-##
-![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)
-![Python](https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
-![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=for-the-badge&logo=typescript&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)
-![GitHub Actions](https://img.shields.io/badge/github%20actions-%232671E5.svg?style=for-the-badge&logo=githubactions&logoColor=white)
-![Ethereum](https://img.shields.io/badge/Ethereum-3C3C3D?style=for-the-badge&logo=Ethereum&logoColor=white)
-![Postgres](https://img.shields.io/badge/postgres-%23316192.svg?style=for-the-badge&logo=postgresql&logoColor=white)
-![React](https://img.shields.io/badge/react-%2320232a.svg?style=for-the-badge&logo=react&logoColor=%2361DAFB)
-![TailwindCSS](https://img.shields.io/badge/tailwindcss-%2338B2AC.svg?style=for-the-badge&logo=tailwind-css&logoColor=white)
-![Vultr](https://img.shields.io/badge/Vultr-007BFC.svg?style=for-the-badge&logo=vultr)
-![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)
-![Nginx](https://img.shields.io/badge/nginx-%23009639.svg?style=for-the-badge&logo=nginx&logoColor=white)
-![PyTorch](https://img.shields.io/badge/PyTorch-%23EE4C2C.svg?style=for-the-badge&logo=PyTorch&logoColor=white)
+## Realtime Session Work (Phases 1-3)
 
----
+This codebase now includes real-time session foundations and partial implementation for the split controller/sandbox model:
 
-## What is YudaiV3?
+- Controller entrypoint: `backend/run_controller.py`
+- Sandbox session server entrypoint: `backend/run_sandbox_server.py`
+- Lifecycle APIs: create/get/delete sandbox, resolve tunnel, heartbeat, cleanup
+- Runtime/session persistence tables: `sandboxes`, `session_runtime`, `session_artifacts`, `session_audit_events`
+- Append-only sandbox cache + artifact export metadata under `/home/yudai/.cache/`
+- Completion detection for `GitHub issue created` + `PR created` with auto-termination flow
+- SSE trajectory streaming endpoint (existing solver stream path)
+- WebSocket chat endpoint shell in sandbox server (MVP foundation)
 
-YudaiV3 is a **model marketplace for coding agents**. It transforms your repo’s development activity (issues created, PRs merged) into a finetuned, tokenized model that you can **list, provide liquidity for, and monetize**.
+Planning and scope documents are in:
 
-- **Base Models:** GPT-5, Claude, Qwen3-Coder, Grok (and more)
-- **Milestone → Finetune:** After **30 issues created** and **30 issues merged**, you can trigger a guided finetune
-- **Tokenization:** Each finetuned model mints its own **ERC-20 (AGENTx)**, paired with **$SOLVE** on Uniswap v4
-- **Monetization:** Earn from **per-request usage** (x402 pay-per-call) and **LP swap fees** streamed via Uniswap v4 **Hooks**
+- `REAL_TIME_PHASE_TASK_LIST.md`
+- `REAL_TIME_IMPLEMENTATION_QUESTIONNAIRE.md`
+- `backend/docs/realtime_phase0/`
 
----
+## Tech Stack
 
-## Who is it for?
+- Frontend: React + Vite + TypeScript + Tailwind CSS + Zustand
+- Backend: FastAPI + SQLAlchemy
+- Database: PostgreSQL + pgvector
+- Solver: Python-based sandbox/trajectory orchestration
+- Realtime: SSE + WebSocket (phase rollout via feature flags)
 
-- **Solo devs & indie hackers** who want their repo history to compound into a sellable model
-- **Product & growth engineers** who want usage-based revenue on top of existing workflows
-- **Open-source maintainers** who seek a sustainable economic loop tied to real code impact
+## Project Structure
 
----
+- `src/` — frontend app (chat, session UI, trajectory viewer)
+- `backend/` — FastAPI backend, auth, GitHub APIs, solver, realtime services
+- `backend/realtime/` — controller/sandbox lifecycle services, schemas, cache/artifact export
+- `backend/db/` — schema init + migrations
+- `backend/context/yudai-grep/` — local model utilities and training code for repo-structure assistance
 
-## How it works (high-level)
+## Running Locally
 
-1. **Create & Merge**  
-   Keep shipping. YudaiV3 tracks issues created and merged PRs to build your training corpus.
+### 1. Prerequisites
 
-2. **Hit 30/30 → Finetune**  
-   Reach **30 issues created** and **30 merged** to unlock a guided finetune for your repo-specific agent.
+- Node.js 18+
+- Python 3.10+
+- PostgreSQL (with `pgvector`)
 
-3. **Mint & List (AGENTx)**  
-   Your model is minted as **AGENTx (ERC-20)** and listed **AGENTx / $SOLVE** on Uniswap v4.
+### 2. Install Dependencies
 
-4. **Provide Liquidity & Earn**  
-   Add LP to deepen markets. **Uniswap v4 Hooks** stream a portion of swap fees to your creator vault.
+Frontend:
 
-5. **Get Paid Per Request (x402)**  
-   The hosted model charges per request using **x402 (HTTP-402)**. Usage revenue settles in stable assets and is routed to your vault, with internal conversion to support your token.
+```bash
+npm install
+```
 
-> **All of the above happens without changing your GitHub workflow.** You build; the marketplace handles tokenization, liquidity, and billing.
+Backend (example using local venv):
 
----
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r backend/requirements.txt
+```
 
-## Key Concepts
+### 3. Configure Environment
 
-- **$SOLVE**  
-  Ecosystem and routing token used to pair liquidity with model tokens and anchor discovery across pools.
+Minimum backend requirement:
 
-- **AGENTx (per-model ERC-20)**  
-  A token representing your finetuned model. Traders can provide LP; users can pay to call your model; you earn from both.
+- `DATABASE_URL` (PostgreSQL connection string)
 
-- **Uniswap v4 Hooks**  
-  Pool-level logic that automatically **directs a share of trading fees** to creator/protocol vaults—no manual harvesting.
+You will also need GitHub OAuth and model provider credentials for full app functionality. Check the existing `.env*` files in the repo for expected keys.
 
-- **x402 Pay-Per-Call**  
-  Machine-native HTTP-402 billing for **per-request** or **per-token** usage. Clean receipts, stable settlement, creator-first routing.
+### 4. Start the App (Single Backend Entrypoint)
 
----
+Backend:
 
-## Features (current & planned)
+```bash
+python backend/run_server.py
+```
 
-- ✅ GitHub-native issue & PR signal ingestion  
-- ✅ Finetune unlock at **30/30 milestone**  
-- ✅ Tokenization & marketplace listing per model (AGENTx)  
-- ✅ Liquidity provisioning (AGENTx / $SOLVE) with v4 Hooks fee streaming  
-- ✅ Usage billing via x402 (per request)  
-- 🛠️ Roadmap: per-model eval cards, dataset attestations, advanced creator analytics, additional base models
+Frontend:
 
----
+```bash
+npm run dev
+```
+
+### 5. Start the Realtime Split Entrypoints (Optional / MVP Work)
+
+Controller host:
+
+```bash
+python backend/run_controller.py
+```
+
+Sandbox session server:
+
+```bash
+python backend/run_sandbox_server.py
+```
+
+Realtime behavior is controlled by feature flags (`REALTIME_*` / `VITE_REALTIME_*`).
+
+## Feature Flags (Realtime Rollout)
+
+Backend and frontend read rollout flags for the real-time phases:
+
+- `REALTIME_CONTROLLER_SPLIT_ENABLED`
+- `REALTIME_TUNNEL_MODE_ENABLED`
+- `REALTIME_WS_CHAT_ENABLED`
+- `REALTIME_SSE_STREAM_ENABLED`
+- `REALTIME_CONTRACT_VERSION`
+
+Frontend equivalents:
+
+- `VITE_REALTIME_CONTROLLER_SPLIT_ENABLED`
+- `VITE_REALTIME_TUNNEL_MODE_ENABLED`
+- `VITE_REALTIME_WS_CHAT_ENABLED`
+- `VITE_REALTIME_SSE_STREAM_ENABLED`
+- `VITE_REALTIME_CONTRACT_VERSION`
+
+## yudai-grep (Repo Context Helper)
+
+The repo includes a local `yudai-grep` module under `backend/context/yudai-grep/` used for repository structure analysis and context generation support.
+
+- Inference/runtime code: `backend/context/yudai-grep/src/runtime.py`
+- Training utility: `backend/context/yudai-grep/src/train.py`
+- Example datasets: `backend/context/yudai-grep/datasets/`
+
+## Current Status
+
+YudaiV3 is under active development. The real-time controller/sandbox split, artifact persistence, and streaming features are being implemented in phases. Expect active iteration and API changes while the MVP is stabilized.
 
 ## Contributing
 
-We welcome contributions to the marketplace code and docs:
+You can contribute improvements to the frontend, backend, solver, or realtime lifecycle work.
 
-1. Fork this repository  
-2. Create a feature branch (`feat/your-idea`)  
-3. Open a PR with a clear description and rationale
-
-Check the [issues page](https://github.com/pranay5255/YudaiV3/issues) for open tasks.
-
----
+1. Fork the repo
+2. Create a branch (`feat/your-change`)
+3. Open a PR with a clear description
 
 ## License
 
-YudaiV3 is an early-stage open-source project. The license is currently under consideration. Feel free to open an [issue](https://github.com/pranay5255/YudaiV3/issues) to discuss licensing or usage terms.
-
----
+License is currently under consideration.
 
 ## Contact
 
-Questions or partnerships: [support@yudai.app](mailto:support@yudai.app)
-
----
-
-## 👉 Call to Action
-
-**Ready to monetize your model? Visit the marketplace:** **[yudai.app](https://yudai.app)**
+- Website: `https://yudai.app`
+- Issues: `https://github.com/pranay5255/YudaiV3/issues`
