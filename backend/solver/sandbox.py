@@ -40,7 +40,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import modal
-from solver.agentScriptGen import AgentScriptParams, build_agent_script, build_pr_script
+from solver.agentScriptGen import AgentScriptParams, build_agent_script, build_pr_script  # noqa: F401
 
 from utils import utc_now
 
@@ -52,25 +52,17 @@ TRAJECTORY_STORAGE_DIR = Path(
 )
 TRAJECTORY_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
-# Template and path constants
-TFBD_TEMPLATE_PATH = Path(__file__).with_name("tfbd.yaml")
-DEFAULT_TFBD_FALLBACK = """agent:
-  system_template: "You are a helpful assistant that can interact with a computer."
-model:
-  model_name: "{model_name}"
-  model_class: "openrouter"
-  model_kwargs:
-    temperature: 0.4
-"""
-
-REMOTE_TFBD_PATH = "/home/user/tfbd.yaml"
 REMOTE_AGENT_SCRIPT_PATH = "/home/user/run_agent.py"
-MINI_SWE_AGENT_PATH = "/home/user/mini-swe-agent"
-MINI_SWE_AGENT_REPO = "https://github.com/pranay5255/yudai-swe-agent.git"
+
+# mini-swe-agent is baked into the image at build time — no runtime git clone.
 SOLVER_IMAGE = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("git", "curl")
+    .apt_install("git", "curl", "gh")
     .pip_install("requests", "pyyaml")
+    .run_commands(
+        "git clone --depth 1 https://github.com/SWE-agent/mini-swe-agent.git /opt/mini-swe-agent",
+        "pip install --no-cache-dir -e /opt/mini-swe-agent",
+    )
 )
 
 _modal_app: Optional[modal.App] = None
@@ -112,101 +104,6 @@ async def _get_modal_app() -> modal.App:
 # SANDBOX CONFIGURATION BUILDERS
 # ============================================================================
 
-
-def build_tfbd_template(
-    model_name: str,
-    small_change: bool = False,
-    best_effort: bool = False,
-    max_iterations: int = 50,
-    max_cost: float = 10.0,
-) -> str:
-    """
-    Build a tfbd.yaml-style template with the requested model and options.
-
-    The sandbox expects both the execution script and the YAML control file,
-    so we lazily load the repository template, update the model stanza, and
-    fall back to a minimal configuration when the template is missing.
-
-    Args:
-        model_name: Model identifier for the solver
-        small_change: Limit scope to minimal code changes
-        best_effort: Continue solving even if tests fail
-        max_iterations: Maximum iterations for the agent
-        max_cost: Maximum cost in USD for the solve session
-    """
-
-    try:
-        base_template = TFBD_TEMPLATE_PATH.read_text()
-    except FileNotFoundError:
-        logger.warning(
-            "tfbd.yaml template missing at %s. Using fallback definition.",
-            TFBD_TEMPLATE_PATH,
-        )
-        return DEFAULT_TFBD_FALLBACK.format(model_name=model_name)
-
-    updated_template, replacements = re.subn(
-        r'model_name:\s*"[^"]+"',
-        f'model_name: "{model_name}"',
-        base_template,
-        count=1,
-    )
-
-    if replacements == 0:
-        # Append a model block if the template did not contain one.
-        appended_block = (
-            f"\nmodel:\n"
-            f'    model_name: "{model_name}"\n'
-            f'    model_class: "openrouter"\n'
-            f"    model_kwargs:\n"
-            f"        temperature: 0.4\n"
-        )
-        updated_template = base_template.rstrip() + appended_block
-
-    constraints: List[str] = []
-    if small_change:
-        constraints.append(
-            "Limit code edits to minimal, targeted changes directly tied to the issue."
-        )
-    if best_effort:
-        constraints.append(
-            "Continue working toward a solution even if automated checks fail, documenting any failures."
-        )
-
-    return _inject_constraints(updated_template, constraints)
-
-
-def _inject_constraints(template: str, constraints: List[str]) -> str:
-    """Inject constraint guidance into the instance template section."""
-
-    if not constraints:
-        return template
-
-    insertion_point = "    ## Recommended Workflow"
-
-    constraint_lines = ["    ## Constraints", ""]
-    constraint_lines.extend(f"    - {constraint}" for constraint in constraints)
-    constraint_block = "\n".join(constraint_lines)
-
-    if insertion_point in template:
-        return template.replace(
-            insertion_point, f"{constraint_block}\n\n{insertion_point}", 1
-        )
-
-    trailing_newline = "" if template.endswith("\n") else "\n"
-    bullets = "\n".join(f"- {constraint}" for constraint in constraints)
-    return f"{template.rstrip()}{trailing_newline}\n\n# Constraints\n{bullets}\n"
-
-
-def build_tfbd_config(params: AgentScriptParams) -> str:
-    """Create a tfbd.yaml configuration string from agent parameters."""
-
-    return build_tfbd_template(
-        model_name=params.model_name,
-        small_change=params.small_change,
-        best_effort=params.best_effort,
-        max_iterations=params.max_iterations,
-        max_cost=params.max_cost,
-    )
 
 
 def build_sandbox_env_bundle(
@@ -260,7 +157,6 @@ class SandboxRunResult:
     local_trajectory_path: Optional[str] = None
     trajectory_metadata: Optional[TrajectoryMetadata] = None
     pr_url: Optional[str] = None
-    tfbd_path: Optional[str] = None
     script_path: Optional[str] = None
     error: Optional[str] = None
 
@@ -286,7 +182,6 @@ class HeadlessSandboxRequest:
     issue_body: Optional[str] = None
     verbose: bool = False
     openrouter_call_delay: float = 0.0
-    create_pr: bool = True
     timeout: int = 1800  # 30 minutes default for agent execution
 
 
@@ -567,16 +462,11 @@ async def upload_solver_artifacts(
     *,
     sandbox: SandboxClient,
     params: AgentScriptParams,
-) -> Tuple[str, str]:
-    """Upload tfbd.yaml and agent runner script into the sandbox."""
-
-    tfbd_config = build_tfbd_config(params)
-    await sandbox.write_file(REMOTE_TFBD_PATH, tfbd_config)
-
+) -> str:
+    """Upload agent runner script into the sandbox. Returns the remote script path."""
     python_script = build_agent_script(params)
     await sandbox.write_file(REMOTE_AGENT_SCRIPT_PATH, python_script)
-
-    return REMOTE_TFBD_PATH, REMOTE_AGENT_SCRIPT_PATH
+    return REMOTE_AGENT_SCRIPT_PATH
 
 
 def parse_trajectory_metadata(trajectory_data: Dict[str, Any]) -> TrajectoryMetadata:
@@ -677,7 +567,7 @@ class HeadlessSandboxExecutor:
 
     This executor:
     1. Creates a Modal sandbox with required dependencies
-    2. Generates execution artifacts (tfbd.yaml + runner script)
+    2. Uploads the generated agent runner script
     3. Executes the uploaded script which performs repository setup and agent run
     4. Captures execution results and trajectory data
     5. Manages sandbox lifecycle and cleanup
@@ -747,9 +637,7 @@ class HeadlessSandboxExecutor:
             if metadata:
                 logger.info("Sandbox metadata attached: %s", metadata)
 
-            # Create tfbd.yaml config with the selected model and user options for traceability
-            # Phase 1: Agent makes code changes with PR creation disabled.
-            # PR creation is handled separately in Phase 2 for deeper context.
+            # Phase 1: agent makes code changes. PR is created in Phase 2.
             script_params = AgentScriptParams.from_payload(
                 model_name=request.model_name,
                 repo_url=request.repo_url,
@@ -763,32 +651,21 @@ class HeadlessSandboxExecutor:
                     "max_cost": request.max_cost,
                     "small_change": request.small_change,
                     "best_effort": request.best_effort,
-                    "create_pr": False,  # PR creation handled by Phase 2
                     "issue_title": request.issue_title,
                     "issue_body": request.issue_body,
                 },
                 verbose=request.verbose,
             )
-            tfbd_path, script_path = await upload_solver_artifacts(
+            script_path = await upload_solver_artifacts(
                 sandbox=sandbox,
                 params=script_params,
             )
             logger.info(
-                "Uploaded tfbd.yaml template to sandbox %s for model %s (small_change=%s, best_effort=%s)",
+                "Uploaded execution script to sandbox %s (model=%s small_change=%s best_effort=%s)",
                 sandbox_id,
                 script_params.model_name,
                 script_params.small_change,
                 script_params.best_effort,
-            )
-            logger.info(
-                "Uploaded headless execution script to sandbox %s",
-                sandbox_id,
-            )
-
-            # Prepare mini-swe-agent dependencies
-            await self._prepare_mini_swe_agent(
-                sandbox=sandbox,
-                envs=command_env,
             )
 
             # Execute the agent script with streaming output
@@ -816,10 +693,10 @@ class HeadlessSandboxExecutor:
                 if self._cancelled:
                     raise SandboxExecutionError("Execution cancelled")
 
-            # Phase 2: Deep PR creation in the same sandbox
+            # Phase 2: Deep PR creation in the same sandbox (only on agent success)
             pr_url = None
-            if request.create_pr and result.exit_code == 0:
-                logger.info("Phase 2: Creating deep PR in sandbox %s", sandbox_id)
+            if result.exit_code == 0:
+                logger.info("Phase 2: Creating PR in sandbox %s", sandbox_id)
                 pr_script = build_pr_script(script_params)
                 await sandbox.write_file("/home/user/create_pr.sh", pr_script)
                 pr_result = await sandbox.run_command_with_logging(
@@ -837,8 +714,6 @@ class HeadlessSandboxExecutor:
                         "Phase 2: PR creation failed, stderr: %s",
                         (pr_result.stderr or "")[-500:],
                     )
-            elif not request.create_pr:
-                logger.info("PR creation disabled, skipping Phase 2")
             else:
                 logger.info(
                     "Agent exited with code %d, skipping Phase 2 PR creation",
@@ -882,7 +757,7 @@ class HeadlessSandboxExecutor:
                 )
 
             # Phase 3: Async video generation (fire-and-forget)
-            if pr_url and request.create_pr:
+            if pr_url:
                 from solver.video import kick_off_video_generation
 
                 asyncio.create_task(
@@ -914,7 +789,6 @@ class HeadlessSandboxExecutor:
                 local_trajectory_path=local_trajectory_path,
                 trajectory_metadata=trajectory_metadata,
                 pr_url=pr_url,
-                tfbd_path=tfbd_path,
                 script_path=script_path,
                 error=None if result.exit_code == 0 else "Agent execution failed",
             )
@@ -968,25 +842,6 @@ class HeadlessSandboxExecutor:
                     logger.warning(f"Failed to close sandbox during cancellation: {e}")
                 finally:
                     self._sandbox = None
-
-    async def _prepare_mini_swe_agent(
-        self,
-        *,
-        sandbox: SandboxClient,
-        envs: Dict[str, str],
-    ) -> None:
-        """Ensure mini-swe-agent and runtime dependencies are available in sandbox."""
-
-        setup_commands = [
-            ("if [ ! -d {path} ]; then git clone --depth 1 {repo} {path}; fi").format(
-                path=MINI_SWE_AGENT_PATH, repo=MINI_SWE_AGENT_REPO
-            ),
-            f"python3 -m pip install --no-cache-dir -e {MINI_SWE_AGENT_PATH}",
-        ]
-
-        for command in setup_commands:
-            logger.info("Running sandbox setup command: %s", command)
-            await sandbox.run_command(command, envs=envs)
 
     def _build_metadata(self, request: HeadlessSandboxRequest) -> Dict[str, str]:
         metadata: Dict[str, Any] = {

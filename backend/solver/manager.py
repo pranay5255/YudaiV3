@@ -717,7 +717,6 @@ class DefaultSolverManager(SolverManager):
             "command": result.command,
             "stdout_tail": (result.stdout or "")[-preview_length:],
             "stderr_tail": (result.stderr or "")[-preview_length:],
-            "tfbd_path": result.tfbd_path,
             "script_path": result.script_path,
             "trajectory_file": result.trajectory_file,
             "local_trajectory_path": result.local_trajectory_path,

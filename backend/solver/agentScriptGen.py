@@ -1,17 +1,22 @@
 """
 Helpers for generating the on-the-fly mini-swe-agent execution script.
 
-The solver endpoint accepts a payload (StartSolveRequest) that determines how the
-agent should behave (small change mode, best effort, max iterations, etc).
-This module takes that payload, normalizes the values, and renders the final
-Python script by parameterizing a template with those values.
+Uses mini-swe-agent Python bindings directly:
+- DefaultAgent.run(task) returns a dict {"exit_status": ..., "submission": ...}
+- output_path= on DefaultAgent auto-saves trajectory after each step
+- LocalEnvironment(cwd=..., env=...) sets working directory and env vars
+- get_model(input_model_name=..., config=...) selects model class by name
+
+The generated script loads mswea's builtin "mini" config for system/instance
+templates, overrides step_limit and cost_limit from user params, then runs
+the agent. PR creation is handled separately by build_pr_script (Phase 2 bash).
 """
 
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
-from string import Template
 from typing import Any, Mapping, Optional
 
 
@@ -60,7 +65,6 @@ class AgentScriptParams:
     max_cost: float = 10.0
     small_change: bool = False
     best_effort: bool = False
-    create_pr: bool = True
 
     @classmethod
     def from_payload(
@@ -74,10 +78,6 @@ class AgentScriptParams:
         payload: Optional[Mapping[str, Any]] = None,
         verbose: bool = False,
     ) -> "AgentScriptParams":
-        """
-        Build params from an arbitrary payload (StartSolveRequest, Solve.matrix, env).
-        """
-
         payload = payload or {}
         return cls(
             model_name=model_name,
@@ -94,7 +94,6 @@ class AgentScriptParams:
             max_cost=_safe_float(payload.get("max_cost"), 10.0),
             small_change=_safe_bool(payload.get("small_change")),
             best_effort=_safe_bool(payload.get("best_effort")),
-            create_pr=_safe_bool(payload.get("create_pr"), default=True),
         )
 
     @classmethod
@@ -109,10 +108,6 @@ class AgentScriptParams:
         env: Optional[Mapping[str, Any]] = None,
         verbose: bool = False,
     ) -> "AgentScriptParams":
-        """
-        Convenience helper for HeadlessSandboxRequest env payloads.
-        """
-
         env = env or {}
         normalized_payload = {
             "temperature": env.get("TEMPERATURE"),
@@ -139,31 +134,25 @@ class AgentScriptParams:
     @property
     def task_literal(self) -> str:
         """JSON literal keeps the script ASCII-safe regardless of the issue text."""
-
         if not self.issue_text:
             return "None"
         return json.dumps(self.issue_text, ensure_ascii=True)
 
     @property
     def owner(self) -> str:
-        """Extract repository owner from repo_url."""
         parts = self.repo_url.split("github.com/")[-1].strip("/").replace(".git", "").split("/")
         return parts[0] if len(parts) >= 2 else ""
 
     @property
     def repo_name(self) -> str:
-        """Extract repository name from repo_url."""
         parts = self.repo_url.split("github.com/")[-1].strip("/").replace(".git", "").split("/")
         return parts[1] if len(parts) >= 2 else ""
 
     @property
     def issue_number(self) -> str:
-        """Extract issue number from issue_url."""
         return self.issue_url.rstrip("/").split("/")[-1] if self.issue_url else "0"
 
     def substitutions(self) -> Mapping[str, Any]:
-        """Values passed into the final Template.substitute call."""
-
         return {
             "log_level": self.log_level,
             "task_literal": self.task_literal,
@@ -173,635 +162,281 @@ class AgentScriptParams:
             "issue_url_literal": json.dumps(self.issue_url, ensure_ascii=True),
             "temperature": f"{self.temperature:.3f}",
             "max_tokens": str(self.max_tokens),
-            "max_iterations": str(self.max_iterations),
-            "max_cost": f"{self.max_cost:.2f}",
+            "step_limit": str(self.max_iterations),
+            "cost_limit": f"{self.max_cost:.2f}",
             "small_change": "True" if self.small_change else "False",
             "best_effort": "True" if self.best_effort else "False",
-            "create_pr": "True" if self.create_pr else "False",
         }
 
 
-_SCRIPT_TEMPLATE_STR = """#!/usr/bin/env python3
+# ---------------------------------------------------------------------------
+# Script template — uses the correct mini-swe-agent Python bindings:
+#
+#   agent.run(task)  →  dict {"exit_status": str, "submission": str}
+#   exit_status == "Submitted"  means the agent completed successfully
+#   output_path= on DefaultAgent auto-saves trajectory after every step
+#   get_model(input_model_name=..., config=...)  selects the model class
+#   LocalEnvironment(cwd=..., env=...)  sets working dir and env vars
+# ---------------------------------------------------------------------------
+
+_SCRIPT_TEMPLATE = """\
+#!/usr/bin/env python3
 '''
 Mini-SWE-Agent execution script for headless sandbox execution.
 Generated automatically by YudaiV3 solver manager.
+
+API contract (mini-swe-agent Python bindings):
+  agent.run(task)  ->  dict with "exit_status" and "submission"
+  exit_status == "Submitted"  on success (agent echoed COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT)
+  exit_status == "LimitsExceeded"  if step/cost limit hit
+  output_path on DefaultAgent  auto-saves trajectory after each step
 '''
 import json
 import logging
 import os
 import subprocess
 import sys
-import time
 import traceback
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import requests
-import yaml
-from minisweagent.agents.default import DefaultAgent
-from minisweagent.environments.local import LocalEnvironment
-from minisweagent.models import get_model
-from minisweagent.run.utils.save import save_traj
 
 logging.basicConfig(
-    level=logging.$log_level,
-    format="[%(levelname)s] %(message)s"
+    level=logging.%(log_level)s,
+    format="[%%(levelname)s] %%(message)s",
 )
-
-CONFIG_DIR = Path("/home/user/config_mswea")
-TFBD_PATH = Path("/home/user/tfbd.yaml")
-TESTBED_PATH = Path("/home/user/testbed")
-MINI_SWE_ROOT = Path("/home/user/mini-swe-agent")
-TRAJECTORY_PATH = Path("/home/user/trajectory.json")
-OUTPUT_PATH = Path("/home/user/last_mini_run.traj.json")
-
-REPO_URL = $repo_literal
-BRANCH_NAME = $branch_literal
-ISSUE_URL = $issue_url_literal
-MODEL_NAME = "$model_name"
-ISSUE_TEXT_LITERAL = $task_literal
-
-TEMPERATURE = $temperature
-MAX_TOKENS = $max_tokens
-MAX_ITERATIONS = $max_iterations
-MAX_COST = $max_cost
-SMALL_CHANGE = $small_change
-BEST_EFFORT = $best_effort
-CREATE_PR = $create_pr
-
-SOLVE_PAYLOAD = {
-    "small_change": SMALL_CHANGE,
-    "best_effort": BEST_EFFORT,
-    "max_iterations": MAX_ITERATIONS,
-    "max_cost": MAX_COST,
-    "create_pr": CREATE_PR,
-}
-
 logger = logging.getLogger("yudai.solver.script")
 
+# === Injected parameters ===
+REPO_URL         = %(repo_literal)s
+BRANCH_NAME      = %(branch_literal)s
+ISSUE_URL        = %(issue_url_literal)s
+MODEL_NAME       = "%(model_name)s"
+ISSUE_TEXT_GIVEN = %(task_literal)s
+TEMPERATURE      = %(temperature)s
+MAX_TOKENS       = %(max_tokens)s
+STEP_LIMIT       = %(step_limit)s   # 0 = unlimited
+COST_LIMIT       = %(cost_limit)s
+SMALL_CHANGE     = %(small_change)s
+BEST_EFFORT      = %(best_effort)s
 
-def _parse_openrouter_delay(value: Optional[str]) -> float:
-    \"\"\"Parse OPENROUTER_CALL_DELAY from environment.\"\"\"
-    if not value:
-        return 0.0
-    try:
-        delay = float(value)
-        if delay < 0:
-            logger.warning(
-                "OPENROUTER_CALL_DELAY must be non-negative, ignoring %s", value
-            )
-            return 0.0
-        return delay
-    except (TypeError, ValueError):
-        logger.warning(
-            "Invalid OPENROUTER_CALL_DELAY value '%s'; ignoring delay override", value
-        )
-        return 0.0
+TESTBED_PATH = Path("/home/user/testbed")
+OUTPUT_PATH  = Path("/home/user/last_mini_run.traj.json")
 
-
-OPENROUTER_CALL_DELAY = _parse_openrouter_delay(os.getenv("OPENROUTER_CALL_DELAY"))
-
-
-def fetch_github_issue(issue_url: str) -> str:
-    \"\"\"Fetch GitHub issue text from the URL.\"\"\"
-    if not issue_url:
-        raise ValueError("GitHub issue URL is required")
-    
-    api_url = issue_url.replace(
-        "github.com", "api.github.com/repos"
-    ).replace("/issues/", "/issues/")
-    
-    headers = {"Accept": "application/vnd.github.v3+json"}
-    if github_token := os.getenv("GITHUB_TOKEN"):
-        headers["Authorization"] = f"token {github_token}"
-    
-    try:
-        response = requests.get(api_url, headers=headers, timeout=60)
-        response.raise_for_status()
-        issue_data = response.json()
-    except Exception as exc:
-        logger.warning("Failed to fetch GitHub issue: %s", exc)
-        raise ValueError(f"Failed to fetch GitHub issue: {exc}")
-    
-    title = issue_data.get("title", "No title")
-    body = issue_data.get("body", "")
-    
-    return f"GitHub Issue: {title}\\n\\n{body}"
+# Env vars forwarded into every subshell the agent runs
+_AGENT_ENV = {
+    "PAGER": "cat",
+    "MANPAGER": "cat",
+    "LESS": "-R",
+    "PIP_PROGRESS_BAR": "off",
+    "TQDM_DISABLE": "1",
+}
 
 
-def load_config() -> Dict[str, Any]:
-    \"\"\"Load agent configuration from tfbd.yaml.\"\"\"
-    if not TFBD_PATH.exists():
-        raise RuntimeError(f"Config file not found at {TFBD_PATH}")
-    
-    logger.info("Loading agent config from '%s'", TFBD_PATH)
-    config = yaml.safe_load(TFBD_PATH.read_text())
-    
-    # Apply runtime overrides
-    config.setdefault("agent", {})["cost_limit"] = MAX_COST
-    
-    # Set temperature and max_tokens inside model_kwargs (required by OpenRouterModelConfig)
-    config.setdefault("model", {}).setdefault("model_kwargs", {})["temperature"] = TEMPERATURE
-    config.setdefault("model", {}).setdefault("model_kwargs", {})["max_tokens"] = MAX_TOKENS
-
-    
-    return config
-
+# ---------------------------------------------------------------------------
+# Repository setup
+# ---------------------------------------------------------------------------
 
 def clone_repository() -> None:
-    \"\"\"Clone the target repository into testbed directory.\"\"\"
     if TESTBED_PATH.exists():
-        logger.info("Testbed already exists at %s", TESTBED_PATH)
+        logger.info("Testbed already exists at %%s", TESTBED_PATH)
         return
-    
+
     repo_url = REPO_URL
-    if github_token := os.getenv("GITHUB_TOKEN"):
-        if "github.com" in repo_url:
-            repo_url = repo_url.replace(
-                "https://github.com/", 
-                f"https://{github_token}@github.com/"
-            )
-    
-    if not repo_url.endswith(".git"):
-        repo_url += ".git"
-    
+    github_token = os.getenv("GITHUB_TOKEN")
+    if github_token and "github.com" in repo_url:
+        # Use git credential store instead of embedding token in URL
+        netrc = Path("/home/user/.netrc")
+        netrc.write_text(f"machine github.com login x-token password {github_token}\\n")
+        netrc.chmod(0o600)
+
     clone_cmd = ["git", "clone", "--depth", "1"]
     if BRANCH_NAME:
         clone_cmd.extend(["--branch", BRANCH_NAME])
+    if not repo_url.endswith(".git"):
+        repo_url += ".git"
     clone_cmd.extend([repo_url, str(TESTBED_PATH)])
-    
-    logger.info("Cloning repository: %s", REPO_URL)
-    result = subprocess.run(
-        clone_cmd,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    
+
+    logger.info("Cloning repository: %%s", REPO_URL)
+    result = subprocess.run(clone_cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(
-            f"Failed to clone repository: {result.stderr}"
-        )
-    
-    logger.info("Repository cloned successfully to %s", TESTBED_PATH)
+        raise RuntimeError(f"Failed to clone repository: {result.stderr}")
+    logger.info("Repository cloned to %%s", TESTBED_PATH)
 
 
-def install_mini_swe_agent() -> None:
-    \"\"\"Install mini-swe-agent if not already available.\"\"\"
-    logger.info("Ensuring mini-swe-agent is available")
-    
-    if not MINI_SWE_ROOT.exists():
-        logger.info("Cloning mini-swe-agent repository")
-        result = subprocess.run(
-            [
-                "git", "clone", "--depth", "1",
-                "https://github.com/pranay5255/yudai-swe-agent.git",
-                str(MINI_SWE_ROOT),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Failed to clone mini-swe-agent: {result.stderr}")
-    
-    logger.info("Installing mini-swe-agent")
-    result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--no-cache-dir", "-e", "."],
-        cwd=MINI_SWE_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to install mini-swe-agent: {result.stderr}")
-    
-    logger.info("mini-swe-agent installed successfully")
+# ---------------------------------------------------------------------------
+# Issue text resolution
+# ---------------------------------------------------------------------------
 
-
-def record_success(exit_status: str, result: Any) -> None:
-    \"\"\"Record successful execution results.\"\"\"
-    payload = {
-        "exit_status": exit_status,
-        "result": str(result) if result else None,
-        "trajectory_file": str(OUTPUT_PATH),
-        "tfbd_path": str(TFBD_PATH),
-        "repository_path": str(TESTBED_PATH),
-        "solve_payload": SOLVE_PAYLOAD,
-    }
-    Path("/home/user/solve_success.json").write_text(
-        json.dumps(payload, indent=2)
-    )
-    logger.info("Recorded success to /home/user/solve_success.json")
-
-
-def record_failure(error: Exception) -> None:
-    \"\"\"Record execution failure.\"\"\"
-    payload = {
-        "error": str(error),
-        "traceback": traceback.format_exc(),
-    }
-    Path("/home/user/solve_failure.json").write_text(
-        json.dumps(payload, indent=2)
-    )
-    logger.error("Recorded failure: %s", error)
-
-
-def finalize_execution(exit_code: int) -> None:
-    \"\"\"Write final execution state.\"\"\"
-    summary = {
-        "exit_code": exit_code,
-        "completed": exit_code == 0,
-    }
-    Path("/home/user/solve_final_state.json").write_text(
-        json.dumps(summary, indent=2)
-    )
-    logger.info("Execution finalized with exit code %d", exit_code)
-
-
-def apply_openrouter_delay(delay: float) -> None:
-    \"\"\"Apply optional throttling between OpenRouter API calls.\"\"\"
-    if delay <= 0:
-        return
-
-    try:
-        from minisweagent.models import openrouter_model
-    except Exception as exc:
-        logger.warning("Unable to apply OpenRouter delay: %s", exc)
-        return
-
-    if getattr(openrouter_model.OpenRouterModel, "_yudai_delay_wrapped", False):
-        return
-
-    original_query = openrouter_model.OpenRouterModel._query
-
-    def delayed_query(self, *args, **kwargs):
-        logger.debug(
-            "Sleeping %.2fs before OpenRouter API request to avoid rate limits",
-            delay,
-        )
-        time.sleep(delay)
-        return original_query(self, *args, **kwargs)
-
-    openrouter_model.OpenRouterModel._query = delayed_query
-    setattr(openrouter_model.OpenRouterModel, "_yudai_delay_wrapped", True)
-    logger.info(
-        "OpenRouter API throttling enabled: %.2fs delay between calls", delay
-    )
-
-
-def extract_repo_info(repo_url: str) -> tuple[str, str]:
-    \"\"\"Extract owner and repo name from GitHub URL.\"\"\"
-    # Handle both https://github.com/owner/repo and git@github.com:owner/repo
-    if "github.com/" in repo_url:
-        parts = repo_url.split("github.com/")[1].strip("/").replace(".git", "").split("/")
-    elif "github.com:" in repo_url:
-        parts = repo_url.split("github.com:")[1].strip("/").replace(".git", "").split("/")
-    else:
-        raise ValueError(f"Unable to parse GitHub repo URL: {repo_url}")
-
-    if len(parts) < 2:
-        raise ValueError(f"Invalid GitHub repo URL format: {repo_url}")
-
-    return parts[0], parts[1]
-
-
-def create_pull_request(issue_url: str) -> Optional[str]:
-    \"\"\"
-    Create a pull request for the changes made by the agent.
-
-    Returns:
-        PR URL if successful, None otherwise
-    \"\"\"
+def fetch_github_issue(issue_url: str) -> str:
+    api_url = issue_url.replace("github.com", "api.github.com/repos")
+    headers = {"Accept": "application/vnd.github.v3+json"}
     github_token = os.getenv("GITHUB_TOKEN")
-    if not github_token:
-        logger.warning("GITHUB_TOKEN not set, skipping PR creation")
-        return None
+    if github_token:
+        headers["Authorization"] = f"token {github_token}"
+    resp = requests.get(api_url, headers=headers, timeout=60)
+    resp.raise_for_status()
+    data = resp.json()
+    title = data.get("title", "No title")
+    body = data.get("body", "")
+    return f"GitHub Issue: {title}\\n\\n{body}"
 
-    try:
-        # Extract owner and repo
-        owner, repo = extract_repo_info(REPO_URL)
-        logger.info(f"Creating PR for {owner}/{repo}")
 
-        # Extract issue number from issue URL
-        issue_number = issue_url.split("/")[-1] if issue_url else "unknown"
+def resolve_task() -> str:
+    if ISSUE_TEXT_GIVEN:
+        logger.info("Using provided issue text")
+        return ISSUE_TEXT_GIVEN
+    if ISSUE_URL:
+        logger.info("Fetching GitHub issue from: %%s", ISSUE_URL)
+        return fetch_github_issue(ISSUE_URL)
+    raise RuntimeError("No task or issue URL provided")
 
-        # Generate unique branch name
-        timestamp = int(time.time())
-        branch_name = f"yudai/fix-issue-{issue_number}-{timestamp}"
 
-        # Configure git
-        logger.info("Configuring git...")
-        subprocess.run(
-            ["git", "config", "user.name", "Yudai Agent"],
-            cwd=TESTBED_PATH,
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.email", "agent@yudai.dev"],
-            cwd=TESTBED_PATH,
-            check=True,
-            capture_output=True,
-        )
+# ---------------------------------------------------------------------------
+# Constraint injection (appended to instance_template before agent init)
+# ---------------------------------------------------------------------------
 
-        # Check if there are any changes
-        status_result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=TESTBED_PATH,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+def _build_constraint_block() -> str:
+    lines = []
+    if SMALL_CHANGE:
+        lines.append("- Limit code edits to minimal, targeted changes directly tied to the issue.")
+    if BEST_EFFORT:
+        lines.append("- Continue working toward a solution even if automated checks fail, documenting any failures.")
+    if not lines:
+        return ""
+    return "\\n\\n## Constraints\\n\\n" + "\\n".join(lines)
 
-        if not status_result.stdout.strip():
-            logger.warning("No changes detected, skipping PR creation")
-            return None
 
-        logger.info(f"Changes detected:\\n{status_result.stdout}")
-
-        # Create and checkout new branch
-        logger.info(f"Creating branch: {branch_name}")
-        subprocess.run(
-            ["git", "checkout", "-b", branch_name],
-            cwd=TESTBED_PATH,
-            check=True,
-            capture_output=True,
-        )
-
-        # Stage all changes
-        logger.info("Staging changes...")
-        subprocess.run(
-            ["git", "add", "-A"],
-            cwd=TESTBED_PATH,
-            check=True,
-            capture_output=True,
-        )
-
-        # Create commit
-        commit_message = f\"\"\"Fix issue #{issue_number}
-
-Automated fix generated by Yudai Agent
-Model: {MODEL_NAME}
-Issue: {issue_url}
-
-Changes made by the agent to resolve the reported issue.
-\"\"\"
-        logger.info("Creating commit...")
-        subprocess.run(
-            ["git", "commit", "-m", commit_message],
-            cwd=TESTBED_PATH,
-            check=True,
-            capture_output=True,
-        )
-
-        # Push to remote
-        remote_url = REPO_URL
-        if "github.com" in remote_url and not remote_url.startswith("https://"):
-            remote_url = f"https://github.com/{owner}/{repo}.git"
-
-        # Add token to URL for authentication
-        auth_url = remote_url.replace(
-            "https://github.com/",
-            f"https://{github_token}@github.com/"
-        )
-
-        logger.info(f"Pushing branch to remote...")
-        push_result = subprocess.run(
-            ["git", "push", "-u", auth_url, branch_name],
-            cwd=TESTBED_PATH,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        if push_result.returncode != 0:
-            logger.error(f"Failed to push branch: {push_result.stderr}")
-            return None
-
-        logger.info("Branch pushed successfully")
-
-        # Create PR using GitHub API
-        logger.info("Creating pull request via GitHub API...")
-        pr_title = f"Fix: Resolve issue #{issue_number}"
-        pr_body = f\"\"\"## Description
-This PR contains automated fixes generated by Yudai Agent to resolve issue #{issue_number}.
-
-## Issue
-{issue_url}
-
-## Model Used
-{MODEL_NAME}
-
-## Agent Configuration
-- Small Change Mode: {SMALL_CHANGE}
-- Best Effort: {BEST_EFFORT}
-- Max Iterations: {MAX_ITERATIONS}
-
-## Changes
-The agent analyzed the issue and made targeted changes to resolve it. Please review the changes carefully before merging.
-
----
-*This PR was automatically generated by [Yudai](https://github.com/pranay5255/YudaiV3)*
-\"\"\"
-
-        api_url = f"https://api.github.com/repos/{owner}/{repo}/pulls"
-        headers = {
-            "Accept": "application/vnd.github.v3+json",
-            "Authorization": f"token {github_token}",
-        }
-        data = {
-            "title": pr_title,
-            "body": pr_body,
-            "head": branch_name,
-            "base": BRANCH_NAME,
-        }
-
-        response = requests.post(api_url, headers=headers, json=data, timeout=30)
-
-        if response.status_code == 201:
-            pr_data = response.json()
-            pr_url = pr_data.get("html_url")
-            logger.info(f"Pull request created successfully: {pr_url}")
-            print(f"\\n\\nPull Request Created: {pr_url}\\n\\n")
-            return pr_url
-        else:
-            logger.error(f"Failed to create PR: {response.status_code} - {response.text}")
-            return None
-
-    except Exception as exc:
-        logger.error(f"Error creating pull request: {exc}", exc_info=True)
-        return None
-
+# ---------------------------------------------------------------------------
+# Main execution using mini-swe-agent Python bindings
+# ---------------------------------------------------------------------------
 
 def main() -> int:
-    \"\"\"Execute mini-swe-agent on the GitHub issue.\"\"\"
-    
-    logger.info("Starting mini-swe-agent execution")
-    logger.info("Solve configuration: %s", SOLVE_PAYLOAD)
-    
-    exit_status, result, extra_info = None, None, None
-    
-    try:
-        # Verify API key is available
-        if not os.getenv("OPENROUTER_API_KEY"):
-            raise RuntimeError("OPENROUTER_API_KEY environment variable required")
-        
-        # Install mini-swe-agent
-        install_mini_swe_agent()
-        
-        # Clone target repository
-        clone_repository()
-        
-        # Determine task text
-        task = None
-        if ISSUE_TEXT_LITERAL and isinstance(ISSUE_TEXT_LITERAL, str):
-            logger.info("Using provided issue text")
-            task = ISSUE_TEXT_LITERAL
-        elif ISSUE_URL:
-            logger.info("Fetching GitHub issue from: %s", ISSUE_URL)
-            task = fetch_github_issue(ISSUE_URL)
-        else:
-            raise RuntimeError("No task or issue URL provided")
-        
-        logger.info("Task loaded successfully")
-        
-        # Load configuration
-        config = load_config()
-        logger.info("Configuration loaded successfully")
+    if not os.getenv("OPENROUTER_API_KEY"):
+        raise RuntimeError("OPENROUTER_API_KEY environment variable required")
 
-        # Optionally slow down OpenRouter requests to mitigate rate limiting
-        apply_openrouter_delay(OPENROUTER_CALL_DELAY)
-        
-        # Initialize model
-        model = get_model(MODEL_NAME, config.get("model", {}))
-        logger.info("Model initialized: %s", MODEL_NAME)
-        
-        # Initialize environment (LocalEnvironment for headless execution)
-        env = LocalEnvironment(**config.get("env", {}))
-        logger.info("Environment initialized: LocalEnvironment")
-        
-        # Initialize agent in yolo mode (non-interactive)
-        agent_config = config.get("agent", {})
-        agent = DefaultAgent(model, env, **agent_config)
-        logger.info("Agent initialized with config: %s", agent_config)
-        
-        # Run the agent
-        logger.info("Executing agent on task...")
-        exit_status, result = agent.run(task)
-        logger.info("Agent execution completed: %s", exit_status)
-        
-        # Save trajectory
-        save_traj(
-            agent,
-            OUTPUT_PATH,
-            exit_status=exit_status,
-            result=result,
-            extra_info=extra_info
-        )
-        logger.info("Trajectory saved to: %s", OUTPUT_PATH)
+    clone_repository()
+    task = resolve_task()
 
-        # Create pull request if enabled and agent succeeded
-        pr_url = None
-        if CREATE_PR and exit_status == "finished":
-            logger.info("Attempting to create pull request...")
-            pr_url = create_pull_request(ISSUE_URL)
-            if pr_url:
-                logger.info(f"Pull request created: {pr_url}")
-            else:
-                logger.warning("Failed to create pull request")
-        elif not CREATE_PR:
-            logger.info("PR creation disabled, skipping...")
-        else:
-            logger.info("Agent did not finish successfully, skipping PR creation")
+    # --- Load builtin mini-swe-agent config for system/instance templates ---
+    from minisweagent.run.utilities.config import get_config_from_spec
+    config = get_config_from_spec("mini")
 
-        # Record success
-        record_success(exit_status, result)
+    agent_cfg   = config.get("agent", {})
+    env_cfg     = config.get("environment", {}).get("env", {})
+    model_cfg   = config.get("model", {})
 
-        # Determine exit code
-        exit_code = 0 if exit_status == "finished" else 1
-        finalize_execution(exit_code)
+    # Merge our env additions on top of the builtin env
+    merged_env = {**env_cfg, **_AGENT_ENV}
 
-        if exit_code == 0:
-            print("\\n✓ Agent completed successfully")
-            print(f"Result: {result}")
-            if pr_url:
-                print(f"Pull Request: {pr_url}")
-        else:
-            print(f"\\n✗ Agent finished with status: {exit_status}")
-            print(f"Result: {result}")
+    # Append constraint block to instance_template if needed
+    instance_template = agent_cfg.get("instance_template", "")
+    constraint_block  = _build_constraint_block()
+    if constraint_block:
+        instance_template = instance_template.rstrip() + constraint_block
 
-        return exit_code
-        
-    except KeyboardInterrupt:
-        logger.warning("Execution interrupted by user")
-        record_failure(RuntimeError("Execution interrupted"))
-        finalize_execution(130)
-        return 130
-        
-    except Exception as exc:
-        logger.error("Agent execution failed: %s", exc, exc_info=True)
-        exit_status = type(exc).__name__
-        result = str(exc)
-        extra_info = {"traceback": traceback.format_exc()}
-        
-        # Attempt to save trajectory even on failure
-        try:
-            if OUTPUT_PATH and 'agent' in locals():
-                save_traj(agent, OUTPUT_PATH, exit_status=exit_status, result=result, extra_info=extra_info)
-        except Exception:
-            pass
-        
-        record_failure(exc)
-        finalize_execution(1)
+    # --- Model ---
+    # get_model selects OpenRouterModel when model_class="openrouter"
+    # The config dict (minus model_class) is forwarded to the constructor.
+    from minisweagent.models import get_model
+
+    model_init_cfg = {
+        "model_class": "openrouter",
+        # model_kwargs are passed through to the OpenRouter API call
+        "model_kwargs": {
+            "temperature": TEMPERATURE,
+            "max_tokens": MAX_TOKENS,
+        },
+        **{k: v for k, v in model_cfg.items() if k not in ("model_name", "model_class", "model_kwargs")},
+    }
+    model = get_model(input_model_name=MODEL_NAME, config=model_init_cfg)
+    logger.info("Model initialised: %%s", MODEL_NAME)
+
+    # --- Environment ---
+    from minisweagent.environments.local import LocalEnvironment
+
+    env = LocalEnvironment(
+        cwd=str(TESTBED_PATH),
+        env=merged_env,
+    )
+    logger.info("LocalEnvironment cwd=%%s", TESTBED_PATH)
+
+    # --- Agent ---
+    # output_path causes DefaultAgent.save() to be called after every step,
+    # so the trajectory file is written incrementally (readable mid-run via
+    # sandbox.read_file for SSE streaming).
+    from minisweagent.agents.default import DefaultAgent
+
+    agent = DefaultAgent(
+        model,
+        env,
+        system_template=agent_cfg.get("system_template", "You are a helpful assistant."),
+        instance_template=instance_template,
+        step_limit=STEP_LIMIT,    # 0 = unlimited
+        cost_limit=COST_LIMIT,
+        output_path=OUTPUT_PATH,  # auto-save after each step
+    )
+    logger.info("Agent initialised (step_limit=%%s cost_limit=%%s)", STEP_LIMIT, COST_LIMIT)
+
+    # --- Run ---
+    # agent.run() returns {"exit_status": str, "submission": str}
+    # "Submitted"     -> agent echoed COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT (success)
+    # "LimitsExceeded"-> step or cost limit hit
+    # Any exception class name -> unhandled error
+    logger.info("Executing agent...")
+    result      = agent.run(task)
+    exit_status = result.get("exit_status", "")
+    submission  = result.get("submission", "")
+
+    logger.info("Agent finished: exit_status=%%s", exit_status)
+
+    succeeded = exit_status == "Submitted"
+    if succeeded:
+        print(f"\\n✓ Agent completed successfully")
+        print(f"Submission: {submission}")
+        print(f"Trajectory saved to: {OUTPUT_PATH}")
+        return 0
+    else:
+        print(f"\\n✗ Agent finished with status: {exit_status}")
         return 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as exc:
+        logger.error("Script failed: %%s", exc, exc_info=True)
+        sys.exit(1)
 """
-
-SCRIPT_TEMPLATE = Template(_SCRIPT_TEMPLATE_STR)
 
 
 def build_agent_script(params: AgentScriptParams) -> str:
-    """
-    Render the agent script by substituting the normalized parameters into the template.
-    """
-
-    return SCRIPT_TEMPLATE.substitute(params.substitutions())
+    """Render the agent execution script with the given parameters."""
+    return _SCRIPT_TEMPLATE % params.substitutions()
 
 
 def build_pr_script(params: AgentScriptParams) -> str:
     """
-    Generate a bash script that creates a deep PR with issue context, diff stats,
-    and trajectory metadata.
-
-    This script is designed to run in the same sandbox after the agent has made
-    code changes (Phase 2). It inspects the GitHub issue via `gh`, reads the diff,
-    parses trajectory data, then creates a single commit + detailed PR.
-
-    Parameters are substituted at generation time from AgentScriptParams.
-    The script uses $GITHUB_TOKEN from the sandbox environment.
+    Generate a bash script that creates a PR with issue context, diff stats,
+    and trajectory metadata (Phase 2, runs in the same sandbox after agent completes).
     """
-
-    owner = params.owner
-    repo = params.repo_name
+    owner        = params.owner
+    repo         = params.repo_name
     issue_number = params.issue_number
-    branch_name = params.branch_name
-    model_name = params.model_name
-    issue_url = params.issue_url
-    repo_url = params.repo_url
+    branch_name  = params.branch_name
+    model_name   = params.model_name
+    issue_url    = params.issue_url
+    repo_url     = params.repo_url
 
-    # Escape fallback strings for safe embedding in bash
     fallback_title = (params.issue_title or "").replace("'", "'\\''")
-    fallback_body = (params.issue_body or "").replace("'", "'\\''")[:500]
+    fallback_body  = (params.issue_body or "").replace("'", "'\\''")[:500]
 
-    import time as _time
-    timestamp = int(_time.time())
+    timestamp = int(time.time())
     pr_branch = f"yudai/fix-issue-{issue_number}-{timestamp}"
 
-    script = f"""#!/usr/bin/env bash
+    return f"""\
+#!/usr/bin/env bash
 set -euo pipefail
 
 OWNER='{owner}'
@@ -859,13 +494,13 @@ for c in comments:
     print()
 " <<< "$ISSUE_JSON" 2>/dev/null || echo "")
 
-# ── Step 3: Capture diff statistics ──
+# ── Step 3: Diff statistics ──
 DIFF_STAT=$(git diff --stat 2>/dev/null || echo "No changes")
 DIFF_FILES=$(git diff --name-only 2>/dev/null || echo "")
 DIFF_SHORT=$(git diff --shortstat 2>/dev/null || echo "0 files changed")
 FILES_CHANGED_COUNT=$(echo "$DIFF_FILES" | grep -c '.' 2>/dev/null || echo "0")
 
-# ── Step 4: Parse trajectory metadata ──
+# ── Step 4: Trajectory metadata ──
 TRAJ_STATS=$(python3 -c "
 import json, sys
 try:
@@ -884,7 +519,7 @@ except Exception as e:
 
 # ── Step 5: Check for changes ──
 if [ -z "$(git status --porcelain)" ]; then
-    echo "ERROR: No changes detected in testbed. Nothing to commit."
+    echo "ERROR: No changes detected. Nothing to commit."
     exit 1
 fi
 
@@ -904,23 +539,10 @@ ${{DIFF_SHORT}}"
 
 git commit -m "$COMMIT_MSG"
 
-# ── Step 7: Push ──
-AUTH_URL=$(echo "$REPO_URL" | sed "s|https://github.com/|https://${{GITHUB_TOKEN}}@github.com/|")
-if [[ ! "$AUTH_URL" == *.git ]]; then
-    AUTH_URL="${{AUTH_URL}}.git"
-fi
-git push -u "$AUTH_URL" "$PR_BRANCH"
+# ── Step 7: Push using .netrc credential (no token in URL) ──
+git push -u origin "$PR_BRANCH"
 
 # ── Step 8: Create PR ──
-PR_BODY=$(cat <<'PRBODYEOF'
-## Summary
-
-fix: resolve #ISSUE_NUM_PLACEHOLDER — ISSUE_TITLE_PLACEHOLDER
-
-PRBODYEOF
-)
-
-# Build the full PR body dynamically
 PR_BODY="## Summary
 
 fix: resolve #${{ISSUE_NUMBER}} — ${{ISSUE_TITLE}}
@@ -962,7 +584,5 @@ gh pr create \\
     --base "$BASE_BRANCH" \\
     --head "$PR_BRANCH"
 
-echo "Phase 2: Deep PR creation complete."
+echo "Phase 2: PR creation complete."
 """
-
-    return script
