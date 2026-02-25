@@ -316,13 +316,12 @@ def get_runtime_for_session(
 # ---------------------------------------------------------------------------
 
 
-def _resolve_sandbox_tunnel(db: Session, session_id: str) -> str:
+def _resolve_sandbox_tunnel(db: Session, session_id: str, user_id: Optional[int] = None) -> str:
     """Look up the tunnel_url for a session's active sandbox. Raises on failure."""
-    session_obj = (
-        db.query(ChatSession)
-        .filter(ChatSession.session_id == session_id)
-        .first()
-    )
+    query = db.query(ChatSession).filter(ChatSession.session_id == session_id)
+    if user_id is not None:
+        query = query.filter(ChatSession.user_id == user_id)
+    session_obj = query.first()
     if not session_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
@@ -359,7 +358,7 @@ async def proxy_http(
     current_user: User = Depends(get_current_user),
 ) -> Response:
     """Reverse-proxy HTTP requests to the sandbox tunnel (same origin, no CORS)."""
-    tunnel_url = _resolve_sandbox_tunnel(db, session_id)
+    tunnel_url = _resolve_sandbox_tunnel(db, session_id, user_id=current_user.id)
 
     upstream_url = f"{tunnel_url.rstrip('/')}/{path}"
     if request.url.query:
@@ -420,7 +419,7 @@ async def proxy_websocket(
         await websocket.close(code=4401, reason="invalid_session_token")
         return
 
-    tunnel_url = _resolve_sandbox_tunnel(db, session_id)
+    tunnel_url = _resolve_sandbox_tunnel(db, session_id, user_id=user.id)
     # Convert http(s) to ws(s)
     ws_upstream_url = tunnel_url.rstrip("/").replace("https://", "wss://").replace("http://", "ws://")
     ws_upstream_url = f"{ws_upstream_url}/{path}?token={token}"
