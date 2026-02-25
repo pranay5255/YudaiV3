@@ -671,6 +671,40 @@ export interface CancelSolveResponse {
 }
 
 // ============================================================================
+// WS UNIFIED PROTOCOL TYPES
+// ============================================================================
+
+export type WSMessageType =
+  | 'chat_message'
+  | 'user_response'
+  | 'trajectory_update'
+  | 'tool_call'
+  | 'agent_question'
+  | 'status'
+  | 'heartbeat'
+  | 'error'
+  | 'done';
+
+export interface WSEnvelope {
+  type: WSMessageType;
+  ts: string;
+  payload: Record<string, unknown>;
+  seq: number;
+}
+
+export interface ToolCallInfo {
+  tool_name: string;
+  tool_input: Record<string, unknown>;
+  call_id?: string;
+}
+
+export interface AgentQuestionInfo {
+  question_id: string;
+  question_text: string;
+  options: string[];
+}
+
+// ============================================================================
 // TRAJECTORY STREAMING TYPES
 // ============================================================================
 
