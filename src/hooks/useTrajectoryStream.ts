@@ -77,7 +77,7 @@ export function useTrajectoryStream({
       }
       const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
       const parsed = new URL(streamUrl, origin);
-      const tunnelPath = parsed.pathname.replace(/^\/api\/daifu/, '');
+      const tunnelPath = parsed.pathname.replace(/^\/(?:api\/)?daifu/, '');
       streamUrl = `${tunnelUrl.replace(/\/$/, '')}${tunnelPath}${parsed.search}`;
     }
     const urlWithToken = `${streamUrl}?token=${encodeURIComponent(sessionToken)}`;
