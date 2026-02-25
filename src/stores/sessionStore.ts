@@ -111,6 +111,17 @@ const buildSessionTargetUrl = (
   params: Record<string, string>
 ): string => {
   const resolved = buildApiUrl(endpoint, params);
+
+  if (realtimeFeatureFlags.controllerProxyEnabled) {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    const parsed = new URL(resolved, origin);
+    const match = parsed.pathname.match(/\/daifu\/sessions\/([^/]+)(\/.*)?$/);
+    if (match) {
+      const [, sessionId, rest] = match;
+      return `/api/controller/proxy/sessions/${sessionId}/sessions/${sessionId}${rest || ''}${parsed.search}`;
+    }
+  }
+
   if (!realtimeFeatureFlags.tunnelModeEnabled) {
     return resolved;
   }
@@ -439,7 +450,11 @@ export const useSessionStore = create<SessionState>()(
                 )
               );
 
-              if (realtimeFeatureFlags.tunnelModeEnabled && !runtime?.tunnel_url) {
+              if (
+                !realtimeFeatureFlags.controllerProxyEnabled &&
+                realtimeFeatureFlags.tunnelModeEnabled &&
+                !runtime?.tunnel_url
+              ) {
                 throw new AppError('TUNNEL_UNAVAILABLE', TUNNEL_UNAVAILABLE_MESSAGE);
               }
             }
@@ -501,7 +516,11 @@ export const useSessionStore = create<SessionState>()(
                 )
               );
 
-              if (realtimeFeatureFlags.tunnelModeEnabled && !runtime?.tunnel_url) {
+              if (
+                !realtimeFeatureFlags.controllerProxyEnabled &&
+                realtimeFeatureFlags.tunnelModeEnabled &&
+                !runtime?.tunnel_url
+              ) {
                 throw new AppError('TUNNEL_UNAVAILABLE', TUNNEL_UNAVAILABLE_MESSAGE);
               }
             }
@@ -595,7 +614,11 @@ export const useSessionStore = create<SessionState>()(
                 )
               );
 
-              if (realtimeFeatureFlags.tunnelModeEnabled && !runtime?.tunnel_url) {
+              if (
+                !realtimeFeatureFlags.controllerProxyEnabled &&
+                realtimeFeatureFlags.tunnelModeEnabled &&
+                !runtime?.tunnel_url
+              ) {
                 throw new AppError('TUNNEL_UNAVAILABLE', TUNNEL_UNAVAILABLE_MESSAGE);
               }
             }
