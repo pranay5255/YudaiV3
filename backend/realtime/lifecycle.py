@@ -28,8 +28,12 @@ from sqlalchemy.orm import Session
 
 from utils import utc_now
 
+from config.realtime_flags import get_realtime_feature_flags
+
 from .cache_store import SessionCacheStore
 from .errors import RealtimeErrorCode, as_http_exception
+from .modal_registry import get_modal_registry
+from .modal_sandbox import RealtimeModalSandbox
 from .sandbox_manager import SandboxManager
 
 
@@ -56,7 +60,7 @@ class RealtimeLifecycleService:
     # Sandbox + runtime provisioning
     # ---------------------------------------------------------------------
 
-    def create_runtime_for_session(
+    async def create_runtime_for_session(
         self,
         db: Session,
         *,
@@ -105,7 +109,21 @@ class RealtimeLifecycleService:
 
         sandbox.active_session_id = session.id
         sandbox.status = SandboxStatus.RUNNING.value
-        sandbox.tunnel_url = sandbox.tunnel_url or self.sandbox_manager.build_tunnel_url(sandbox.id)
+
+        flags = get_realtime_feature_flags()
+        if flags.modal_provisioning_enabled:
+            controller_base_url = os.getenv("CONTROLLER_BASE_URL", "http://localhost:8000")
+            github_token = os.getenv("GITHUB_TOKEN")
+            modal_sb = await RealtimeModalSandbox.create(
+                sandbox_db_id=sandbox.id,
+                controller_base_url=controller_base_url,
+                github_token=github_token,
+            )
+            sandbox.tunnel_url = modal_sb.tunnel_url
+            await get_modal_registry().register(sandbox.id, modal_sb)
+        else:
+            sandbox.tunnel_url = sandbox.tunnel_url or self.sandbox_manager.build_tunnel_url(sandbox.id)
+
         sandbox.tunnel_token_ttl_seconds = sandbox.tunnel_token_ttl_seconds or 3600
         sandbox.last_heartbeat_at = utc_now()
 
@@ -119,6 +137,8 @@ class RealtimeLifecycleService:
                 "environment": identity.environment,
             }
         )
+        if flags.modal_provisioning_enabled:
+            lifecycle_metadata["modal_sandbox_id"] = modal_sb.modal_sandbox_id
         sandbox.lifecycle_metadata = lifecycle_metadata
 
         git_bootstrap = self.sandbox_manager.ensure_git_bootstrap(
@@ -613,6 +633,14 @@ class RealtimeLifecycleService:
         sandbox.status = SandboxStatus.TERMINATED.value
         sandbox.terminated_at = utc_now()
         sandbox.active_session_id = None
+
+        flags = get_realtime_feature_flags()
+        if flags.modal_provisioning_enabled:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(get_modal_registry().terminate_and_remove(sandbox.id))
+            except RuntimeError:
+                pass
 
         runtimes = (
             db.query(SessionRuntime)
