@@ -1,7 +1,15 @@
 // src/config/api.ts - Ultra-minimal Contract One API Configuration
 
 // Contract One: All API calls through /api/* umbrella
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').trim();
+export const resolveApiBase = (value?: string): string => {
+  const normalized = (value || '/api').trim() || '/api';
+  if (normalized === '/') {
+    return normalized;
+  }
+  return normalized.replace(/\/+$/, '');
+};
+
+export const API_BASE = resolveApiBase(import.meta.env.VITE_API_BASE_URL);
 
 export const API = {
   AUTH: {
