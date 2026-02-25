@@ -448,7 +448,7 @@ async def create_session(
             repo_url = f"https://github.com/{request.repo_owner}/{request.repo_name}.git"
 
             try:
-                envelope = lifecycle.create_runtime_for_session(
+                envelope = await lifecycle.create_runtime_for_session(
                     db,
                     session=db_session,
                     user_id=current_user.id,
