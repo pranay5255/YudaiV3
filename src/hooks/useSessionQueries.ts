@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { API, buildApiUrl } from '../config/api';
 import { realtimeFeatureFlags } from '../config/realtimeFlags';
+import { buildControllerProxySessionUrl } from '../utils/realtimeRouting';
 import { useAuthStore } from '../stores/authStore';
 import { useSessionStore } from '../stores/sessionStore';
 import type {
@@ -55,12 +56,9 @@ const buildSessionTargetUrl = (
   const resolved = buildApiUrl(endpoint, params);
 
   if (realtimeFeatureFlags.controllerProxyEnabled) {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
-    const parsed = new URL(resolved, origin);
-    const match = parsed.pathname.match(/\/daifu\/sessions\/([^/]+)(\/.*)?$/);
-    if (match) {
-      const [, sessionId, rest] = match;
-      return `/api/controller/proxy/sessions/${sessionId}/sessions/${sessionId}${rest || ''}${parsed.search}`;
+    const proxied = buildControllerProxySessionUrl(resolved);
+    if (proxied) {
+      return proxied;
     }
   }
 
@@ -77,7 +75,7 @@ const buildSessionTargetUrl = (
 
   const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
   const parsed = new URL(resolved, origin);
-  const tunnelPath = parsed.pathname.replace(/^\/api\/daifu/, '');
+  const tunnelPath = parsed.pathname.replace(/^\/(?:api\/)?daifu/, '');
   return `${tunnelUrl.replace(/\/$/, '')}${tunnelPath}${parsed.search}`;
 };
 
