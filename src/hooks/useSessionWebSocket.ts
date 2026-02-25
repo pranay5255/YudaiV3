@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { buildUnifiedSessionWebSocketUrl } from '../utils/realtimeRouting';
 import { useAuthStore } from '../stores/authStore';
 import type {
   TrajectoryData,
@@ -82,10 +83,10 @@ export function useSessionWebSocket({
   const connect = useCallback(() => {
     if (!sessionToken || !sessionId) return;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl =
-      `${protocol}//${host}/api/controller/proxy/sessions/${sessionId}/ws/sessions/${sessionId}/ws/unified?token=${encodeURIComponent(sessionToken)}`;
+    const wsUrl = buildUnifiedSessionWebSocketUrl({
+      sessionId,
+      sessionToken,
+    });
 
     setStatus('connecting');
     setError(null);
