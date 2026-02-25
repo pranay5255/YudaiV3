@@ -18,6 +18,10 @@ from github import github_router
 from realtime.controller_routes import router as controller_router
 
 
+def _parse_allow_origins(raw: str) -> list[str]:
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("[controller] starting realtime controller host")
@@ -36,9 +40,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv(
-        "ALLOW_ORIGINS", "http://localhost:3000,https://yudai.app"
-    ).split(","),
+    allow_origins=_parse_allow_origins(
+        os.getenv("ALLOW_ORIGINS", "http://localhost:3000,https://yudai.app")
+    ),
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
