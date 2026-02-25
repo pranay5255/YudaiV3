@@ -44,6 +44,7 @@ export const API = {
     CLEANUP: `${API_BASE}/controller/sandboxes/cleanup`,
     RUNTIME_ENSURE: `${API_BASE}/controller/sessions/{sessionId}/runtime`,
     RUNTIME_DETAIL: `${API_BASE}/controller/sessions/{sessionId}/runtime`,
+    PROXY: `${API_BASE}/controller/proxy/sessions/{sessionId}`,
   },
   SYSTEM: {
     HEALTH: `${API_BASE}/health`,
