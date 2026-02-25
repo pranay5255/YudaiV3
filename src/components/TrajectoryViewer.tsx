@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { FileText, ChevronRight, ChevronDown, DollarSign, MessageSquare, Clock, CheckCircle, XCircle, AlertCircle, Radio } from 'lucide-react';
+import { FileText, ChevronRight, ChevronDown, DollarSign, MessageSquare, Clock, CheckCircle, XCircle, AlertCircle, Radio, Wrench, HelpCircle } from 'lucide-react';
 import { useTrajectoryStream } from '../hooks/useTrajectoryStream';
-import type { TrajectoryData } from '../types/sessionTypes';
+import { useSessionWebSocket } from '../hooks/useSessionWebSocket';
+import { realtimeFeatureFlags } from '../config/realtimeFlags';
+import type { TrajectoryData, ToolCallInfo, AgentQuestionInfo } from '../types/sessionTypes';
 import trajectoryData from '../data/last_mini_run.traj.json';
 
 interface TrajectoryViewerProps {
@@ -25,18 +27,29 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({
   const [expandedMessages, setExpandedMessages] = useState<Set<number>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Live streaming hook
-  const {
-    trajectory: liveTrajectory,
-    streamStatus,
-    error: streamError,
-    messageCount: liveMessageCount,
-  } = useTrajectoryStream({
+  const useWsMode = isLive && realtimeFeatureFlags.wsUnifiedEnabled;
+
+  // WS unified hook (Phase 5)
+  const wsStream = useSessionWebSocket({
+    sessionId,
+    enabled: useWsMode,
+  });
+
+  // SSE streaming hook (legacy)
+  const sseStream = useTrajectoryStream({
     sessionId,
     solveId,
     runId,
-    enabled: isLive,
+    enabled: isLive && !realtimeFeatureFlags.wsUnifiedEnabled,
   });
+
+  // Unify the two streams
+  const liveTrajectory = useWsMode ? wsStream.trajectory : sseStream.trajectory;
+  const streamStatus = useWsMode ? wsStream.status : sseStream.streamStatus;
+  const streamError = useWsMode ? wsStream.error : sseStream.error;
+  const liveMessageCount = useWsMode ? wsStream.messageCount : sseStream.messageCount;
+  const toolCalls: ToolCallInfo[] = useWsMode ? wsStream.toolCalls : [];
+  const agentQuestion: AgentQuestionInfo | null = useWsMode ? wsStream.agentQuestion : null;
 
   // Static fallback data
   const [staticState, setStaticState] = useState<{
@@ -241,6 +254,47 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({
           </div>
         )}
       </div>
+
+      {/* Agent Question (WS mode only) */}
+      {agentQuestion && (
+        <div className="mx-4 mt-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <HelpCircle className="w-4 h-4 text-amber-400" />
+            <p className="text-sm font-medium text-amber-300">Agent Question</p>
+          </div>
+          <p className="text-sm text-fg mb-2">{agentQuestion.question_text}</p>
+          {agentQuestion.options.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {agentQuestion.options.map((opt) => (
+                <button
+                  key={opt}
+                  onClick={() => wsStream.sendUserResponse(agentQuestion.question_id, opt)}
+                  className="px-3 py-1 text-xs bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-md text-amber-200 transition-colors"
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Recent Tool Calls (WS mode only) */}
+      {toolCalls.length > 0 && (
+        <div className="mx-4 mt-2 p-3 bg-zinc-800/50 border border-zinc-700/50 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <Wrench className="w-4 h-4 text-fg/60" />
+            <p className="text-xs font-medium text-fg/60">Recent Tool Calls ({toolCalls.length})</p>
+          </div>
+          <div className="space-y-1">
+            {toolCalls.slice(-5).map((tc, i) => (
+              <div key={i} className="text-xs text-fg/50 font-mono">
+                {tc.tool_name}({Object.keys(tc.tool_input).join(', ')})
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Messages List */}
       <div className="flex-1 overflow-y-auto p-4">

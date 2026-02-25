@@ -14,12 +14,18 @@ class RealtimeErrorCode(str, Enum):
     TUNNEL_AUTH_EXPIRED = "TUNNEL_AUTH_EXPIRED"
     TUNNEL_TERMINATED = "TUNNEL_TERMINATED"
     TUNNEL_RESOLVE_FAILED = "TUNNEL_RESOLVE_FAILED"
+    # Deprecated: SSE codes superseded by WS unified protocol
     SSE_AUTH_INVALID = "SSE_AUTH_INVALID"
     SSE_STREAM_TIMEOUT = "SSE_STREAM_TIMEOUT"
     SSE_STREAM_TERMINATED = "SSE_STREAM_TERMINATED"
     WS_AUTH_INVALID = "WS_AUTH_INVALID"
     WS_RETRY_EXHAUSTED = "WS_RETRY_EXHAUSTED"
     SINGLE_ACTIVE_EDITOR_CONFLICT = "SINGLE_ACTIVE_EDITOR_CONFLICT"
+    WS_PROXY_UPSTREAM_UNAVAILABLE = "WS_PROXY_UPSTREAM_UNAVAILABLE"
+    WS_HEARTBEAT_TIMEOUT = "WS_HEARTBEAT_TIMEOUT"
+    WS_MESSAGE_PARSE_ERROR = "WS_MESSAGE_PARSE_ERROR"
+    PROXY_UPSTREAM_ERROR = "PROXY_UPSTREAM_ERROR"
+    MODAL_PROVISION_FAILED = "MODAL_PROVISION_FAILED"
 
 
 @dataclass(frozen=True)
@@ -93,6 +99,36 @@ ERROR_SPECS: Dict[RealtimeErrorCode, RealtimeErrorSpec] = {
             "Another active editor session already owns this sandbox identity. "
             "Finish or terminate that session before creating a new one."
         ),
+    ),
+    RealtimeErrorCode.WS_PROXY_UPSTREAM_UNAVAILABLE: RealtimeErrorSpec(
+        code=RealtimeErrorCode.WS_PROXY_UPSTREAM_UNAVAILABLE,
+        http_status=502,
+        retryable=True,
+        message="Sandbox WebSocket upstream is unavailable. Retrying...",
+    ),
+    RealtimeErrorCode.WS_HEARTBEAT_TIMEOUT: RealtimeErrorSpec(
+        code=RealtimeErrorCode.WS_HEARTBEAT_TIMEOUT,
+        http_status=408,
+        retryable=True,
+        message="WebSocket heartbeat timed out. Reconnecting...",
+    ),
+    RealtimeErrorCode.WS_MESSAGE_PARSE_ERROR: RealtimeErrorSpec(
+        code=RealtimeErrorCode.WS_MESSAGE_PARSE_ERROR,
+        http_status=400,
+        retryable=False,
+        message="Failed to parse WebSocket message.",
+    ),
+    RealtimeErrorCode.PROXY_UPSTREAM_ERROR: RealtimeErrorSpec(
+        code=RealtimeErrorCode.PROXY_UPSTREAM_ERROR,
+        http_status=502,
+        retryable=True,
+        message="Upstream sandbox returned an error. Retry in a few seconds.",
+    ),
+    RealtimeErrorCode.MODAL_PROVISION_FAILED: RealtimeErrorSpec(
+        code=RealtimeErrorCode.MODAL_PROVISION_FAILED,
+        http_status=503,
+        retryable=False,
+        message="Failed to provision Modal sandbox compute.",
     ),
 }
 

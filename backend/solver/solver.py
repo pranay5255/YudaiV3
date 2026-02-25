@@ -188,7 +188,19 @@ async def stream_trajectory(
 
     Authentication via ?token= query parameter (EventSource doesn't support headers).
     Sends trajectory_update events with new messages every 3s.
+
+    When ws_unified_enabled is true and sse_stream_enabled is false, returns 410 Gone
+    to signal clients to use the unified WebSocket endpoint instead.
     """
+    from config.realtime_flags import get_realtime_feature_flags
+
+    flags = get_realtime_feature_flags()
+    if flags.ws_unified_enabled and not flags.sse_stream_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="SSE streaming is deprecated. Use the unified WebSocket endpoint.",
+        )
+
     return StreamingResponse(
         _trajectory_stream_generator(request, solve_id, run_id),
         media_type="text/event-stream",

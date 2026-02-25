@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Optional
 
-from auth.github_oauth import get_current_user
+import httpx
+from auth.github_oauth import get_current_user, validate_session_token
+from config.realtime_flags import get_realtime_feature_flags
 from db.database import get_db
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
-from models import ChatSession, SessionRuntime, User
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, WebSocket, status
+from models import ChatSession, Sandbox, SandboxStatus, SessionRuntime, User
 from sqlalchemy.orm import Session
 
+from .errors import RealtimeErrorCode, as_http_exception
 from .lifecycle import get_realtime_lifecycle_service
 from .schemas import (
     CleanupResponse,
@@ -22,7 +26,15 @@ from .schemas import (
     TunnelResolveResponse,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["realtime-controller"])
+
+# Hop-by-hop headers that must not be forwarded through a proxy
+_HOP_BY_HOP_HEADERS = frozenset({
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+    "te", "trailers", "transfer-encoding", "upgrade",
+})
 
 
 
@@ -41,13 +53,15 @@ def _to_sandbox_response(sandbox) -> SandboxResponse:
 
 def _to_runtime_response(runtime: SessionRuntime) -> RuntimeResponse:
     metadata = runtime.runtime_metadata if isinstance(runtime.runtime_metadata, dict) else {}
+    flags = get_realtime_feature_flags()
     return RuntimeResponse(
         runtime_id=runtime.runtime_id,
         sandbox_id=runtime.sandbox_id or "",
         identity_key=(metadata.get("identity_key") if isinstance(metadata, dict) else "")
         or "",
         status=runtime.status,
-        tunnel_url=runtime.tunnel_url,
+        tunnel_url=None if flags.controller_proxy_enabled else runtime.tunnel_url,
+        proxy_base_url=f"/api/controller/proxy/sessions/" if flags.controller_proxy_enabled else None,
         token_ttl_seconds=3600,
         tunnel_expires_at=runtime.tunnel_expires_at,
         completion_issue_created=runtime.completion_issue_created,
@@ -62,7 +76,7 @@ def _to_runtime_response(runtime: SessionRuntime) -> RuntimeResponse:
     response_model=SandboxResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_sandbox(
+async def create_sandbox(
     request: SandboxCreateRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -98,7 +112,7 @@ def create_sandbox(
             detail="Session not found for sandbox provisioning",
         )
 
-    envelope = lifecycle.create_runtime_for_session(
+    envelope = await lifecycle.create_runtime_for_session(
         db,
         session=session_obj,
         user_id=current_user.id,
@@ -221,7 +235,7 @@ def cleanup_sandboxes(
     response_model=RuntimeResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def ensure_runtime_for_session(
+async def ensure_runtime_for_session(
     session_id: str,
     request: RuntimeEnsureRequest,
     db: Session = Depends(get_db),
@@ -240,7 +254,7 @@ def ensure_runtime_for_session(
     if not session_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
-    envelope = lifecycle.create_runtime_for_session(
+    envelope = await lifecycle.create_runtime_for_session(
         db,
         session=session_obj,
         user_id=current_user.id,
@@ -295,3 +309,160 @@ def get_runtime_for_session(
         response.identity_key = sandbox.identity_key
         response.token_ttl_seconds = sandbox.tunnel_token_ttl_seconds or 3600
     return response
+
+
+# ---------------------------------------------------------------------------
+# Helper: resolve sandbox tunnel_url for a session
+# ---------------------------------------------------------------------------
+
+
+def _resolve_sandbox_tunnel(db: Session, session_id: str) -> str:
+    """Look up the tunnel_url for a session's active sandbox. Raises on failure."""
+    session_obj = (
+        db.query(ChatSession)
+        .filter(ChatSession.session_id == session_id)
+        .first()
+    )
+    if not session_obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    lifecycle = get_realtime_lifecycle_service()
+    runtime = lifecycle._get_latest_runtime(db, session_id=session_obj.id)
+    if not runtime or not runtime.sandbox_id:
+        raise as_http_exception(RealtimeErrorCode.TUNNEL_UNAVAILABLE)
+
+    sandbox = db.query(Sandbox).filter(Sandbox.id == runtime.sandbox_id).first()
+    if not sandbox:
+        raise as_http_exception(RealtimeErrorCode.TUNNEL_UNAVAILABLE)
+    if sandbox.status == SandboxStatus.TERMINATED.value:
+        raise as_http_exception(RealtimeErrorCode.TUNNEL_TERMINATED)
+    if not sandbox.tunnel_url:
+        raise as_http_exception(RealtimeErrorCode.TUNNEL_UNAVAILABLE)
+
+    return sandbox.tunnel_url
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: HTTP reverse proxy
+# ---------------------------------------------------------------------------
+
+
+@router.api_route(
+    "/controller/proxy/sessions/{session_id}/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+)
+async def proxy_http(
+    request: Request,
+    session_id: str,
+    path: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Reverse-proxy HTTP requests to the sandbox tunnel (same origin, no CORS)."""
+    tunnel_url = _resolve_sandbox_tunnel(db, session_id)
+
+    upstream_url = f"{tunnel_url.rstrip('/')}/{path}"
+    if request.url.query:
+        upstream_url = f"{upstream_url}?{request.url.query}"
+
+    # Forward headers, stripping hop-by-hop
+    forward_headers = {
+        k: v
+        for k, v in request.headers.items()
+        if k.lower() not in _HOP_BY_HOP_HEADERS and k.lower() != "host"
+    }
+
+    body = await request.body()
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            upstream_resp = await client.request(
+                method=request.method,
+                url=upstream_url,
+                headers=forward_headers,
+                content=body,
+            )
+    except httpx.ConnectError:
+        raise as_http_exception(RealtimeErrorCode.PROXY_UPSTREAM_ERROR, detail="Sandbox unreachable")
+
+    # Forward response headers, stripping hop-by-hop
+    resp_headers = {
+        k: v
+        for k, v in upstream_resp.headers.items()
+        if k.lower() not in _HOP_BY_HOP_HEADERS
+    }
+
+    return Response(
+        content=upstream_resp.content,
+        status_code=upstream_resp.status_code,
+        headers=resp_headers,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: WebSocket reverse proxy
+# ---------------------------------------------------------------------------
+
+
+@router.websocket("/controller/proxy/sessions/{session_id}/ws/{path:path}")
+async def proxy_websocket(
+    websocket: WebSocket,
+    session_id: str,
+    path: str,
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+) -> None:
+    """Bidirectional WebSocket relay between client and sandbox."""
+    import websockets
+
+    user = validate_session_token(db, token)
+    if not user:
+        await websocket.close(code=4401, reason="invalid_session_token")
+        return
+
+    tunnel_url = _resolve_sandbox_tunnel(db, session_id)
+    # Convert http(s) to ws(s)
+    ws_upstream_url = tunnel_url.rstrip("/").replace("https://", "wss://").replace("http://", "ws://")
+    ws_upstream_url = f"{ws_upstream_url}/{path}?token={token}"
+
+    await websocket.accept()
+
+    try:
+        async with websockets.connect(ws_upstream_url) as upstream_ws:
+
+            async def client_to_upstream() -> None:
+                try:
+                    while True:
+                        data = await websocket.receive_text()
+                        await upstream_ws.send(data)
+                except Exception:
+                    pass
+
+            async def upstream_to_client() -> None:
+                try:
+                    async for msg in upstream_ws:
+                        if isinstance(msg, str):
+                            await websocket.send_text(msg)
+                        else:
+                            await websocket.send_bytes(msg)
+                except Exception:
+                    pass
+
+            import asyncio
+            done, pending = await asyncio.wait(
+                [
+                    asyncio.create_task(client_to_upstream()),
+                    asyncio.create_task(upstream_to_client()),
+                ],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+
+    except Exception as e:
+        logger.warning("WS proxy error for session %s: %s", session_id, e)
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass

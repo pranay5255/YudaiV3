@@ -12,6 +12,8 @@ export interface RealtimeFeatureFlags {
   tunnelModeEnabled: boolean;
   wsChatEnabled: boolean;
   sseStreamEnabled: boolean;
+  controllerProxyEnabled: boolean;
+  wsUnifiedEnabled: boolean;
   contractVersion: string;
 }
 
@@ -27,6 +29,14 @@ export const realtimeFeatureFlags: RealtimeFeatureFlags = {
   wsChatEnabled: parseFlag(import.meta.env.VITE_REALTIME_WS_CHAT_ENABLED, false),
   sseStreamEnabled: parseFlag(
     import.meta.env.VITE_REALTIME_SSE_STREAM_ENABLED,
+    false
+  ),
+  controllerProxyEnabled: parseFlag(
+    import.meta.env.VITE_REALTIME_CONTROLLER_PROXY_ENABLED,
+    false
+  ),
+  wsUnifiedEnabled: parseFlag(
+    import.meta.env.VITE_REALTIME_WS_UNIFIED_ENABLED,
     false
   ),
   contractVersion: (

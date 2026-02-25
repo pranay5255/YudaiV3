@@ -53,6 +53,17 @@ const buildSessionTargetUrl = (
   params: Record<string, string>
 ): string => {
   const resolved = buildApiUrl(endpoint, params);
+
+  if (realtimeFeatureFlags.controllerProxyEnabled) {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    const parsed = new URL(resolved, origin);
+    const match = parsed.pathname.match(/\/daifu\/sessions\/([^/]+)(\/.*)?$/);
+    if (match) {
+      const [, sessionId, rest] = match;
+      return `/api/controller/proxy/sessions/${sessionId}/sessions/${sessionId}${rest || ''}${parsed.search}`;
+    }
+  }
+
   if (!realtimeFeatureFlags.tunnelModeEnabled) {
     return resolved;
   }
