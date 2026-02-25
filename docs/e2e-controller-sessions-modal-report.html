@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YudaiV3 E2E Report - Controller Host, Sessions API, Modal Provisioning</title>
+  <style>
+    :root {
+      --bg: #f5f1e8;
+      --paper: #fffdf8;
+      --ink: #1f1a16;
+      --muted: #6b625a;
+      --line: #ddd2c2;
+      --accent: #0f766e;
+      --warn: #b45309;
+      --danger: #b91c1c;
+      --ok: #166534;
+      --code-bg: #171411;
+      --code-ink: #f8f3ea;
+      --shadow: 0 14px 40px rgba(41, 27, 17, 0.08);
+      --radius: 16px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 20% 0%, rgba(15, 118, 110, 0.08), transparent 40%),
+        radial-gradient(circle at 100% 10%, rgba(185, 28, 28, 0.06), transparent 45%),
+        var(--bg);
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+      line-height: 1.5;
+    }
+
+    .wrap {
+      width: min(1120px, calc(100% - 32px));
+      margin: 28px auto 56px;
+    }
+
+    .hero {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.88));
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      box-shadow: var(--shadow);
+      border-radius: 22px;
+      padding: 28px 28px 22px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto -80px -110px auto;
+      width: 260px;
+      height: 260px;
+      background:
+        repeating-linear-gradient(
+          -45deg,
+          rgba(15, 118, 110, 0.11) 0 8px,
+          rgba(15, 118, 110, 0.03) 8px 16px
+        );
+      border-radius: 50%;
+      transform: rotate(8deg);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(1.6rem, 2vw + 1rem, 2.4rem);
+      line-height: 1.12;
+      letter-spacing: -0.02em;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 1.25rem;
+      letter-spacing: -0.01em;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 1.02rem;
+    }
+
+    p { margin: 0 0 10px; }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0 0;
+    }
+
+    .chip {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.8);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 0.86rem;
+      color: var(--muted);
+    }
+
+    .chip strong { color: var(--ink); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+
+    .span-12 { grid-column: span 12; }
+    .span-8 { grid-column: span 8; }
+    .span-6 { grid-column: span 6; }
+    .span-4 { grid-column: span 4; }
+
+    @media (max-width: 900px) {
+      .span-8, .span-6, .span-4 { grid-column: span 12; }
+      .hero { padding: 22px 18px 18px; }
+      .card { padding: 16px; }
+    }
+
+    .kpi {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .kpi .box {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      padding: 12px;
+    }
+
+    .kpi .label {
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .kpi .value {
+      font-size: 1.35rem;
+      font-weight: 700;
+      font-family: "Avenir Next Condensed", "Franklin Gothic Medium", "Arial Narrow", sans-serif;
+      letter-spacing: 0.01em;
+    }
+
+    .value.ok { color: var(--ok); }
+    .value.warn { color: var(--warn); }
+    .value.bad { color: var(--danger); }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.82rem;
+      border: 1px solid currentColor;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .status::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      display: inline-block;
+    }
+
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--danger); }
+    .info { color: var(--accent); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.94rem;
+    }
+
+    th, td {
+      border-top: 1px solid var(--line);
+      padding: 10px 8px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      background: rgba(0,0,0,0.015);
+    }
+
+    tr:first-child th, tr:first-child td { border-top: none; }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    }
+
+    pre {
+      margin: 10px 0 0;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid #2e2822;
+      background: var(--code-bg);
+      color: var(--code-ink);
+      overflow-x: auto;
+      font-size: 0.86rem;
+      line-height: 1.45;
+    }
+
+    .mini {
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .list {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .list li { margin: 6px 0; }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: rgba(15, 118, 110, 0.06);
+      border-radius: 10px;
+      padding: 12px 12px 12px 14px;
+      margin-top: 10px;
+    }
+
+    .callout.warn {
+      border-left-color: var(--warn);
+      background: rgba(180, 83, 9, 0.07);
+      color: inherit;
+    }
+
+    .callout.bad {
+      border-left-color: var(--danger);
+      background: rgba(185, 28, 28, 0.07);
+      color: inherit;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .path {
+      color: var(--muted);
+      font-size: 0.83rem;
+      word-break: break-word;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    @media (max-width: 800px) {
+      .kpi { grid-template-columns: 1fr; }
+      .two-col { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="hero">
+      <h1>Controller Host + Sessions API + Modal Provisioning E2E Report</h1>
+      <p>
+        Static deployment and troubleshooting document generated from live end-to-end testing of
+        the YudaiV3 backend controller host, sessions API, controller proxy routes, and real Modal
+        sandbox provisioning.
+      </p>
+      <div class="meta">
+        <span class="chip"><strong>Date:</strong> 2026-02-25</span>
+        <span class="chip"><strong>Backend Host:</strong> 139.84.154.9</span>
+        <span class="chip"><strong>Frontend Target:</strong> Vercel (Vite build from repo root, app in <code>src/</code>)</span>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card span-12">
+        <div class="section-title">
+          <h2>Completion Checklist (Required Scope)</h2>
+          <span class="status info">Documented + Actionable</span>
+        </div>
+        <ol class="list">
+          <li><strong>Deploy <code>src/</code> as a Vite project on Vercel</strong> - documented below (deploy repo root; Vite compiles <code>src/</code> into <code>dist/</code>).</li>
+          <li><strong>Deploy <code>backend/</code> controller API on backend server</strong> - documented below (Uvicorn + optional reverse proxy/systemd).</li>
+          <li><strong>Solve networking issues between frontend and backend</strong> - documented below (rewrites, TLS, CORS, WS upgrade, DNS, firewall).</li>
+          <li><strong>Specify production backend ENV VARs</strong> - full backend <code>.env.production</code> template included below.</li>
+        </ol>
+      </article>
+
+      <article class="card span-4">
+        <h2>Live Test Summary</h2>
+        <div class="kpi">
+          <div class="box">
+            <div class="label">Controller/Session API</div>
+            <div class="value ok">Mostly Pass</div>
+          </div>
+          <div class="box">
+            <div class="label">Modal Provisioning</div>
+            <div class="value warn">Partial Pass</div>
+          </div>
+          <div class="box">
+            <div class="label">Blocking Runtime Bugs</div>
+            <div class="value bad">3 Critical</div>
+          </div>
+        </div>
+        <div class="callout warn">
+          Modal sandbox creation reached a real Modal tunnel URL, but the sandbox app crashed at startup.
+        </div>
+      </article>
+
+      <article class="card span-8">
+        <h2>What Passed In Live E2E</h2>
+        <div class="two-col">
+          <ul class="list">
+            <li><code>GET /health</code></li>
+            <li><code>GET /realtime/flags</code></li>
+            <li><code>GET /docs</code></li>
+            <li><code>POST /daifu/sessions</code> (non-Modal mode)</li>
+            <li><code>PUT /daifu/sessions/{id}</code></li>
+            <li><code>POST /daifu/sessions/{id}/messages</code></li>
+            <li><code>POST /daifu/sessions/{id}/messages/bulk</code></li>
+            <li><code>GET /daifu/sessions/{id}/messages</code></li>
+            <li><code>POST /daifu/sessions/{id}/context-cards</code></li>
+            <li><code>GET /daifu/sessions/{id}/context-cards</code></li>
+          </ul>
+          <ul class="list">
+            <li><code>GET /daifu/sessions/{id}/file-deps/session</code></li>
+            <li><code>POST /controller/sessions/{id}/runtime</code></li>
+            <li><code>GET /controller/sessions/{id}/runtime</code></li>
+            <li><code>POST /controller/sandboxes</code></li>
+            <li><code>GET /controller/sandboxes/{id}</code></li>
+            <li><code>POST /controller/sandboxes/{id}/resolve-tunnel</code></li>
+            <li><code>POST /controller/sandboxes/{id}/heartbeat</code></li>
+            <li><code>POST /controller/sandboxes/cleanup</code></li>
+            <li><code>GET /controller/proxy/sessions/{id}/healthz</code> (local sandbox mode)</li>
+            <li><code>DELETE /controller/sandboxes/{id}</code> + post-delete <code>410</code></li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="card span-12">
+        <div class="section-title">
+          <h2>Error Log From E2E Testing (What Broke + How To Fix)</h2>
+          <span class="status bad">Fix Before Production</span>
+        </div>
+        <table>
+          <tr>
+            <th>Error</th>
+            <th>Where It Happened</th>
+            <th>Impact</th>
+            <th>Fix / Resolution</th>
+          </tr>
+          <tr>
+            <td><code>TypeError: can't compare offset-naive and offset-aware datetimes</code></td>
+            <td>
+              <code>get_current_user()</code> session token path<br/>
+              <span class="path">backend/auth/github_oauth.py:483</span><br/>
+              <code>validate_session_token()</code><br/>
+              <span class="path">backend/auth/github_oauth.py:414</span>
+            </td>
+            <td>
+              Breaks authenticated requests when frontend sends a session token (HTTP 500 or WS 403).
+              This also broke direct sandbox WS and controller proxy WS auth during testing.
+            </td>
+            <td>
+              Normalize DB timestamps before comparison (SQLite returns naive timestamps). Example approach:
+              treat naive timestamps as UTC before comparing with <code>utc_now()</code>.
+              Add a shared helper and use it in both auth functions.
+            </td>
+          </tr>
+          <tr>
+            <td><code>can't subtract offset-naive and offset-aware datetimes</code></td>
+            <td>
+              Session context statistics duration calculation<br/>
+              <span class="path">backend/daifuUserAgent/session_service.py:198</span>
+            </td>
+            <td>
+              <code>GET /daifu/sessions/{id}</code> returned <code>500</code>.<br/>
+              Also breaks proxied session context via <code>/controller/proxy/...</code>.
+            </td>
+            <td>
+              Normalize <code>db_session.created_at</code> to UTC before subtracting from <code>utc_now()</code>.
+              Same root cause as auth bug.
+            </td>
+          </tr>
+          <tr>
+            <td><code>local dir .../backend/backend does not exist</code></td>
+            <td>
+              Modal image packaging when controller launched from <code>backend/</code><br/>
+              <span class="path">backend/realtime/modal_sandbox.py</span>
+            </td>
+            <td>
+              Modal provisioning failed immediately during <code>POST /daifu/sessions</code>.
+            </td>
+            <td>
+              Use an absolute source path instead of relative <code>"backend/"</code>. Fixed in local testing patch
+              using <code>Path(__file__).resolve().parents[1]</code>.
+            </td>
+          </tr>
+          <tr>
+            <td>Modal SDK image build error after <code>add_local_dir()</code></td>
+            <td>
+              Newer Modal SDKs reject build steps after <code>image.add_local_*</code>
+            </td>
+            <td>
+              Modal provisioning failed even after path fix.
+            </td>
+            <td>
+              For <code>add_local_dir(...)</code>, use <code>copy=True</code> or move local-add calls to the end of the build.
+              Fixed in local testing patch with <code>copy=True</code> and adjusted call order.
+            </td>
+          </tr>
+          <tr>
+            <td><code>ModuleNotFoundError: No module named 'pgvector'</code></td>
+            <td>
+              Modal sandbox startup logs (real Modal app logs)<br/>
+              Sandbox container failed importing <code>/app/backend/models.py</code>
+            </td>
+            <td>
+              Real Modal tunnel URL was provisioned, but sandbox app crashed before serving traffic.<br/>
+              Controller proxy <code>/healthz</code> returned <code>502 PROXY_UPSTREAM_ERROR</code>.
+            </td>
+            <td>
+              Add <code>pgvector</code> to the Modal image in <code>backend/realtime/modal_sandbox.py</code>.<br/>
+              Example: add <code>"pgvector"</code> to <code>.pip_install(...)</code>.
+            </td>
+          </tr>
+          <tr>
+            <td>Modal sandbox missing DB connection env (likely startup risk)</td>
+            <td>
+              <code>run_sandbox_server.py</code> imports DB at startup, but Modal env currently passes only
+              <code>SANDBOX_ID</code> and <code>CONTROLLER_BASE_URL</code>.
+            </td>
+            <td>
+              Even after fixing <code>pgvector</code>, sandbox can still fail if no DB URL is passed.
+            </td>
+            <td>
+              Pass <code>CONTROLLER_DATABASE_URL</code> (or <code>DATABASE_URL</code>) into Modal sandbox env from
+              <code>RealtimeModalSandbox.create(...)</code>.
+            </td>
+          </tr>
+        </table>
+      </article>
+
+      <article class="card span-6">
+        <div class="section-title">
+          <h2>1. Deploy Frontend (<code>src/</code>) to Vercel</h2>
+          <span class="status ok">Vite Project</span>
+        </div>
+        <p>
+          The app lives in <code>src/</code>, but deployment should use the <strong>repo root</strong> because
+          <code>package.json</code>, <code>vite.config.ts</code>, and build scripts are at the root.
+        </p>
+        <h3>Vercel Project Settings</h3>
+        <ul class="list">
+          <li><strong>Framework Preset:</strong> Vite</li>
+          <li><strong>Root Directory:</strong> repository root (not <code>src/</code>)</li>
+          <li><strong>Install Command:</strong> <code>npm ci</code></li>
+          <li><strong>Build Command:</strong> <code>npm run build</code></li>
+          <li><strong>Output Directory:</strong> <code>dist</code></li>
+        </ul>
+        <h3>Frontend Env Vars (Vercel)</h3>
+        <pre>VITE_API_BASE_URL=/api
+VITE_REALTIME_CONTROLLER_SPLIT_ENABLED=true
+VITE_REALTIME_CONTROLLER_PROXY_ENABLED=true
+VITE_REALTIME_WS_UNIFIED_ENABLED=true
+VITE_REALTIME_TUNNEL_MODE_ENABLED=true
+# Optional
+VITE_REALTIME_SSE_STREAM_ENABLED=false
+VITE_REALTIME_WS_CHAT_ENABLED=false
+VITE_REALTIME_CONTRACT_VERSION=realtime-v1-phase0</pre>
+        <h3>Vercel Rewrite (already prepared)</h3>
+        <pre>{
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "http://139.84.154.9:8000/:path*" }
+  ]
+}</pre>
+        <div class="callout warn">
+          Vercel is HTTPS. A raw <code>http://139.84.154.9:8000</code> backend may cause mixed-content and WS issues.
+          Prefer an HTTPS backend domain (see networking section).
+        </div>
+      </article>
+
+      <article class="card span-6">
+        <div class="section-title">
+          <h2>2. Deploy Backend Controller API on <code>139.84.154.9</code></h2>
+          <span class="status warn">Requires TLS/Proxy Hardening</span>
+        </div>
+        <h3>Install & Run (Python + uv)</h3>
+        <pre>cd /opt/YudaiV3
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install uv
+uv sync || pip install -r requirements.txt
+
+cd backend
+uv run uvicorn run_controller:app --host 0.0.0.0 --port 8000</pre>
+        <h3>Recommended Production Runtime</h3>
+        <ul class="list">
+          <li>Run Uvicorn/Gunicorn under <code>systemd</code></li>
+          <li>Put Nginx or Caddy in front for TLS (<code>443</code>)</li>
+          <li>Expose backend to the public as <code>https://api.yourdomain.com</code></li>
+          <li>Update <code>CONTROLLER_BASE_URL</code> to the public URL (not localhost)</li>
+        </ul>
+        <h3>Health Checks</h3>
+        <pre>curl -i http://139.84.154.9:8000/health
+curl -i http://139.84.154.9:8000/realtime/flags</pre>
+        <div class="callout">
+          The controller host already mounts both the legacy sessions router (<code>/daifu/*</code>)
+          and the controller lifecycle/proxy routes (<code>/controller/*</code>).
+        </div>
+      </article>
+
+      <article class="card span-12">
+        <div class="section-title">
+          <h2>3. Networking: Make Frontend and Backend Communicate Reliably</h2>
+          <span class="status bad">Must Be Correct For Production</span>
+        </div>
+        <table>
+          <tr>
+            <th>Problem</th>
+            <th>Why It Happens</th>
+            <th>Production Fix</th>
+          </tr>
+          <tr>
+            <td>Mixed content (HTTPS frontend calling HTTP backend)</td>
+            <td>Vercel serves HTTPS. Browsers block insecure requests/WS from secure origins.</td>
+            <td>Put TLS on backend (Nginx/Caddy) and use <code>https://api.yourdomain.com</code> in rewrites / <code>CONTROLLER_BASE_URL</code>.</td>
+          </tr>
+          <tr>
+            <td>CORS failures</td>
+            <td>Backend must explicitly allow the Vercel origin(s).</td>
+            <td>Set <code>ALLOW_ORIGINS</code> and optionally <code>ALLOW_ORIGIN_REGEX</code> for preview deployments.</td>
+          </tr>
+          <tr>
+            <td>WebSocket upgrade failures via reverse proxy</td>
+            <td>Proxy config missing <code>Upgrade</code>/<code>Connection</code> headers.</td>
+            <td>Enable WS proxying in Nginx/Caddy for <code>/controller/proxy/sessions/*/ws/*</code>.</td>
+          </tr>
+          <tr>
+            <td>Modal sandbox cannot call controller heartbeat</td>
+            <td><code>CONTROLLER_BASE_URL</code> must be reachable from Modal (public network), not localhost.</td>
+            <td>Set <code>CONTROLLER_BASE_URL=https://api.yourdomain.com</code>.</td>
+          </tr>
+          <tr>
+            <td>Controller cannot reach Modal tunnel</td>
+            <td>Sandbox process crashes before listening (seen in E2E due missing <code>pgvector</code>).</td>
+            <td>Fix Modal image dependencies and sandbox env propagation, then re-test <code>/controller/proxy/.../healthz</code>.</td>
+          </tr>
+        </table>
+
+        <h3>Firewall / Ports (Backend Server)</h3>
+        <pre># Example with ufw
+sudo ufw allow 22/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+
+# If temporarily exposing uvicorn directly (not recommended long term):
+sudo ufw allow 8000/tcp</pre>
+
+        <h3>Nginx WebSocket Example (controller proxy)</h3>
+        <pre>location / {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /controller/proxy/sessions/ {
+    proxy_pass http://127.0.0.1:8000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}</pre>
+      </article>
+
+      <article class="card span-12">
+        <div class="section-title">
+          <h2>4. Production Backend <code>.env</code> (What To Set)</h2>
+          <span class="status ok">Copy + Fill Values</span>
+        </div>
+        <p class="mini">
+          File target example: <code>backend/.env.production</code>. This includes controller host settings,
+          realtime rollout flags, Modal credentials, CORS, and recommended auth settings.
+        </p>
+        <pre># =========================
+# Core App / Database (REQUIRED)
+# =========================
+DATABASE_URL=postgresql://DB_USER:DB_PASS@DB_HOST:5432/YUDAI_DB
+
+# Public URL of the controller API (REQUIRED for Modal callbacks/heartbeat)
+# Use your TLS endpoint in production, not localhost.
+CONTROLLER_BASE_URL=https://api.yourdomain.com
+
+# =========================
+# CORS / Frontend Origins (REQUIRED)
+# =========================
+ALLOW_ORIGINS=https://your-frontend.vercel.app,https://yourdomain.com
+# Optional: allow Vercel preview deployments
+ALLOW_ORIGIN_REGEX=^https://.*\\.vercel\\.app$
+
+# =========================
+# Realtime Feature Flags (REQUIRED for controller-proxy + unified WS flow)
+# =========================
+REALTIME_CONTROLLER_SPLIT_ENABLED=true
+REALTIME_CONTROLLER_PROXY_ENABLED=true
+REALTIME_WS_UNIFIED_ENABLED=true
+REALTIME_TUNNEL_MODE_ENABLED=true
+REALTIME_MODAL_PROVISIONING_ENABLED=true
+
+# Optional flags
+REALTIME_WS_CHAT_ENABLED=false
+REALTIME_SSE_STREAM_ENABLED=false
+REALTIME_CONTRACT_VERSION=realtime-v1-phase0
+REALTIME_DEFAULT_ORG=yudai
+
+# =========================
+# Modal Credentials (REQUIRED if using Modal provisioning)
+# =========================
+MODAL_TOKEN_ID=ak-xxxxxxxxxxxxxxxx
+MODAL_TOKEN_SECRET=as-xxxxxxxxxxxxxxxxxxxxxxxx
+
+# =========================
+# GitHub / Repo Bootstrap (RECOMMENDED, REQUIRED for private repo clone/bootstrap)
+# =========================
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# GitHub OAuth / App Auth (REQUIRED if frontend login/auth flows are used)
+GITHUB_APP_CLIENT_ID=Iv1.xxxxxxxxxxxxxxxx
+GITHUB_APP_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
+GITHUB_APP_ID=1234567
+GITHUB_APP_PRIVATE_KEY_PATH=/opt/YudaiV3/backend/keys/github-app.private-key.pem
+# This should point to your backend callback endpoint
+GITHUB_REDIRECT_URI=https://api.yourdomain.com/auth/callback
+
+# =========================
+# Controller <-> Sandbox Heartbeat Security (RECOMMENDED)
+# =========================
+CONTROLLER_HEARTBEAT_SECRET=replace-with-random-secret
+
+# =========================
+# Sandbox / Local Storage Paths (RECOMMENDED)
+# =========================
+SANDBOX_GIT_ROOT=/var/lib/yudai/sandbox-repos
+SANDBOX_CACHE_ROOT=/var/lib/yudai/sandbox-cache
+SANDBOX_TUNNEL_TEMPLATE=http://localhost:8100
+
+# =========================
+# Logging / Debug (OPTIONAL)
+# =========================
+DB_ECHO=false</pre>
+
+        <div class="callout bad">
+          <strong>Important (Modal sandbox startup):</strong> the controller currently needs a code patch to pass
+          a DB connection env (<code>CONTROLLER_DATABASE_URL</code> or <code>DATABASE_URL</code>) into the Modal sandbox.
+          Setting it only in the controller host <code>.env</code> is not enough unless the code forwards it.
+        </div>
+      </article>
+
+      <article class="card span-12">
+        <div class="section-title">
+          <h2>Code Patches To Apply Before Production Re-Test</h2>
+          <span class="status warn">Required For Clean E2E</span>
+        </div>
+        <ol class="list">
+          <li>
+            <strong>Fix timezone comparisons for SQLite-backed auth/session tokens</strong><br/>
+            <span class="path">backend/auth/github_oauth.py:414, backend/auth/github_oauth.py:483</span>
+          </li>
+          <li>
+            <strong>Fix session duration datetime arithmetic in session context</strong><br/>
+            <span class="path">backend/daifuUserAgent/session_service.py:198</span>
+          </li>
+          <li>
+            <strong>Add <code>pgvector</code> to Modal image dependencies</strong><br/>
+            <span class="path">backend/realtime/modal_sandbox.py (image .pip_install)</span>
+          </li>
+          <li>
+            <strong>Pass DB URL into Modal sandbox env</strong> (<code>CONTROLLER_DATABASE_URL</code> recommended)<br/>
+            <span class="path">backend/realtime/modal_sandbox.py:102</span>
+          </li>
+          <li>
+            <strong>(Optional) Use async Modal tunnels API to remove warning</strong><br/>
+            <span class="path">backend/realtime/modal_sandbox.py:134</span>
+          </li>
+        </ol>
+      </article>
+
+      <article class="card span-12">
+        <div class="section-title">
+          <h2>Re-Test Commands (After Fixes)</h2>
+          <span class="status info">Runbook</span>
+        </div>
+        <pre># 1) Backend server health
+curl -i https://api.yourdomain.com/health
+curl -i https://api.yourdomain.com/realtime/flags
+
+# 2) Frontend -> backend connectivity via Vercel rewrite
+curl -i https://your-frontend.vercel.app/api/health
+
+# 3) Modal observability
+modal app list
+modal app logs yudai-realtime --timestamps
+modal container list --json
+
+# 4) Local targeted regression tests (already added)
+UV_CACHE_DIR=/tmp/.uv-cache uv run pytest -q \
+  backend/tests/test_realtime_lifecycle.py \
+  backend/tests/test_realtime_controller_routes.py \
+  backend/tests/test_session_routes_realtime_provisioning.py \
+  backend/tests/test_run_controller_mounts.py
+
+# 5) Frontend routing/proxy URL tests
+npx vitest run tests/frontend/apiConfig.test.ts tests/frontend/realtimeRouting.test.ts</pre>
+      </article>
+    </section>
+  </main>
+</body>
+</html>
