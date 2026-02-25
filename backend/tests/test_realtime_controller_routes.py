@@ -1,3 +1,4 @@
+import asyncio
 import os
 from pathlib import Path
 import sys
@@ -17,6 +18,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///tmp/realtime-controller-tests.d
 from models import Base, ChatSession, User  # noqa: E402
 from realtime.cache_store import SessionCacheStore  # noqa: E402
 from realtime.controller_routes import (  # noqa: E402
+    _resolve_sandbox_tunnel,
     delete_sandbox,
     ensure_runtime_for_session,
     get_sandbox,
@@ -78,18 +80,20 @@ def db_and_user(tmp_path, monkeypatch):
 def test_runtime_ensure_and_resolve_tunnel(db_and_user):
     db, user, session = db_and_user
 
-    runtime_response = ensure_runtime_for_session(
-        session_id=session.session_id,
-        request=RuntimeEnsureRequest(
-            org="yudai",
-            repo_owner="octocat",
-            repo_name="yudaiv3",
-            environment="main",
-            repo_branch="main",
-            repo_url="file:///tmp/unused",
+    runtime_response = asyncio.run(
+        ensure_runtime_for_session(
+            session_id=session.session_id,
+            request=RuntimeEnsureRequest(
+                org="yudai",
+                repo_owner="octocat",
+                repo_name="yudaiv3",
+                environment="main",
+                repo_branch="main",
+                repo_url="file:///tmp/unused",
+            ),
+            db=db,
+            current_user=user,
         ),
-        db=db,
-        current_user=user,
     )
 
     assert runtime_response.runtime_id.startswith("rt_")
@@ -117,18 +121,20 @@ def test_runtime_ensure_and_resolve_tunnel(db_and_user):
 def test_terminated_sandbox_returns_hard_error(db_and_user):
     db, user, session = db_and_user
 
-    runtime_response = ensure_runtime_for_session(
-        session_id=session.session_id,
-        request=RuntimeEnsureRequest(
-            org="yudai",
-            repo_owner="octocat",
-            repo_name="yudaiv3",
-            environment="main",
-            repo_branch="main",
-            repo_url="file:///tmp/unused",
+    runtime_response = asyncio.run(
+        ensure_runtime_for_session(
+            session_id=session.session_id,
+            request=RuntimeEnsureRequest(
+                org="yudai",
+                repo_owner="octocat",
+                repo_name="yudaiv3",
+                environment="main",
+                repo_branch="main",
+                repo_url="file:///tmp/unused",
+            ),
+            db=db,
+            current_user=user,
         ),
-        db=db,
-        current_user=user,
     )
 
     sandbox_id = runtime_response.sandbox_id
@@ -149,3 +155,42 @@ def test_terminated_sandbox_returns_hard_error(db_and_user):
 
     assert exc.value.status_code == 410
     assert exc.value.detail.get("code") == "TUNNEL_TERMINATED"
+
+
+def test_proxy_tunnel_resolution_requires_session_owner(db_and_user):
+    db, user, session = db_and_user
+
+    runtime_response = asyncio.run(
+        ensure_runtime_for_session(
+            session_id=session.session_id,
+            request=RuntimeEnsureRequest(
+                org="yudai",
+                repo_owner="octocat",
+                repo_name="yudaiv3",
+                environment="main",
+                repo_branch="main",
+                repo_url="file:///tmp/unused",
+            ),
+            db=db,
+            current_user=user,
+        ),
+    )
+    assert runtime_response.sandbox_id.startswith("sbx_")
+
+    other_user = User(
+        github_username="intruder",
+        github_user_id="5002",
+        email="intruder@example.com",
+        display_name="Intruder",
+    )
+    db.add(other_user)
+    db.commit()
+    db.refresh(other_user)
+
+    owner_tunnel = _resolve_sandbox_tunnel(db, session.session_id, user_id=user.id)
+    assert owner_tunnel.startswith("http://sandbox.local/")
+
+    with pytest.raises(HTTPException) as exc:
+        _resolve_sandbox_tunnel(db, session.session_id, user_id=other_user.id)
+
+    assert exc.value.status_code == 404
