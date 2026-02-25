@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -127,30 +128,34 @@ def test_single_active_editor_conflict(db_session, lifecycle_service):
         repo_branch="main",
     )
 
-    lifecycle_service.create_runtime_for_session(
-        db,
-        session=session_a,
-        user_id=user_a.id,
-        org="yudai",
-        repo_owner="octocat",
-        repo_name="yudaiv3",
-        environment="main",
-        repo_branch="main",
-        repo_url=None,
-    )
-    db.commit()
-
-    with pytest.raises(HTTPException) as exc:
+    asyncio.run(
         lifecycle_service.create_runtime_for_session(
             db,
-            session=session_b,
-            user_id=user_b.id,
+            session=session_a,
+            user_id=user_a.id,
             org="yudai",
             repo_owner="octocat",
             repo_name="yudaiv3",
             environment="main",
             repo_branch="main",
             repo_url=None,
+        )
+    )
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            lifecycle_service.create_runtime_for_session(
+                db,
+                session=session_b,
+                user_id=user_b.id,
+                org="yudai",
+                repo_owner="octocat",
+                repo_name="yudaiv3",
+                environment="main",
+                repo_branch="main",
+                repo_url=None,
+            )
         )
 
     assert exc.value.status_code == 409
@@ -169,16 +174,18 @@ def test_completion_detector_exports_artifact_and_terminates(db_session, lifecyc
         repo_branch="main",
     )
 
-    envelope = lifecycle_service.create_runtime_for_session(
-        db,
-        session=session,
-        user_id=user.id,
-        org="yudai",
-        repo_owner="octocat",
-        repo_name="yudaiv3",
-        environment="main",
-        repo_branch="main",
-        repo_url=None,
+    envelope = asyncio.run(
+        lifecycle_service.create_runtime_for_session(
+            db,
+            session=session,
+            user_id=user.id,
+            org="yudai",
+            repo_owner="octocat",
+            repo_name="yudaiv3",
+            environment="main",
+            repo_branch="main",
+            repo_url=None,
+        )
     )
     db.commit()
 
