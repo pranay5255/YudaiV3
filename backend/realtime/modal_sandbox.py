@@ -4,34 +4,57 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 import modal
 
 logger = logging.getLogger(__name__)
 
-REALTIME_SANDBOX_IMAGE = (
-    modal.Image.debian_slim(python_version="3.11")
-    .apt_install("git", "curl")
-    .pip_install(
-        "fastapi",
-        "uvicorn[standard]",
-        "httpx",
-        "sqlalchemy",
-        "pydantic",
-        "pyyaml",
-        "requests",
-        "websockets",
-        "python-jose[cryptography]",
-        "passlib",
-    )
-    .copy_local_dir("backend/", "/app/backend/")
-    .env({"PYTHONPATH": "/app/backend"})
-)
+_BACKEND_SOURCE_DIR = Path(__file__).resolve().parents[1]
+_realtime_sandbox_image: Optional[modal.Image] = None
 
 _modal_app: Optional[modal.App] = None
 _modal_app_lock = asyncio.Lock()
+
+
+def _with_backend_source(image: modal.Image) -> modal.Image:
+    """Attach local backend source code, supporting Modal SDK API variants."""
+    copy_local_dir = getattr(image, "copy_local_dir", None)
+    if callable(copy_local_dir):
+        return copy_local_dir(str(_BACKEND_SOURCE_DIR), "/app/backend/")
+
+    add_local_dir = getattr(image, "add_local_dir", None)
+    if callable(add_local_dir):
+        return add_local_dir(str(_BACKEND_SOURCE_DIR), remote_path="/app/backend/", copy=True)
+
+    raise AttributeError("Modal Image API missing copy_local_dir/add_local_dir")
+
+
+def _get_realtime_sandbox_image() -> modal.Image:
+    """Lazily build the Modal image so non-Modal tests can import this module."""
+    global _realtime_sandbox_image
+    if _realtime_sandbox_image is None:
+        image = (
+            modal.Image.debian_slim(python_version="3.11")
+            .apt_install("git", "curl")
+            .pip_install(
+                "fastapi",
+                "uvicorn[standard]",
+                "httpx",
+                "sqlalchemy",
+                "pydantic",
+                "pyyaml",
+                "requests",
+                "websockets",
+                "python-jose[cryptography]",
+                "passlib",
+            )
+            .env({"PYTHONPATH": "/app/backend"})
+        )
+        _realtime_sandbox_image = _with_backend_source(image)
+    return _realtime_sandbox_image
 
 
 async def _call_modal_async(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -101,7 +124,7 @@ class RealtimeModalSandbox:
             "--port",
             "8100",
             app=app,
-            image=REALTIME_SANDBOX_IMAGE,
+            image=_get_realtime_sandbox_image(),
             encrypted_ports=[8100],
             env=sandbox_env,
             timeout=timeout,
