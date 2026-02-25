@@ -806,6 +806,16 @@ class DefaultSolverManager(SolverManager):
             return None
         return state.executors.get(run_id)
 
+    def get_active_executors(
+        self,
+    ) -> List[tuple[tuple[str, str], HeadlessSandboxExecutor]]:
+        """Return all currently registered executors as ((solve_id, run_id), executor) pairs."""
+        results: List[tuple[tuple[str, str], HeadlessSandboxExecutor]] = []
+        for solve_id, state in self._tasks.items():
+            for run_id, executor in state.executors.items():
+                results.append(((solve_id, run_id), executor))
+        return results
+
     async def _cleanup_task(self, solve_id: str):
         async with self._lock:
             self._tasks.pop(solve_id, None)
