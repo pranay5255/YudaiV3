@@ -3,748 +3,1761 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>YudaiV3 E2E Report - Controller Host, Sessions API, Modal Provisioning</title>
+  <title>YudaiV4 Deployment Intelligence - Git Status Deep Dive</title>
   <style>
     :root {
-      --bg: #f5f1e8;
-      --paper: #fffdf8;
-      --ink: #1f1a16;
-      --muted: #6b625a;
-      --line: #ddd2c2;
+      --bg: #f4efe6;
+      --paper: #fffaf1;
+      --ink: #201a15;
+      --muted: #6d6256;
+      --line: #d9ccb8;
       --accent: #0f766e;
-      --warn: #b45309;
-      --danger: #b91c1c;
-      --ok: #166534;
-      --code-bg: #171411;
-      --code-ink: #f8f3ea;
-      --shadow: 0 14px 40px rgba(41, 27, 17, 0.08);
+      --critical: #b91c1c;
+      --high: #b45309;
+      --medium: #1d4ed8;
+      --low: #3f3f46;
+      --success: #166534;
+      --shadow: 0 14px 36px rgba(34, 22, 12, 0.08);
       --radius: 16px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
     }
 
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
 
     body {
       margin: 0;
       color: var(--ink);
       background:
-        radial-gradient(circle at 20% 0%, rgba(15, 118, 110, 0.08), transparent 40%),
-        radial-gradient(circle at 100% 10%, rgba(185, 28, 28, 0.06), transparent 45%),
+        radial-gradient(circle at 0% 0%, rgba(15, 118, 110, 0.08), transparent 45%),
+        radial-gradient(circle at 100% 10%, rgba(185, 28, 28, 0.08), transparent 35%),
         var(--bg);
       font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
       line-height: 1.5;
     }
 
-    .wrap {
-      width: min(1120px, calc(100% - 32px));
-      margin: 28px auto 56px;
+    .page {
+      width: min(1240px, calc(100% - 28px));
+      margin: 22px auto 40px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .hero,
+    .panel {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      padding: 20px;
     }
 
     .hero {
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.88));
-      border: 1px solid rgba(255, 255, 255, 0.9);
-      box-shadow: var(--shadow);
-      border-radius: 22px;
-      padding: 28px 28px 22px;
       position: relative;
       overflow: hidden;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 250, 241, 0.95));
     }
 
     .hero::after {
       content: "";
       position: absolute;
-      inset: auto -80px -110px auto;
       width: 260px;
       height: 260px;
+      right: -70px;
+      bottom: -140px;
+      border-radius: 50%;
       background:
         repeating-linear-gradient(
-          -45deg,
-          rgba(15, 118, 110, 0.11) 0 8px,
+          -40deg,
+          rgba(15, 118, 110, 0.18) 0 8px,
           rgba(15, 118, 110, 0.03) 8px 16px
         );
-      border-radius: 50%;
-      transform: rotate(8deg);
+      transform: rotate(5deg);
+      pointer-events: none;
     }
 
     h1 {
       margin: 0 0 8px;
-      font-size: clamp(1.6rem, 2vw + 1rem, 2.4rem);
-      line-height: 1.12;
+      font-size: clamp(1.45rem, 2vw + 0.8rem, 2.3rem);
+      line-height: 1.1;
       letter-spacing: -0.02em;
     }
 
     h2 {
-      margin: 0 0 12px;
-      font-size: 1.25rem;
+      margin: 0;
+      font-size: 1.2rem;
       letter-spacing: -0.01em;
     }
 
     h3 {
       margin: 0 0 8px;
-      font-size: 1.02rem;
+      font-size: 0.95rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
     }
 
-    p { margin: 0 0 10px; }
+    p {
+      margin: 0 0 10px;
+    }
 
-    .meta {
+    .chips {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      margin: 12px 0 0;
+      margin-top: 12px;
     }
 
     .chip {
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.8);
-      padding: 6px 10px;
       border-radius: 999px;
-      font-size: 0.86rem;
+      padding: 5px 10px;
+      background: rgba(255, 255, 255, 0.8);
+      font-size: 0.84rem;
       color: var(--muted);
     }
 
-    .chip strong { color: var(--ink); }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(12, 1fr);
-      gap: 16px;
-      margin-top: 16px;
+    .chip strong {
+      color: var(--ink);
     }
 
-    .card {
-      background: var(--paper);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      padding: 18px;
+    .facts {
+      margin: 10px 0 0;
+      padding-left: 18px;
     }
 
-    .span-12 { grid-column: span 12; }
-    .span-8 { grid-column: span 8; }
-    .span-6 { grid-column: span 6; }
-    .span-4 { grid-column: span 4; }
-
-    @media (max-width: 900px) {
-      .span-8, .span-6, .span-4 { grid-column: span 12; }
-      .hero { padding: 22px 18px 18px; }
-      .card { padding: 16px; }
+    .facts li {
+      margin: 6px 0;
     }
 
-    .kpi {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 12px;
-    }
-
-    .kpi .box {
-      border: 1px solid var(--line);
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: rgba(15, 118, 110, 0.08);
       border-radius: 12px;
-      background: #fff;
-      padding: 12px;
+      padding: 11px 12px;
+      margin-top: 12px;
     }
 
-    .kpi .label {
+    .callout.warn {
+      border-left-color: var(--high);
+      background: rgba(180, 83, 9, 0.11);
+    }
+
+    .cross {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+      margin-top: 12px;
+    }
+
+    .cross th,
+    .cross td {
+      border-top: 1px solid var(--line);
+      padding: 9px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .cross tr:first-child th,
+    .cross tr:first-child td {
+      border-top: none;
+    }
+
+    .cross th {
       color: var(--muted);
-      font-size: 0.8rem;
-      margin-bottom: 4px;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.05em;
+      font-size: 0.78rem;
+      background: rgba(0, 0, 0, 0.02);
     }
 
-    .kpi .value {
-      font-size: 1.35rem;
-      font-weight: 700;
-      font-family: "Avenir Next Condensed", "Franklin Gothic Medium", "Arial Narrow", sans-serif;
-      letter-spacing: 0.01em;
+    .panel-head {
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
     }
 
-    .value.ok { color: var(--ok); }
-    .value.warn { color: var(--warn); }
-    .value.bad { color: var(--danger); }
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
 
-    .status {
-      display: inline-flex;
+    button,
+    select,
+    input {
+      font: inherit;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: #fff;
+      padding: 7px 11px;
+      border-radius: 10px;
+      cursor: pointer;
+      color: var(--ink);
+    }
+
+    button:hover {
+      border-color: var(--accent);
+    }
+
+    .controls {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.72);
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      padding: 10px;
+    }
+
+    .control {
+      display: grid;
+      gap: 4px;
+    }
+
+    .control label {
+      font-size: 0.77rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+    }
+
+    .control input,
+    .control select {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 7px 8px;
+      background: #fff;
+    }
+
+    .toggle {
+      display: flex;
       align-items: center;
       gap: 8px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      border: 1px dashed var(--line);
+      border-radius: 10px;
+      padding: 7px 8px;
+      background: rgba(255, 255, 255, 0.66);
+      margin-top: 8px;
+    }
+
+    .summary-line {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .file-list {
+      margin-top: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .file-card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .file-card summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 12px 14px;
+      display: grid;
+      gap: 8px;
+      position: relative;
+    }
+
+    .file-card summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .file-card summary::after {
+      content: "+";
+      position: absolute;
+      right: 14px;
+      top: 10px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .file-card[open] summary::after {
+      content: "-";
+    }
+
+    .summary-top {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding-right: 26px;
+      flex-wrap: wrap;
+    }
+
+    .path {
+      font-family: var(--mono);
+      font-size: 0.83rem;
+      color: var(--ink);
+      word-break: break-word;
+    }
+
+    .tags {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .tag {
       border-radius: 999px;
-      padding: 4px 10px;
-      font-size: 0.82rem;
+      padding: 2px 8px;
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
       border: 1px solid currentColor;
-      line-height: 1.2;
       white-space: nowrap;
     }
 
-    .status::before {
-      content: "";
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: currentColor;
-      display: inline-block;
+    .tag.mod {
+      color: #92400e;
+      background: rgba(146, 64, 14, 0.08);
     }
 
-    .ok { color: var(--ok); }
-    .warn { color: var(--warn); }
-    .bad { color: var(--danger); }
-    .info { color: var(--accent); }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.94rem;
+    .tag.new {
+      color: #0f766e;
+      background: rgba(15, 118, 110, 0.08);
     }
 
-    th, td {
+    .tag.backend,
+    .tag.frontend,
+    .tag.docs,
+    .tag.tests,
+    .tag.db,
+    .tag.dependency {
+      color: #334155;
+      background: rgba(51, 65, 85, 0.08);
+    }
+
+    .tag.critical {
+      color: var(--critical);
+      background: rgba(185, 28, 28, 0.1);
+    }
+
+    .tag.high {
+      color: var(--high);
+      background: rgba(180, 83, 9, 0.11);
+    }
+
+    .tag.medium {
+      color: var(--medium);
+      background: rgba(29, 78, 216, 0.1);
+    }
+
+    .tag.low {
+      color: var(--low);
+      background: rgba(63, 63, 70, 0.1);
+    }
+
+    .summary-text {
+      margin: 0;
+      color: #2f2924;
+      font-size: 0.91rem;
+    }
+
+    .file-body {
       border-top: 1px solid var(--line);
-      padding: 10px 8px;
-      vertical-align: top;
-      text-align: left;
+      padding: 12px 14px 14px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      background: rgba(250, 246, 238, 0.66);
     }
 
-    th {
-      color: var(--muted);
-      font-weight: 600;
-      font-size: 0.82rem;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      background: rgba(0,0,0,0.015);
+    .file-body section {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fff;
     }
 
-    tr:first-child th, tr:first-child td { border-top: none; }
-
-    code, pre {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-    }
-
-    pre {
-      margin: 10px 0 0;
-      padding: 12px;
-      border-radius: 12px;
-      border: 1px solid #2e2822;
-      background: var(--code-bg);
-      color: var(--code-ink);
-      overflow-x: auto;
-      font-size: 0.86rem;
-      line-height: 1.45;
-    }
-
-    .mini {
-      color: var(--muted);
-      font-size: 0.85rem;
-    }
-
-    .list {
+    .file-body ul {
       margin: 0;
       padding-left: 18px;
     }
 
-    .list li { margin: 6px 0; }
-
-    .callout {
-      border-left: 4px solid var(--accent);
-      background: rgba(15, 118, 110, 0.06);
-      border-radius: 10px;
-      padding: 12px 12px 12px 14px;
-      margin-top: 10px;
+    .file-body li {
+      margin: 6px 0;
+      font-size: 0.89rem;
     }
 
-    .callout.warn {
-      border-left-color: var(--warn);
-      background: rgba(180, 83, 9, 0.07);
-      color: inherit;
-    }
-
-    .callout.bad {
-      border-left-color: var(--danger);
-      background: rgba(185, 28, 28, 0.07);
-      color: inherit;
-    }
-
-    .section-title {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 8px;
-    }
-
-    .path {
+    .empty {
+      border: 1px dashed var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      text-align: center;
       color: var(--muted);
-      font-size: 0.83rem;
-      word-break: break-word;
+      background: rgba(255, 255, 255, 0.7);
     }
 
-    .two-col {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
+    .checklist {
+      margin-top: 10px;
+      padding-left: 22px;
     }
 
-    @media (max-width: 800px) {
-      .kpi { grid-template-columns: 1fr; }
-      .two-col { grid-template-columns: 1fr; }
+    .checklist li {
+      margin: 8px 0;
+    }
+
+    .check-item {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      font-size: 0.92rem;
+    }
+
+    .progress {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      background: #fff;
+    }
+
+    .mini {
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    .sticky-tools {
+      position: sticky;
+      top: 8px;
+      z-index: 5;
+      backdrop-filter: blur(6px);
+    }
+
+    @media (max-width: 1040px) {
+      .controls {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .file-body {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .controls {
+        grid-template-columns: 1fr;
+      }
+
+      .page {
+        width: min(1240px, calc(100% - 14px));
+      }
     }
   </style>
 </head>
 <body>
-  <main class="wrap">
+  <main class="page">
     <section class="hero">
-      <h1>Controller Host + Sessions API + Modal Provisioning E2E Report</h1>
+      <h1>YudaiV4 Deployment Intelligence Report</h1>
       <p>
-        Static deployment and troubleshooting document generated from live end-to-end testing of
-        the YudaiV3 backend controller host, sessions API, controller proxy routes, and real Modal
-        sandbox provisioning.
+        Cross-referenced update of the controller/sessions/modal E2E report with the current
+        <code>git status</code> delta. This page now explains every changed file and adds interactive
+        study controls (search, filters, impact sorting, expand/collapse, deploy checklist).
       </p>
-      <div class="meta">
-        <span class="chip"><strong>Date:</strong> 2026-02-25</span>
-        <span class="chip"><strong>Backend Host:</strong> 139.84.154.9</span>
-        <span class="chip"><strong>Frontend Target:</strong> Vercel (Vite build from repo root, app in <code>src/</code>)</span>
+      <div class="chips">
+        <span class="chip" id="chip-total"><strong>Files:</strong> --</span>
+        <span class="chip" id="chip-mod"><strong>Modified:</strong> --</span>
+        <span class="chip" id="chip-new"><strong>New:</strong> --</span>
+        <span class="chip" id="chip-critical"><strong>Deployment-Critical:</strong> --</span>
+        <span class="chip"><strong>Date:</strong> 2026-02-28</span>
       </div>
     </section>
 
-    <section class="grid">
-      <article class="card span-12">
-        <div class="section-title">
-          <h2>Completion Checklist (Required Scope)</h2>
-          <span class="status info">Documented + Actionable</span>
+    <section class="panel">
+      <h2>Deployment Truths For YudaiV4</h2>
+      <ul class="facts">
+        <li>The architecture shifted from direct tunnel/proxy access to controller-brokered execution with unified controller WebSocket endpoints.</li>
+        <li>Mode orchestration is now explicit in backend state: <code>pending - architect - tester - coder - complete</code> with <code>agent_executions</code> tracking.</li>
+        <li>Auth/session datetime handling was hardened with <code>ensure_utc()</code> to avoid SQLite naive timestamp crashes.</li>
+        <li>Frontend routing now targets controller paths directly; tunnel/proxy URL rewriting logic was removed.</li>
+      </ul>
+      <div class="callout warn">
+        <strong>Database Note (from your deployment constraint):</strong> production DB starts empty. You do <strong>not</strong>
+        need incremental migration execution to preserve prior data. Initialize schema directly from the current model baseline.
+        Keep the new SQL migration files for non-empty environment upgrades or rollback rehearsal only.
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Cross-Reference: Previous Report vs Current Code</h2>
+      <table class="cross">
+        <tr>
+          <th>Earlier Assumption</th>
+          <th>Current Code Reality</th>
+          <th>Deployment Meaning</th>
+        </tr>
+        <tr>
+          <td>Frontend can proxy/tunnel directly to sandbox.</td>
+          <td><code>backend/realtime/controller_routes.py</code> removed HTTP/WS proxy routes and exposes unified controller WS only.</td>
+          <td>Keep browser traffic on controller domain; sandbox comms are internal.</td>
+        </tr>
+        <tr>
+          <td>Runtime response includes tunnel/proxy fields for browser usage.</td>
+          <td><code>backend/realtime/schemas.py</code> dropped <code>proxy_base_url</code>; <code>tunnel_url</code> now intentionally hidden in runtime response.</td>
+          <td>Frontend should not depend on raw Modal tunnel addresses.</td>
+        </tr>
+        <tr>
+          <td>3-mode flow described conceptually but not persisted.</td>
+          <td><code>backend/models.py</code> + <code>backend/realtime/mode_orchestrator.py</code> persist mode state and execution rows.</td>
+          <td>You can now audit mode transitions and artifacts during deployment verification.</td>
+        </tr>
+        <tr>
+          <td>Auth/session datetime errors were open blockers.</td>
+          <td><code>backend/utils.py</code>, <code>backend/auth/github_oauth.py</code>, <code>backend/daifuUserAgent/githubOps.py</code>, <code>backend/daifuUserAgent/session_service.py</code> normalize timestamps.</td>
+          <td>Removes 500/403 failures caused by naive-vs-aware datetime comparisons.</td>
+        </tr>
+        <tr>
+          <td>Migration explicitly required before deploy.</td>
+          <td>Migration SQL exists, but you stated DB is empty for first production bootstrap.</td>
+          <td>Bootstrap schema directly; treat migration scripts as upgrade/rollback references.</td>
+        </tr>
+      </table>
+    </section>
+
+    <section class="panel sticky-tools">
+      <div class="panel-head">
+        <h2>Interactive Git Status Deep Dive</h2>
+        <div class="actions">
+          <button id="expand-all" type="button">Expand Visible</button>
+          <button id="collapse-all" type="button">Collapse Visible</button>
+          <button id="reset-filters" type="button">Reset Filters</button>
         </div>
-        <ol class="list">
-          <li><strong>Deploy <code>src/</code> as a Vite project on Vercel</strong> - documented below (deploy repo root; Vite compiles <code>src/</code> into <code>dist/</code>).</li>
-          <li><strong>Deploy <code>backend/</code> controller API on backend server</strong> - documented below (Uvicorn + optional reverse proxy/systemd).</li>
-          <li><strong>Solve networking issues between frontend and backend</strong> - documented below (rewrites, TLS, CORS, WS upgrade, DNS, firewall).</li>
-          <li><strong>Specify production backend ENV VARs</strong> - full backend <code>.env.production</code> template included below.</li>
-        </ol>
-      </article>
+      </div>
+      <p class="mini">Search by path, symbol, or feature text. Filter by status/layer/impact and focus only on deployment-critical paths.</p>
 
-      <article class="card span-4">
-        <h2>Live Test Summary</h2>
-        <div class="kpi">
-          <div class="box">
-            <div class="label">Controller/Session API</div>
-            <div class="value ok">Mostly Pass</div>
-          </div>
-          <div class="box">
-            <div class="label">Modal Provisioning</div>
-            <div class="value warn">Partial Pass</div>
-          </div>
-          <div class="box">
-            <div class="label">Blocking Runtime Bugs</div>
-            <div class="value bad">3 Critical</div>
-          </div>
+      <div class="controls">
+        <div class="control">
+          <label for="search">Search</label>
+          <input id="search" type="text" placeholder="session_routes, mode_orchestrator, websocket..." />
         </div>
-        <div class="callout warn">
-          Modal sandbox creation reached a real Modal tunnel URL, but the sandbox app crashed at startup.
+        <div class="control">
+          <label for="status-filter">Status</label>
+          <select id="status-filter">
+            <option value="all">All</option>
+            <option value="M">Modified</option>
+            <option value="NEW">New</option>
+          </select>
         </div>
-      </article>
-
-      <article class="card span-8">
-        <h2>What Passed In Live E2E</h2>
-        <div class="two-col">
-          <ul class="list">
-            <li><code>GET /health</code></li>
-            <li><code>GET /realtime/flags</code></li>
-            <li><code>GET /docs</code></li>
-            <li><code>POST /daifu/sessions</code> (non-Modal mode)</li>
-            <li><code>PUT /daifu/sessions/{id}</code></li>
-            <li><code>POST /daifu/sessions/{id}/messages</code></li>
-            <li><code>POST /daifu/sessions/{id}/messages/bulk</code></li>
-            <li><code>GET /daifu/sessions/{id}/messages</code></li>
-            <li><code>POST /daifu/sessions/{id}/context-cards</code></li>
-            <li><code>GET /daifu/sessions/{id}/context-cards</code></li>
-          </ul>
-          <ul class="list">
-            <li><code>GET /daifu/sessions/{id}/file-deps/session</code></li>
-            <li><code>POST /controller/sessions/{id}/runtime</code></li>
-            <li><code>GET /controller/sessions/{id}/runtime</code></li>
-            <li><code>POST /controller/sandboxes</code></li>
-            <li><code>GET /controller/sandboxes/{id}</code></li>
-            <li><code>POST /controller/sandboxes/{id}/resolve-tunnel</code></li>
-            <li><code>POST /controller/sandboxes/{id}/heartbeat</code></li>
-            <li><code>POST /controller/sandboxes/cleanup</code></li>
-            <li><code>GET /controller/proxy/sessions/{id}/healthz</code> (local sandbox mode)</li>
-            <li><code>DELETE /controller/sandboxes/{id}</code> + post-delete <code>410</code></li>
-          </ul>
+        <div class="control">
+          <label for="layer-filter">Layer</label>
+          <select id="layer-filter">
+            <option value="all">All</option>
+          </select>
         </div>
-      </article>
-
-      <article class="card span-12">
-        <div class="section-title">
-          <h2>Error Log From E2E Testing (What Broke + How To Fix)</h2>
-          <span class="status bad">Fix Before Production</span>
+        <div class="control">
+          <label for="impact-filter">Impact</label>
+          <select id="impact-filter">
+            <option value="all">All</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
         </div>
-        <table>
-          <tr>
-            <th>Error</th>
-            <th>Where It Happened</th>
-            <th>Impact</th>
-            <th>Fix / Resolution</th>
-          </tr>
-          <tr>
-            <td><code>TypeError: can't compare offset-naive and offset-aware datetimes</code></td>
-            <td>
-              <code>get_current_user()</code> session token path<br/>
-              <span class="path">backend/auth/github_oauth.py:483</span><br/>
-              <code>validate_session_token()</code><br/>
-              <span class="path">backend/auth/github_oauth.py:414</span>
-            </td>
-            <td>
-              Breaks authenticated requests when frontend sends a session token (HTTP 500 or WS 403).
-              This also broke direct sandbox WS and controller proxy WS auth during testing.
-            </td>
-            <td>
-              Normalize DB timestamps before comparison (SQLite returns naive timestamps). Example approach:
-              treat naive timestamps as UTC before comparing with <code>utc_now()</code>.
-              Add a shared helper and use it in both auth functions.
-            </td>
-          </tr>
-          <tr>
-            <td><code>can't subtract offset-naive and offset-aware datetimes</code></td>
-            <td>
-              Session context statistics duration calculation<br/>
-              <span class="path">backend/daifuUserAgent/session_service.py:198</span>
-            </td>
-            <td>
-              <code>GET /daifu/sessions/{id}</code> returned <code>500</code>.<br/>
-              Also breaks proxied session context via <code>/controller/proxy/...</code>.
-            </td>
-            <td>
-              Normalize <code>db_session.created_at</code> to UTC before subtracting from <code>utc_now()</code>.
-              Same root cause as auth bug.
-            </td>
-          </tr>
-          <tr>
-            <td><code>local dir .../backend/backend does not exist</code></td>
-            <td>
-              Modal image packaging when controller launched from <code>backend/</code><br/>
-              <span class="path">backend/realtime/modal_sandbox.py</span>
-            </td>
-            <td>
-              Modal provisioning failed immediately during <code>POST /daifu/sessions</code>.
-            </td>
-            <td>
-              Use an absolute source path instead of relative <code>"backend/"</code>. Fixed in local testing patch
-              using <code>Path(__file__).resolve().parents[1]</code>.
-            </td>
-          </tr>
-          <tr>
-            <td>Modal SDK image build error after <code>add_local_dir()</code></td>
-            <td>
-              Newer Modal SDKs reject build steps after <code>image.add_local_*</code>
-            </td>
-            <td>
-              Modal provisioning failed even after path fix.
-            </td>
-            <td>
-              For <code>add_local_dir(...)</code>, use <code>copy=True</code> or move local-add calls to the end of the build.
-              Fixed in local testing patch with <code>copy=True</code> and adjusted call order.
-            </td>
-          </tr>
-          <tr>
-            <td><code>ModuleNotFoundError: No module named 'pgvector'</code></td>
-            <td>
-              Modal sandbox startup logs (real Modal app logs)<br/>
-              Sandbox container failed importing <code>/app/backend/models.py</code>
-            </td>
-            <td>
-              Real Modal tunnel URL was provisioned, but sandbox app crashed before serving traffic.<br/>
-              Controller proxy <code>/healthz</code> returned <code>502 PROXY_UPSTREAM_ERROR</code>.
-            </td>
-            <td>
-              Add <code>pgvector</code> to the Modal image in <code>backend/realtime/modal_sandbox.py</code>.<br/>
-              Example: add <code>"pgvector"</code> to <code>.pip_install(...)</code>.
-            </td>
-          </tr>
-          <tr>
-            <td>Modal sandbox missing DB connection env (likely startup risk)</td>
-            <td>
-              <code>run_sandbox_server.py</code> imports DB at startup, but Modal env currently passes only
-              <code>SANDBOX_ID</code> and <code>CONTROLLER_BASE_URL</code>.
-            </td>
-            <td>
-              Even after fixing <code>pgvector</code>, sandbox can still fail if no DB URL is passed.
-            </td>
-            <td>
-              Pass <code>CONTROLLER_DATABASE_URL</code> (or <code>DATABASE_URL</code>) into Modal sandbox env from
-              <code>RealtimeModalSandbox.create(...)</code>.
-            </td>
-          </tr>
-        </table>
-      </article>
-
-      <article class="card span-6">
-        <div class="section-title">
-          <h2>1. Deploy Frontend (<code>src/</code>) to Vercel</h2>
-          <span class="status ok">Vite Project</span>
+        <div class="control">
+          <label for="sort-filter">Sort</label>
+          <select id="sort-filter">
+            <option value="impact">Impact then path</option>
+            <option value="path">Path</option>
+            <option value="status">Status</option>
+            <option value="layer">Layer</option>
+          </select>
         </div>
-        <p>
-          The app lives in <code>src/</code>, but deployment should use the <strong>repo root</strong> because
-          <code>package.json</code>, <code>vite.config.ts</code>, and build scripts are at the root.
-        </p>
-        <h3>Vercel Project Settings</h3>
-        <ul class="list">
-          <li><strong>Framework Preset:</strong> Vite</li>
-          <li><strong>Root Directory:</strong> repository root (not <code>src/</code>)</li>
-          <li><strong>Install Command:</strong> <code>npm ci</code></li>
-          <li><strong>Build Command:</strong> <code>npm run build</code></li>
-          <li><strong>Output Directory:</strong> <code>dist</code></li>
-        </ul>
-        <h3>Frontend Env Vars (Vercel)</h3>
-        <pre>VITE_API_BASE_URL=/api
-VITE_REALTIME_CONTROLLER_SPLIT_ENABLED=true
-VITE_REALTIME_CONTROLLER_PROXY_ENABLED=true
-VITE_REALTIME_WS_UNIFIED_ENABLED=true
-VITE_REALTIME_TUNNEL_MODE_ENABLED=true
-# Optional
-VITE_REALTIME_SSE_STREAM_ENABLED=false
-VITE_REALTIME_WS_CHAT_ENABLED=false
-VITE_REALTIME_CONTRACT_VERSION=realtime-v1-phase0</pre>
-        <h3>Vercel Rewrite (already prepared)</h3>
-        <pre>{
-  "rewrites": [
-    { "source": "/api/:path*", "destination": "http://139.84.154.9:8000/:path*" }
-  ]
-}</pre>
-        <div class="callout warn">
-          Vercel is HTTPS. A raw <code>http://139.84.154.9:8000</code> backend may cause mixed-content and WS issues.
-          Prefer an HTTPS backend domain (see networking section).
-        </div>
-      </article>
+      </div>
 
-      <article class="card span-6">
-        <div class="section-title">
-          <h2>2. Deploy Backend Controller API on <code>139.84.154.9</code></h2>
-          <span class="status warn">Requires TLS/Proxy Hardening</span>
-        </div>
-        <h3>Install & Run (Python + uv)</h3>
-        <pre>cd /opt/YudaiV3
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -U pip
-pip install uv
-uv sync || pip install -r requirements.txt
+      <label class="toggle" for="critical-only">
+        <input id="critical-only" type="checkbox" />
+        Show only deployment-critical files
+      </label>
 
-cd backend
-uv run uvicorn run_controller:app --host 0.0.0.0 --port 8000</pre>
-        <h3>Recommended Production Runtime</h3>
-        <ul class="list">
-          <li>Run Uvicorn/Gunicorn under <code>systemd</code></li>
-          <li>Put Nginx or Caddy in front for TLS (<code>443</code>)</li>
-          <li>Expose backend to the public as <code>https://api.yourdomain.com</code></li>
-          <li>Update <code>CONTROLLER_BASE_URL</code> to the public URL (not localhost)</li>
-        </ul>
-        <h3>Health Checks</h3>
-        <pre>curl -i http://139.84.154.9:8000/health
-curl -i http://139.84.154.9:8000/realtime/flags</pre>
-        <div class="callout">
-          The controller host already mounts both the legacy sessions router (<code>/daifu/*</code>)
-          and the controller lifecycle/proxy routes (<code>/controller/*</code>).
-        </div>
-      </article>
+      <div class="summary-line" id="filter-summary"></div>
+      <div class="file-list" id="file-list"></div>
+    </section>
 
-      <article class="card span-12">
-        <div class="section-title">
-          <h2>3. Networking: Make Frontend and Backend Communicate Reliably</h2>
-          <span class="status bad">Must Be Correct For Production</span>
-        </div>
-        <table>
-          <tr>
-            <th>Problem</th>
-            <th>Why It Happens</th>
-            <th>Production Fix</th>
-          </tr>
-          <tr>
-            <td>Mixed content (HTTPS frontend calling HTTP backend)</td>
-            <td>Vercel serves HTTPS. Browsers block insecure requests/WS from secure origins.</td>
-            <td>Put TLS on backend (Nginx/Caddy) and use <code>https://api.yourdomain.com</code> in rewrites / <code>CONTROLLER_BASE_URL</code>.</td>
-          </tr>
-          <tr>
-            <td>CORS failures</td>
-            <td>Backend must explicitly allow the Vercel origin(s).</td>
-            <td>Set <code>ALLOW_ORIGINS</code> and optionally <code>ALLOW_ORIGIN_REGEX</code> for preview deployments.</td>
-          </tr>
-          <tr>
-            <td>WebSocket upgrade failures via reverse proxy</td>
-            <td>Proxy config missing <code>Upgrade</code>/<code>Connection</code> headers.</td>
-            <td>Enable WS proxying in Nginx/Caddy for <code>/controller/proxy/sessions/*/ws/*</code>.</td>
-          </tr>
-          <tr>
-            <td>Modal sandbox cannot call controller heartbeat</td>
-            <td><code>CONTROLLER_BASE_URL</code> must be reachable from Modal (public network), not localhost.</td>
-            <td>Set <code>CONTROLLER_BASE_URL=https://api.yourdomain.com</code>.</td>
-          </tr>
-          <tr>
-            <td>Controller cannot reach Modal tunnel</td>
-            <td>Sandbox process crashes before listening (seen in E2E due missing <code>pgvector</code>).</td>
-            <td>Fix Modal image dependencies and sandbox env propagation, then re-test <code>/controller/proxy/.../healthz</code>.</td>
-          </tr>
-        </table>
-
-        <h3>Firewall / Ports (Backend Server)</h3>
-        <pre># Example with ufw
-sudo ufw allow 22/tcp
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-
-# If temporarily exposing uvicorn directly (not recommended long term):
-sudo ufw allow 8000/tcp</pre>
-
-        <h3>Nginx WebSocket Example (controller proxy)</h3>
-        <pre>location / {
-    proxy_pass http://127.0.0.1:8000;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-
-location /controller/proxy/sessions/ {
-    proxy_pass http://127.0.0.1:8000;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}</pre>
-      </article>
-
-      <article class="card span-12">
-        <div class="section-title">
-          <h2>4. Production Backend <code>.env</code> (What To Set)</h2>
-          <span class="status ok">Copy + Fill Values</span>
-        </div>
-        <p class="mini">
-          File target example: <code>backend/.env.production</code>. This includes controller host settings,
-          realtime rollout flags, Modal credentials, CORS, and recommended auth settings.
-        </p>
-        <pre># =========================
-# Core App / Database (REQUIRED)
-# =========================
-DATABASE_URL=postgresql://DB_USER:DB_PASS@DB_HOST:5432/YUDAI_DB
-
-# Public URL of the controller API (REQUIRED for Modal callbacks/heartbeat)
-# Use your TLS endpoint in production, not localhost.
-CONTROLLER_BASE_URL=https://api.yourdomain.com
-
-# =========================
-# CORS / Frontend Origins (REQUIRED)
-# =========================
-ALLOW_ORIGINS=https://your-frontend.vercel.app,https://yourdomain.com
-# Optional: allow Vercel preview deployments
-ALLOW_ORIGIN_REGEX=^https://.*\\.vercel\\.app$
-
-# =========================
-# Realtime Feature Flags (REQUIRED for controller-proxy + unified WS flow)
-# =========================
-REALTIME_CONTROLLER_SPLIT_ENABLED=true
-REALTIME_CONTROLLER_PROXY_ENABLED=true
-REALTIME_WS_UNIFIED_ENABLED=true
-REALTIME_TUNNEL_MODE_ENABLED=true
-REALTIME_MODAL_PROVISIONING_ENABLED=true
-
-# Optional flags
-REALTIME_WS_CHAT_ENABLED=false
-REALTIME_SSE_STREAM_ENABLED=false
-REALTIME_CONTRACT_VERSION=realtime-v1-phase0
-REALTIME_DEFAULT_ORG=yudai
-
-# =========================
-# Modal Credentials (REQUIRED if using Modal provisioning)
-# =========================
-MODAL_TOKEN_ID=ak-xxxxxxxxxxxxxxxx
-MODAL_TOKEN_SECRET=as-xxxxxxxxxxxxxxxxxxxxxxxx
-
-# =========================
-# GitHub / Repo Bootstrap (RECOMMENDED, REQUIRED for private repo clone/bootstrap)
-# =========================
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-# GitHub OAuth / App Auth (REQUIRED if frontend login/auth flows are used)
-GITHUB_APP_CLIENT_ID=Iv1.xxxxxxxxxxxxxxxx
-GITHUB_APP_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
-GITHUB_APP_ID=1234567
-GITHUB_APP_PRIVATE_KEY_PATH=/opt/YudaiV3/backend/keys/github-app.private-key.pem
-# This should point to your backend callback endpoint
-GITHUB_REDIRECT_URI=https://api.yourdomain.com/auth/callback
-
-# =========================
-# Controller <-> Sandbox Heartbeat Security (RECOMMENDED)
-# =========================
-CONTROLLER_HEARTBEAT_SECRET=replace-with-random-secret
-
-# =========================
-# Sandbox / Local Storage Paths (RECOMMENDED)
-# =========================
-SANDBOX_GIT_ROOT=/var/lib/yudai/sandbox-repos
-SANDBOX_CACHE_ROOT=/var/lib/yudai/sandbox-cache
-SANDBOX_TUNNEL_TEMPLATE=http://localhost:8100
-
-# =========================
-# Logging / Debug (OPTIONAL)
-# =========================
-DB_ECHO=false</pre>
-
-        <div class="callout bad">
-          <strong>Important (Modal sandbox startup):</strong> the controller currently needs a code patch to pass
-          a DB connection env (<code>CONTROLLER_DATABASE_URL</code> or <code>DATABASE_URL</code>) into the Modal sandbox.
-          Setting it only in the controller host <code>.env</code> is not enough unless the code forwards it.
-        </div>
-      </article>
-
-      <article class="card span-12">
-        <div class="section-title">
-          <h2>Code Patches To Apply Before Production Re-Test</h2>
-          <span class="status warn">Required For Clean E2E</span>
-        </div>
-        <ol class="list">
-          <li>
-            <strong>Fix timezone comparisons for SQLite-backed auth/session tokens</strong><br/>
-            <span class="path">backend/auth/github_oauth.py:414, backend/auth/github_oauth.py:483</span>
-          </li>
-          <li>
-            <strong>Fix session duration datetime arithmetic in session context</strong><br/>
-            <span class="path">backend/daifuUserAgent/session_service.py:198</span>
-          </li>
-          <li>
-            <strong>Add <code>pgvector</code> to Modal image dependencies</strong><br/>
-            <span class="path">backend/realtime/modal_sandbox.py (image .pip_install)</span>
-          </li>
-          <li>
-            <strong>Pass DB URL into Modal sandbox env</strong> (<code>CONTROLLER_DATABASE_URL</code> recommended)<br/>
-            <span class="path">backend/realtime/modal_sandbox.py:102</span>
-          </li>
-          <li>
-            <strong>(Optional) Use async Modal tunnels API to remove warning</strong><br/>
-            <span class="path">backend/realtime/modal_sandbox.py:134</span>
-          </li>
-        </ol>
-      </article>
-
-      <article class="card span-12">
-        <div class="section-title">
-          <h2>Re-Test Commands (After Fixes)</h2>
-          <span class="status info">Runbook</span>
-        </div>
-        <pre># 1) Backend server health
-curl -i https://api.yourdomain.com/health
-curl -i https://api.yourdomain.com/realtime/flags
-
-# 2) Frontend -> backend connectivity via Vercel rewrite
-curl -i https://your-frontend.vercel.app/api/health
-
-# 3) Modal observability
-modal app list
-modal app logs yudai-realtime --timestamps
-modal container list --json
-
-# 4) Local targeted regression tests (already added)
-UV_CACHE_DIR=/tmp/.uv-cache uv run pytest -q \
-  backend/tests/test_realtime_lifecycle.py \
-  backend/tests/test_realtime_controller_routes.py \
-  backend/tests/test_session_routes_realtime_provisioning.py \
-  backend/tests/test_run_controller_mounts.py
-
-# 5) Frontend routing/proxy URL tests
-npx vitest run tests/frontend/apiConfig.test.ts tests/frontend/realtimeRouting.test.ts</pre>
-      </article>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Empty-DB Deployment Checklist</h2>
+        <span class="progress" id="check-progress">0/0 complete</span>
+      </div>
+      <p class="mini">Checklist state is stored in your browser local storage for this page.</p>
+      <ol class="checklist" id="deploy-checklist">
+        <li>
+          <label class="check-item">
+            <input type="checkbox" data-task="schema-bootstrap" />
+            Bootstrap database schema from current models/baseline (skip incremental migration path for empty DB).
+          </label>
+        </li>
+        <li>
+          <label class="check-item">
+            <input type="checkbox" data-task="env-flags" />
+            Set new controller-broker flags: <code>REALTIME_CONTROLLER_BROKER_ENABLED</code>, <code>REALTIME_SANDBOX_INTERNAL_EXEC_ENABLED</code>, <code>REALTIME_MODE_ORCHESTRATOR_ENABLED</code>.
+          </label>
+        </li>
+        <li>
+          <label class="check-item">
+            <input type="checkbox" data-task="internal-secret" />
+            Configure <code>CONTROLLER_INTERNAL_WS_SECRET</code> on controller and sandbox environment.
+          </label>
+        </li>
+        <li>
+          <label class="check-item">
+            <input type="checkbox" data-task="modal-env" />
+            Verify Modal sandbox receives setup context env vars (<code>SESSION_PUBLIC_ID</code>, <code>REPO_URL</code>, <code>WORKSPACE_PATH</code>).
+          </label>
+        </li>
+        <li>
+          <label class="check-item">
+            <input type="checkbox" data-task="ws-e2e" />
+            Open <code>/controller/sessions/{id}/ws/unified</code> and confirm <code>status</code>, <code>mode_event</code>, and heartbeat traffic.
+          </label>
+        </li>
+        <li>
+          <label class="check-item">
+            <input type="checkbox" data-task="exec-pipeline" />
+            Trigger <code>/daifu/sessions/{id}/execution</code> and validate Architect - Tester - Coder transitions and execution rows.
+          </label>
+        </li>
+        <li>
+          <label class="check-item">
+            <input type="checkbox" data-task="frontend-routing" />
+            Confirm frontend uses controller URLs only (no tunnel/proxy rewrite assumptions).
+          </label>
+        </li>
+        <li>
+          <label class="check-item">
+            <input type="checkbox" data-task="smoke-tests" />
+            Run backend and frontend routing tests updated in this change set before production cutover.
+          </label>
+        </li>
+      </ol>
     </section>
   </main>
+
+  <script>
+    const FILES = [
+      {
+        path: "backend/auth/github_oauth.py",
+        status: "M",
+        layer: "backend",
+        impact: "high",
+        deployCritical: true,
+        summary: "Token expiry checks now normalize naive timestamps before UTC comparison.",
+        symbols: ["validate_session_token", "get_current_user", "get_github_api", "ensure_utc"],
+        features: [
+          "Imported ensure_utc from utils and applied it to session and auth token expiry checks.",
+          "Prevents offset-naive vs offset-aware datetime exceptions in auth code paths."
+        ],
+        deployment: [
+          "Stabilizes authenticated API + unified WS access in SQLite-backed environments.",
+          "Avoids auth regressions during first deployment smoke tests."
+        ],
+        validation: [
+          "Authenticate and call protected /daifu endpoints.",
+          "Open unified WS with token and verify no datetime TypeError in backend logs."
+        ]
+      },
+      {
+        path: "backend/config/realtime_flags.py",
+        status: "M",
+        layer: "backend",
+        impact: "critical",
+        deployCritical: true,
+        summary: "Realtime flags were redefined for controller-broker contract v2.",
+        symbols: ["RealtimeFeatureFlags", "from_env", "as_dict"],
+        features: [
+          "Removed tunnel/proxy flags and introduced controller_broker, sandbox_internal_exec, and mode_orchestrator toggles.",
+          "Default contract version changed to realtime-v2-controller-broker."
+        ],
+        deployment: [
+          "Flag mismatches between backend/frontend will break route and WS assumptions.",
+          "These flags determine if 3-mode orchestration endpoints can run."
+        ],
+        validation: [
+          "Call GET /realtime/flags and confirm expected v2 keys are present.",
+          "Verify environment variables are set consistently for controller and sandbox containers."
+        ]
+      },
+      {
+        path: "backend/daifuUserAgent/githubOps.py",
+        status: "M",
+        layer: "backend",
+        impact: "medium",
+        deployCritical: false,
+        summary: "GitHub token expiry checks now use UTC normalization.",
+        symbols: ["GitHubOps.get_github_token", "ensure_utc"],
+        features: [
+          "Applied ensure_utc before comparing auth_token.expires_at with utc_now.",
+          "Expired token invalidation remains unchanged, now safer on SQLite."
+        ],
+        deployment: [
+          "Reduces false token-expired decisions caused by timezone mismatch.",
+          "Improves reliability for issue/PR operations downstream."
+        ],
+        validation: [
+          "Run a GitHub operation using stored token and verify no datetime comparison crash."
+        ]
+      },
+      {
+        path: "backend/daifuUserAgent/session_routes.py",
+        status: "M",
+        layer: "backend",
+        impact: "critical",
+        deployCritical: true,
+        summary: "Sessions API now stores mode state, exposes conversation/execution endpoints, and queues 3-mode pipeline.",
+        symbols: [
+          "create_session",
+          "conversation_in_session",
+          "execute_session_pipeline",
+          "run_mode_pipeline_background",
+          "_next_mode_for_session"
+        ],
+        features: [
+          "create_session now seeds repo_url, runtime_workspace_path, current_mode/mode_status, and passes env_inputs to lifecycle runtime provisioning.",
+          "Added POST /sessions/{id}/conversation for immediate NL acknowledgment and optional follow-up question generation.",
+          "Added POST /sessions/{id}/execution to create AgentExecution rows and launch fixed Architect->Tester->Coder background pipeline.",
+          "Session and update responses now include mode/issue/PR metadata fields."
+        ],
+        deployment: [
+          "This is the main API entry for orchestrated execution; failures here block the whole feature.",
+          "Controller-broker behavior intentionally hides tunnel_url when broker mode is enabled."
+        ],
+        validation: [
+          "Create session and inspect returned mode fields.",
+          "Call conversation then execution and confirm mode_event messages are emitted over unified WS."
+        ]
+      },
+      {
+        path: "backend/daifuUserAgent/session_service.py",
+        status: "M",
+        layer: "backend",
+        impact: "high",
+        deployCritical: true,
+        summary: "Session context responses now expose 3-mode metadata and safe duration calculations.",
+        symbols: ["SessionService.to_response", "SessionService.get_context", "ensure_utc"],
+        features: [
+          "Mapped repo_url/workspace and all mode-tracking fields into response DTOs.",
+          "Session duration now uses ensure_utc(created_at) before subtraction."
+        ],
+        deployment: [
+          "Frontend can now display mode progression without additional API changes.",
+          "Fixes runtime 500 risk in session context retrieval."
+        ],
+        validation: [
+          "Call GET /daifu/sessions/{id} and verify returned fields current_mode/mode_status/issue_url/pr_url.",
+          "Confirm no datetime subtraction exception in logs."
+        ]
+      },
+      {
+        path: "backend/docs/realtime_phase0/contracts-controller.openapi.yaml",
+        status: "M",
+        layer: "docs",
+        impact: "medium",
+        deployCritical: false,
+        summary: "Controller OpenAPI contract updated to v2 controller-broker surface.",
+        symbols: ["/controller/sessions/{session_id}/runtime", "/controller/sessions/{session_id}/ws/unified"],
+        features: [
+          "Document title/version updated to Controller-Broker v2.",
+          "Added runtime ensure/detail endpoints and unified WS path.",
+          "Flag schema updated to new v2 keys."
+        ],
+        deployment: [
+          "API consumers and QA docs should now align with non-proxy architecture.",
+          "Reduces integration confusion for frontend and ops teams."
+        ],
+        validation: [
+          "Regenerate docs and confirm runtime + unified WS endpoints appear."
+        ]
+      },
+      {
+        path: "backend/docs/realtime_phase0/contracts-sandbox.openapi.yaml",
+        status: "M",
+        layer: "docs",
+        impact: "medium",
+        deployCritical: false,
+        summary: "Sandbox OpenAPI shifted from public session APIs to internal exec WS contract.",
+        symbols: ["/internal/sessions/{session_id}/ws/exec", "exec.start", "exec.stdin", "exec.cancel"],
+        features: [
+          "Removed public chat/solve endpoints and bearer auth definitions.",
+          "Introduced internal websocket message schemas for command execution."
+        ],
+        deployment: [
+          "Clarifies that browser clients must not call sandbox APIs directly.",
+          "Internal controller->sandbox WS security now depends on optional secret query token."
+        ],
+        validation: [
+          "Compare sandbox routes to spec and confirm only healthz + internal exec WS are exposed."
+        ]
+      },
+      {
+        path: "backend/docs/realtime_phase0/contracts.md",
+        status: "M",
+        layer: "docs",
+        impact: "medium",
+        deployCritical: false,
+        summary: "Narrative contract doc rewritten around controller-broker v2 and fixed mode transitions.",
+        symbols: ["architect -> tester -> coder", "controller unified WS"],
+        features: [
+          "Added sessions API entries for conversation and execution endpoints.",
+          "Declared no browser traffic to sandbox tunnel/proxy routes."
+        ],
+        deployment: [
+          "Provides canonical architecture statement for release docs.",
+          "Helps prevent accidental reintroduction of proxy/tunnel client logic."
+        ],
+        validation: [
+          "Align onboarding/deployment docs with this contract text before production handoff."
+        ]
+      },
+      {
+        path: "backend/docs/realtime_phase0/rollout-flags.md",
+        status: "M",
+        layer: "docs",
+        impact: "medium",
+        deployCritical: false,
+        summary: "Rollout flag documentation now lists new backend/frontend v2 toggles and deprecated ones.",
+        symbols: ["REALTIME_CONTROLLER_BROKER_ENABLED", "VITE_REALTIME_MODE_ORCHESTRATOR_ENABLED"],
+        features: [
+          "Added controller_broker/internal_exec/mode_orchestrator flags for backend and frontend.",
+          "Marked tunnel/proxy flag family as deprecated."
+        ],
+        deployment: [
+          "Reduces env configuration drift in production rollout.",
+          "Useful for verifying legacy flags are not driving current behavior."
+        ],
+        validation: [
+          "Compare .env values against this file before deploy."
+        ]
+      },
+      {
+        path: "backend/models.py",
+        status: "M",
+        layer: "backend",
+        impact: "critical",
+        deployCritical: true,
+        summary: "Core schema/model layer now persists mode workflow state and execution telemetry.",
+        symbols: [
+          "SessionMode",
+          "SessionModeStatus",
+          "ChatSession current_mode",
+          "AgentExecution",
+          "ConversationRequest/Response",
+          "ExecutionRequest/Response"
+        ],
+        features: [
+          "ChatSession gained repo_url/workspace columns plus full architect/tester/coder tracking fields and mode_metadata.",
+          "New AgentExecution table model captures plan, outputs, errors, and timestamps for each mode run.",
+          "Session response schemas and new conversation/execution schema models were added."
+        ],
+        deployment: [
+          "Defines the authoritative persisted state used by orchestration and UI.",
+          "For empty DB deployment, bootstrap directly with this schema baseline; migration scripts are optional for first install."
+        ],
+        validation: [
+          "Inspect DB schema after bootstrap and confirm chat_sessions + agent_executions columns exist.",
+          "Fetch a session and validate new response fields serialize correctly."
+        ]
+      },
+      {
+        path: "backend/realtime/controller_routes.py",
+        status: "M",
+        layer: "backend",
+        impact: "critical",
+        deployCritical: true,
+        summary: "Controller routes removed proxy relays and introduced public unified WS gateway behavior.",
+        symbols: [
+          "unified_session_websocket",
+          "ensure_runtime_for_session",
+          "get_runtime_for_session",
+          "get_ws_hub"
+        ],
+        features: [
+          "Deleted HTTP and WS proxy-to-sandbox relay endpoints from controller routes.",
+          "Runtime responses now intentionally hide tunnel_url from clients.",
+          "Unified WS endpoint now authenticates session token, sends status/mode bootstrap, heartbeats, and basic message acknowledgments.",
+          "Runtime creation calls now pass setup env_inputs to lifecycle."
+        ],
+        deployment: [
+          "Frontend must connect to /controller/sessions/{id}/ws/unified, not proxy paths.",
+          "Controller domain becomes the only browser-facing realtime entrypoint."
+        ],
+        validation: [
+          "Run WS handshake to unified endpoint with valid token.",
+          "Verify removed proxy routes are not expected by frontend or reverse proxy config."
+        ]
+      },
+      {
+        path: "backend/realtime/lifecycle.py",
+        status: "M",
+        layer: "backend",
+        impact: "high",
+        deployCritical: true,
+        summary: "Lifecycle runtime provisioning now carries structured setup_context into sandbox/runtime metadata.",
+        symbols: ["create_runtime_for_session", "setup_context", "RealtimeModalSandbox.create"],
+        features: [
+          "Added env_inputs argument and setup_context object containing repo/workspace/session metadata.",
+          "Propagates setup context to Modal sandbox creation and runtime/audit/cache metadata stores."
+        ],
+        deployment: [
+          "Creates traceability for runtime setup decisions during debugging.",
+          "Ensures internal sandbox process gets required bootstrap context values."
+        ],
+        validation: [
+          "Inspect runtime.runtime_metadata.setup_context after session creation.",
+          "Confirm audit events include setup_context payload."
+        ]
+      },
+      {
+        path: "backend/realtime/modal_sandbox.py",
+        status: "M",
+        layer: "backend",
+        impact: "high",
+        deployCritical: true,
+        summary: "Modal sandbox creation now forwards expanded environment and serialized setup context.",
+        symbols: ["RealtimeModalSandbox.create", "SANDBOX_SETUP_CONTEXT", "CONTROLLER_INTERNAL_WS_SECRET"],
+        features: [
+          "create() accepts session_public_id, repo_url, repo_branch, workspace_path, env_inputs.",
+          "Sandbox env now includes controller internal WS secret (if configured) and setup context JSON blob."
+        ],
+        deployment: [
+          "Required for controller->sandbox internal exec channel and reproducible workspace bootstrap.",
+          "Missing env propagation would break orchestrator command execution paths."
+        ],
+        validation: [
+          "Provision sandbox and inspect env via internal diagnostic command.",
+          "Confirm SANDBOX_SETUP_CONTEXT contains session/repo/workspace fields."
+        ]
+      },
+      {
+        path: "backend/realtime/sandbox_routes.py",
+        status: "M",
+        layer: "backend",
+        impact: "critical",
+        deployCritical: true,
+        summary: "Sandbox server converted to internal exec websocket service with process lifecycle streaming.",
+        symbols: ["/internal/sessions/{session_id}/ws/exec", "EXEC_START", "EXEC_STDIN", "EXEC_CANCEL"],
+        features: [
+          "Removed public websocket chat/unified endpoints and session-token auth path.",
+          "Added internal secret check and command execution channel that launches shell processes.",
+          "Streams stdout/stderr/exit events as sandbox_stream envelopes and supports stdin/cancel."
+        ],
+        deployment: [
+          "This is the core execution runtime for tester/coder mode commands.",
+          "Controller and sandbox must share CONTROLLER_INTERNAL_WS_SECRET in production for hardened access."
+        ],
+        validation: [
+          "From controller, send exec.start and verify stdout/stderr/exit events are received.",
+          "Send exec.cancel during long command and verify cancelled event."
+        ]
+      },
+      {
+        path: "backend/realtime/schemas.py",
+        status: "M",
+        layer: "backend",
+        impact: "medium",
+        deployCritical: false,
+        summary: "Runtime response schema simplified by removing proxy_base_url.",
+        symbols: ["RuntimeResponse"],
+        features: [
+          "Removed proxy_base_url optional field from RuntimeResponse model."
+        ],
+        deployment: [
+          "Clients should derive WS/API endpoints from controller config, not runtime payload proxies.",
+          "Prevents stale proxy assumptions from leaking through API contracts."
+        ],
+        validation: [
+          "Call GET /controller/sessions/{id}/runtime and ensure response has no proxy_base_url key."
+        ]
+      },
+      {
+        path: "backend/realtime/ws_protocol.py",
+        status: "M",
+        layer: "backend",
+        impact: "high",
+        deployCritical: true,
+        summary: "Unified websocket protocol expanded with exec control and mode/event stream message types.",
+        symbols: ["WSMessageType", "LLMStreamPayload", "SandboxStreamPayload", "ModeEventPayload"],
+        features: [
+          "Added client message types exec.start, exec.stdin, exec.cancel.",
+          "Added server message types llm_stream, sandbox_stream, mode_event, state_event.",
+          "Introduced typed payload models for new stream/event envelopes."
+        ],
+        deployment: [
+          "Backend and frontend WS handlers must parse the same message vocabulary.",
+          "Any mismatch here causes silent UI stream regressions."
+        ],
+        validation: [
+          "Capture WS traffic during execution and confirm envelope type names match this protocol."
+        ]
+      },
+      {
+        path: "backend/run_sandbox_server.py",
+        status: "M",
+        layer: "backend",
+        impact: "high",
+        deployCritical: true,
+        summary: "Sandbox process now mounts only internal sandbox routes, not legacy session router.",
+        symbols: ["app.include_router(sandbox_router)"],
+        features: [
+          "Removed inclusion of daifu session router from sandbox server.",
+          "Description updated to controller-brokered internal sandbox role."
+        ],
+        deployment: [
+          "Reduces external surface area and enforces controller as public API boundary.",
+          "Reverse proxy/security groups should not expose sandbox session APIs."
+        ],
+        validation: [
+          "Inspect sandbox docs and verify only healthz/internal exec WS routes are present."
+        ]
+      },
+      {
+        path: "backend/solver/mswea",
+        status: "M",
+        layer: "dependency",
+        impact: "medium",
+        deployCritical: false,
+        summary: "MSWEA git submodule pointer advanced to newer commit.",
+        symbols: ["Subproject commit 3204405..."],
+        features: [
+          "Submodule reference moved from ea073aa... to 3204405...."
+        ],
+        deployment: [
+          "Behavior of solver internals may change even without local file diffs.",
+          "Pin/review this commit during release tagging."
+        ],
+        validation: [
+          "Run solver-related smoke tests against the updated submodule revision."
+        ]
+      },
+      {
+        path: "backend/tests/test_realtime_controller_routes.py",
+        status: "M",
+        layer: "tests",
+        impact: "medium",
+        deployCritical: false,
+        summary: "Controller route tests aligned to no-proxy architecture and runtime ownership checks.",
+        symbols: ["get_runtime_for_session", "runtime_response.tunnel_url is None"],
+        features: [
+          "Removed _resolve_sandbox_tunnel test dependency.",
+          "Runtime ensure test now expects tunnel_url to be hidden (None).",
+          "Ownership test switched to runtime detail endpoint authorization path."
+        ],
+        deployment: [
+          "Validates the contract expected by updated frontend routing helpers.",
+          "Prevents accidental reintroduction of legacy proxy assumptions."
+        ],
+        validation: [
+          "Run this pytest module and verify all assertions pass."
+        ]
+      },
+      {
+        path: "backend/tests/test_run_controller_mounts.py",
+        status: "M",
+        layer: "tests",
+        impact: "low",
+        deployCritical: false,
+        summary: "Mount test now expects unified WS endpoint and no proxy route mounts.",
+        symbols: ["/controller/sessions/{session_id}/ws/unified"],
+        features: [
+          "Removed assertions for proxy HTTP/WS mount paths.",
+          "Added assertion for unified controller WS path."
+        ],
+        deployment: [
+          "Small guardrail to keep app route registration consistent with v2 architecture."
+        ],
+        validation: [
+          "Run test_run_controller_mounts.py in CI or local pre-deploy checks."
+        ]
+      },
+      {
+        path: "backend/tests/test_session_routes_realtime_provisioning.py",
+        status: "M",
+        layer: "tests",
+        impact: "low",
+        deployCritical: false,
+        summary: "Session route provisioning tests updated for new feature flag shape.",
+        symbols: ["RealtimeFeatureFlags fixture"],
+        features: [
+          "Fixture now provides controller_broker/sandbox_internal_exec/mode_orchestrator flags.",
+          "Removed deprecated tunnel_mode/controller_proxy fields from test setup."
+        ],
+        deployment: [
+          "Keeps provisioning tests valid under revised flag schema."
+        ],
+        validation: [
+          "Run this pytest module and confirm fixture-based tests still pass."
+        ]
+      },
+      {
+        path: "backend/utils.py",
+        status: "M",
+        layer: "backend",
+        impact: "high",
+        deployCritical: true,
+        summary: "Added ensure_utc helper to normalize naive datetimes across codebase.",
+        symbols: ["ensure_utc", "utc_now"],
+        features: [
+          "New utility converts naive datetime inputs to timezone-aware UTC values.",
+          "Designed specifically for SQLite behavior in auth/session arithmetic paths."
+        ],
+        deployment: [
+          "Foundation fix used by auth/session service modules to avoid datetime exceptions.",
+          "Important for stable local/staging behavior prior to full Postgres rollout."
+        ],
+        validation: [
+          "Unit test or manual check comparisons between ensure_utc(datetime) and utc_now()."
+        ]
+      },
+      {
+        path: "docs/e2e-controller-sessions-modal-report.html",
+        status: "M",
+        layer: "docs",
+        impact: "high",
+        deployCritical: true,
+        summary: "Report transformed into interactive deployment intelligence page with full git-status file coverage.",
+        symbols: ["FILES dataset", "search/filter controls", "deployment checklist"],
+        features: [
+          "Added searchable/filterable per-file module analysis covering every modified/new path.",
+          "Added cross-reference section aligning previous assumptions with current v2 code reality.",
+          "Added persistent deployment checklist tuned for empty-DB rollout."
+        ],
+        deployment: [
+          "This document is now the primary operational artifact for release readiness review.",
+          "Speeds issue triage by mapping code deltas directly to deployment risk and validation steps."
+        ],
+        validation: [
+          "Open page in browser and test search, filters, expand/collapse, and checklist persistence."
+        ]
+      },
+      {
+        path: "src/config/api.ts",
+        status: "M",
+        layer: "frontend",
+        impact: "high",
+        deployCritical: true,
+        summary: "Frontend API map now includes conversation/execution endpoints and unified WS controller route.",
+        symbols: ["API.SESSIONS.CONVERSATION", "API.SESSIONS.EXECUTION", "API.CONTROLLER.UNIFIED_WS"],
+        features: [
+          "Added endpoint constants for /conversation and /execution session APIs.",
+          "Replaced controller proxy path constant with controller unified WS path."
+        ],
+        deployment: [
+          "Frontend runtime URL construction depends on these constants.",
+          "Incorrect values here break connection bootstrapping."
+        ],
+        validation: [
+          "Build frontend and inspect generated requests/WS URL in network panel."
+        ]
+      },
+      {
+        path: "src/config/realtimeFlags.ts",
+        status: "M",
+        layer: "frontend",
+        impact: "high",
+        deployCritical: true,
+        summary: "Frontend flag model switched to v2 controller-broker toggle set.",
+        symbols: ["RealtimeFeatureFlags", "controllerBrokerEnabled", "modeOrchestratorEnabled"],
+        features: [
+          "Removed tunnelMode/controllerProxy booleans and added controllerBroker/sandboxInternalExec/modeOrchestrator.",
+          "Default contract version changed to realtime-v2-controller-broker."
+        ],
+        deployment: [
+          "UI behavior and runtime provisioning conditions now follow new flag names.",
+          "Env mismatches will cause incorrect route logic or hidden features."
+        ],
+        validation: [
+          "Print parsed realtime flags in browser console and compare with backend /realtime/flags payload."
+        ]
+      },
+      {
+        path: "src/hooks/useSessionQueries.ts",
+        status: "M",
+        layer: "frontend",
+        impact: "medium",
+        deployCritical: false,
+        summary: "Session query hook removed tunnel/proxy URL rewrites and now targets controller paths directly.",
+        symbols: ["buildControllerSessionTargetUrl"],
+        features: [
+          "Deleted legacy logic branching on realtimeFeatureFlags for tunnel/proxy behavior.",
+          "URL builder now directly returns controller session target path."
+        ],
+        deployment: [
+          "Aligns query hooks with backend proxy-route removal.",
+          "Reduces path mutation complexity during API calls."
+        ],
+        validation: [
+          "Fetch messages/context through hook and ensure paths resolve to /api/daifu/... endpoints only."
+        ]
+      },
+      {
+        path: "src/hooks/useSessionWebSocket.ts",
+        status: "M",
+        layer: "frontend",
+        impact: "high",
+        deployCritical: true,
+        summary: "Unified WS hook can now render llm_stream, sandbox_stream, and mode/state events.",
+        symbols: ["case 'llm_stream'", "case 'sandbox_stream'", "case 'mode_event'"],
+        features: [
+          "Added handlers to append assistant/system stream content to trajectory.",
+          "Marks session status completed when workflow_complete/state complete events arrive."
+        ],
+        deployment: [
+          "Without these handlers, new orchestrator events would not appear in UI telemetry.",
+          "Critical for user visibility into tester/coder runtime execution."
+        ],
+        validation: [
+          "Open active session and confirm incoming stream messages update trajectory view in real time."
+        ]
+      },
+      {
+        path: "src/hooks/useTrajectoryStream.ts",
+        status: "M",
+        layer: "frontend",
+        impact: "medium",
+        deployCritical: false,
+        summary: "SSE trajectory hook removed tunnel-mode URL remapping and runtime dependency.",
+        symbols: ["buildApiUrl(API.SESSIONS.SOLVER.STREAM)"],
+        features: [
+          "Removed useSessionStore/runtime coupling for tunnel URL fallback.",
+          "SSE stream URL now always derives from controller API base URL."
+        ],
+        deployment: [
+          "Prevents broken SSE URLs when tunnel fields are intentionally absent.",
+          "Simplifies stream startup conditions."
+        ],
+        validation: [
+          "Start a solve stream and confirm EventSource URL uses controller origin path only."
+        ]
+      },
+      {
+        path: "src/stores/sessionStore.ts",
+        status: "M",
+        layer: "frontend",
+        impact: "critical",
+        deployCritical: true,
+        summary: "Main session store removed tunnel/proxy branching and refactored error semantics for controller-only routing.",
+        symbols: [
+          "buildSessionTargetUrl",
+          "controllerBrokerEnabled",
+          "SESSION_AUTH_EXPIRED",
+          "SESSION_TERMINATED"
+        ],
+        features: [
+          "All session API calls now use buildControllerSessionTargetUrl without tunnel URL rewriting.",
+          "Provision/load runtime logic switched from tunnelModeEnabled to controllerBrokerEnabled conditions.",
+          "Renamed tunnel-prefixed user-facing errors to session-prefixed variants."
+        ],
+        deployment: [
+          "This store drives most frontend session behavior; wrong URL strategy here breaks core flows.",
+          "Ensures compatibility with backend removal of proxy routes and hidden tunnel URLs."
+        ],
+        validation: [
+          "Exercise create/load/message/context-card/session-detail flows in UI.",
+          "Confirm no code path throws tunnel unavailable errors under broker mode."
+        ]
+      },
+      {
+        path: "src/types/sessionTypes.ts",
+        status: "M",
+        layer: "frontend",
+        impact: "high",
+        deployCritical: true,
+        summary: "Type system expanded for mode tracking, conversation/execution APIs, and new WS message taxonomy.",
+        symbols: ["Session.current_mode", "ConversationRequest", "ExecutionResponse", "WSMessageType union"],
+        features: [
+          "Session interface now includes repo_url/workspace path and architect/tester/coder lifecycle fields.",
+          "Added conversation and execution request/response interfaces.",
+          "WS message union now covers exec.* and stream/mode/state events."
+        ],
+        deployment: [
+          "Prevents type drift between frontend and updated backend contracts.",
+          "Required for robust compile-time checks in UI logic."
+        ],
+        validation: [
+          "Run TypeScript build and ensure no unresolved type mismatches in session/websocket code."
+        ]
+      },
+      {
+        path: "src/utils/realtimeRouting.ts",
+        status: "M",
+        layer: "frontend",
+        impact: "high",
+        deployCritical: true,
+        summary: "Routing helpers now generate direct controller URLs and unified WS paths only.",
+        symbols: ["buildControllerSessionTargetUrl", "buildUnifiedSessionWebSocketUrl"],
+        features: [
+          "Removed buildControllerProxySessionUrl and tunnel rewrite helper entirely.",
+          "Unified WS builder now consumes controller unified WS endpoint directly."
+        ],
+        deployment: [
+          "Core routing contract change consumed by store/hooks/tests.",
+          "Any stale proxy path here would fail immediately after deploy."
+        ],
+        validation: [
+          "Run frontend routing tests and inspect generated URL outputs for relative and absolute cases."
+        ]
+      },
+      {
+        path: "src/vite-env.d.ts",
+        status: "M",
+        layer: "frontend",
+        impact: "medium",
+        deployCritical: false,
+        summary: "Vite env typings updated for new realtime flags while retaining deprecated keys as legacy compatibility.",
+        symbols: ["VITE_REALTIME_CONTROLLER_BROKER_ENABLED", "VITE_REALTIME_MODE_ORCHESTRATOR_ENABLED"],
+        features: [
+          "Declared new optional environment variable typings for controller-broker contract.",
+          "Left legacy tunnel/proxy entries with deprecation note."
+        ],
+        deployment: [
+          "Prevents TS errors when setting new flags in Vercel/local env files.",
+          "Helps teams phase out old vars safely."
+        ],
+        validation: [
+          "Run TS check/build with updated env vars defined."
+        ]
+      },
+      {
+        path: "tests/frontend/realtimeRouting.test.ts",
+        status: "M",
+        layer: "tests",
+        impact: "medium",
+        deployCritical: false,
+        summary: "Frontend routing tests rewritten for controller-only URL generation and unified WS endpoint format.",
+        symbols: ["buildControllerSessionTargetUrl", "buildUnifiedSessionWebSocketUrl"],
+        features: [
+          "Removed proxy/tunnel rewrite assertions.",
+          "Added expectations for direct controller path generation and ws/wss unified endpoint URLs."
+        ],
+        deployment: [
+          "Locks in the new frontend routing contract to catch regressions quickly."
+        ],
+        validation: [
+          "Run vitest for tests/frontend/realtimeRouting.test.ts."
+        ]
+      },
+      {
+        path: "3-MODE-IMPLEMENTATION-PLAN.md",
+        status: "NEW",
+        layer: "docs",
+        impact: "low",
+        deployCritical: false,
+        summary: "New top-level 1,243-line implementation plan describing 3-mode architecture, tasks, and rollout timeline.",
+        symbols: ["Session Flow", "Implementation Tasks", "Testing Strategy"],
+        features: [
+          "Provides detailed conceptual sequence for Architect/Tester/Coder execution, sandbox setup, and WS streaming.",
+          "Contains extensive task checklists and phased rollout suggestions."
+        ],
+        deployment: [
+          "Useful planning artifact, but code has already diverged in some endpoint details.",
+          "Treat as reference; verify against current runtime contracts before use in runbooks."
+        ],
+        validation: [
+          "Review for stale assumptions (for example old proxy WS path mentions) before external distribution."
+        ]
+      },
+      {
+        path: "backend/db/migrations/20260227_phase1_three_mode_workflow.rollback.sql",
+        status: "NEW",
+        layer: "db",
+        impact: "medium",
+        deployCritical: false,
+        summary: "Rollback SQL for three-mode schema additions and agent_executions table.",
+        symbols: ["DROP TABLE agent_executions", "DROP COLUMN current_mode"],
+        features: [
+          "Drops agent_executions trigger/table/index and removes all added chat_sessions mode columns.",
+          "Provides controlled fallback path for upgraded non-empty databases."
+        ],
+        deployment: [
+          "For your empty DB initial deploy, this rollback is not needed.",
+          "Still valuable for rehearsal in staging environments with live data."
+        ],
+        validation: [
+          "Only execute in controlled rollback drills; verify schema diff before and after."
+        ]
+      },
+      {
+        path: "backend/db/migrations/20260227_phase1_three_mode_workflow.sql",
+        status: "NEW",
+        layer: "db",
+        impact: "medium",
+        deployCritical: false,
+        summary: "Forward SQL migration for mode-tracking columns and agent_executions table.",
+        symbols: ["ALTER TABLE chat_sessions", "CREATE TABLE agent_executions"],
+        features: [
+          "Adds repo/mode/issue/pr metadata columns to chat_sessions.",
+          "Creates indexed agent_executions table with update trigger support."
+        ],
+        deployment: [
+          "For empty DB bootstrap, schema can be created directly without running incremental migration order.",
+          "Keep this script for upgrade scenarios from prior populated versions."
+        ],
+        validation: [
+          "If used, run on staging and verify indices/triggers exist after execution."
+        ]
+      },
+      {
+        path: "backend/realtime/mode_orchestrator.py",
+        status: "NEW",
+        layer: "backend",
+        impact: "critical",
+        deployCritical: true,
+        summary: "New orchestrator executes immutable Architect->Tester->Coder pipeline and emits mode/state websocket events.",
+        symbols: [
+          "ModeOrchestrator.run_full_pipeline",
+          "_run_architect",
+          "_run_tester",
+          "_run_coder",
+          "run_mode_pipeline_background"
+        ],
+        features: [
+          "Creates AgentExecution records, updates session mode_status, and pushes mode_event/state_event envelopes via ws_hub.",
+          "Architect stage creates UserIssue and marks lifecycle issue completion metadata.",
+          "Tester/Coder stages execute shell commands through sandbox_exec_broker and relay sandbox_stream output.",
+          "Coder stage records PR metadata and lifecycle completion markers."
+        ],
+        deployment: [
+          "This file is the runtime heart of 3-mode automation; failures stop workflow progression.",
+          "Current implementation uses synthesized issue/PR flows and command heuristics, so validate against real GitHub expectations."
+        ],
+        validation: [
+          "Trigger /execution endpoint and trace AgentExecution rows for all stages.",
+          "Verify ws_hub broadcasts mode transitions and sandbox_stream payloads in UI."
+        ]
+      },
+      {
+        path: "backend/realtime/sandbox_exec_broker.py",
+        status: "NEW",
+        layer: "backend",
+        impact: "critical",
+        deployCritical: true,
+        summary: "New controller-side broker opens internal sandbox WS, sends exec commands, and aggregates streamed process output.",
+        symbols: ["SandboxExecBroker.run_command", "_resolve_runtime", "_to_websocket_url"],
+        features: [
+          "Resolves active sandbox tunnel from lifecycle/runtime and builds internal WS endpoint path.",
+          "Sends exec.start payloads and handles streaming stdout/stderr/exit events with optional callback forwarding.",
+          "Applies timeout handling and normalized return structure (exit_code/stdout/stderr/duration)."
+        ],
+        deployment: [
+          "Core bridge between orchestrator and sandbox runtime process execution.",
+          "Requires stable tunnel reachability and optional secret coordination for hardened environments."
+        ],
+        validation: [
+          "Execute known command via broker in staging and verify exit_code/stdout parsing.",
+          "Force timeout case and confirm RuntimeError handling path."
+        ]
+      },
+      {
+        path: "backend/realtime/ws_hub.py",
+        status: "NEW",
+        layer: "backend",
+        impact: "high",
+        deployCritical: true,
+        summary: "New in-memory session WebSocket hub for controller-side broadcast fanout.",
+        symbols: ["SessionWebSocketHub.register", "send_to_session", "get_ws_hub"],
+        features: [
+          "Tracks connected sockets by session id with async locking.",
+          "Broadcasts serialized envelopes and prunes stale sockets automatically on send failures."
+        ],
+        deployment: [
+          "Required for orchestrator and conversation endpoints to push events to active clients.",
+          "Single-process in-memory design means horizontal scaling requires sticky sessions or external pub/sub later."
+        ],
+        validation: [
+          "Connect multiple clients to same session and verify fanout delivery counts."
+        ]
+      },
+      {
+        path: "docs/3-mode-agent-system-implementation-plan.md",
+        status: "NEW",
+        layer: "docs",
+        impact: "low",
+        deployCritical: false,
+        summary: "Second copy of the same 1,243-line 3-mode plan stored under docs/.",
+        symbols: ["Duplicate of 3-MODE-IMPLEMENTATION-PLAN.md"],
+        features: [
+          "Contains the same architecture/session flow/task detail as the root-level plan file.",
+          "Creates duplicated maintenance surface for planning documentation."
+        ],
+        deployment: [
+          "No runtime impact, but duplication can produce stale conflicting guidance over time.",
+          "Recommend designating one canonical planning doc path post-deployment."
+        ],
+        validation: [
+          "Diff both plan files periodically or de-duplicate to single source of truth."
+        ]
+      }
+    ];
+
+    const IMPACT_WEIGHT = {
+      critical: 0,
+      high: 1,
+      medium: 2,
+      low: 3
+    };
+
+    const dom = {
+      search: document.getElementById("search"),
+      status: document.getElementById("status-filter"),
+      layer: document.getElementById("layer-filter"),
+      impact: document.getElementById("impact-filter"),
+      sort: document.getElementById("sort-filter"),
+      criticalOnly: document.getElementById("critical-only"),
+      fileList: document.getElementById("file-list"),
+      summary: document.getElementById("filter-summary"),
+      chipTotal: document.getElementById("chip-total"),
+      chipMod: document.getElementById("chip-mod"),
+      chipNew: document.getElementById("chip-new"),
+      chipCritical: document.getElementById("chip-critical"),
+      expandAll: document.getElementById("expand-all"),
+      collapseAll: document.getElementById("collapse-all"),
+      reset: document.getElementById("reset-filters"),
+      checklist: document.getElementById("deploy-checklist"),
+      checkProgress: document.getElementById("check-progress")
+    };
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function tag(label, cls) {
+      return `<span class="tag ${cls}">${escapeHtml(label)}</span>`;
+    }
+
+    function renderList(items) {
+      if (!items.length) {
+        dom.fileList.innerHTML = "<div class='empty'>No files match current filters.</div>";
+        return;
+      }
+
+      dom.fileList.innerHTML = items.map((file) => {
+        const statusLabel = file.status === "M" ? "Modified" : "New";
+        const searchableBlob = [
+          file.path,
+          file.summary,
+          ...(file.symbols || []),
+          ...(file.features || []),
+          ...(file.deployment || []),
+          ...(file.validation || [])
+        ].join(" ");
+
+        return `
+          <details class="file-card" data-search="${escapeHtml(searchableBlob.toLowerCase())}">
+            <summary>
+              <div class="summary-top">
+                <code class="path">${escapeHtml(file.path)}</code>
+                <div class="tags">
+                  ${tag(statusLabel, file.status === "M" ? "mod" : "new")}
+                  ${tag(file.layer, file.layer)}
+                  ${tag(file.impact, file.impact)}
+                  ${file.deployCritical ? tag("deploy-critical", "critical") : ""}
+                </div>
+              </div>
+              <p class="summary-text">${escapeHtml(file.summary)}</p>
+            </summary>
+            <div class="file-body">
+              <section>
+                <h3>Functional Changes</h3>
+                <ul>${file.features.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>
+              </section>
+              <section>
+                <h3>Deployment Impact</h3>
+                <ul>${file.deployment.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>
+              </section>
+              <section>
+                <h3>Key Symbols</h3>
+                <ul>${file.symbols.map((line) => `<li><code>${escapeHtml(line)}</code></li>`).join("")}</ul>
+              </section>
+              <section>
+                <h3>Validation</h3>
+                <ul>${file.validation.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ul>
+              </section>
+            </div>
+          </details>
+        `;
+      }).join("");
+    }
+
+    function applyFilters() {
+      const searchValue = dom.search.value.trim().toLowerCase();
+      const statusValue = dom.status.value;
+      const layerValue = dom.layer.value;
+      const impactValue = dom.impact.value;
+      const sortValue = dom.sort.value;
+      const criticalOnly = dom.criticalOnly.checked;
+
+      let filtered = FILES.filter((file) => {
+        if (statusValue !== "all" && file.status !== statusValue) {
+          return false;
+        }
+        if (layerValue !== "all" && file.layer !== layerValue) {
+          return false;
+        }
+        if (impactValue !== "all" && file.impact !== impactValue) {
+          return false;
+        }
+        if (criticalOnly && !file.deployCritical) {
+          return false;
+        }
+        if (!searchValue) {
+          return true;
+        }
+        const blob = [
+          file.path,
+          file.summary,
+          ...(file.symbols || []),
+          ...(file.features || []),
+          ...(file.deployment || []),
+          ...(file.validation || [])
+        ].join(" ").toLowerCase();
+        return blob.includes(searchValue);
+      });
+
+      filtered = filtered.sort((a, b) => {
+        if (sortValue === "path") {
+          return a.path.localeCompare(b.path);
+        }
+        if (sortValue === "status") {
+          const statusOrder = { NEW: 0, M: 1 };
+          const statusDelta = statusOrder[a.status] - statusOrder[b.status];
+          return statusDelta !== 0 ? statusDelta : a.path.localeCompare(b.path);
+        }
+        if (sortValue === "layer") {
+          const layerDelta = a.layer.localeCompare(b.layer);
+          return layerDelta !== 0 ? layerDelta : a.path.localeCompare(b.path);
+        }
+
+        const impactDelta = IMPACT_WEIGHT[a.impact] - IMPACT_WEIGHT[b.impact];
+        return impactDelta !== 0 ? impactDelta : a.path.localeCompare(b.path);
+      });
+
+      renderList(filtered);
+
+      const criticalVisible = filtered.filter((f) => f.impact === "critical").length;
+      const deployCriticalVisible = filtered.filter((f) => f.deployCritical).length;
+      dom.summary.textContent = `${filtered.length} of ${FILES.length} files shown | ${criticalVisible} critical-impact | ${deployCriticalVisible} deployment-critical.`;
+    }
+
+    function initializeHeaderStats() {
+      const modified = FILES.filter((file) => file.status === "M").length;
+      const fresh = FILES.filter((file) => file.status === "NEW").length;
+      const deployCritical = FILES.filter((file) => file.deployCritical).length;
+
+      dom.chipTotal.innerHTML = `<strong>Files:</strong> ${FILES.length}`;
+      dom.chipMod.innerHTML = `<strong>Modified:</strong> ${modified}`;
+      dom.chipNew.innerHTML = `<strong>New:</strong> ${fresh}`;
+      dom.chipCritical.innerHTML = `<strong>Deployment-Critical:</strong> ${deployCritical}`;
+    }
+
+    function initializeLayerOptions() {
+      const layers = Array.from(new Set(FILES.map((file) => file.layer))).sort();
+      dom.layer.innerHTML = `<option value="all">All</option>${layers.map((layer) => `<option value="${escapeHtml(layer)}">${escapeHtml(layer)}</option>`).join("")}`;
+    }
+
+    function wireControls() {
+      [dom.search, dom.status, dom.layer, dom.impact, dom.sort, dom.criticalOnly].forEach((node) => {
+        node.addEventListener("input", applyFilters);
+        node.addEventListener("change", applyFilters);
+      });
+
+      dom.expandAll.addEventListener("click", () => {
+        dom.fileList.querySelectorAll("details.file-card").forEach((item) => {
+          item.open = true;
+        });
+      });
+
+      dom.collapseAll.addEventListener("click", () => {
+        dom.fileList.querySelectorAll("details.file-card").forEach((item) => {
+          item.open = false;
+        });
+      });
+
+      dom.reset.addEventListener("click", () => {
+        dom.search.value = "";
+        dom.status.value = "all";
+        dom.layer.value = "all";
+        dom.impact.value = "all";
+        dom.sort.value = "impact";
+        dom.criticalOnly.checked = false;
+        applyFilters();
+      });
+    }
+
+    const CHECKLIST_STORAGE_KEY = "yudai-v4-deploy-checklist";
+
+    function updateChecklistProgress() {
+      const checkboxes = Array.from(dom.checklist.querySelectorAll("input[type='checkbox']"));
+      const done = checkboxes.filter((box) => box.checked).length;
+      dom.checkProgress.textContent = `${done}/${checkboxes.length} complete`;
+      if (done === checkboxes.length && checkboxes.length > 0) {
+        dom.checkProgress.style.borderColor = "var(--success)";
+        dom.checkProgress.style.color = "var(--success)";
+      } else {
+        dom.checkProgress.style.borderColor = "var(--line)";
+        dom.checkProgress.style.color = "var(--muted)";
+      }
+    }
+
+    function initChecklist() {
+      const checkboxes = Array.from(dom.checklist.querySelectorAll("input[type='checkbox']"));
+      let saved = {};
+      try {
+        saved = JSON.parse(localStorage.getItem(CHECKLIST_STORAGE_KEY) || "{}");
+      } catch (_error) {
+        saved = {};
+      }
+
+      checkboxes.forEach((box) => {
+        const key = box.getAttribute("data-task");
+        if (key && saved[key]) {
+          box.checked = true;
+        }
+
+        box.addEventListener("change", () => {
+          const next = {};
+          checkboxes.forEach((item) => {
+            const itemKey = item.getAttribute("data-task");
+            if (itemKey) {
+              next[itemKey] = item.checked;
+            }
+          });
+          localStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(next));
+          updateChecklistProgress();
+        });
+      });
+
+      updateChecklistProgress();
+    }
+
+    initializeHeaderStats();
+    initializeLayerOptions();
+    wireControls();
+    initChecklist();
+    applyFilters();
+  </script>
 </body>
 </html>
