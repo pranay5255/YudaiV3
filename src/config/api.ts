@@ -27,6 +27,8 @@ export const API = {
     DETAIL: `${API_BASE}/daifu/sessions/{sessionId}`,
     MESSAGES: `${API_BASE}/daifu/sessions/{sessionId}/messages`,
     CHAT: `${API_BASE}/daifu/sessions/{sessionId}/chat`,
+    CONVERSATION: `${API_BASE}/daifu/sessions/{sessionId}/conversation`,
+    EXECUTION: `${API_BASE}/daifu/sessions/{sessionId}/execution`,
     CONTEXT_CARDS: `${API_BASE}/daifu/sessions/{sessionId}/context-cards`,
     CONTEXT_CARD_DETAIL: `${API_BASE}/daifu/sessions/{sessionId}/context-cards/{cardId}`,
     FILE_DEPS_SESSION: `${API_BASE}/daifu/sessions/{sessionId}/file-deps/session`,
@@ -52,7 +54,7 @@ export const API = {
     CLEANUP: `${API_BASE}/controller/sandboxes/cleanup`,
     RUNTIME_ENSURE: `${API_BASE}/controller/sessions/{sessionId}/runtime`,
     RUNTIME_DETAIL: `${API_BASE}/controller/sessions/{sessionId}/runtime`,
-    PROXY: `${API_BASE}/controller/proxy/sessions/{sessionId}`,
+    UNIFIED_WS: `${API_BASE}/controller/sessions/{sessionId}/ws/unified`,
   },
   SYSTEM: {
     HEALTH: `${API_BASE}/health`,
