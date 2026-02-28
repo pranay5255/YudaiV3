@@ -15,8 +15,15 @@ class WSMessageType(str, Enum):
     # Client -> Server
     CHAT_MESSAGE = "chat_message"
     USER_RESPONSE = "user_response"
+    EXEC_START = "exec.start"
+    EXEC_STDIN = "exec.stdin"
+    EXEC_CANCEL = "exec.cancel"
 
     # Server -> Client
+    LLM_STREAM = "llm_stream"
+    SANDBOX_STREAM = "sandbox_stream"
+    MODE_EVENT = "mode_event"
+    STATE_EVENT = "state_event"
     TRAJECTORY_UPDATE = "trajectory_update"
     TOOL_CALL = "tool_call"
     AGENT_QUESTION = "agent_question"
@@ -62,6 +69,29 @@ class AgentQuestionPayload(BaseModel):
 class StatusPayload(BaseModel):
     status: str
     detail: Optional[str] = None
+
+
+class LLMStreamPayload(BaseModel):
+    stream: str = "llm"
+    text: str
+    final: bool = False
+
+
+class SandboxStreamPayload(BaseModel):
+    stream: str = "sandbox"
+    event: str
+    data: Optional[str] = None
+    exit_code: Optional[int] = None
+    pid: Optional[int] = None
+    command: Optional[str] = None
+
+
+class ModeEventPayload(BaseModel):
+    mode: str
+    state: str
+    previous_mode: Optional[str] = None
+    detail: Optional[str] = None
+    execution_id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
