@@ -146,6 +146,50 @@ export function useSessionWebSocket({
           break;
         }
 
+        case 'llm_stream': {
+          setStatus('streaming');
+          const payload = envelope.payload as { text?: string };
+          const text = payload.text || '';
+          if (text) {
+            setTrajectory((prev) => ({
+              info: prev?.info || {},
+              messages: [
+                ...(prev?.messages || []),
+                { role: 'assistant', content: text },
+              ],
+            }));
+            setMessageCount((count) => count + 1);
+          }
+          break;
+        }
+
+        case 'sandbox_stream': {
+          setStatus('streaming');
+          const payload = envelope.payload as { event?: string; data?: string; exit_code?: number };
+          const content =
+            payload.event === 'exit'
+              ? `[sandbox] process exited (${payload.exit_code ?? 'unknown'})`
+              : `[sandbox:${payload.event || 'event'}] ${payload.data || ''}`;
+          setTrajectory((prev) => ({
+            info: prev?.info || {},
+            messages: [
+              ...(prev?.messages || []),
+              { role: 'system', content },
+            ],
+          }));
+          setMessageCount((count) => count + 1);
+          break;
+        }
+
+        case 'mode_event':
+        case 'state_event': {
+          const payload = envelope.payload as { state?: string; mode?: string };
+          if (payload.state === 'workflow_complete' || payload.mode === 'complete') {
+            setStatus('completed');
+          }
+          break;
+        }
+
         case 'tool_call': {
           const tc = envelope.payload as ToolCallInfo;
           setToolCalls((prev) => [...prev, tc]);
