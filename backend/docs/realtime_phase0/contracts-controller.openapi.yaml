@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
-  title: Yudai Controller API (Phase 0 Freeze)
-  version: 0.1.0
+  title: Yudai Controller API (Controller-Broker v2)
+  version: 0.2.0
 servers:
   - url: https://yudai.app/api
 components:
@@ -101,7 +101,7 @@ paths:
           description: terminated
   /controller/sandboxes/{sandbox_id}/resolve-tunnel:
     post:
-      summary: Resolve active tunnel URL for direct frontend access
+      summary: Resolve active tunnel URL (controller/internal diagnostics)
       parameters:
         - in: path
           name: sandbox_id
@@ -159,6 +159,46 @@ paths:
                     type: integer
                   terminated:
                     type: integer
+  /controller/sessions/{session_id}/runtime:
+    get:
+      summary: Get active runtime metadata for session
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: runtime state
+    post:
+      summary: Ensure active runtime exists for session
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: runtime ensured
+  /controller/sessions/{session_id}/ws/unified:
+    get:
+      summary: Unified websocket endpoint for llm/sandbox/mode streams (upgrade path)
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: token
+          required: true
+          schema:
+            type: string
+      responses:
+        "101":
+          description: WebSocket protocol switch
   /realtime/flags:
     get:
       summary: Return rollout flags and contract version
@@ -175,11 +215,19 @@ paths:
                     properties:
                       controller_split_enabled:
                         type: boolean
-                      tunnel_mode_enabled:
+                      controller_broker_enabled:
+                        type: boolean
+                      sandbox_internal_exec_enabled:
+                        type: boolean
+                      mode_orchestrator_enabled:
                         type: boolean
                       ws_chat_enabled:
                         type: boolean
                       sse_stream_enabled:
+                        type: boolean
+                      modal_provisioning_enabled:
+                        type: boolean
+                      ws_unified_enabled:
                         type: boolean
                       contract_version:
                         type: string
