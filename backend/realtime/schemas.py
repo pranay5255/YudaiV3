@@ -63,7 +63,6 @@ class RuntimeResponse(BaseModel):
     identity_key: str
     status: str
     tunnel_url: Optional[str] = None
-    proxy_base_url: Optional[str] = None
     token_ttl_seconds: int = 3600
     tunnel_expires_at: Optional[datetime] = None
     completion_issue_created: bool = False
