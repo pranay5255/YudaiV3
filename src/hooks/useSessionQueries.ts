@@ -3,9 +3,8 @@
  * This module keeps a compatibility API but does not use React Query.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { API, buildApiUrl } from '../config/api';
-import { realtimeFeatureFlags } from '../config/realtimeFlags';
-import { buildControllerProxySessionUrl } from '../utils/realtimeRouting';
+import { API } from '../config/api';
+import { buildControllerSessionTargetUrl } from '../utils/realtimeRouting';
 import { useAuthStore } from '../stores/authStore';
 import { useSessionStore } from '../stores/sessionStore';
 import type {
@@ -53,30 +52,7 @@ const buildSessionTargetUrl = (
   endpoint: string,
   params: Record<string, string>
 ): string => {
-  const resolved = buildApiUrl(endpoint, params);
-
-  if (realtimeFeatureFlags.controllerProxyEnabled) {
-    const proxied = buildControllerProxySessionUrl(resolved);
-    if (proxied) {
-      return proxied;
-    }
-  }
-
-  if (!realtimeFeatureFlags.tunnelModeEnabled) {
-    return resolved;
-  }
-
-  const tunnelUrl =
-    useSessionStore.getState().runtime?.tunnel_url ||
-    useSessionStore.getState().currentSession?.tunnel_url;
-  if (!tunnelUrl) {
-    throw new Error('Sandbox tunnel is unavailable. Please create a new session.');
-  }
-
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
-  const parsed = new URL(resolved, origin);
-  const tunnelPath = parsed.pathname.replace(/^\/(?:api\/)?daifu/, '');
-  return `${tunnelUrl.replace(/\/$/, '')}${tunnelPath}${parsed.search}`;
+  return buildControllerSessionTargetUrl(endpoint, params);
 };
 
 const toError = (error: unknown, fallback: string): Error =>
