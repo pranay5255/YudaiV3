@@ -24,7 +24,7 @@ import {
 } from '../types/sessionTypes';
 import { API, buildApiUrl } from '../config/api';
 import { realtimeFeatureFlags } from '../config/realtimeFlags';
-import { buildControllerProxySessionUrl } from '../utils/realtimeRouting';
+import { buildControllerSessionTargetUrl } from '../utils/realtimeRouting';
 import { useAuthStore } from './authStore';
 
 export type SessionStatus =
@@ -59,11 +59,9 @@ const toAppError = (
   return new AppError(code, fallbackMessage);
 };
 
-const TUNNEL_UNAVAILABLE_MESSAGE =
-  'Sandbox tunnel is unavailable. Please create a new session.';
-const TUNNEL_AUTH_EXPIRED_MESSAGE =
+const SESSION_AUTH_EXPIRED_MESSAGE =
   'Session expired. Sign in again to reconnect to sandbox.';
-const TUNNEL_TERMINATED_MESSAGE =
+const SESSION_TERMINATED_MESSAGE =
   'This session sandbox has already been terminated.';
 
 // Helper function to get auth headers
@@ -95,11 +93,11 @@ const handleApiResponse = async <T>(response: Response): Promise<T> => {
     }
     if (errorCode === `HTTP_${response.status}`) {
       if (response.status === 401) {
-        errorCode = 'TUNNEL_AUTH_EXPIRED';
-        errorMessage = TUNNEL_AUTH_EXPIRED_MESSAGE;
+        errorCode = 'SESSION_AUTH_EXPIRED';
+        errorMessage = SESSION_AUTH_EXPIRED_MESSAGE;
       } else if (response.status === 410) {
-        errorCode = 'TUNNEL_TERMINATED';
-        errorMessage = TUNNEL_TERMINATED_MESSAGE;
+        errorCode = 'SESSION_TERMINATED';
+        errorMessage = SESSION_TERMINATED_MESSAGE;
       }
     }
     throw new AppError(errorCode, errorMessage);
@@ -111,31 +109,7 @@ const buildSessionTargetUrl = (
   endpoint: string,
   params: Record<string, string>
 ): string => {
-  const resolved = buildApiUrl(endpoint, params);
-
-  if (realtimeFeatureFlags.controllerProxyEnabled) {
-    const proxied = buildControllerProxySessionUrl(resolved);
-    if (proxied) {
-      return proxied;
-    }
-  }
-
-  if (!realtimeFeatureFlags.tunnelModeEnabled) {
-    return resolved;
-  }
-
-  const tunnelUrl =
-    useSessionStore.getState().runtime?.tunnel_url ||
-    useSessionStore.getState().currentSession?.tunnel_url;
-  if (!tunnelUrl) {
-    throw new AppError('TUNNEL_UNAVAILABLE', TUNNEL_UNAVAILABLE_MESSAGE);
-  }
-
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
-  const parsed = new URL(resolved, origin);
-  const tunnelPath = parsed.pathname.replace(/^\/(?:api\/)?daifu/, '');
-
-  return `${tunnelUrl.replace(/\/$/, '')}${tunnelPath}${parsed.search}`;
+  return buildControllerSessionTargetUrl(endpoint, params);
 };
 
 // Unified Session State Interface - matches backend models perfectly
@@ -424,7 +398,7 @@ export const useSessionStore = create<SessionState>()(
 
             const shouldProvisionRuntime =
               realtimeFeatureFlags.controllerSplitEnabled ||
-              realtimeFeatureFlags.tunnelModeEnabled;
+              realtimeFeatureFlags.controllerBrokerEnabled;
 
             let runtime: SessionRuntimeInfo | null = null;
             if (shouldProvisionRuntime) {
@@ -448,13 +422,6 @@ export const useSessionStore = create<SessionState>()(
                 )
               );
 
-              if (
-                !realtimeFeatureFlags.controllerProxyEnabled &&
-                realtimeFeatureFlags.tunnelModeEnabled &&
-                !runtime?.tunnel_url
-              ) {
-                throw new AppError('TUNNEL_UNAVAILABLE', TUNNEL_UNAVAILABLE_MESSAGE);
-              }
             }
 
             const resolvedSession: Session = {
@@ -501,7 +468,7 @@ export const useSessionStore = create<SessionState>()(
 
             const shouldLoadRuntime =
               realtimeFeatureFlags.controllerSplitEnabled ||
-              realtimeFeatureFlags.tunnelModeEnabled;
+              realtimeFeatureFlags.controllerBrokerEnabled;
             let runtime: SessionRuntimeInfo | null = null;
             if (shouldLoadRuntime) {
               runtime = await handleApiResponse<SessionRuntimeInfo>(
@@ -514,22 +481,15 @@ export const useSessionStore = create<SessionState>()(
                 )
               );
 
-              if (
-                !realtimeFeatureFlags.controllerProxyEnabled &&
-                realtimeFeatureFlags.tunnelModeEnabled &&
-                !runtime?.tunnel_url
-              ) {
-                throw new AppError('TUNNEL_UNAVAILABLE', TUNNEL_UNAVAILABLE_MESSAGE);
-              }
             }
 
             if (runtime) {
               set({ runtime });
             }
 
-            const sessionDetailUrl = realtimeFeatureFlags.tunnelModeEnabled
-              ? buildSessionTargetUrl(API.SESSIONS.DETAIL, { sessionId })
-              : buildApiUrl(API.SESSIONS.DETAIL, { sessionId });
+            const sessionDetailUrl = buildSessionTargetUrl(API.SESSIONS.DETAIL, {
+              sessionId,
+            });
 
             const context = await handleApiResponse<SessionContext>(
               await fetch(sessionDetailUrl, {
@@ -599,7 +559,7 @@ export const useSessionStore = create<SessionState>()(
 
             const shouldLoadRuntime =
               realtimeFeatureFlags.controllerSplitEnabled ||
-              realtimeFeatureFlags.tunnelModeEnabled;
+              realtimeFeatureFlags.controllerBrokerEnabled;
             let runtime: SessionRuntimeInfo | null = null;
             if (shouldLoadRuntime) {
               runtime = await handleApiResponse<SessionRuntimeInfo>(
@@ -612,22 +572,15 @@ export const useSessionStore = create<SessionState>()(
                 )
               );
 
-              if (
-                !realtimeFeatureFlags.controllerProxyEnabled &&
-                realtimeFeatureFlags.tunnelModeEnabled &&
-                !runtime?.tunnel_url
-              ) {
-                throw new AppError('TUNNEL_UNAVAILABLE', TUNNEL_UNAVAILABLE_MESSAGE);
-              }
             }
 
             if (runtime) {
               set({ runtime });
             }
 
-            const sessionDetailUrl = realtimeFeatureFlags.tunnelModeEnabled
-              ? buildSessionTargetUrl(API.SESSIONS.DETAIL, { sessionId })
-              : buildApiUrl(API.SESSIONS.DETAIL, { sessionId });
+            const sessionDetailUrl = buildSessionTargetUrl(API.SESSIONS.DETAIL, {
+              sessionId,
+            });
 
             await handleApiResponse<SessionContext>(
               await fetch(sessionDetailUrl, {
@@ -767,9 +720,9 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingMessages: true, messageError: null });
 
-            const messagesUrl = realtimeFeatureFlags.tunnelModeEnabled
-              ? buildSessionTargetUrl(API.SESSIONS.MESSAGES, { sessionId })
-              : buildApiUrl(API.SESSIONS.MESSAGES, { sessionId });
+            const messagesUrl = buildSessionTargetUrl(API.SESSIONS.MESSAGES, {
+              sessionId,
+            });
 
             const messages = await handleApiResponse<ChatMessage[]>(
               await fetch(messagesUrl, {
@@ -818,9 +771,9 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingContextCards: true, contextCardError: null });
 
-            const createCardUrl = realtimeFeatureFlags.tunnelModeEnabled
-              ? buildSessionTargetUrl(API.SESSIONS.CONTEXT_CARDS, { sessionId: activeSessionId })
-              : buildApiUrl(API.SESSIONS.CONTEXT_CARDS, { sessionId: activeSessionId });
+            const createCardUrl = buildSessionTargetUrl(API.SESSIONS.CONTEXT_CARDS, {
+              sessionId: activeSessionId,
+            });
 
             const newCard = await handleApiResponse<ContextCard>(
               await fetch(createCardUrl, {
@@ -880,9 +833,10 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingContextCards: true, contextCardError: null });
 
-            const deleteCardUrl = realtimeFeatureFlags.tunnelModeEnabled
-              ? buildSessionTargetUrl(API.SESSIONS.CONTEXT_CARD_DETAIL, { sessionId: activeSessionId, cardId })
-              : buildApiUrl(API.SESSIONS.CONTEXT_CARD_DETAIL, { sessionId: activeSessionId, cardId });
+            const deleteCardUrl = buildSessionTargetUrl(
+              API.SESSIONS.CONTEXT_CARD_DETAIL,
+              { sessionId: activeSessionId, cardId }
+            );
 
             await handleApiResponse<{ success: boolean; message: string }>(
               await fetch(deleteCardUrl, {
@@ -926,9 +880,10 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingContextCards: true, contextCardError: null });
 
-            const contextCardsUrl = realtimeFeatureFlags.tunnelModeEnabled
-              ? buildSessionTargetUrl(API.SESSIONS.CONTEXT_CARDS, { sessionId })
-              : buildApiUrl(API.SESSIONS.CONTEXT_CARDS, { sessionId });
+            const contextCardsUrl = buildSessionTargetUrl(
+              API.SESSIONS.CONTEXT_CARDS,
+              { sessionId }
+            );
 
             const cards = await handleApiResponse<ContextCard[]>(
               await fetch(contextCardsUrl, {
@@ -1011,9 +966,10 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoadingFileContext: true, fileContextError: null });
 
-            const fileDepsUrl = realtimeFeatureFlags.tunnelModeEnabled
-              ? buildSessionTargetUrl(API.SESSIONS.FILE_DEPS_SESSION, { sessionId })
-              : buildApiUrl(API.SESSIONS.FILE_DEPS_SESSION, { sessionId });
+            const fileDepsUrl = buildSessionTargetUrl(
+              API.SESSIONS.FILE_DEPS_SESSION,
+              { sessionId }
+            );
 
             const deps = await handleApiResponse<FileItem[]>(
               await fetch(fileDepsUrl, {
@@ -1181,9 +1137,9 @@ export const useSessionStore = create<SessionState>()(
               } : undefined,
             };
 
-            const chatUrl = realtimeFeatureFlags.tunnelModeEnabled
-              ? buildSessionTargetUrl(API.SESSIONS.CHAT, { sessionId: activeSessionId })
-              : buildApiUrl(API.SESSIONS.CHAT, { sessionId: activeSessionId });
+            const chatUrl = buildSessionTargetUrl(API.SESSIONS.CHAT, {
+              sessionId: activeSessionId,
+            });
 
             const response = await handleApiResponse<ChatResponse>(
               await fetch(chatUrl, {
@@ -1287,9 +1243,9 @@ export const useSessionStore = create<SessionState>()(
 
             const response = await handleApiResponse<IssueCreationResponse>(
               await fetch(
-                realtimeFeatureFlags.tunnelModeEnabled
-                  ? buildSessionTargetUrl(API.SESSIONS.ISSUES.CREATE, { sessionId: sessionIdToUse })
-                  : buildApiUrl(API.SESSIONS.ISSUES.CREATE, { sessionId: sessionIdToUse }),
+                buildSessionTargetUrl(API.SESSIONS.ISSUES.CREATE, {
+                  sessionId: sessionIdToUse,
+                }),
                 {
                 method: 'POST',
                 headers: getAuthHeaders(sessionToken || ''),
@@ -1375,9 +1331,10 @@ export const useSessionStore = create<SessionState>()(
 
           const response = await handleApiResponse<CreateGitHubIssueResponse>(
             await fetch(
-              realtimeFeatureFlags.tunnelModeEnabled
-                ? buildSessionTargetUrl(API.SESSIONS.ISSUES.CREATE_GITHUB_ISSUE, { sessionId: activeSessionId, issueId })
-                : buildApiUrl(API.SESSIONS.ISSUES.CREATE_GITHUB_ISSUE, { sessionId: activeSessionId, issueId }),
+              buildSessionTargetUrl(API.SESSIONS.ISSUES.CREATE_GITHUB_ISSUE, {
+                sessionId: activeSessionId,
+                issueId,
+              }),
               {
               method: 'POST',
               headers: getAuthHeaders(sessionToken || ''),
