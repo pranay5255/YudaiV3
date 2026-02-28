@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -95,6 +97,11 @@ class RealtimeModalSandbox:
         sandbox_db_id: str,
         controller_base_url: str,
         github_token: Optional[str] = None,
+        session_public_id: Optional[str] = None,
+        repo_url: Optional[str] = None,
+        repo_branch: Optional[str] = None,
+        workspace_path: Optional[str] = None,
+        env_inputs: Optional[Dict[str, str]] = None,
         timeout: int = 7200,
     ) -> "RealtimeModalSandbox":
         app = await _get_modal_app()
@@ -103,8 +110,32 @@ class RealtimeModalSandbox:
             "SANDBOX_ID": sandbox_db_id,
             "CONTROLLER_BASE_URL": controller_base_url,
         }
+        controller_internal_ws_secret = os.getenv("CONTROLLER_INTERNAL_WS_SECRET")
+        if controller_internal_ws_secret:
+            sandbox_env["CONTROLLER_INTERNAL_WS_SECRET"] = controller_internal_ws_secret
         if github_token:
             sandbox_env["GITHUB_TOKEN"] = github_token
+        if session_public_id:
+            sandbox_env["SESSION_PUBLIC_ID"] = session_public_id
+        if repo_url:
+            sandbox_env["REPO_URL"] = repo_url
+        if repo_branch:
+            sandbox_env["REPO_BRANCH"] = repo_branch
+        if workspace_path:
+            sandbox_env["WORKSPACE_PATH"] = workspace_path
+        if env_inputs:
+            for key, value in env_inputs.items():
+                if key and value is not None:
+                    sandbox_env[key] = str(value)
+        sandbox_env["SANDBOX_SETUP_CONTEXT"] = json.dumps(
+            {
+                "session_public_id": session_public_id,
+                "repo_url": repo_url,
+                "repo_branch": repo_branch,
+                "workspace_path": workspace_path,
+                "env_inputs": env_inputs or {},
+            }
+        )
 
         logger.info(
             "Creating Modal sandbox for db_id=%s controller=%s timeout=%d",
