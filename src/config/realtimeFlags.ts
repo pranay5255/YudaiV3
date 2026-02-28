@@ -9,10 +9,11 @@ const parseFlag = (value: string | undefined, fallback: boolean): boolean => {
 
 export interface RealtimeFeatureFlags {
   controllerSplitEnabled: boolean;
-  tunnelModeEnabled: boolean;
+  controllerBrokerEnabled: boolean;
+  sandboxInternalExecEnabled: boolean;
+  modeOrchestratorEnabled: boolean;
   wsChatEnabled: boolean;
   sseStreamEnabled: boolean;
-  controllerProxyEnabled: boolean;
   wsUnifiedEnabled: boolean;
   contractVersion: string;
 }
@@ -22,17 +23,21 @@ export const realtimeFeatureFlags: RealtimeFeatureFlags = {
     import.meta.env.VITE_REALTIME_CONTROLLER_SPLIT_ENABLED,
     false
   ),
-  tunnelModeEnabled: parseFlag(
-    import.meta.env.VITE_REALTIME_TUNNEL_MODE_ENABLED,
-    false
+  controllerBrokerEnabled: parseFlag(
+    import.meta.env.VITE_REALTIME_CONTROLLER_BROKER_ENABLED,
+    true
+  ),
+  sandboxInternalExecEnabled: parseFlag(
+    import.meta.env.VITE_REALTIME_SANDBOX_INTERNAL_EXEC_ENABLED,
+    true
+  ),
+  modeOrchestratorEnabled: parseFlag(
+    import.meta.env.VITE_REALTIME_MODE_ORCHESTRATOR_ENABLED,
+    true
   ),
   wsChatEnabled: parseFlag(import.meta.env.VITE_REALTIME_WS_CHAT_ENABLED, false),
   sseStreamEnabled: parseFlag(
     import.meta.env.VITE_REALTIME_SSE_STREAM_ENABLED,
-    false
-  ),
-  controllerProxyEnabled: parseFlag(
-    import.meta.env.VITE_REALTIME_CONTROLLER_PROXY_ENABLED,
     false
   ),
   wsUnifiedEnabled: parseFlag(
@@ -40,7 +45,7 @@ export const realtimeFeatureFlags: RealtimeFeatureFlags = {
     false
   ),
   contractVersion: (
-    import.meta.env.VITE_REALTIME_CONTRACT_VERSION || 'realtime-v1-phase0'
+    import.meta.env.VITE_REALTIME_CONTRACT_VERSION ||
+    'realtime-v2-controller-broker'
   ).trim(),
 };
-
