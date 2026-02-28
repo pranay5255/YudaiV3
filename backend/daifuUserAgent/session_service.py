@@ -24,7 +24,7 @@ from models import (
 )
 from sqlalchemy.orm import Session
 
-from utils import utc_now
+from utils import ensure_utc, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -113,10 +113,25 @@ class SessionService:
             repo_owner=db_session.repo_owner,
             repo_name=db_session.repo_name,
             repo_branch=db_session.repo_branch,
+            repo_url=db_session.repo_url,
             repo_context=db_session.repo_context,
+            runtime_workspace_path=db_session.runtime_workspace_path,
             is_active=db_session.is_active,
             total_messages=db_session.total_messages,
             total_tokens=db_session.total_tokens,
+            current_mode=db_session.current_mode,
+            mode_status=db_session.mode_status,
+            mode_updated_at=db_session.mode_updated_at,
+            architect_issue_url=db_session.architect_issue_url,
+            architect_issue_number=db_session.architect_issue_number,
+            architect_completed_at=db_session.architect_completed_at,
+            tester_status=db_session.tester_status,
+            tester_completed_at=db_session.tester_completed_at,
+            coder_pr_url=db_session.coder_pr_url,
+            coder_pr_number=db_session.coder_pr_number,
+            coder_completed_at=db_session.coder_completed_at,
+            workflow_completed_at=db_session.workflow_completed_at,
+            mode_metadata=db_session.mode_metadata,
             created_at=db_session.created_at,
             updated_at=db_session.updated_at,
             last_activity=db_session.last_activity,
@@ -194,8 +209,9 @@ class SessionService:
             statistics={
                 "total_messages": db_session.total_messages,
                 "total_tokens": db_session.total_tokens,
+                # Normalize naive datetime from SQLite to UTC before subtraction
                 "session_duration": int(
-                    (utc_now() - db_session.created_at).total_seconds()
+                    (utc_now() - ensure_utc(db_session.created_at)).total_seconds()
                 )
                 if db_session.created_at
                 else 0,
