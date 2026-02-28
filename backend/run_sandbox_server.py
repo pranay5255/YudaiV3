@@ -11,7 +11,6 @@ import httpx
 import uvicorn
 
 from config.realtime_flags import get_realtime_feature_flags
-from daifuUserAgent.session_routes import router as session_router
 from db.database import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,7 +64,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Yudai Sandbox Session Server",
-    description="Phase 1 sandbox API shell with direct tunnel auth",
+    description="Internal sandbox server for controller-brokered execution",
     version="3.0.0",
     docs_url="/docs",
     lifespan=lifespan,
@@ -79,8 +78,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Existing session APIs now hosted at sandbox root paths.
-app.include_router(session_router)
 app.include_router(sandbox_router)
 
 
