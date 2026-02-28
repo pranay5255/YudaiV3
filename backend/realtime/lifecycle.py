@@ -72,6 +72,7 @@ class RealtimeLifecycleService:
         environment: Optional[str],
         repo_branch: Optional[str],
         repo_url: Optional[str],
+        env_inputs: Optional[Dict[str, str]] = None,
     ) -> RuntimeEnvelope:
         identity = build_sandbox_identity(
             org=org or self.default_org,
@@ -109,6 +110,14 @@ class RealtimeLifecycleService:
 
         sandbox.active_session_id = session.id
         sandbox.status = SandboxStatus.RUNNING.value
+        workspace_path = os.getenv("REALTIME_WORKSPACE_PATH", "/workspace/repo")
+        setup_context: Dict[str, Any] = {
+            "repo_url": repo_url,
+            "repo_branch": repo_branch or "main",
+            "workspace_path": workspace_path,
+            "env_inputs": env_inputs or {},
+            "session_public_id": session.session_id,
+        }
 
         flags = get_realtime_feature_flags()
         if flags.modal_provisioning_enabled:
@@ -118,6 +127,11 @@ class RealtimeLifecycleService:
                 sandbox_db_id=sandbox.id,
                 controller_base_url=controller_base_url,
                 github_token=github_token,
+                session_public_id=session.session_id,
+                repo_url=repo_url,
+                repo_branch=repo_branch or "main",
+                workspace_path=workspace_path,
+                env_inputs=env_inputs or {},
             )
             sandbox.tunnel_url = modal_sb.tunnel_url
             await get_modal_registry().register(sandbox.id, modal_sb)
@@ -135,6 +149,7 @@ class RealtimeLifecycleService:
                 "repo_owner": identity.repo_owner,
                 "repo_name": identity.repo_name,
                 "environment": identity.environment,
+                "setup_context": setup_context,
             }
         )
         if flags.modal_provisioning_enabled:
@@ -158,6 +173,7 @@ class RealtimeLifecycleService:
             )
             metadata = runtime.runtime_metadata or {}
             metadata["git_bootstrap"] = git_bootstrap
+            metadata["setup_context"] = setup_context
             runtime.runtime_metadata = metadata
         else:
             runtime = SessionRuntime(
@@ -170,7 +186,10 @@ class RealtimeLifecycleService:
                 tunnel_expires_at=utc_now()
                 + timedelta(seconds=sandbox.tunnel_token_ttl_seconds or 3600),
                 started_at=utc_now(),
-                runtime_metadata={"git_bootstrap": git_bootstrap},
+                runtime_metadata={
+                    "git_bootstrap": git_bootstrap,
+                    "setup_context": setup_context,
+                },
             )
             db.add(runtime)
             db.flush()
@@ -187,6 +206,7 @@ class RealtimeLifecycleService:
                 "tunnel_url": sandbox.tunnel_url,
                 "token_ttl_seconds": sandbox.tunnel_token_ttl_seconds,
                 "git_bootstrap": git_bootstrap,
+                "setup_context": setup_context,
             },
         )
 
@@ -200,6 +220,7 @@ class RealtimeLifecycleService:
                 "tunnel_url": sandbox.tunnel_url,
                 "token_ttl_seconds": sandbox.tunnel_token_ttl_seconds,
                 "git_bootstrap": git_bootstrap,
+                "setup_context": setup_context,
             },
         )
 
