@@ -93,24 +93,34 @@ from db.database import SessionLocal, get_db
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from realtime.errors import RealtimeErrorCode, error_payload
 from realtime.lifecycle import get_realtime_lifecycle_service
+from realtime.mode_orchestrator import run_mode_pipeline_background
+from realtime.ws_hub import get_ws_hub
+from realtime.ws_protocol import WSMessageType
 
 # Import from filedeps.py
 from models import (
     APIError,
+    AgentExecution,
     ChatMessage,
     ChatMessageResponse,
     ChatRequest,
     ChatResponse,
     ChatSession,
+    ConversationRequest,
+    ConversationResponse,
     ContextCard,
     ContextCardResponse,
     CreateContextCardRequest,
     CreateGitHubIssueResponse,
     CreateSessionRequest,
+    ExecutionRequest,
+    ExecutionResponse,
     FileEmbedding,
     FileItem,
     FileItemResponse,
     Repository,
+    SessionMode,
+    SessionModeStatus,
     SessionContextResponse,
     SessionResponse,
     UpdateSessionRequest,
@@ -154,6 +164,36 @@ def create_standardized_error(
     )
 
     return HTTPException(status_code=status_code, detail=error_response.model_dump())
+
+
+def _next_mode_for_session(session: ChatSession) -> str:
+    if not session.architect_completed_at:
+        return SessionMode.ARCHITECT.value
+    if not session.tester_completed_at:
+        return SessionMode.TESTER.value
+    if not session.coder_completed_at:
+        return SessionMode.CODER.value
+    return SessionMode.COMPLETE.value
+
+
+def _build_mode_plan(mode: str, objective: str) -> List[str]:
+    if mode == SessionMode.ARCHITECT.value:
+        return [
+            "Analyze the user objective and synthesize a detailed implementation issue.",
+            f"Objective: {objective}",
+            "Persist issue metadata and emit mode/state websocket events.",
+        ]
+    if mode == SessionMode.TESTER.value:
+        return [
+            "Inspect repository test tooling and generate/run tests in sandbox.",
+            "Stream sandbox stdout/stderr/exit to controller unified websocket.",
+        ]
+    if mode == SessionMode.CODER.value:
+        return [
+            "Implement changes in sandbox workspace.",
+            "Run tests and publish PR metadata to lifecycle completion tracker.",
+        ]
+    return ["Workflow already complete."]
 
 
 # ============================================================================
@@ -424,12 +464,17 @@ async def create_session(
             repo_owner=request.repo_owner,
             repo_name=request.repo_name,
             repo_branch=request.repo_branch or "main",
+            repo_url=f"https://github.com/{request.repo_owner}/{request.repo_name}.git",
             repo_context=None,
+            runtime_workspace_path="/workspace/repo",
             generate_embeddings=request.generate_embeddings,
             generate_facts_memories=request.generate_facts_memories,
             is_active=True,
             total_messages=0,
             total_tokens=0,
+            current_mode=SessionMode.PENDING.value,
+            mode_status=SessionModeStatus.IDLE.value,
+            mode_updated_at=utc_now(),
             last_activity=utc_now(),
         )
 
@@ -443,7 +488,7 @@ async def create_session(
 
         # Phase 1: Provision sandbox/runtime immediately when rollout is enabled.
         realtime_flags = get_realtime_feature_flags()
-        if realtime_flags.controller_split_enabled or realtime_flags.tunnel_mode_enabled:
+        if realtime_flags.controller_split_enabled or realtime_flags.controller_broker_enabled:
             lifecycle = get_realtime_lifecycle_service()
             repo_url = f"https://github.com/{request.repo_owner}/{request.repo_name}.git"
 
@@ -458,6 +503,10 @@ async def create_session(
                     environment=request.repo_branch,
                     repo_branch=request.repo_branch,
                     repo_url=repo_url,
+                    env_inputs={
+                        "SESSION_PUBLIC_ID": session_id,
+                        "WORKSPACE_PATH": db_session.runtime_workspace_path or "/workspace/repo",
+                    },
                 )
                 db.commit()
                 db.refresh(envelope.runtime)
@@ -465,7 +514,11 @@ async def create_session(
 
                 runtime_id = envelope.runtime.runtime_id
                 sandbox_id = envelope.sandbox.id
-                tunnel_url = envelope.sandbox.tunnel_url
+                tunnel_url = (
+                    None
+                    if realtime_flags.controller_broker_enabled
+                    else envelope.sandbox.tunnel_url
+                )
             except HTTPException:
                 raise
             except Exception as realtime_error:
@@ -475,7 +528,7 @@ async def create_session(
                     session_id,
                     realtime_error,
                 )
-                if realtime_flags.tunnel_mode_enabled:
+                if realtime_flags.controller_broker_enabled:
                     raise HTTPException(
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                         detail=error_payload(
@@ -532,10 +585,25 @@ async def create_session(
             repo_owner=db_session.repo_owner,
             repo_name=db_session.repo_name,
             repo_branch=db_session.repo_branch,
+            repo_url=db_session.repo_url,
             repo_context=db_session.repo_context,
+            runtime_workspace_path=db_session.runtime_workspace_path,
             is_active=db_session.is_active,
             total_messages=db_session.total_messages,
             total_tokens=db_session.total_tokens,
+            current_mode=db_session.current_mode,
+            mode_status=db_session.mode_status,
+            mode_updated_at=db_session.mode_updated_at,
+            architect_issue_url=db_session.architect_issue_url,
+            architect_issue_number=db_session.architect_issue_number,
+            architect_completed_at=db_session.architect_completed_at,
+            tester_status=db_session.tester_status,
+            tester_completed_at=db_session.tester_completed_at,
+            coder_pr_url=db_session.coder_pr_url,
+            coder_pr_number=db_session.coder_pr_number,
+            coder_completed_at=db_session.coder_completed_at,
+            workflow_completed_at=db_session.workflow_completed_at,
+            mode_metadata=db_session.mode_metadata,
             created_at=db_session.created_at,
             updated_at=db_session.updated_at,
             last_activity=db_session.last_activity,
@@ -610,10 +678,25 @@ async def update_session(
             repo_owner=db_session.repo_owner,
             repo_name=db_session.repo_name,
             repo_branch=db_session.repo_branch,
+            repo_url=db_session.repo_url,
             repo_context=db_session.repo_context,
+            runtime_workspace_path=db_session.runtime_workspace_path,
             is_active=db_session.is_active,
             total_messages=db_session.total_messages,
             total_tokens=db_session.total_tokens,
+            current_mode=db_session.current_mode,
+            mode_status=db_session.mode_status,
+            mode_updated_at=db_session.mode_updated_at,
+            architect_issue_url=db_session.architect_issue_url,
+            architect_issue_number=db_session.architect_issue_number,
+            architect_completed_at=db_session.architect_completed_at,
+            tester_status=db_session.tester_status,
+            tester_completed_at=db_session.tester_completed_at,
+            coder_pr_url=db_session.coder_pr_url,
+            coder_pr_number=db_session.coder_pr_number,
+            coder_completed_at=db_session.coder_completed_at,
+            workflow_completed_at=db_session.workflow_completed_at,
+            mode_metadata=db_session.mode_metadata,
             created_at=db_session.created_at,
             updated_at=db_session.updated_at,
             last_activity=db_session.last_activity,
@@ -1056,6 +1139,152 @@ async def get_file_dependencies_for_session(
 
 # CHAT ENDPOINTS - Consolidated from chat_api.py
 # =================================================================================
+
+
+@router.post("/sessions/{session_id}/conversation", response_model=ConversationResponse)
+async def conversation_in_session(
+    session_id: str,
+    request: ConversationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Conversation API: immediate natural-language response + optional follow-up question."""
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+
+    content = request.message.strip()
+    lower_content = content.lower()
+    follow_up_question = None
+
+    # Lightweight ambiguity detector: ask for preference before execution when request is broad.
+    ambiguous_terms = ("auth", "authentication", "api", "database", "testing")
+    if not request.selected_option_ids and any(term in lower_content for term in ambiguous_terms):
+        follow_up_question = {
+            "question_id": f"q_{uuid.uuid4().hex[:10]}",
+            "prompt": "Choose the primary implementation focus for this run.",
+            "multi_select": False,
+            "options": [
+                {"id": "behavior", "label": "Behavioral change first"},
+                {"id": "tests", "label": "Test coverage first"},
+                {"id": "refactor", "label": "Refactor and structure first"},
+            ],
+        }
+        db_session.mode_status = SessionModeStatus.WAITING_FOR_INPUT.value
+    else:
+        db_session.mode_status = SessionModeStatus.IDLE.value
+
+    db_session.last_activity = utc_now()
+    db_session.mode_updated_at = utc_now()
+    db.commit()
+
+    reply = (
+        "Captured your request. The execution pipeline remains fixed "
+        "at Architect -> Tester -> Coder and will continue from the next pending mode."
+    )
+
+    ws_hub = get_ws_hub()
+    await ws_hub.send_to_session(
+        session_id,
+        WSMessageType.LLM_STREAM,
+        {"stream": "llm", "text": reply, "final": True},
+    )
+    if follow_up_question:
+        await ws_hub.send_to_session(
+            session_id,
+            WSMessageType.AGENT_QUESTION,
+            {
+                "question_id": follow_up_question["question_id"],
+                "question_text": follow_up_question["prompt"],
+                "options": [item["label"] for item in follow_up_question["options"]],
+            },
+        )
+
+    return ConversationResponse(
+        session_id=session_id,
+        reply=reply,
+        current_mode=db_session.current_mode,
+        mode_status=db_session.mode_status,
+        follow_up_question=follow_up_question,
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/execution",
+    response_model=ExecutionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def execute_session_pipeline(
+    session_id: str,
+    request: ExecutionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Execution API: generate mode plan and run fixed Architect -> Tester -> Coder pipeline."""
+    realtime_flags = get_realtime_feature_flags()
+    if not realtime_flags.mode_orchestrator_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Mode orchestrator is disabled by feature flags",
+        )
+
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    next_mode = _next_mode_for_session(db_session)
+
+    if next_mode == SessionMode.COMPLETE.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Session workflow already complete",
+        )
+
+    if request.force_mode and request.force_mode != next_mode:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Mode switching is server-controlled. Expected next mode "
+                f"'{next_mode}', got '{request.force_mode}'."
+            ),
+        )
+
+    execution = AgentExecution(
+        id=f"exec_{uuid.uuid4().hex[:24]}",
+        session_id=db_session.id,
+        mode=next_mode,
+        status=SessionModeStatus.RUNNING.value,
+        execution_plan=_build_mode_plan(next_mode, request.objective),
+        execution_metadata={"trigger": "execution_api"},
+        started_at=utc_now(),
+    )
+    db.add(execution)
+    db_session.mode_status = SessionModeStatus.RUNNING.value
+    db_session.mode_updated_at = utc_now()
+    db.commit()
+
+    asyncio.create_task(
+        run_mode_pipeline_background(
+            session_public_id=session_id,
+            user_id=current_user.id,
+            objective=request.objective,
+        )
+    )
+
+    await get_ws_hub().send_to_session(
+        session_id,
+        WSMessageType.MODE_EVENT,
+        {
+            "mode": next_mode,
+            "state": SessionModeStatus.RUNNING.value,
+            "execution_id": execution.id,
+            "detail": "Pipeline queued",
+        },
+    )
+
+    return ExecutionResponse(
+        execution_id=execution.id,
+        session_id=session_id,
+        mode=next_mode,
+        status=SessionModeStatus.RUNNING.value,
+        plan=execution.execution_plan or [],
+        started_at=execution.started_at or utc_now(),
+    )
 
 
 @router.post("/sessions/{session_id}/chat", response_model=ChatResponse)
