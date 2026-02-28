@@ -23,7 +23,7 @@ from jwt import encode as jwt_encode
 from models import AuthToken, SessionToken, User
 from sqlalchemy.orm import Session
 
-from utils import utc_now
+from utils import ensure_utc, utc_now
 
 # GitHub App OAuth Configuration - single source of truth
 GITHUB_APP_CLIENT_ID = os.getenv("GITHUB_APP_CLIENT_ID")
@@ -410,8 +410,8 @@ def validate_session_token(db: Session, session_token: str) -> Optional[User]:
             print(f"[Auth] No active session token found: {session_token[:10]}...")
             return None
 
-        # Check if token is expired
-        if db_session_token.expires_at < utc_now():
+        # Check if token is expired (normalize naive datetime from SQLite to UTC)
+        if ensure_utc(db_session_token.expires_at) < utc_now():
             print(f"[Auth] Session token expired: {session_token[:10]}...")
             return None
 
@@ -480,7 +480,8 @@ async def get_current_user(
         .first()
     )
 
-    if session_token and session_token.expires_at > utc_now():
+    # Normalize naive datetime from SQLite to UTC before comparison
+    if session_token and ensure_utc(session_token.expires_at) > utc_now():
         user = db.query(User).filter(User.id == session_token.user_id).first()
         if user:
             return user
@@ -496,8 +497,8 @@ async def get_current_user(
     )
 
     if auth_token:
-        # Check expiry for auth token
-        if auth_token.expires_at and auth_token.expires_at < utc_now():
+        # Check expiry for auth token (normalize naive datetime from SQLite to UTC)
+        if auth_token.expires_at and ensure_utc(auth_token.expires_at) < utc_now():
             # Deactivate expired token
             auth_token.is_active = False
             db.commit()
@@ -552,8 +553,8 @@ def get_github_api(user_id: int, db: Session):
             detail="No valid authentication token found",
         )
 
-    # Check if token is expired
-    if auth_token.expires_at and auth_token.expires_at < utc_now():
+    # Check if token is expired (normalize naive datetime from SQLite to UTC)
+    if auth_token.expires_at and ensure_utc(auth_token.expires_at) < utc_now():
         # Deactivate expired token
         auth_token.is_active = False
         db.commit()
