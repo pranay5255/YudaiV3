@@ -15,10 +15,25 @@ export interface Session {
   repo_owner?: string;
   repo_name?: string;
   repo_branch?: string;
+  repo_url?: string;
   repo_context?: Record<string, unknown>;
+  runtime_workspace_path?: string;
   is_active: boolean;
   total_messages: number;
   total_tokens: number;
+  current_mode?: 'pending' | 'architect' | 'tester' | 'coder' | 'complete' | 'failed';
+  mode_status?: 'idle' | 'running' | 'waiting_for_input' | 'complete' | 'failed';
+  mode_updated_at?: string;
+  architect_issue_url?: string;
+  architect_issue_number?: number;
+  architect_completed_at?: string;
+  tester_status?: string;
+  tester_completed_at?: string;
+  coder_pr_url?: string;
+  coder_pr_number?: number;
+  coder_completed_at?: string;
+  workflow_completed_at?: string;
+  mode_metadata?: Record<string, unknown>;
   created_at: string;
   updated_at?: string;
   last_activity?: string;
@@ -318,6 +333,45 @@ export interface UpdateSessionRequest {
   title?: string;
   description?: string;
   repo_branch?: string;
+}
+
+export interface ConversationOption {
+  id: string;
+  label: string;
+}
+
+export interface ConversationQuestion {
+  question_id: string;
+  prompt: string;
+  multi_select: boolean;
+  options: ConversationOption[];
+}
+
+export interface ConversationRequest {
+  message: string;
+  selected_option_ids?: string[];
+}
+
+export interface ConversationResponse {
+  session_id: string;
+  reply: string;
+  current_mode: string;
+  mode_status: string;
+  follow_up_question?: ConversationQuestion;
+}
+
+export interface ExecutionRequest {
+  objective: string;
+  force_mode?: 'architect' | 'tester' | 'coder';
+}
+
+export interface ExecutionResponse {
+  execution_id: string;
+  session_id: string;
+  mode: string;
+  status: string;
+  plan: string[];
+  started_at: string;
 }
 
 export interface CreateContextCardRequest {
@@ -677,6 +731,13 @@ export interface CancelSolveResponse {
 export type WSMessageType =
   | 'chat_message'
   | 'user_response'
+  | 'exec.start'
+  | 'exec.stdin'
+  | 'exec.cancel'
+  | 'llm_stream'
+  | 'sandbox_stream'
+  | 'mode_event'
+  | 'state_event'
   | 'trajectory_update'
   | 'tool_call'
   | 'agent_question'
