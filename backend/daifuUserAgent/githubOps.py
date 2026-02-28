@@ -31,7 +31,7 @@ from ghapi.all import GhApi
 from models import AuthToken
 from sqlalchemy.orm import Session
 
-from utils import utc_now
+from utils import ensure_utc, utc_now
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -81,8 +81,8 @@ class GitHubOps:
                 logger.warning(f"No active GitHub token found for user {user_id}")
                 return None
 
-            # Check if token is expired
-            if auth_token.expires_at and auth_token.expires_at < utc_now():
+            # Check if token is expired (normalize naive datetime from SQLite to UTC)
+            if auth_token.expires_at and ensure_utc(auth_token.expires_at) < utc_now():
                 logger.warning(f"GitHub token expired for user {user_id}")
                 auth_token.is_active = False
                 db.commit()
