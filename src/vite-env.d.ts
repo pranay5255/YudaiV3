@@ -5,6 +5,11 @@ interface ImportMetaEnv {
   readonly VITE_API_BASE_URL: string;
   readonly VITE_APP_TITLE: string;
   readonly VITE_REALTIME_CONTROLLER_SPLIT_ENABLED?: string;
+  readonly VITE_REALTIME_CONTROLLER_BROKER_ENABLED?: string;
+  readonly VITE_REALTIME_SANDBOX_INTERNAL_EXEC_ENABLED?: string;
+  readonly VITE_REALTIME_MODE_ORCHESTRATOR_ENABLED?: string;
+  readonly VITE_REALTIME_WS_UNIFIED_ENABLED?: string;
+  // Legacy compatibility flags (deprecated).
   readonly VITE_REALTIME_TUNNEL_MODE_ENABLED?: string;
   readonly VITE_REALTIME_WS_CHAT_ENABLED?: string;
   readonly VITE_REALTIME_SSE_STREAM_ENABLED?: string;
