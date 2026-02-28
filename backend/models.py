@@ -139,6 +139,23 @@ class SessionAuditEventName(str, Enum):
     SANDBOX_TERMINATE = "sandbox_terminate"
 
 
+class SessionMode(str, Enum):
+    PENDING = "pending"
+    ARCHITECT = "architect"
+    TESTER = "tester"
+    CODER = "coder"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class SessionModeStatus(str, Enum):
+    IDLE = "idle"
+    RUNNING = "running"
+    WAITING_FOR_INPUT = "waiting_for_input"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
 # ============================================================================
 # SQLALCHEMY MODELS (Database Schema)
 # ============================================================================
@@ -472,9 +489,13 @@ class ChatSession(Base):
     repo_branch: Mapped[Optional[str]] = mapped_column(
         String(255), nullable=True, default="main"
     )
+    repo_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     repo_context: Mapped[Optional[str]] = mapped_column(
         JSON, nullable=True
     )  # Repository metadata
+    runtime_workspace_path: Mapped[Optional[str]] = mapped_column(
+        String(512), nullable=True
+    )
     generate_embeddings: Mapped[bool] = mapped_column(Boolean, default=False)
     generate_facts_memories: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -482,6 +503,39 @@ class ChatSession(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     total_messages: Mapped[int] = mapped_column(Integer, default=0)
     total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    current_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=SessionMode.PENDING.value, index=True
+    )
+    mode_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=SessionModeStatus.IDLE.value
+    )
+    mode_updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    architect_issue_url: Mapped[Optional[str]] = mapped_column(
+        String(1000), nullable=True
+    )
+    architect_issue_number: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True
+    )
+    architect_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    tester_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    tester_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    coder_pr_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    coder_pr_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    coder_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    workflow_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    mode_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -518,6 +572,9 @@ class ChatSession(Base):
         back_populates="session", cascade="all, delete-orphan"
     )
     audit_events: Mapped[List["SessionAuditEvent"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+    executions: Mapped[List["AgentExecution"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
 
@@ -1200,6 +1257,43 @@ class SessionAuditEvent(Base):
     )
 
 
+class AgentExecution(Base):
+    """Execution attempts for fixed Architect -> Tester -> Coder workflow."""
+
+    __tablename__ = "agent_executions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    mode: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=SessionModeStatus.RUNNING.value, index=True
+    )
+    execution_plan: Mapped[Optional[List[str]]] = mapped_column(JSON_TYPE, nullable=True)
+    output_summary: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    execution_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )
+
+    session: Mapped["ChatSession"] = relationship(back_populates="executions")
+
+
 # ============================================================================
 # AI SOLVER PYDANTIC SCHEMAS (Simplified - Only Used Models)
 # ============================================================================
@@ -1453,9 +1547,23 @@ class ChatSessionResponse(BaseModel):
     session_id: str
     title: Optional[str] = None
     description: Optional[str] = None
+    repo_url: Optional[str] = None
+    runtime_workspace_path: Optional[str] = None
     is_active: bool
     total_messages: int
     total_tokens: int
+    current_mode: str = SessionMode.PENDING.value
+    mode_status: str = SessionModeStatus.IDLE.value
+    mode_updated_at: Optional[datetime] = None
+    architect_issue_url: Optional[str] = None
+    architect_issue_number: Optional[int] = None
+    architect_completed_at: Optional[datetime] = None
+    tester_status: Optional[str] = None
+    tester_completed_at: Optional[datetime] = None
+    coder_pr_url: Optional[str] = None
+    coder_pr_number: Optional[int] = None
+    coder_completed_at: Optional[datetime] = None
+    workflow_completed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     last_activity: Optional[datetime] = None
@@ -1525,10 +1633,25 @@ class SessionResponse(BaseModel):
     repo_owner: Optional[str] = None
     repo_name: Optional[str] = None
     repo_branch: Optional[str] = None
+    repo_url: Optional[str] = None
     repo_context: Optional[Dict[str, Any]] = None
+    runtime_workspace_path: Optional[str] = None
     is_active: bool
     total_messages: int
     total_tokens: int
+    current_mode: str = SessionMode.PENDING.value
+    mode_status: str = SessionModeStatus.IDLE.value
+    mode_updated_at: Optional[datetime] = None
+    architect_issue_url: Optional[str] = None
+    architect_issue_number: Optional[int] = None
+    architect_completed_at: Optional[datetime] = None
+    tester_status: Optional[str] = None
+    tester_completed_at: Optional[datetime] = None
+    coder_pr_url: Optional[str] = None
+    coder_pr_number: Optional[int] = None
+    coder_completed_at: Optional[datetime] = None
+    workflow_completed_at: Optional[datetime] = None
+    mode_metadata: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     last_activity: Optional[datetime] = None
@@ -1676,6 +1799,45 @@ class ChatResponse(BaseModel):
     processing_time: float = Field(...)
     session_id: str = Field(...)
     model_config = ConfigDict(populate_by_name=True)
+
+
+class ConversationOption(BaseModel):
+    id: str = Field(..., min_length=1, max_length=128)
+    label: str = Field(..., min_length=1, max_length=255)
+
+
+class ConversationQuestion(BaseModel):
+    question_id: str = Field(..., min_length=1, max_length=64)
+    prompt: str = Field(..., min_length=1)
+    multi_select: bool = False
+    options: List[ConversationOption] = Field(default_factory=list)
+
+
+class ConversationRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=10000)
+    selected_option_ids: Optional[List[str]] = Field(default_factory=list)
+
+
+class ConversationResponse(BaseModel):
+    session_id: str
+    reply: str
+    current_mode: str
+    mode_status: str
+    follow_up_question: Optional[ConversationQuestion] = None
+
+
+class ExecutionRequest(BaseModel):
+    objective: str = Field(..., min_length=1, max_length=10000)
+    force_mode: Optional[Literal["architect", "tester", "coder"]] = None
+
+
+class ExecutionResponse(BaseModel):
+    execution_id: str
+    session_id: str
+    mode: str
+    status: str
+    plan: List[str] = Field(default_factory=list)
+    started_at: datetime
 
 
 class ContextCardResponse(BaseModel):
