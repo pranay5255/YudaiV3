@@ -1,39 +1,47 @@
-# Phase 0 Contract Freeze
+# Realtime Contract (Controller-Broker v2)
 
-This contract freezes the initial controller/sandbox interface for Phase 1.
+This contract defines the controller-brokered realtime architecture.
+Browser clients must talk only to the controller host.
 
-## Controller Endpoints (v1)
+## Controller Endpoints
 
 1. `POST /controller/sandboxes`
 2. `GET /controller/sandboxes/{sandbox_id}`
 3. `DELETE /controller/sandboxes/{sandbox_id}`
-4. `POST /controller/sandboxes/{sandbox_id}/resolve-tunnel`
+4. `POST /controller/sandboxes/{sandbox_id}/resolve-tunnel` (controller/internal diagnostics only)
 5. `POST /controller/sandboxes/{sandbox_id}/heartbeat`
 6. `POST /controller/sandboxes/cleanup`
-7. `GET /realtime/flags`
+7. `POST /controller/sessions/{session_id}/runtime`
+8. `GET /controller/sessions/{session_id}/runtime`
+9. `WS /controller/sessions/{session_id}/ws/unified`
+10. `GET /realtime/flags`
 
 Examples are defined in:
 `backend/docs/realtime_phase0/contracts-controller.openapi.yaml`.
 
-## Sandbox Session Server Endpoints (v1)
+## Sessions API (Public Surface)
+
+All end-user session APIs remain on the controller under `/daifu/*`, including:
+
+1. `POST /daifu/sessions/{session_id}/conversation`
+2. `POST /daifu/sessions/{session_id}/execution`
+
+The server enforces fixed mode transitions:
+`architect -> tester -> coder`.
+
+## Sandbox Endpoints (Internal Only)
 
 1. `GET /healthz`
-2. `POST /sessions/{session_id}/chat`
-3. `POST /sessions/{session_id}/issues/create-with-context`
-4. `POST /sessions/{session_id}/solve/start`
-5. `GET /sessions/{session_id}/solve/status/{solve_id}`
-6. `POST /sessions/{session_id}/solve/cancel/{solve_id}`
-7. `GET /sessions/{session_id}/solve/stream/{solve_id}/{run_id}?token=...`
-8. `GET /sessions/{session_id}/ws/chat` (WebSocket handshake path)
+2. `WS /internal/sessions/{session_id}/ws/exec`
+   - accepts `exec.start`, `exec.stdin`, `exec.cancel`
+   - emits stdout/stderr/exit events
 
 Examples are defined in:
 `backend/docs/realtime_phase0/contracts-sandbox.openapi.yaml`.
 
-## Contract-Level Decisions Applied
+## Contract-Level Decisions
 
-1. Identity key: `org + repo + environment`.
-2. Auth: session JWT passthrough, 1 hour TTL, reusable until expiry.
-3. Tunnel resolution may include an additional short-lived signed URL.
-4. Frontend direct tunnel only; no controller proxy fallback.
-5. Stream split: SSE for solve trajectory, WebSocket for chat.
-6. Sandbox completion condition: both GitHub issue and PR creation done.
+1. No browser traffic to sandbox tunnel/proxy routes.
+2. Controller unified WS carries LLM stream, sandbox execution stream, and mode/state events.
+3. Sandbox WS is authenticated with controller-only internal secret.
+4. Session mode state is persisted server-side and cannot be user-forced.
