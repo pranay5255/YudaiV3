@@ -87,11 +87,12 @@ def db_and_user(tmp_path, monkeypatch):
 def _flags(*, enabled: bool) -> RealtimeFeatureFlags:
     return RealtimeFeatureFlags(
         controller_split_enabled=enabled,
-        tunnel_mode_enabled=False,
+        controller_broker_enabled=False,
+        sandbox_internal_exec_enabled=True,
+        mode_orchestrator_enabled=True,
         ws_chat_enabled=False,
         sse_stream_enabled=False,
         modal_provisioning_enabled=False,
-        controller_proxy_enabled=False,
         ws_unified_enabled=False,
         contract_version="test",
     )
