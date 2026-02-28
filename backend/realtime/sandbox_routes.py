@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
+from typing import Any, Dict, Optional
 
-from auth.github_oauth import validate_session_token
-from db.database import get_db
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from .schemas import HealthzResponse
 from .ws_protocol import WSMessageType, build_envelope
@@ -34,225 +33,206 @@ def healthz() -> HealthzResponse:
     )
 
 
-@router.websocket("/sessions/{session_id}/ws/chat")
-async def websocket_chat(
+def _is_internal_ws_authorized(secret: Optional[str]) -> bool:
+    expected = os.getenv("CONTROLLER_INTERNAL_WS_SECRET")
+    if not expected:
+        return True
+    return bool(secret and secret == expected)
+
+
+@router.websocket("/internal/sessions/{session_id}/ws/exec")
+async def websocket_internal_exec(
     websocket: WebSocket,
     session_id: str,
-    token: str = Query(...),
-    db: Session = Depends(get_db),
+    secret: Optional[str] = Query(default=None),
 ) -> None:
-    """Phase 1 websocket shell endpoint with session token auth."""
-    user = validate_session_token(db, token)
-    if not user:
-        await websocket.close(code=4401, reason="invalid_session_token")
-        return
-
-    await websocket.accept()
-    await websocket.send_json(
-        {
-            "type": "status",
-            "status": "connected",
-            "session_id": session_id,
-            "message": "WebSocket chat shell active",
-        }
-    )
-
-    try:
-        while True:
-            payload = await websocket.receive_text()
-            await websocket.send_json(
-                {
-                    "type": "echo",
-                    "session_id": session_id,
-                    "payload": payload,
-                }
-            )
-    except WebSocketDisconnect:
-        return
-
-
-# ---------------------------------------------------------------------------
-# Phase 4: Unified WS handler (trajectory + chat + agent questions)
-# ---------------------------------------------------------------------------
-
-
-@router.websocket("/sessions/{session_id}/ws/unified")
-async def websocket_unified(
-    websocket: WebSocket,
-    session_id: str,
-    token: str = Query(...),
-    db: Session = Depends(get_db),
-) -> None:
-    """Unified WS endpoint: heartbeat, trajectory polling, bidirectional chat."""
-    user = validate_session_token(db, token)
-    if not user:
-        await websocket.close(code=4401, reason="invalid_session_token")
+    """Internal controller-only command execution websocket."""
+    if not _is_internal_ws_authorized(secret):
+        await websocket.close(code=4403, reason="forbidden")
         return
 
     await websocket.accept()
     await websocket.send_text(
-        build_envelope(WSMessageType.STATUS, {"status": "connected", "session_id": session_id})
+        build_envelope(
+            WSMessageType.STATUS,
+            {"status": "connected", "session_id": session_id, "channel": "internal_exec"},
+        )
     )
 
-    shutdown = asyncio.Event()
+    process: Optional[asyncio.subprocess.Process] = None
+    stream_tasks: list[asyncio.Task[Any]] = []
+    wait_task: Optional[asyncio.Task[Any]] = None
 
-    async def heartbeat_loop() -> None:
-        """Send heartbeat every 3 seconds."""
-        while not shutdown.is_set():
+    async def _safe_send(msg_type: WSMessageType, payload: Dict[str, Any]) -> None:
+        try:
+            await websocket.send_text(build_envelope(msg_type, payload))
+        except Exception:
+            # Caller handles shutdown; avoid exploding background tasks on disconnect.
+            pass
+
+    async def _stream_reader(
+        stream: Optional[asyncio.StreamReader],
+        event_name: str,
+    ) -> None:
+        if stream is None:
+            return
+        while True:
+            chunk = await stream.read(2048)
+            if not chunk:
+                return
+            await _safe_send(
+                WSMessageType.SANDBOX_STREAM,
+                {
+                    "stream": "sandbox",
+                    "event": event_name,
+                    "data": chunk.decode("utf-8", errors="replace"),
+                },
+            )
+
+    async def _clear_tasks() -> None:
+        nonlocal stream_tasks, wait_task
+        for task in stream_tasks:
+            task.cancel()
+        if wait_task:
+            wait_task.cancel()
+        for task in [*stream_tasks, wait_task]:
+            if task is None:
+                continue
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+        stream_tasks = []
+        wait_task = None
+
+    async def _terminate_process() -> None:
+        nonlocal process
+        if process is None:
+            return
+        if process.returncode is None:
+            process.terminate()
             try:
-                await websocket.send_text(build_envelope(WSMessageType.HEARTBEAT))
-            except Exception:
-                shutdown.set()
-                return
-            await asyncio.sleep(3)
+                await asyncio.wait_for(process.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                process.kill()
+                with contextlib.suppress(Exception):
+                    await process.wait()
+        process = None
+        await _clear_tasks()
 
-    async def trajectory_poll_loop() -> None:
-        """Poll solver executor for trajectory updates every 3 seconds."""
-        from solver.solver import solver_manager
+    async def _launch_process(command: str, cwd: Optional[str], env: Dict[str, Any]) -> None:
+        nonlocal process, stream_tasks, wait_task
+        await _terminate_process()
 
-        last_message_count = 0
+        resolved_cwd = cwd or os.getenv("WORKSPACE_PATH") or "/workspace/repo"
+        if resolved_cwd and not os.path.isdir(resolved_cwd):
+            resolved_cwd = None
 
-        while not shutdown.is_set():
-            await asyncio.sleep(3)
-            if shutdown.is_set():
-                return
+        merged_env = os.environ.copy()
+        for key, value in env.items():
+            if key:
+                merged_env[str(key)] = str(value)
 
-            # Find any active executor for this session's solves
-            # The executor key is (solve_id, run_id) — iterate to find active ones
-            active_executors = solver_manager.get_active_executors()
-            for (solve_id, run_id), executor in active_executors:
-                if not executor.is_active:
-                    continue
+        process = await asyncio.create_subprocess_exec(
+            "bash",
+            "-lc",
+            command,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=resolved_cwd,
+            env=merged_env,
+        )
 
-                try:
-                    trajectory = await executor.read_trajectory()
-                    if not trajectory:
-                        continue
+        await _safe_send(
+            WSMessageType.SANDBOX_STREAM,
+            {
+                "stream": "sandbox",
+                "event": "start",
+                "pid": process.pid,
+                "command": command,
+            },
+        )
 
-                    messages = trajectory.get("messages", [])
-                    info = trajectory.get("info", {})
-                    current_count = len(messages)
+        stream_tasks = [
+            asyncio.create_task(_stream_reader(process.stdout, "stdout")),
+            asyncio.create_task(_stream_reader(process.stderr, "stderr")),
+        ]
 
-                    if current_count > last_message_count:
-                        new_messages = messages[last_message_count:]
-                        await websocket.send_text(
-                            build_envelope(
-                                WSMessageType.TRAJECTORY_UPDATE,
-                                {
-                                    "messages": new_messages,
-                                    "info": info,
-                                    "message_count": current_count,
-                                    "new_message_start_index": last_message_count,
-                                },
-                            )
-                        )
-                        last_message_count = current_count
+        async def _wait_for_exit() -> None:
+            assert process is not None
+            exit_code = await process.wait()
+            await _safe_send(
+                WSMessageType.SANDBOX_STREAM,
+                {
+                    "stream": "sandbox",
+                    "event": "exit",
+                    "exit_code": exit_code,
+                },
+            )
 
-                        # Detect tool calls in new messages
-                        for msg in new_messages:
-                            extra = msg.get("extra", {})
-                            if isinstance(extra, dict) and extra.get("tool_call"):
-                                await websocket.send_text(
-                                    build_envelope(
-                                        WSMessageType.TOOL_CALL,
-                                        {
-                                            "tool_name": extra["tool_call"].get("name", "unknown"),
-                                            "tool_input": extra["tool_call"].get("input", {}),
-                                            "call_id": extra["tool_call"].get("id"),
-                                        },
-                                    )
-                                )
+        wait_task = asyncio.create_task(_wait_for_exit())
 
-                            if isinstance(extra, dict) and extra.get("agent_question"):
-                                await websocket.send_text(
-                                    build_envelope(
-                                        WSMessageType.AGENT_QUESTION,
-                                        {
-                                            "question_id": extra["agent_question"].get("id", ""),
-                                            "question_text": extra["agent_question"].get("text", ""),
-                                            "options": extra["agent_question"].get("options", []),
-                                        },
-                                    )
-                                )
-
-                except Exception as e:
-                    logger.debug("Trajectory poll error: %s", e)
-
-            # Check if all executors finished
-            if not any(ex.is_active for (_, _), ex in active_executors):
-                if active_executors:
-                    # Had executors but they all finished
-                    try:
-                        await websocket.send_text(
-                            build_envelope(WSMessageType.STATUS, {"status": "completed"})
-                        )
-                        await websocket.send_text(build_envelope(WSMessageType.DONE))
-                    except Exception:
-                        pass
-                    shutdown.set()
-                    return
-
-    async def receive_loop() -> None:
-        """Listen for client messages (chat_message, user_response)."""
-        while not shutdown.is_set():
+    try:
+        while True:
+            raw_message = await websocket.receive_text()
             try:
-                raw = await websocket.receive_text()
-            except WebSocketDisconnect:
-                shutdown.set()
-                return
-            except Exception:
-                shutdown.set()
-                return
-
-            try:
-                msg = json.loads(raw)
+                message = json.loads(raw_message)
             except json.JSONDecodeError:
-                await websocket.send_text(
-                    build_envelope(
-                        WSMessageType.ERROR,
-                        {"message": "Invalid JSON", "code": "WS_MESSAGE_PARSE_ERROR"},
-                    )
+                await _safe_send(
+                    WSMessageType.ERROR,
+                    {"message": "Invalid JSON", "code": "WS_MESSAGE_PARSE_ERROR"},
                 )
                 continue
 
-            msg_type = msg.get("type")
+            msg_type = message.get("type")
+            payload = message.get("payload", {}) or {}
+            if not isinstance(payload, dict):
+                payload = {}
 
-            if msg_type == WSMessageType.CHAT_MESSAGE.value:
-                content = msg.get("payload", {}).get("content", "")
-                await websocket.send_text(
-                    build_envelope(
-                        WSMessageType.STATUS,
-                        {"status": "received", "detail": f"Chat message received ({len(content)} chars)"},
-                    )
-                )
-
-            elif msg_type == WSMessageType.USER_RESPONSE.value:
-                await websocket.send_text(
-                    build_envelope(
-                        WSMessageType.STATUS,
-                        {"status": "received", "detail": "User response acknowledged"},
-                    )
-                )
-
-            else:
-                await websocket.send_text(
-                    build_envelope(
+            if msg_type == WSMessageType.EXEC_START.value:
+                command = str(payload.get("command") or "").strip()
+                if not command:
+                    await _safe_send(
                         WSMessageType.ERROR,
-                        {"message": f"Unknown message type: {msg_type}"},
+                        {"message": "Missing command for exec.start", "code": "EXEC_COMMAND_MISSING"},
                     )
-                )
+                    continue
 
-    try:
-        await asyncio.gather(
-            heartbeat_loop(),
-            trajectory_poll_loop(),
-            receive_loop(),
-        )
-    except Exception as e:
-        logger.warning("Unified WS error for session %s: %s", session_id, e)
+                env = payload.get("env", {})
+                if not isinstance(env, dict):
+                    env = {}
+
+                await _launch_process(command, payload.get("cwd"), env)
+                continue
+
+            if msg_type == WSMessageType.EXEC_STDIN.value:
+                if process is None or process.returncode is not None or process.stdin is None:
+                    await _safe_send(
+                        WSMessageType.ERROR,
+                        {"message": "No active process for stdin", "code": "EXEC_NOT_RUNNING"},
+                    )
+                    continue
+
+                data = str(payload.get("data") or "")
+                if data:
+                    process.stdin.write(data.encode("utf-8"))
+                    await process.stdin.drain()
+                continue
+
+            if msg_type == WSMessageType.EXEC_CANCEL.value:
+                await _terminate_process()
+                await _safe_send(
+                    WSMessageType.SANDBOX_STREAM,
+                    {"stream": "sandbox", "event": "cancelled"},
+                )
+                continue
+
+            await _safe_send(
+                WSMessageType.ERROR,
+                {"message": f"Unknown message type: {msg_type}", "code": "EXEC_UNKNOWN_MESSAGE"},
+            )
+    except WebSocketDisconnect:
+        pass
     finally:
-        shutdown.set()
-        try:
+        await _terminate_process()
+        with contextlib.suppress(Exception):
             await websocket.close()
-        except Exception:
-            pass
