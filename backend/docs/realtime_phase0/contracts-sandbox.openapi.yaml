@@ -1,69 +1,49 @@
 openapi: 3.1.0
 info:
-  title: Yudai Sandbox Session Server API (Phase 0 Freeze)
-  version: 0.1.0
+  title: Yudai Sandbox Internal API (Controller-Broker v2)
+  version: 0.2.0
 servers:
   - url: https://sandbox.example.run
 components:
-  securitySchemes:
-    SessionBearer:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
   schemas:
-    ChatRequest:
+    ExecStartMessage:
       type: object
-      required: [message]
+      required: [type, payload]
       properties:
-        message:
+        type:
+          type: string
+          enum: ["exec.start"]
+        payload:
+          type: object
+          required: [command]
+          properties:
+            command:
+              type: string
+            cwd:
+              type: string
+            env:
+              type: object
+              additionalProperties:
+                type: string
+    ExecStdinMessage:
+      type: object
+      required: [type, payload]
+      properties:
+        type:
+          type: string
+          enum: ["exec.stdin"]
+        payload:
           type: object
           properties:
-            message_text:
+            data:
               type: string
-              example: analyze auth regression in login flow
-        repository:
-          type: object
-          properties:
-            owner:
-              type: string
-              example: octocat
-            name:
-              type: string
-              example: yudaiv3
-            branch:
-              type: string
-              example: main
-    ChatResponse:
+    ExecCancelMessage:
       type: object
+      required: [type]
       properties:
-        reply:
+        type:
           type: string
-        message_id:
-          type: string
-        processing_time:
-          type: number
-    SolveStartRequest:
-      type: object
-      required: [issue_id, repo_url, branch_name]
-      properties:
-        issue_id:
-          type: integer
-          example: 42
-        repo_url:
-          type: string
-          example: https://github.com/octocat/yudaiv3
-        branch_name:
-          type: string
-          example: main
-    SolveStartResponse:
-      type: object
-      properties:
-        solve_id:
-          type: string
-          example: solve_01JT8C3S3ANQ1ZHFY4QX4W7N2K
-        status:
-          type: string
-          enum: [pending, running, completed, failed, cancelled]
+          enum: ["exec.cancel"]
 paths:
   /healthz:
     get:
@@ -71,140 +51,9 @@ paths:
       responses:
         "200":
           description: alive
-  /sessions/{session_id}/chat:
-    post:
-      summary: Chat with session context
-      security:
-        - SessionBearer: []
-      parameters:
-        - in: path
-          name: session_id
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/ChatRequest"
-      responses:
-        "200":
-          description: assistant response
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ChatResponse"
-  /sessions/{session_id}/issues/create-with-context:
-    post:
-      summary: Create issue draft using current session context
-      security:
-        - SessionBearer: []
-      parameters:
-        - in: path
-          name: session_id
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: issue prepared
-  /sessions/{session_id}/solve/start:
-    post:
-      summary: Start solve execution
-      security:
-        - SessionBearer: []
-      parameters:
-        - in: path
-          name: session_id
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SolveStartRequest"
-      responses:
-        "201":
-          description: solve started
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SolveStartResponse"
-  /sessions/{session_id}/solve/status/{solve_id}:
+  /internal/sessions/{session_id}/ws/exec:
     get:
-      summary: Get solve status
-      security:
-        - SessionBearer: []
-      parameters:
-        - in: path
-          name: session_id
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: solve_id
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: solve status payload
-  /sessions/{session_id}/solve/cancel/{solve_id}:
-    post:
-      summary: Cancel solve execution
-      security:
-        - SessionBearer: []
-      parameters:
-        - in: path
-          name: session_id
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: solve_id
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: solve cancelled
-  /sessions/{session_id}/solve/stream/{solve_id}/{run_id}:
-    get:
-      summary: Solver trajectory SSE stream
-      parameters:
-        - in: path
-          name: session_id
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: solve_id
-          required: true
-          schema:
-            type: string
-        - in: path
-          name: run_id
-          required: true
-          schema:
-            type: string
-        - in: query
-          name: token
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: text/event-stream events
-          content:
-            text/event-stream:
-              schema:
-                type: string
-  /sessions/{session_id}/ws/chat:
-    get:
-      summary: WebSocket chat endpoint (upgrade request)
+      summary: Internal controller websocket for command execution (upgrade path)
       parameters:
         - in: path
           name: session_id
@@ -212,11 +61,10 @@ paths:
           schema:
             type: string
         - in: query
-          name: token
-          required: true
+          name: secret
+          required: false
           schema:
             type: string
       responses:
         "101":
           description: WebSocket protocol switch
-
