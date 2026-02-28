@@ -49,8 +49,7 @@ def test_run_controller_mounts_session_and_controller_routes():
     assert "/daifu/sessions" in paths
     assert "/daifu/sessions/{session_id}" in paths
     assert "/controller/sessions/{session_id}/runtime" in paths
-    assert "/controller/proxy/sessions/{session_id}/{path:path}" in paths
-    assert "/controller/proxy/sessions/{session_id}/ws/{path:path}" in paths
+    assert "/controller/sessions/{session_id}/ws/unified" in paths
 
 
 def test_parse_allow_origins_trims_and_drops_empty_values():
