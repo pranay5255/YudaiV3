@@ -71,7 +71,7 @@ services:
     restart: unless-stopped
     # Use environment files for better secrets management
     env_file:
-      - .env.prod
+      - backend/.env.prod
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       - DB_ECHO=false
@@ -120,14 +120,10 @@ services:
       db:
         condition: service_healthy
     volumes:
-      - ./backend:/app
-      - /app/__pycache__
       - app_logs:/app/logs
       - ./backend/yudaiv3.2025-09-07.private-key.pem:/app/yudaiv3.2025-09-07.private-key.pem:ro
-      # SWE-agent volumes
       - /var/run/docker.sock:/var/run/docker.sock
       - swe_runs:/data/swe_runs
-      - ./backend/solver:/app/solver
       - transformers_cache:/tmp/transformers_cache
       - huggingface_cache:/tmp/huggingface_cache
     tmpfs:
