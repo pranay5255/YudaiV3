@@ -23,5 +23,3 @@ uv.lock
 DEPLOYMENT_GUIDE.md
 README.md
 *.sh
-# Keep nginx.prod.conf - it's needed for production
-!nginx.prod.conf
