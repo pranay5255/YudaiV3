@@ -1,6 +1,9 @@
 // src/config/api.ts - Ultra-minimal Contract One API Configuration
 
 // Contract One: All API calls through /api/* umbrella
+// In production with nginx mode: VITE_API_BASE_URL = https://api.yudai.app
+// In production with direct mode: VITE_API_BASE_URL = /api (Vercel rewrite)
+// In development: VITE_API_BASE_URL = /api (Vite proxy)
 export const resolveApiBase = (value?: string): string => {
   const normalized = (value || '/api').trim() || '/api';
   if (normalized === '/') {
@@ -9,6 +12,10 @@ export const resolveApiBase = (value?: string): string => {
   return normalized.replace(/\/+$/, '');
 };
 
+// VITE_API_BASE_URL is set via:
+// 1. Vercel environment variables (production)
+// 2. .env.local or .env.production (build time)
+// 3. Falls back to /api for local dev / Vercel rewrites
 export const API_BASE = resolveApiBase(import.meta.env.VITE_API_BASE_URL);
 
 export const API = {
