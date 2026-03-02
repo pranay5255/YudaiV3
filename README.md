@@ -44,7 +44,7 @@ Planning and scope documents are in:
 
 ## Project Structure
 
-- `src/` — frontend app (chat, session UI, trajectory viewer)
+- `src/` — standalone frontend app/package (chat, session UI, trajectory viewer)
 - `backend/` — FastAPI backend, auth, GitHub APIs, solver, realtime services
 - `backend/realtime/` — controller/sandbox lifecycle services, schemas, cache/artifact export
 - `backend/db/` — schema init + migrations
@@ -63,7 +63,8 @@ Planning and scope documents are in:
 Frontend:
 
 ```bash
-npm install
+cd src
+npm ci
 ```
 
 Backend (example using local venv):
@@ -93,7 +94,15 @@ python backend/run_server.py
 Frontend:
 
 ```bash
+cd src
 npm run dev
+```
+
+Frontend production build:
+
+```bash
+cd src
+npm run build
 ```
 
 ### 5. Start the Realtime Split Entrypoints (Optional / MVP Work)
