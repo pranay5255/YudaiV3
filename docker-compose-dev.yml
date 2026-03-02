@@ -113,17 +113,17 @@ services:
   # Frontend Service (Development with Vite dev server)
   frontend:
     build:
-      context: .
+      context: ./src
       dockerfile: Dockerfile.dev
     container_name: yudai-fe-dev
     restart: unless-stopped
     environment:
-      - VITE_API_BASE_URL=http://localhost:8001/api
+      - VITE_API_BASE_URL=http://backend:8000
       - NODE_ENV=development
     ports:
       - "3000:3000"
     volumes:
-      - .:/app
+      - ./src:/app
       - /app/node_modules
     depends_on:
       backend:
