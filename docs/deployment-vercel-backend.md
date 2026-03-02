@@ -20,6 +20,13 @@ Recommended frontend env vars:
 
 That keeps browser requests same-origin (`https://your-app.vercel.app/api/...`) while Vercel proxies to the backend server.
 
+Repository layout note:
+
+- Frontend is now a standalone app in `src/`
+- Set Vercel project Root Directory to `src`
+- Keep the rewrite config in `src/vercel.json`
+- Local build command: `cd src && npm run build`
+
 ## Backend Server (139.84.154.9)
 
 Run the controller host (from repo root or by `cd backend`):
