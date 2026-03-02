@@ -2,7 +2,7 @@
 """
 YudaiV3 Backend API Server - Contract One Architecture
 
-All API calls go through /api/* umbrella (nginx strips prefix)
+All API calls go through /api/* umbrella (Vercel strips /api prefix and proxies to this server)
 """
 
 import os
