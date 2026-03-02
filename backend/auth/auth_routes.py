@@ -14,17 +14,17 @@ from auth.github_oauth import (
     deactivate_session_token,
     exchange_code,
     get_github_oauth_url,
+    get_current_user,
     user_info,
     validate_github_app_config,
-    validate_session_token,
 )
 from db.database import get_db
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
-from fastapi.security import HTTPBearer
 from models import (
     # CreateSessionTokenRequest,
     SessionTokenRequest,
+    User,
     # SessionTokenResponse,
 )
 from sqlalchemy.orm import Session
@@ -213,20 +213,16 @@ async def api_login():
 
 
 @router.get("/api/user")
-async def api_get_user(db: Session = Depends(get_db), credentials=Depends(HTTPBearer())):
-    """Get user by Bearer session token in Authorization header."""
+async def api_get_user(current_user: User = Depends(get_current_user)):
+    """Get current authenticated user from Bearer token."""
     try:
-        token = credentials.credentials if credentials else None
-        user = validate_session_token(db, token) if token else None
-        if not user:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session token")
         return {
-            "id": user.id,
-            "github_username": user.github_username,
-            "github_id": user.github_user_id,
-            "display_name": user.display_name,
-            "email": user.email,
-            "avatar_url": user.avatar_url
+            "id": current_user.id,
+            "github_username": current_user.github_username,
+            "github_id": current_user.github_user_id,
+            "display_name": current_user.display_name,
+            "email": current_user.email,
+            "avatar_url": current_user.avatar_url,
         }
     except HTTPException:
         raise
