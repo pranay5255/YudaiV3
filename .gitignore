@@ -2,10 +2,13 @@ node_modules
 dist/
 .venv
 .env
-.env.secrets
-.env.dev
-.env.prod
-.env.dev.secrets
+.env.*
+!.env.example
+!.env.deploy.template
+backend/.env.prod
+backend/.env.local
+backend/.env.development
+backend/.env.staging
 /data/
 /backups/
 /logs/
