@@ -156,6 +156,11 @@ class SessionModeStatus(str, Enum):
     FAILED = "failed"
 
 
+class UserQuestionStatus(str, Enum):
+    PENDING = "pending"
+    ANSWERED = "answered"
+
+
 # ============================================================================
 # SQLALCHEMY MODELS (Database Schema)
 # ============================================================================
@@ -553,6 +558,9 @@ class ChatSession(Base):
     messages: Mapped[List["ChatMessage"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
+    user_questions: Mapped[List["UserQuestion"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
     context_cards: Mapped[List["ContextCard"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
@@ -621,6 +629,44 @@ class ChatMessage(Base):
 
     # Relationships
     session: Mapped["ChatSession"] = relationship(back_populates="messages")
+
+
+class UserQuestion(Base):
+    """Persisted agent follow-up questions and user answers for a chat session."""
+
+    __tablename__ = "user_questions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    question_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    mode: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    question_text: Mapped[str] = mapped_column(Text, nullable=False)
+    options: Mapped[Optional[List[Dict[str, str]]]] = mapped_column(JSON_TYPE, nullable=True)
+    multi_select: Mapped[bool] = mapped_column(Boolean, default=False)
+    selected_option_ids: Mapped[Optional[List[str]]] = mapped_column(JSON_TYPE, nullable=True)
+    answer_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=UserQuestionStatus.PENDING.value, index=True
+    )
+    question_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=True)
+    asked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    answered_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )
+
+    session: Mapped["ChatSession"] = relationship(back_populates="user_questions")
+    user: Mapped["User"] = relationship()
 
 
 class ContextCard(Base):
@@ -1824,6 +1870,52 @@ class ConversationResponse(BaseModel):
     current_mode: str
     mode_status: str
     follow_up_question: Optional[ConversationQuestion] = None
+
+
+class UserQuestionOption(BaseModel):
+    id: str = Field(..., min_length=1, max_length=128)
+    label: str = Field(..., min_length=1, max_length=255)
+
+
+class AskQuestionRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=10000)
+    options: List[UserQuestionOption] = Field(default_factory=list)
+    multi_select: bool = False
+    mode: Optional[Literal["architect", "tester", "coder"]] = None
+    objective: Optional[str] = Field(default=None, min_length=1, max_length=10000)
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class AnswerQuestionRequest(BaseModel):
+    selected_option_ids: List[str] = Field(default_factory=list)
+    answer_text: Optional[str] = Field(default=None, max_length=10000)
+    resume_execution: bool = True
+
+
+class UserQuestionResponse(BaseModel):
+    question_id: str
+    session_id: str
+    mode: Optional[str] = None
+    prompt: str
+    options: List[UserQuestionOption] = Field(default_factory=list)
+    multi_select: bool = False
+    selected_option_ids: List[str] = Field(default_factory=list)
+    answer_text: Optional[str] = None
+    status: str
+    asked_at: datetime
+    answered_at: Optional[datetime] = None
+
+
+class AskQuestionResponse(BaseModel):
+    question: UserQuestionResponse
+    mode_status: str
+
+
+class AnswerQuestionResponse(BaseModel):
+    question: UserQuestionResponse
+    resumed: bool = False
+    resumed_mode: Optional[str] = None
+    mode_status: str
 
 
 class ExecutionRequest(BaseModel):
