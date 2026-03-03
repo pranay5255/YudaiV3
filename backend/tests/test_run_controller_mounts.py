@@ -38,7 +38,7 @@ def _install_import_stubs() -> None:
     sys.modules["daifuUserAgent.llm_service"] = fake_llm_service
 
 
-def test_run_controller_mounts_session_and_controller_routes():
+def test_run_controller_mounts_canonical_routes_only():
     _install_import_stubs()
 
     import importlib
@@ -46,10 +46,20 @@ def test_run_controller_mounts_session_and_controller_routes():
     run_controller = importlib.import_module("run_controller")
 
     paths = {getattr(route, "path", None) for route in run_controller.app.routes}
+
+    # Canonical mounts
     assert "/daifu/sessions" in paths
-    assert "/daifu/sessions/{session_id}" in paths
+    assert "/auth/api/login" in paths
     assert "/controller/sessions/{session_id}/runtime" in paths
     assert "/controller/sessions/{session_id}/ws/unified" in paths
+    assert "/health" in paths
+
+    # No alias mounts
+    assert "/api/daifu/sessions" not in paths
+    assert "/api/auth/api/login" not in paths
+    assert "/api/controller/sessions/{session_id}/runtime" not in paths
+    assert "/api/controller/sessions/{session_id}/ws/unified" not in paths
+    assert "/api/health" not in paths
 
 
 def test_parse_allow_origins_trims_and_drops_empty_values():
