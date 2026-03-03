@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YudaiV3 Development Context - 2026-03-03</title>
+  <style>
+    :root {
+      --bg-1: #0b1220;
+      --bg-2: #111c2f;
+      --card: #152238;
+      --card-2: #1a2b45;
+      --text: #e7eef8;
+      --muted: #9db0c8;
+      --accent: #38bdf8;
+      --accent-2: #22c55e;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --line: #2f4768;
+      --mono: "JetBrains Mono", "SFMono-Regular", Menlo, monospace;
+      --sans: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      color: var(--text);
+      background:
+        radial-gradient(circle at 20% 0%, #153052 0%, transparent 40%),
+        radial-gradient(circle at 80% 20%, #11473f 0%, transparent 35%),
+        linear-gradient(160deg, var(--bg-1), var(--bg-2));
+      line-height: 1.45;
+    }
+
+    .container {
+      width: min(1200px, 92vw);
+      margin: 2.5rem auto 3rem;
+      display: grid;
+      gap: 1rem;
+    }
+
+    .hero {
+      background: linear-gradient(135deg, #183457, #1b3c4e);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 1.5rem;
+    }
+
+    h1, h2, h3 { margin: 0 0 .55rem 0; letter-spacing: .2px; }
+    h1 { font-size: clamp(1.4rem, 2.5vw, 2.2rem); }
+    h2 { font-size: clamp(1.05rem, 1.9vw, 1.35rem); color: #cde7ff; }
+    h3 { font-size: 1rem; color: #c8e2ff; }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .5rem;
+      margin-top: .8rem;
+    }
+
+    .chip {
+      padding: .25rem .55rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.03);
+      font-size: .78rem;
+      color: var(--muted);
+    }
+
+    .grid {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .grid.two { grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+
+    .card {
+      background: linear-gradient(160deg, var(--card), var(--card-2));
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 1rem;
+    }
+
+    .card p { margin: .2rem 0 .5rem 0; color: var(--muted); }
+
+    .kpi {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(90px, 1fr));
+      gap: .5rem;
+      margin-top: .7rem;
+    }
+
+    .k {
+      background: rgba(255,255,255,.03);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: .6rem;
+      text-align: center;
+    }
+
+    .k strong { display: block; font-size: 1.05rem; color: #dbf3ff; }
+    .k span { font-size: .72rem; color: var(--muted); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .9rem;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: .5rem .45rem;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: #b7d4f3;
+      font-size: .78rem;
+      letter-spacing: .4px;
+      text-transform: uppercase;
+      background: rgba(255,255,255,.02);
+      position: sticky;
+      top: 0;
+    }
+
+    .mono { font-family: var(--mono); font-size: .82rem; }
+
+    pre {
+      margin: .45rem 0 .2rem;
+      padding: .8rem;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #0f1727;
+      color: #d6e4f5;
+      overflow: auto;
+      font-family: var(--mono);
+      font-size: .78rem;
+    }
+
+    .ok { color: var(--accent-2); }
+    .warn { color: var(--warn); }
+    .danger { color: var(--danger); }
+
+    details {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: .55rem .7rem;
+      background: rgba(255,255,255,.02);
+    }
+
+    summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: #d6e9ff;
+    }
+
+    .footer {
+      color: var(--muted);
+      font-size: .82rem;
+      text-align: right;
+      margin-top: .4rem;
+    }
+
+    .diagram-note {
+      color: var(--muted);
+      margin: 0 0 .45rem 0;
+      font-size: .86rem;
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <section class="hero">
+      <h1>YudaiV3 Context Snapshot</h1>
+      <p>Single-page resume point for deployment, routing contract, websocket caveats, auth status, current working tree, and the last 50 commits.</p>
+      <div class="meta">
+        <span class="chip">Generated: 2026-03-03 (UTC)</span>
+        <span class="chip">Branch: main</span>
+        <span class="chip">Scope: Frontend/Backend deployment contract</span>
+      </div>
+      <div class="kpi">
+        <div class="k"><strong>50</strong><span>Commits Parsed</span></div>
+        <div class="k"><strong>2</strong><span>Canonical Route Tests Passing</span></div>
+        <div class="k"><strong>11</strong><span>Working Tree Entries</span></div>
+        <div class="k"><strong class="warn">Auth Invalid</strong><span>gh token state</span></div>
+      </div>
+    </section>
+
+    <section class="grid two">
+      <article class="card">
+        <h2>Resume Checklist</h2>
+        <table>
+          <thead><tr><th>Area</th><th>Current State</th><th>Next Action</th></tr></thead>
+          <tbody>
+            <tr><td>Backend Deploy</td><td>Docker Compose ready on <span class="mono">139.84.154.9</span></td><td>Run backend first and verify <span class="mono">http://localhost:8000/health</span></td></tr>
+            <tr><td>Frontend Deploy</td><td>Chosen: Vercel CLI from server</td><td>Run <span class="mono">vercel --prod</span> from <span class="mono">src/</span></td></tr>
+            <tr><td>DB Strategy</td><td>Fresh DB, <span class="mono">create_all</span>-oriented</td><td>No migration replay needed unless strategy changes</td></tr>
+            <tr><td>Routes</td><td>Canonical-only backend mounts</td><td>Keep frontend endpoints aligned to canonical contract</td></tr>
+            <tr><td>WS Routing</td><td><span class="mono">VITE_WS_BASE_URL</span> supported</td><td>Prefer <span class="mono">wss://</span> for production browser compatibility</td></tr>
+          </tbody>
+        </table>
+      </article>
+
+      <article class="card">
+        <h2>Key Decisions From Chat</h2>
+        <table>
+          <thead><tr><th>Decision</th><th>Selected Context</th></tr></thead>
+          <tbody>
+            <tr><td>WebSocket target</td><td>Direct backend endpoint via dedicated WS base URL (split from API base)</td></tr>
+            <tr><td>Secrets</td><td>Keep in <span class="mono">.env.prod</span>; rely on <span class="mono">.gitignore</span> for future prevention</td></tr>
+            <tr><td>Server</td><td>This machine (<span class="mono">139.84.154.9</span>) with Docker Compose</td></tr>
+            <tr><td>Database</td><td>Fresh bootstrap path using SQLAlchemy schema creation</td></tr>
+            <tr><td>Frontend deploy trigger</td><td>Vercel CLI from this server</td></tr>
+          </tbody>
+        </table>
+      </article>
+    </section>
+
+    <section class="card">
+      <h2>Architecture Flow</h2>
+      <p class="diagram-note">HTTP API and WebSocket can now be configured independently.</p>
+      <pre class="mermaid">
+flowchart LR
+  Browser[Browser on https://yudai.app] --> FE[Vercel Frontend App]
+  FE -->|REST calls (VITE_API_BASE_URL)| API[(https://api.yudai.app)]
+  Browser -->|WebSocket (VITE_WS_BASE_URL)| WS[ws://... or wss://...]
+  WS --> BE[Backend run_controller :8000]
+  BE --> DB[(PostgreSQL)]
+      </pre>
+    </section>
+
+    <section class="grid two">
+      <article class="card">
+        <h3>Deployment Sequence</h3>
+        <pre class="mermaid">
+sequenceDiagram
+  participant Dev as You
+  participant Srv as Server 139.84.154.9
+  participant BE as Backend (Docker Compose)
+  participant VC as Vercel CLI
+  participant FE as Frontend CDN
+
+  Dev->>Srv: docker compose -f docker-compose.backend-only.yml up -d --build
+  Srv->>BE: boot app + init schema path
+  Dev->>BE: curl http://localhost:8000/health
+  BE-->>Dev: healthy
+  Dev->>VC: cd src && vercel --prod
+  VC->>FE: publish frontend build
+  FE-->>Dev: production available
+        </pre>
+      </article>
+
+      <article class="card">
+        <h3>WebSocket Risk State</h3>
+        <pre class="mermaid">
+stateDiagram-v2
+  [*] --> SplitRoutingEnabled
+  SplitRoutingEnabled: VITE_API_BASE_URL + VITE_WS_BASE_URL
+  SplitRoutingEnabled --> WsInsecureFromHttps: WS=ws:// and page=https://
+  WsInsecureFromHttps --> BrowserBlocked
+  SplitRoutingEnabled --> WsSecure: WS=wss://...
+  WsSecure --> StableRealtime
+  BrowserBlocked --> WsSecure: add TLS endpoint, switch to wss://
+        </pre>
+      </article>
+    </section>
+
+    <section class="card">
+      <h2>Critical Caveat and Practical Fix</h2>
+      <table>
+        <thead><tr><th>Problem</th><th>Impact</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Using <span class="mono">ws://139.84.154.9:8000</span> from an <span class="mono">https://</span> Vercel page</td>
+            <td>Mixed-content policy likely blocks websocket in browser</td>
+            <td>Expose TLS endpoint and set <span class="mono">VITE_WS_BASE_URL=wss://api.yudai.app</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <pre>Recommended production env:
+VITE_API_BASE_URL=https://api.yudai.app
+VITE_WS_BASE_URL=wss://api.yudai.app</pre>
+    </section>
+
+    <section class="grid two">
+      <article class="card">
+        <h2>GitHub CLI Auth Status</h2>
+        <p>Captured from <span class="mono">gh auth status</span>:</p>
+        <pre>github.com
+  X Failed to log in to github.com account pranay5255 (/root/.config/gh/hosts.yml)
+  - Active account: true
+  - The token in /root/.config/gh/hosts.yml is invalid.
+  - To re-authenticate, run: gh auth login -h github.com
+  - To forget about this account, run: gh auth logout -h github.com -u pranay5255</pre>
+      </article>
+
+      <article class="card">
+        <h2>Current Working Tree Snapshot</h2>
+        <pre> M .env.deploy.template
+ M .gitignore
+ M backend/MSWEA_PLANNING_CONTEXT.txt
+ M backend/daifuUserAgent/session_routes.py
+ M backend/db/database.py
+ M backend/db/init.sql
+ M backend/db/init_db.py
+ M backend/models.py
+ M backend/realtime/mode_orchestrator.py
+ M backend/realtime/ws_protocol.py
+ M backend/run_controller.py
+ M backend/start.sh
+ M backend/tests/test_run_controller_mounts.py
+ M docs/deployment-vercel-backend.md
+ M scripts/deploy.sh
+ M src/tests/frontend/realtimeRouting.test.ts
+?? backend/realtime/mswea_mode_configs/
+?? backend/tests/test_session_routes_questions.py</pre>
+      </article>
+    </section>
+
+    <section class="card">
+      <h2>Last 50 Commits with Explanations</h2>
+      <p>Explanation text is synthesized from each commit message and affected area so you can quickly recover intent.</p>
+      <details>
+        <summary>Commit Type Distribution (last 50)</summary>
+        <pre>add=8, chore=8, feat=7, fix=7, remove=6, docs=3, test=2, update=2, merge=2, build=1, ci=1, refactor=1, other=2</pre>
+      </details>
+      <div style="max-height: 560px; overflow:auto; border:1px solid var(--line); border-radius:10px; margin-top:.7rem;">
+        <table id="commitTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Hash</th>
+              <th>Date</th>
+              <th>Author</th>
+              <th>Area</th>
+              <th>Subject</th>
+              <th>Explanation</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="footer">Context document path: <span class="mono">docs/development-context-2026-03-03.html</span></p>
+  </main>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      securityLevel: 'loose',
+      flowchart: { useMaxWidth: true, htmlLabels: true }
+    });
+
+    const commits = [
+      {hash:"d1f7ffa", date:"2026-03-03", author:"pranay5255", subject:"chore(nginx): remove deprecated api.yudai.app nginx config", area:"nginx"},
+      {hash:"4d203a7", date:"2026-03-03", author:"pranay5255", subject:"chore(db): remove add_chat_messages_actions migration", area:"backend"},
+      {hash:"7e512fb", date:"2026-03-03", author:"pranay5255", subject:"chore(db): remove phase1 three-mode workflow rollback migration", area:"backend"},
+      {hash:"1ca06af", date:"2026-03-03", author:"pranay5255", subject:"chore(db): remove phase1 three-mode workflow migration", area:"backend"},
+      {hash:"6981d75", date:"2026-03-03", author:"pranay5255", subject:"chore(db): remove phase0 realtime preflight rollback migration", area:"backend"},
+      {hash:"e5ab677", date:"2026-03-03", author:"pranay5255", subject:"chore(db): remove phase0 realtime preflight migration", area:"backend"},
+      {hash:"42bda62", date:"2026-03-03", author:"pranay5255", subject:"chore(data): update mock trajectory data with edge-proxy directory names", area:"src"},
+      {hash:"2cc2044", date:"2026-03-03", author:"pranay5255", subject:"refactor(components): replace inline agent question UI with UserQuestionPrompt", area:"src"},
+      {hash:"a2a64b2", date:"2026-03-03", author:"pranay5255", subject:"feat(components): add UserQuestionPrompt component", area:"src"},
+      {hash:"1b29d9c", date:"2026-03-03", author:"pranay5255", subject:"feat(hooks): submit question answers via HTTP and normalize agent_question payload", area:"src"},
+      {hash:"1342f33", date:"2026-03-03", author:"pranay5255", subject:"feat(utils): add buildControllerUnifiedWsEndpoint helper", area:"src"},
+      {hash:"a05b070", date:"2026-03-03", author:"pranay5255", subject:"fix(config): simplify Vite dev proxy and enable WebSocket passthrough", area:"src"},
+      {hash:"9332471", date:"2026-03-03", author:"pranay5255", subject:"chore(types): add VITE_WS_BASE_URL to ImportMetaEnv", area:"src"},
+      {hash:"9e139e4", date:"2026-03-03", author:"pranay5255", subject:"feat(config): add question endpoints and fix prod API base URL fallback", area:"src"},
+      {hash:"6f733df", date:"2026-03-03", author:"pranay5255", subject:"feat(types): add UserQuestion types and update AgentQuestionInfo", area:"src"},
+      {hash:"c3ac18a", date:"2026-03-03", author:"pranay5255", subject:"build(deps): update mswea subproject commit hash", area:"backend"},
+      {hash:"7f51c8f", date:"2026-03-03", author:"Pranay kundu", subject:"Merge pull request #136 from pranay5255/feat/deployment-script", area:""},
+      {hash:"5476b7f", date:"2026-03-03", author:"pranay5255", subject:"add download_model.py for model downloading", area:"backend"},
+      {hash:"861eabc", date:"2026-03-03", author:"pranay5255", subject:"remove deprecated src/Dockerfile.dev", area:"src"},
+      {hash:"f98ec37", date:"2026-03-03", author:"pranay5255", subject:"remove deprecated last_mini_run.traj.json", area:"last_mini_run.traj.json"},
+      {hash:"d7e416a", date:"2026-03-03", author:"pranay5255", subject:"remove deprecated docker-compose.prod.yml", area:"docker-compose.prod.yml"},
+      {hash:"661ceaa", date:"2026-03-03", author:"pranay5255", subject:"remove deprecated docker-compose-dev.yml", area:"docker-compose-dev.yml"},
+      {hash:"80846d0", date:"2026-03-03", author:"pranay5255", subject:"update backend utils module", area:"backend"},
+      {hash:"a27ff25", date:"2026-03-03", author:"pranay5255", subject:"update backend start.sh configuration", area:"backend"},
+      {hash:"c63cfff", date:"2026-03-03", author:"pranay5255", subject:"remove deprecated run_server.py script", area:"backend"},
+      {hash:"5411b9e", date:"2026-03-03", author:"pranay5255", subject:"remove deprecated run_db_init.py script", area:"backend"},
+      {hash:"d30bedf", date:"2026-03-02", author:"pranay5255", subject:"Improve API base URL configuration with deployment mode docs", area:"src"},
+      {hash:"4f6d2a0", date:"2026-03-02", author:"pranay5255", subject:"Add security headers to Vercel configuration", area:"src"},
+      {hash:"a7693be", date:"2026-03-02", author:"pranay5255", subject:"Add deployment environment variables template", area:".env.deploy.template"},
+      {hash:"2966a54", date:"2026-03-02", author:"pranay5255", subject:"Add nginx reverse proxy config with SSL, CORS, WebSocket support", area:"nginx"},
+      {hash:"6e8afc3", date:"2026-03-02", author:"pranay5255", subject:"Add full-stack deployment script with nginx/direct modes", area:"scripts"},
+      {hash:"5f5fc62", date:"2026-03-03", author:"pranay5255", subject:"docs: update deployment guide with WebSocket/nginx mode explanation", area:"docs"},
+      {hash:"dd8f400", date:"2026-03-03", author:"pranay5255", subject:"ci: split build into frontend and backend jobs matching deployment targets", area:".github"},
+      {hash:"7fa3df9", date:"2026-03-03", author:"Pranay kundu", subject:"Merge pull request #137 from pranay5255/feat/backend-e2e-chat-only", area:""},
+      {hash:"2211966", date:"2026-03-02", author:"pranay5255", subject:"test(e2e): add executable backend end-to-end bash test suite", area:"scripts"},
+      {hash:"0a2354b", date:"2026-03-02", author:"pranay5255", subject:"docs(e2e): add backend checklist for auth chat sandbox and embeddings", area:"docs"},
+      {hash:"d5cc3f9", date:"2026-03-02", author:"pranay5255", subject:"fix(compose): load backend prod env and sandbox runtime paths", area:"docker-compose.backend-only.yml"},
+      {hash:"adfb777", date:"2026-03-02", author:"pranay5255", subject:"feat(db): add migration for chat_messages.actions column", area:"backend"},
+      {hash:"892be03", date:"2026-03-02", author:"pranay5255", subject:"fix(db): add actions column to chat_messages bootstrap schema", area:"backend"},
+      {hash:"6803cda", date:"2026-03-02", author:"pranay5255", subject:"fix(auth): accept bearer token for /auth/api/user", area:"backend"},
+      {hash:"c02c2cb", date:"2026-03-02", author:"pranay5255", subject:"test(e2e): add executable backend end-to-end bash test suite", area:"scripts"},
+      {hash:"29ac6fa", date:"2026-03-02", author:"pranay5255", subject:"docs(e2e): add backend checklist for auth chat sandbox and embeddings", area:"docs"},
+      {hash:"ec80a94", date:"2026-03-02", author:"pranay5255", subject:"fix(compose): load backend prod env and sandbox runtime paths", area:"docker-compose.backend-only.yml"},
+      {hash:"3f89820", date:"2026-03-02", author:"pranay5255", subject:"feat(db): add migration for chat_messages.actions column", area:"backend"},
+      {hash:"a2199d1", date:"2026-03-02", author:"pranay5255", subject:"fix(db): add actions column to chat_messages bootstrap schema", area:"backend"},
+      {hash:"a7af91f", date:"2026-03-02", author:"pranay5255", subject:"fix(auth): accept bearer token for /auth/api/user", area:"backend"},
+      {hash:"f789e8b", date:"2026-03-02", author:"pranay5255", subject:"Improve API base URL configuration with deployment mode docs", area:"src"},
+      {hash:"838e3d1", date:"2026-03-02", author:"pranay5255", subject:"Add security headers to Vercel configuration", area:"src"},
+      {hash:"b194678", date:"2026-03-02", author:"pranay5255", subject:"Add deployment environment variables template", area:".env.deploy.template"},
+      {hash:"9ed0fa1", date:"2026-03-02", author:"pranay5255", subject:"Add nginx reverse proxy config with SSL, CORS, WebSocket support", area:"nginx"}
+    ];
+
+    function explain(subject) {
+      const s = subject.toLowerCase();
+      if (s.includes('remove deprecated') || s.startsWith('remove ')) {
+        return 'Cleanup: removed obsolete files/config to reduce ambiguity and maintenance overhead.';
+      }
+      if (s.startsWith('chore(db): remove')) {
+        return 'DB strategy cleanup: removed older SQL migration artifacts as the schema direction shifted.';
+      }
+      if (s.includes('nginx') && s.includes('remove')) {
+        return 'Deployment simplification: removed legacy nginx-based entrypoint in favor of newer routing direction.';
+      }
+      if (s.includes('buildcontrollerunifiedwsendpoint')) {
+        return 'Realtime contract improvement: introduced helper for canonical unified WS endpoint construction.';
+      }
+      if (s.includes('vite_ws_base_url')) {
+        return 'Config contract improvement: split websocket base URL from API base URL.';
+      }
+      if (s.includes('websocket passthrough') || s.includes('vite dev proxy')) {
+        return 'Local developer experience fix for websocket forwarding and consistent API proxying.';
+      }
+      if (s.includes('agent question') || s.includes('userquestionprompt')) {
+        return 'UX improvement: formalized agent question flow and separated prompt component logic.';
+      }
+      if (s.includes('api base url')) {
+        return 'Frontend/backend contract tuning for environment-based URL routing behavior.';
+      }
+      if (s.includes('deployment environment variables template')) {
+        return 'Introduced reusable deployment env template to reduce manual setup drift.';
+      }
+      if (s.includes('security headers')) {
+        return 'Hardening: added browser security headers in frontend host config.';
+      }
+      if (s.includes('full-stack deployment script')) {
+        return 'Added scripted deployment workflow tying backend compose and frontend publish.';
+      }
+      if (s.startsWith('docs: update deployment guide')) {
+        return 'Documentation sync for deployment and websocket behavior.';
+      }
+      if (s.startsWith('ci:')) {
+        return 'CI pipeline refinement to match split frontend/backend deployment concerns.';
+      }
+      if (s.startsWith('test(e2e)')) {
+        return 'Added executable end-to-end checks to validate core backend integration paths.';
+      }
+      if (s.startsWith('docs(e2e)')) {
+        return 'Added operational checklist to standardize E2E validation steps.';
+      }
+      if (s.startsWith('fix(compose)')) {
+        return 'Compose runtime fix for loading production env and runtime directory bindings.';
+      }
+      if (s.includes('chat_messages.actions')) {
+        return 'Schema evolution: added structured actions metadata support for chat messages.';
+      }
+      if (s.includes('accept bearer token')) {
+        return 'Auth compatibility fix: endpoint now accepts bearer token semantics expected by frontend.';
+      }
+      if (s.startsWith('build(deps)')) {
+        return 'Dependency alignment update for subproject reference consistency.';
+      }
+      if (s.startsWith('merge pull request')) {
+        return 'Branch integration commit pulling feature changes into mainline.';
+      }
+      if (s.startsWith('add download_model.py')) {
+        return 'Added utility script for model preparation/downloading tasks.';
+      }
+      if (s.startsWith('update backend')) {
+        return 'Backend operational update touching runtime helper/startup behavior.';
+      }
+      if (s.startsWith('add ')) {
+        return 'Feature/scaffold addition in the referenced area.';
+      }
+      return 'Maintenance or refactor change contributing to deployment/realtime stabilization.';
+    }
+
+    const tbody = document.querySelector('#commitTable tbody');
+    commits.forEach((c, idx) => {
+      const tr = document.createElement('tr');
+      const area = c.area || '-';
+      const short = c.subject;
+      tr.innerHTML = `
+        <td class="mono">${idx + 1}</td>
+        <td class="mono">${c.hash}</td>
+        <td class="mono">${c.date}</td>
+        <td>${c.author}</td>
+        <td class="mono">${area}</td>
+        <td>${short}</td>
+        <td>${explain(short)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  </script>
+</body>
+</html>
