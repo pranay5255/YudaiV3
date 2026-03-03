@@ -100,7 +100,11 @@ from realtime.ws_protocol import WSMessageType
 # Import from filedeps.py
 from models import (
     APIError,
+    AnswerQuestionRequest,
+    AnswerQuestionResponse,
     AgentExecution,
+    AskQuestionRequest,
+    AskQuestionResponse,
     ChatMessage,
     ChatMessageResponse,
     ChatRequest,
@@ -125,6 +129,10 @@ from models import (
     SessionResponse,
     UpdateSessionRequest,
     User,
+    UserQuestion,
+    UserQuestionOption,
+    UserQuestionResponse,
+    UserQuestionStatus,
     UserIssueResponse,
 )
 from pgvector.sqlalchemy import Vector
@@ -194,6 +202,107 @@ def _build_mode_plan(mode: str, objective: str) -> List[str]:
             "Run tests and publish PR metadata to lifecycle completion tracker.",
         ]
     return ["Workflow already complete."]
+
+
+def _truncate_for_context(value: str, limit: int = 400) -> str:
+    compact = " ".join((value or "").split())
+    if len(compact) <= limit:
+        return compact
+    return compact[:limit] + "..."
+
+
+def _to_user_question_response(
+    question: UserQuestion,
+    *,
+    session_public_id: str,
+) -> UserQuestionResponse:
+    options_raw = question.options or []
+    options: List[UserQuestionOption] = []
+    for opt in options_raw:
+        if not isinstance(opt, dict):
+            continue
+        option_id = str(opt.get("id") or "").strip()
+        label = str(opt.get("label") or "").strip()
+        if option_id and label:
+            options.append(UserQuestionOption(id=option_id, label=label))
+
+    return UserQuestionResponse(
+        question_id=question.question_id,
+        session_id=session_public_id,
+        mode=question.mode,
+        prompt=question.question_text,
+        options=options,
+        multi_select=bool(question.multi_select),
+        selected_option_ids=[str(item) for item in (question.selected_option_ids or [])],
+        answer_text=question.answer_text,
+        status=question.status,
+        asked_at=question.asked_at,
+        answered_at=question.answered_at,
+    )
+
+
+def _build_objective_with_context(
+    db: Session,
+    *,
+    session: ChatSession,
+    objective: str,
+) -> str:
+    objective_sections = [f"Primary Objective:\n{objective.strip()}"]
+
+    recent_messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session.id)
+        .order_by(ChatMessage.created_at.desc())
+        .limit(12)
+        .all()
+    )
+    if recent_messages:
+        lines = []
+        for message in reversed(recent_messages):
+            role = (message.role or message.sender_type or "user").strip().lower()
+            lines.append(f"- [{role}] {_truncate_for_context(message.message_text, 300)}")
+        objective_sections.append(
+            "Relevant Chat Context (most recent messages):\n" + "\n".join(lines)
+        )
+
+    answered_questions = (
+        db.query(UserQuestion)
+        .filter(
+            UserQuestion.session_id == session.id,
+            UserQuestion.status == UserQuestionStatus.ANSWERED.value,
+        )
+        .order_by(UserQuestion.answered_at.desc(), UserQuestion.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    if answered_questions:
+        qa_lines = []
+        for question in reversed(answered_questions):
+            options = {
+                str(item.get("id")): str(item.get("label"))
+                for item in (question.options or [])
+                if isinstance(item, dict) and item.get("id") and item.get("label")
+            }
+            selected = []
+            for option_id in question.selected_option_ids or []:
+                option_id_str = str(option_id)
+                selected.append(options.get(option_id_str, option_id_str))
+
+            answer_parts: List[str] = []
+            if selected:
+                answer_parts.append("selected: " + ", ".join(selected))
+            if question.answer_text:
+                answer_parts.append("text: " + _truncate_for_context(question.answer_text, 250))
+            if not answer_parts:
+                answer_parts.append("answered")
+
+            qa_lines.append(
+                f"- Q: {_truncate_for_context(question.question_text, 280)}\n"
+                f"  A: {'; '.join(answer_parts)}"
+            )
+        objective_sections.append("Clarifications from Q&A:\n" + "\n".join(qa_lines))
+
+    return "\n\n".join(section for section in objective_sections if section.strip())
 
 
 # ============================================================================
@@ -1155,31 +1264,64 @@ async def conversation_in_session(
     lower_content = content.lower()
     follow_up_question = None
 
+    user_message = ChatMessage(
+        session_id=db_session.id,
+        message_id=f"msg_{uuid.uuid4().hex[:12]}",
+        message_text=content,
+        sender_type="user",
+        role="user",
+        tokens=0,
+    )
+    db.add(user_message)
+    db_session.total_messages = (db_session.total_messages or 0) + 1
+
     # Lightweight ambiguity detector: ask for preference before execution when request is broad.
     ambiguous_terms = ("auth", "authentication", "api", "database", "testing")
     if not request.selected_option_ids and any(term in lower_content for term in ambiguous_terms):
+        question_options = [
+            {"id": "behavior", "label": "Behavioral change first"},
+            {"id": "tests", "label": "Test coverage first"},
+            {"id": "refactor", "label": "Refactor and structure first"},
+        ]
+        question = UserQuestion(
+            question_id=f"q_{uuid.uuid4().hex[:10]}",
+            session_id=db_session.id,
+            user_id=current_user.id,
+            mode=_next_mode_for_session(db_session),
+            question_text="Choose the primary implementation focus for this run.",
+            options=question_options,
+            multi_select=False,
+            status=UserQuestionStatus.PENDING.value,
+            question_metadata={"origin": "conversation_ambiguity"},
+        )
+        db.add(question)
         follow_up_question = {
-            "question_id": f"q_{uuid.uuid4().hex[:10]}",
-            "prompt": "Choose the primary implementation focus for this run.",
-            "multi_select": False,
-            "options": [
-                {"id": "behavior", "label": "Behavioral change first"},
-                {"id": "tests", "label": "Test coverage first"},
-                {"id": "refactor", "label": "Refactor and structure first"},
-            ],
+            "question_id": question.question_id,
+            "prompt": question.question_text,
+            "multi_select": question.multi_select,
+            "options": question_options,
         }
         db_session.mode_status = SessionModeStatus.WAITING_FOR_INPUT.value
     else:
         db_session.mode_status = SessionModeStatus.IDLE.value
 
-    db_session.last_activity = utc_now()
-    db_session.mode_updated_at = utc_now()
-    db.commit()
-
     reply = (
         "Captured your request. The execution pipeline remains fixed "
         "at Architect -> Tester -> Coder and will continue from the next pending mode."
     )
+    assistant_message = ChatMessage(
+        session_id=db_session.id,
+        message_id=f"msg_{uuid.uuid4().hex[:12]}",
+        message_text=reply,
+        sender_type="assistant",
+        role="assistant",
+        tokens=0,
+    )
+    db.add(assistant_message)
+    db_session.total_messages = (db_session.total_messages or 0) + 1
+    db_session.last_activity = utc_now()
+    db_session.mode_updated_at = utc_now()
+    db.commit()
 
     ws_hub = get_ws_hub()
     await ws_hub.send_to_session(
@@ -1194,7 +1336,8 @@ async def conversation_in_session(
             {
                 "question_id": follow_up_question["question_id"],
                 "question_text": follow_up_question["prompt"],
-                "options": [item["label"] for item in follow_up_question["options"]],
+                "multi_select": bool(follow_up_question["multi_select"]),
+                "options": follow_up_question["options"],
             },
         )
 
@@ -1204,6 +1347,217 @@ async def conversation_in_session(
         current_mode=db_session.current_mode,
         mode_status=db_session.mode_status,
         follow_up_question=follow_up_question,
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/ask-question",
+    response_model=AskQuestionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ask_question_for_session(
+    session_id: str,
+    request: AskQuestionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Persist a follow-up question and move session to waiting-for-input."""
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+
+    options: List[Dict[str, str]] = []
+    seen_ids: set[str] = set()
+    for option in request.options:
+        option_id = option.id.strip()
+        if option_id in seen_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Duplicate option id: {option_id}",
+            )
+        seen_ids.add(option_id)
+        options.append({"id": option_id, "label": option.label.strip()})
+
+    mode = request.mode or _next_mode_for_session(db_session)
+    question = UserQuestion(
+        question_id=f"q_{uuid.uuid4().hex[:10]}",
+        session_id=db_session.id,
+        user_id=current_user.id,
+        mode=mode,
+        question_text=request.prompt.strip(),
+        options=options,
+        multi_select=bool(request.multi_select),
+        status=UserQuestionStatus.PENDING.value,
+        question_metadata=request.metadata or {},
+    )
+    db.add(question)
+
+    mode_metadata = db_session.mode_metadata or {}
+    if request.objective:
+        mode_metadata["pending_resume_objective"] = request.objective.strip()
+    mode_metadata["last_question_id"] = question.question_id
+    db_session.mode_metadata = mode_metadata
+    db_session.mode_status = SessionModeStatus.WAITING_FOR_INPUT.value
+    db_session.mode_updated_at = utc_now()
+    db_session.last_activity = utc_now()
+    db.commit()
+    db.refresh(question)
+
+    await get_ws_hub().send_to_session(
+        session_id,
+        WSMessageType.AGENT_QUESTION,
+        {
+            "question_id": question.question_id,
+            "question_text": question.question_text,
+            "multi_select": bool(question.multi_select),
+            "options": options,
+        },
+    )
+
+    return AskQuestionResponse(
+        question=_to_user_question_response(question, session_public_id=session_id),
+        mode_status=db_session.mode_status,
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/questions/{question_id}/answer",
+    response_model=AnswerQuestionResponse,
+)
+async def answer_session_question(
+    session_id: str,
+    question_id: str,
+    request: AnswerQuestionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Record question answer and resume fixed mode execution when requested."""
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    question = (
+        db.query(UserQuestion)
+        .filter(
+            UserQuestion.question_id == question_id,
+            UserQuestion.session_id == db_session.id,
+            UserQuestion.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not question:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+
+    option_ids = [str(item).strip() for item in request.selected_option_ids if str(item).strip()]
+    option_set = {item["id"] for item in (question.options or []) if isinstance(item, dict) and item.get("id")}
+    invalid_option_ids = [item for item in option_ids if option_set and item not in option_set]
+    if invalid_option_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid option id(s): {', '.join(invalid_option_ids)}",
+        )
+
+    if not question.multi_select and len(option_ids) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Question only accepts a single selected option",
+        )
+
+    answer_text = (request.answer_text or "").strip()
+    if not option_ids and not answer_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Answer requires selected_option_ids and/or answer_text",
+        )
+
+    was_waiting_for_input = db_session.mode_status == SessionModeStatus.WAITING_FOR_INPUT.value
+
+    question.selected_option_ids = option_ids or None
+    question.answer_text = answer_text or None
+    question.status = UserQuestionStatus.ANSWERED.value
+    question.answered_at = utc_now()
+    db_session.mode_status = SessionModeStatus.IDLE.value
+    db_session.mode_updated_at = utc_now()
+    db_session.last_activity = utc_now()
+
+    mode_metadata = db_session.mode_metadata or {}
+    mode_metadata["last_answered_question_id"] = question.question_id
+    mode_metadata["last_answered_question_at"] = utc_now().isoformat()
+    db_session.mode_metadata = mode_metadata
+
+    resumed = False
+    resumed_mode: Optional[str] = None
+    contextual_objective = ""
+    next_mode = _next_mode_for_session(db_session)
+    realtime_flags = get_realtime_feature_flags()
+    if (
+        request.resume_execution
+        and was_waiting_for_input
+        and realtime_flags.mode_orchestrator_enabled
+        and next_mode != SessionMode.COMPLETE.value
+    ):
+        objective_seed = (
+            answer_text
+            or str((db_session.mode_metadata or {}).get("pending_resume_objective") or "").strip()
+        )
+        if not objective_seed:
+            latest_execution = (
+                db.query(AgentExecution)
+                .filter(AgentExecution.session_id == db_session.id)
+                .order_by(AgentExecution.created_at.desc())
+                .first()
+            )
+            if latest_execution and isinstance(latest_execution.execution_metadata, dict):
+                objective_seed = str(latest_execution.execution_metadata.get("objective") or "").strip()
+
+        if not objective_seed:
+            last_user_message = (
+                db.query(ChatMessage)
+                .filter(
+                    ChatMessage.session_id == db_session.id,
+                    ChatMessage.role == "user",
+                )
+                .order_by(ChatMessage.created_at.desc())
+                .first()
+            )
+            if last_user_message:
+                objective_seed = last_user_message.message_text
+
+        objective_seed = objective_seed or "Continue the current workflow."
+        contextual_objective = _build_objective_with_context(
+            db,
+            session=db_session,
+            objective=objective_seed,
+        )
+        mode_metadata = db_session.mode_metadata or {}
+        mode_metadata["pending_resume_objective"] = objective_seed
+        mode_metadata["objective_with_context"] = contextual_objective
+        db_session.mode_metadata = mode_metadata
+        db_session.mode_status = SessionModeStatus.RUNNING.value
+        db_session.mode_updated_at = utc_now()
+        resumed = True
+        resumed_mode = next_mode
+
+    db.commit()
+
+    if resumed:
+        asyncio.create_task(
+            run_mode_pipeline_background(
+                session_public_id=session_id,
+                user_id=current_user.id,
+                objective=contextual_objective,
+            )
+        )
+        await get_ws_hub().send_to_session(
+            session_id,
+            WSMessageType.MODE_EVENT,
+            {
+                "mode": resumed_mode,
+                "state": SessionModeStatus.RUNNING.value,
+                "detail": "Pipeline resumed after question answer",
+            },
+        )
+
+    return AnswerQuestionResponse(
+        question=_to_user_question_response(question, session_public_id=session_id),
+        resumed=resumed,
+        resumed_mode=resumed_mode,
+        mode_status=db_session.mode_status,
     )
 
 
@@ -1244,16 +1598,31 @@ async def execute_session_pipeline(
             ),
         )
 
+    objective_with_context = _build_objective_with_context(
+        db,
+        session=db_session,
+        objective=request.objective,
+    )
+
     execution = AgentExecution(
         id=f"exec_{uuid.uuid4().hex[:24]}",
         session_id=db_session.id,
         mode=next_mode,
         status=SessionModeStatus.RUNNING.value,
-        execution_plan=_build_mode_plan(next_mode, request.objective),
-        execution_metadata={"trigger": "execution_api"},
+        execution_plan=_build_mode_plan(next_mode, objective_with_context),
+        execution_metadata={
+            "trigger": "execution_api",
+            "objective": request.objective,
+            "objective_with_context": objective_with_context,
+        },
         started_at=utc_now(),
     )
     db.add(execution)
+    db_session.mode_metadata = {
+        **(db_session.mode_metadata or {}),
+        "pending_resume_objective": request.objective,
+        "objective_with_context": objective_with_context,
+    }
     db_session.mode_status = SessionModeStatus.RUNNING.value
     db_session.mode_updated_at = utc_now()
     db.commit()
@@ -1262,7 +1631,7 @@ async def execute_session_pipeline(
         run_mode_pipeline_background(
             session_public_id=session_id,
             user_id=current_user.id,
-            objective=request.objective,
+            objective=objective_with_context,
         )
     )
 
