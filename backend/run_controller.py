@@ -49,12 +49,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Existing APIs
+# Canonical API mounts only.
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(github_router, prefix="/github", tags=["github"])
 app.include_router(session_router, prefix="/daifu", tags=["sessions"])
-
-# New Phase 1 controller lifecycle APIs
 app.include_router(controller_router)
 
 
