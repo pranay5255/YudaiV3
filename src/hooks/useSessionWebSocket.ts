@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { buildUnifiedSessionWebSocketUrl } from '../utils/realtimeRouting';
 import { useAuthStore } from '../stores/authStore';
+import { API, buildApiUrl } from '../config/api';
 import type {
   TrajectoryData,
   ToolCallInfo,
@@ -23,12 +24,17 @@ interface UseSessionWebSocketResult {
   toolCalls: ToolCallInfo[];
   agentQuestion: AgentQuestionInfo | null;
   sendChatMessage: (content: string) => void;
-  sendUserResponse: (questionId: string, answer: string) => void;
+  sendUserResponse: (questionId: string, selectedOptionIds: string[], answerText?: string) => Promise<void>;
   disconnect: () => void;
 }
 
 const MAX_RECONNECT_ATTEMPTS = 10;
 const HEARTBEAT_TIMEOUT_MS = 10_000;
+
+const getWsBaseUrl = (): string | undefined => {
+  const value = (import.meta.env.VITE_WS_BASE_URL || '').trim();
+  return value || undefined;
+};
 
 export function useSessionWebSocket({
   sessionId,
@@ -83,10 +89,21 @@ export function useSessionWebSocket({
   const connect = useCallback(() => {
     if (!sessionToken || !sessionId) return;
 
+    const wsBaseUrl = getWsBaseUrl();
     const wsUrl = buildUnifiedSessionWebSocketUrl({
       sessionId,
       sessionToken,
+      controllerWsBaseUrl: wsBaseUrl,
     });
+
+    if (
+      typeof window !== 'undefined' &&
+      window.location.protocol === 'https:' &&
+      wsUrl.startsWith('ws://')
+    ) {
+      // Browsers generally block insecure websocket connections from HTTPS pages.
+      console.warn('[WebSocket] ws:// from an https:// page may be blocked by browser mixed-content policy');
+    }
 
     setStatus('connecting');
     setError(null);
@@ -197,8 +214,38 @@ export function useSessionWebSocket({
         }
 
         case 'agent_question': {
-          const aq = envelope.payload as AgentQuestionInfo;
-          setAgentQuestion(aq);
+          const payload = envelope.payload as {
+            question_id?: string;
+            question_text?: string;
+            multi_select?: boolean;
+            options?: Array<string | { id?: string; label?: string }>;
+            option_ids?: string[];
+          };
+          const rawOptions = payload.options || [];
+          const optionIds = payload.option_ids || [];
+          const normalizedOptions = rawOptions
+            .map((option, index) => {
+              if (typeof option === 'string') {
+                return {
+                  id: optionIds[index] || option.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+                  label: option,
+                };
+              }
+              const id = String(option?.id || optionIds[index] || `option-${index + 1}`).trim();
+              const label = String(option?.label || '').trim();
+              if (!id || !label) {
+                return null;
+              }
+              return { id, label };
+            })
+            .filter((item): item is { id: string; label: string } => Boolean(item));
+
+          setAgentQuestion({
+            question_id: String(payload.question_id || ''),
+            question_text: String(payload.question_text || ''),
+            multi_select: Boolean(payload.multi_select),
+            options: normalizedOptions,
+          });
           break;
         }
 
@@ -266,18 +313,48 @@ export function useSessionWebSocket({
   );
 
   const sendUserResponse = useCallback(
-    (questionId: string, answer: string) => {
+    async (questionId: string, selectedOptionIds: string[], answerText?: string) => {
+      if (!sessionToken || !sessionId) {
+        throw new Error('Missing authenticated session context');
+      }
+
+      const endpoint = buildApiUrl(API.SESSIONS.ANSWER_QUESTION, {
+        sessionId,
+        questionId,
+      });
+
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${sessionToken}`,
+        },
+        body: JSON.stringify({
+          selected_option_ids: selectedOptionIds,
+          answer_text: answerText || undefined,
+          resume_execution: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        const message = String(data?.detail || data?.message || 'Failed to submit answer');
+        setError(message);
+        throw new Error(message);
+      }
+
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(
           JSON.stringify({
             type: 'user_response',
-            payload: { question_id: questionId, answer },
+            payload: { question_id: questionId, selected_option_ids: selectedOptionIds, answer: answerText || '' },
           })
         );
       }
+
       setAgentQuestion(null);
     },
-    []
+    [sessionToken, sessionId]
   );
 
   return {
