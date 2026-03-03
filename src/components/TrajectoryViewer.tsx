@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { FileText, ChevronRight, ChevronDown, DollarSign, MessageSquare, Clock, CheckCircle, XCircle, AlertCircle, Radio, Wrench, HelpCircle } from 'lucide-react';
+import { FileText, ChevronRight, ChevronDown, DollarSign, MessageSquare, Clock, CheckCircle, XCircle, AlertCircle, Radio, Wrench } from 'lucide-react';
 import { useTrajectoryStream } from '../hooks/useTrajectoryStream';
 import { useSessionWebSocket } from '../hooks/useSessionWebSocket';
 import { realtimeFeatureFlags } from '../config/realtimeFlags';
 import type { TrajectoryData, ToolCallInfo, AgentQuestionInfo } from '../types/sessionTypes';
 import trajectoryData from '../data/last_mini_run.traj.json';
+import { UserQuestionPrompt } from './UserQuestionPrompt';
 
 interface TrajectoryViewerProps {
   // Static mode props
@@ -257,26 +258,12 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({
 
       {/* Agent Question (WS mode only) */}
       {agentQuestion && (
-        <div className="mx-4 mt-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-          <div className="flex items-center gap-2 mb-2">
-            <HelpCircle className="w-4 h-4 text-amber-400" />
-            <p className="text-sm font-medium text-amber-300">Agent Question</p>
-          </div>
-          <p className="text-sm text-fg mb-2">{agentQuestion.question_text}</p>
-          {agentQuestion.options.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {agentQuestion.options.map((opt) => (
-                <button
-                  key={opt}
-                  onClick={() => wsStream.sendUserResponse(agentQuestion.question_id, opt)}
-                  className="px-3 py-1 text-xs bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-md text-amber-200 transition-colors"
-                >
-                  {opt}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <UserQuestionPrompt
+          question={agentQuestion}
+          onSubmit={(selectedOptionIds, answerText) =>
+            wsStream.sendUserResponse(agentQuestion.question_id, selectedOptionIds, answerText)
+          }
+        />
       )}
 
       {/* Recent Tool Calls (WS mode only) */}
