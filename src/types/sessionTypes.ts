@@ -360,6 +360,52 @@ export interface ConversationResponse {
   follow_up_question?: ConversationQuestion;
 }
 
+export interface UserQuestionOption {
+  id: string;
+  label: string;
+}
+
+export interface UserQuestionResponse {
+  question_id: string;
+  session_id: string;
+  mode?: 'architect' | 'tester' | 'coder';
+  prompt: string;
+  options: UserQuestionOption[];
+  multi_select: boolean;
+  selected_option_ids: string[];
+  answer_text?: string;
+  status: string;
+  asked_at: string;
+  answered_at?: string;
+}
+
+export interface AskQuestionRequest {
+  prompt: string;
+  options?: UserQuestionOption[];
+  multi_select?: boolean;
+  mode?: 'architect' | 'tester' | 'coder';
+  objective?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AskQuestionResponse {
+  question: UserQuestionResponse;
+  mode_status: string;
+}
+
+export interface AnswerQuestionRequest {
+  selected_option_ids?: string[];
+  answer_text?: string;
+  resume_execution?: boolean;
+}
+
+export interface AnswerQuestionResponse {
+  question: UserQuestionResponse;
+  resumed: boolean;
+  resumed_mode?: 'architect' | 'tester' | 'coder' | 'complete';
+  mode_status: string;
+}
+
 export interface ExecutionRequest {
   objective: string;
   force_mode?: 'architect' | 'tester' | 'coder';
@@ -762,7 +808,8 @@ export interface ToolCallInfo {
 export interface AgentQuestionInfo {
   question_id: string;
   question_text: string;
-  options: string[];
+  options: UserQuestionOption[];
+  multi_select?: boolean;
 }
 
 // ============================================================================
