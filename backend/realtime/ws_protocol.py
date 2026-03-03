@@ -63,7 +63,8 @@ class ToolCallPayload(BaseModel):
 class AgentQuestionPayload(BaseModel):
     question_id: str
     question_text: str
-    options: List[str] = Field(default_factory=list)
+    multi_select: bool = False
+    options: List[Dict[str, str]] = Field(default_factory=list)
 
 
 class StatusPayload(BaseModel):
