@@ -16,22 +16,14 @@ if [ -z "$POSTGRES_DB" ]; then
     echo "ℹ️ Using default database name: $POSTGRES_DB"
 fi
 
-# Initialize database tables
+# Initialize database tables (schema only, no sample data or external fetches)
 echo "🏗️  Initializing database tables..."
-if python db/init_db.py --full-init; then
+if python db/init_db.py --init; then
     echo "✅ Database tables initialized successfully!"
 else
     echo "❌ Failed to initialize database tables"
     echo " This is a critical error. Application cannot start without database tables."
     exit 1
-fi
-
-# Validate API routes consistency (optional - skip if routes module not present)
-echo "🔍 Validating API route configuration..."
-if python -c "from config.routes import APIRoutes; APIRoutes.validate_routes_on_startup()" 2>/dev/null; then
-    echo "✅ API route validation passed!"
-else
-    echo "⚠️  API route validation skipped (config.routes not found)"
 fi
 
 # Function to test database connectivity
