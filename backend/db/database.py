@@ -64,7 +64,7 @@ def get_db():
 
 def init_db():
     """
-    Initialize database - create all tables using SQLAlchemy models
+    Initialize database - create all tables using SQLAlchemy models.
     """
     try:
         print("Initializing database with SQLAlchemy models...")
@@ -318,7 +318,8 @@ def create_sample_data():
             db.add(token)
         db.commit()
 
-        fetch_and_add_openrouter_models()
+        # NOTE: fetch_and_add_openrouter_models() removed from startup path.
+        # Run manually via: python -m db.database --sync-models
 
         # Assign refresh_token after construction to avoid keyword issues
         try:
@@ -641,9 +642,8 @@ def create_sample_data():
             db.add(file_embedding)
         db.commit()
 
-        # Fetch and add OpenRouter models (called separately after sample data)
-        # This ensures models are available for the solver
-        fetch_and_add_openrouter_models()
+        # NOTE: fetch_and_add_openrouter_models() removed from startup path.
+        # Run manually via: python -m db.database --sync-models
 
         # Sample Solve jobs for solver orchestration
         sample_solves = [
@@ -780,3 +780,26 @@ def reset_sample_data():
         raise
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Admin CLI
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Database admin utilities")
+    parser.add_argument(
+        "--sync-models",
+        action="store_true",
+        help="Fetch and sync OpenRouter AI models into the ai_models table",
+    )
+    args = parser.parse_args()
+
+    if args.sync_models:
+        print("🔄 Syncing OpenRouter models...")
+        fetch_and_add_openrouter_models()
+        print("✅ Done.")
+    else:
+        parser.print_help()
