@@ -129,7 +129,7 @@ ai_model_ids?: number[];   # Multiple models (ALREADY DEFINED but unused)
 
 Need to investigate:
 1. How is backend containerized? (Dockerfile, docker-compose.yml)
-2. How is frontend built and served? (nginx? static files?)
+2. How is frontend built and served? (Vercel static hosting? static files?)
 3. What databases are configured? (PostgreSQL connection)
 4. What environment variables are needed?
 5. How are E2B API keys configured?
@@ -198,7 +198,7 @@ Need to investigate:
 1. **Docker deployment config**
    - docker-compose.prod.yml structure?
    - Dockerfile for backend?
-   - nginx config for frontend?
+   - Vercel routing config for frontend?
    - Environment variable management?
 
 2. **Trajectory streaming technical approach**
