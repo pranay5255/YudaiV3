@@ -3,6 +3,7 @@
 // Environment variables
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL: string;
+  readonly VITE_WS_BASE_URL?: string;
   readonly VITE_APP_TITLE: string;
   readonly VITE_REALTIME_CONTROLLER_SPLIT_ENABLED?: string;
   readonly VITE_REALTIME_CONTROLLER_BROKER_ENABLED?: string;
