@@ -9,6 +9,7 @@ import eslint from 'vite-plugin-eslint';
 
 export default defineConfig(({ mode }) => {
   const isProduction = mode === 'production';
+  const apiProxyTarget = process.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
   return {
     plugins: [
@@ -34,14 +35,11 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       proxy: {
         '/api': {
-          target: process.env.VITE_API_BASE_URL || 'http://localhost:8001',
+          target: apiProxyTarget,
           changeOrigin: true,
           secure: false,
-        },
-        '/auth/api': {
-          target: process.env.VITE_API_BASE_URL || 'http://localhost:8001',
-          changeOrigin: true,
-          secure: false,
+          ws: true,
+          rewrite: (path) => path.replace(/^\/api/, ''),
         },
       },
     },
