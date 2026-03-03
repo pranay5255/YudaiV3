@@ -281,6 +281,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     context_cards JSON,
     referenced_files JSON,
     error_message TEXT,
+    actions JSON,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE
 );
