@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { API } from '@/config/api';
 import {
   buildControllerSessionTargetUrl,
+  buildControllerUnifiedWsEndpoint,
   buildUnifiedSessionWebSocketUrl,
 } from '@/utils/realtimeRouting';
 
@@ -35,6 +36,27 @@ describe('realtime routing helpers', () => {
     });
 
     expect(result).toBe(
+      'ws://139.84.154.9:8000/controller/sessions/session_abc/ws/unified?token=token'
+    );
+  });
+
+  it('builds websocket URL from WS base host by appending unified endpoint', () => {
+    const endpoint = buildControllerUnifiedWsEndpoint({
+      sessionId: 'session_abc',
+      controllerWsBaseUrl: 'ws://139.84.154.9:8000',
+    });
+
+    expect(endpoint).toBe(
+      'ws://139.84.154.9:8000/controller/sessions/session_abc/ws/unified'
+    );
+
+    const url = buildUnifiedSessionWebSocketUrl({
+      sessionId: 'session_abc',
+      sessionToken: 'token',
+      controllerWsBaseUrl: 'ws://139.84.154.9:8000',
+    });
+
+    expect(url).toBe(
       'ws://139.84.154.9:8000/controller/sessions/session_abc/ws/unified?token=token'
     );
   });
