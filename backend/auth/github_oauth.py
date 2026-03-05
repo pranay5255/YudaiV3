@@ -39,7 +39,9 @@ GITHUB_APP_API_URL = "https://api.github.com/app"
 GITHUB_INSTALLATIONS_API_URL = "https://api.github.com/app/installations"
 
 # GitHub App redirect URI - must match what's configured in GitHub App
-GITHUB_REDIRECT_URI = os.getenv("GITHUB_REDIRECT_URI", "http://localhost:8001/auth/callback")
+GITHUB_REDIRECT_URI = os.getenv(
+    "GITHUB_REDIRECT_URI", "https://api.yudai.app/auth/callback"
+)
 
 # Legacy support for old environment variables
 GITHUB_CLIENT_ID = GITHUB_APP_CLIENT_ID or os.getenv("GITHUB_CLIENT_ID")
@@ -86,10 +88,9 @@ def generate_github_app_jwt() -> str:
 
     # Read the private key
     try:
-        with open(GITHUB_APP_PRIVATE_KEY_PATH, 'rb') as key_file:
+        with open(GITHUB_APP_PRIVATE_KEY_PATH, "rb") as key_file:
             private_key = serialization.load_pem_private_key(
-                key_file.read(),
-                password=None
+                key_file.read(), password=None
             )
     except Exception as e:
         raise GitHubOAuthError(f"Failed to load GitHub App private key: {e}")
@@ -129,14 +130,16 @@ async def get_installation_token(installation_id: int) -> Optional[str]:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{GITHUB_INSTALLATIONS_API_URL}/{installation_id}/access_tokens",
-                headers=headers
+                headers=headers,
             )
 
         if response.status_code == 201:
             token_data = response.json()
             return token_data.get("token")
         else:
-            print(f"[GitHub App] Failed to get installation token: {response.status_code} - {response.text}")
+            print(
+                f"[GitHub App] Failed to get installation token: {response.status_code} - {response.text}"
+            )
             return None
 
     except Exception as e:
@@ -232,7 +235,7 @@ async def create_or_update_user(
     access_token: str,
     installation_id: Optional[int] = None,
     permissions: Optional[Dict[str, Any]] = None,
-    repositories_url: Optional[str] = None
+    repositories_url: Optional[str] = None,
 ) -> User:
     """
     Create or update user in database from GitHub user info
@@ -345,20 +348,23 @@ def validate_github_app_config():
 
 def validate_github_config():
     """Legacy validation function - redirects to new GitHub App validation"""
-    return validate_github_app_config(        )
+    return validate_github_app_config()
 
 
 # ============================================================================
 # SESSION TOKEN MANAGEMENT FUNCTIONS
 # ============================================================================
 
+
 def generate_session_token(length: int = 32) -> str:
     """Generate a secure random session token"""
     alphabet = string.ascii_letters + string.digits
-    return ''.join(secrets.choice(alphabet) for _ in range(length))
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
-def create_session_token(db: Session, user_id: int, expires_in_hours: int = 24) -> SessionToken:
+def create_session_token(
+    db: Session, user_id: int, expires_in_hours: int = 24
+) -> SessionToken:
     """Create a new session token for a user"""
     try:
         print(f"[Auth] Creating session token for user_id: {user_id}")
@@ -372,14 +378,16 @@ def create_session_token(db: Session, user_id: int, expires_in_hours: int = 24) 
             user_id=user_id,
             session_token=session_token,
             expires_at=expires_at,
-            is_active=True
+            is_active=True,
         )
 
         db.add(db_session_token)
         db.commit()
         db.refresh(db_session_token)
 
-        print(f"[Auth] Successfully created session token with ID: {db_session_token.id}")
+        print(
+            f"[Auth] Successfully created session token with ID: {db_session_token.id}"
+        )
         return db_session_token
 
     except Exception as e:
@@ -387,7 +395,7 @@ def create_session_token(db: Session, user_id: int, expires_in_hours: int = 24) 
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create session token"
+            detail="Failed to create session token",
         )
 
 
@@ -401,10 +409,11 @@ def validate_session_token(db: Session, session_token: str) -> Optional[User]:
         print(f"[Auth] Validating session token: {session_token[:10]}...")
 
         # Find active session token
-        db_session_token = db.query(SessionToken).filter(
-            SessionToken.session_token == session_token,
-            SessionToken.is_active
-        ).first()
+        db_session_token = (
+            db.query(SessionToken)
+            .filter(SessionToken.session_token == session_token, SessionToken.is_active)
+            .first()
+        )
 
         if not db_session_token:
             print(f"[Auth] No active session token found: {session_token[:10]}...")
@@ -419,10 +428,14 @@ def validate_session_token(db: Session, session_token: str) -> Optional[User]:
         user = db.query(User).filter(User.id == db_session_token.user_id).first()
 
         if not user:
-            print(f"[Auth] User not found for valid session token: {session_token[:10]}...")
+            print(
+                f"[Auth] User not found for valid session token: {session_token[:10]}..."
+            )
             return None
 
-        print(f"[Auth] Successfully validated session token for user: {user.github_username}")
+        print(
+            f"[Auth] Successfully validated session token for user: {user.github_username}"
+        )
         return user
 
     except Exception as e:
@@ -436,13 +449,16 @@ def deactivate_session_token(db: Session, session_token: str) -> bool:
         print(f"[Auth] Deactivating session token: {session_token[:10]}...")
 
         # Find the session token
-        db_session_token = db.query(SessionToken).filter(
-            SessionToken.session_token == session_token,
-            SessionToken.is_active
-        ).first()
+        db_session_token = (
+            db.query(SessionToken)
+            .filter(SessionToken.session_token == session_token, SessionToken.is_active)
+            .first()
+        )
 
         if not db_session_token:
-            print(f"[Auth] Session token not found or already inactive: {session_token[:10]}...")
+            print(
+                f"[Auth] Session token not found or already inactive: {session_token[:10]}..."
+            )
             return False
 
         # Deactivate the token
