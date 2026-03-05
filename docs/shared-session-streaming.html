@@ -1,0 +1,1211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shared Session Streaming — YudaiV3 Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ============ THEME — Dark-first, GitHub-inspired ============ */
+  :root {
+    --font-body: 'Geist', system-ui, sans-serif;
+    --font-mono: 'Geist Mono', 'SF Mono', Consolas, monospace;
+
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #21262d;
+    --surface-elevated: #1c2333;
+    --border: rgba(255, 255, 255, 0.06);
+    --border-bright: rgba(255, 255, 255, 0.13);
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+
+    --blue: #58a6ff;
+    --blue-dim: rgba(88, 166, 255, 0.12);
+    --green: #3fb950;
+    --green-dim: rgba(63, 185, 80, 0.1);
+    --orange: #ffa657;
+    --orange-dim: rgba(255, 166, 87, 0.1);
+    --purple: #d2a8ff;
+    --purple-dim: rgba(210, 168, 255, 0.1);
+    --red: #f85149;
+    --red-dim: rgba(248, 81, 73, 0.1);
+    --yellow: #e3b341;
+    --yellow-dim: rgba(227, 179, 65, 0.1);
+    --cyan: #79c0ff;
+    --cyan-dim: rgba(121, 192, 255, 0.1);
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f8fa;
+      --surface: #ffffff;
+      --surface2: #f0f3f6;
+      --surface-elevated: #ffffff;
+      --border: rgba(0, 0, 0, 0.07);
+      --border-bright: rgba(0, 0, 0, 0.14);
+      --text: #1f2328;
+      --text-dim: #656d76;
+      --blue: #0969da;
+      --blue-dim: rgba(9, 105, 218, 0.08);
+      --green: #1a7f37;
+      --green-dim: rgba(26, 127, 55, 0.08);
+      --orange: #bf5e12;
+      --orange-dim: rgba(191, 94, 18, 0.08);
+      --purple: #8250df;
+      --purple-dim: rgba(130, 80, 223, 0.08);
+      --red: #cf222e;
+      --red-dim: rgba(207, 34, 46, 0.08);
+      --yellow: #9a6700;
+      --yellow-dim: rgba(154, 103, 0, 0.08);
+      --cyan: #0550ae;
+      --cyan-dim: rgba(5, 80, 174, 0.08);
+    }
+  }
+
+  /* ============ RESET + BASE ============ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(ellipse at 15% 0%, var(--blue-dim) 0%, transparent 50%),
+      radial-gradient(ellipse at 85% 100%, var(--purple-dim) 0%, transparent 40%);
+    color: var(--text);
+    font-family: var(--font-body);
+    padding: 40px;
+    min-height: 100vh;
+    overflow-wrap: break-word;
+  }
+
+  /* ============ ANIMATION ============ */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes fadeScale {
+    from { opacity: 0; transform: scale(0.92); }
+    to { opacity: 1; transform: scale(1); }
+  }
+
+  .anim { animation: fadeUp 0.4s ease-out both; animation-delay: calc(var(--i, 0) * 0.06s); }
+  .anim-s { animation: fadeScale 0.35s ease-out both; animation-delay: calc(var(--i, 0) * 0.06s); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-delay: 0ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* ============ NAV LAYOUT ============ */
+  .wrap {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 0 40px;
+  }
+  .main { min-width: 0; }
+
+  .toc {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+    padding: 14px 0;
+    grid-row: 1 / -1;
+    max-height: calc(100dvh - 48px);
+    overflow-y: auto;
+  }
+  .toc::-webkit-scrollbar { width: 3px; }
+  .toc::-webkit-scrollbar-thumb { background: var(--surface-elevated); border-radius: 2px; }
+  .toc-title {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    padding: 0 0 10px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .toc a {
+    display: block;
+    font-size: 11px;
+    color: var(--text-dim);
+    text-decoration: none;
+    padding: 4px 8px;
+    border-radius: 5px;
+    border-left: 2px solid transparent;
+    transition: all 0.15s;
+    line-height: 1.4;
+    margin-bottom: 1px;
+  }
+  .toc a:hover { color: var(--text); background: var(--surface2); }
+  .toc a.active { color: var(--text); border-left-color: var(--blue); }
+
+  @media (max-width: 1000px) {
+    .wrap { grid-template-columns: 1fr; padding-top: 0; }
+    body { padding-top: 0; }
+    .toc {
+      position: sticky; top: 0; z-index: 200;
+      max-height: none; display: flex; gap: 4px;
+      align-items: center; overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 0;
+      margin: 0 -40px; padding-left: 40px; padding-right: 40px;
+      grid-row: auto;
+    }
+    .toc::-webkit-scrollbar { display: none; }
+    .toc-title { display: none; }
+    .toc a {
+      white-space: nowrap; flex-shrink: 0;
+      border-left: none; border-bottom: 2px solid transparent;
+      border-radius: 4px 4px 0 0; padding: 6px 10px; font-size: 10px;
+    }
+    .toc a.active { border-left: none; border-bottom-color: var(--blue); background: var(--surface); }
+    .main { padding-top: 20px; }
+    .sec-head { scroll-margin-top: 52px; }
+  }
+
+  /* ============ TYPOGRAPHY ============ */
+  h1 { font-size: 36px; font-weight: 700; letter-spacing: -1px; margin-bottom: 6px; text-wrap: balance; }
+  .subtitle { color: var(--text-dim); font-family: var(--font-mono); font-size: 12px; margin-bottom: 40px; }
+  h2 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 0; padding: 0; }
+  h3 { font-size: 18px; font-weight: 600; margin: 24px 0 12px; }
+  p { color: var(--text-dim); font-size: 14px; line-height: 1.7; margin-bottom: 14px; }
+  p strong, li strong { color: var(--text); }
+
+  /* ============ SECTION HEADS ============ */
+  .sec-head {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin: 48px 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .sec-head::before {
+    content: '';
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .sec-head.blue { color: var(--blue); background: var(--blue-dim); }
+  .sec-head.green { color: var(--green); background: var(--green-dim); }
+  .sec-head.orange { color: var(--orange); background: var(--orange-dim); }
+  .sec-head.purple { color: var(--purple); background: var(--purple-dim); }
+  .sec-head.red { color: var(--red); background: var(--red-dim); }
+  .sec-head.yellow { color: var(--yellow); background: var(--yellow-dim); }
+  .sec-head.cyan { color: var(--cyan); background: var(--cyan-dim); }
+
+  /* ============ CARDS ============ */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+    min-width: 0;
+  }
+  .card--hero {
+    background: var(--surface-elevated);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    border-color: var(--border-bright);
+    padding: 28px 32px;
+  }
+  .card--recessed {
+    background: var(--surface2);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+  }
+
+  /* ============ INLINE CODE ============ */
+  code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    border-radius: 4px;
+    color: var(--purple);
+  }
+  .code-blue { color: var(--blue); }
+  .code-green { color: var(--green); }
+  .code-orange { color: var(--orange); }
+
+  /* ============ PRE CODE BLOCKS ============ */
+  pre.codeblock {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text);
+    margin: 16px 0;
+  }
+  pre.codeblock .cm { color: var(--text-dim); }
+  pre.codeblock .kw { color: var(--blue); }
+  pre.codeblock .ty { color: var(--orange); }
+  pre.codeblock .str { color: var(--green); }
+  pre.codeblock .fn { color: var(--purple); }
+
+  /* ============ DIFF PANELS ============ */
+  .diff-panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 16px 0;
+  }
+  .diff-panels > * { min-width: 0; overflow-wrap: break-word; }
+  .diff-hdr {
+    font-family: var(--font-mono);
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1px;
+    padding: 10px 16px;
+  }
+  .diff-hdr--before { background: var(--red-dim); color: var(--red); border-bottom: 2px solid var(--red); }
+  .diff-hdr--after { background: var(--green-dim); color: var(--green); border-bottom: 2px solid var(--green); }
+  .diff-body {
+    padding: 16px;
+    background: var(--surface);
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-dim);
+  }
+  .diff-body code { font-size: 11px; }
+  .diff-new {
+    background: var(--green-dim);
+    border: 1px solid rgba(63,185,80,0.2);
+    border-radius: 4px;
+    padding: 2px 6px;
+    color: var(--green);
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+  @media (max-width: 768px) { .diff-panels { grid-template-columns: 1fr; } }
+
+  /* ============ STEPS ============ */
+  .steps { margin: 16px 0; }
+  .step {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 20px;
+    align-items: flex-start;
+  }
+  .step-num {
+    flex-shrink: 0;
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 2px;
+  }
+  .step-num.blue { background: var(--blue-dim); color: var(--blue); border: 1px solid rgba(88,166,255,0.3); }
+  .step-num.green { background: var(--green-dim); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
+  .step-num.purple { background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(210,168,255,0.3); }
+  .step-body h4 { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .step-body p { font-size: 13px; margin: 0; }
+
+  /* ============ TABLE ============ */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 16px 0;
+  }
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table {
+    width: 100%; border-collapse: collapse;
+    font-size: 13px; line-height: 1.5;
+  }
+  th {
+    background: var(--surface2);
+    font-family: var(--font-mono);
+    font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1px;
+    color: var(--text-dim);
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 2px solid var(--border-bright);
+    white-space: nowrap;
+  }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    color: var(--text);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr { transition: background 0.15s ease; }
+  tbody tr:hover { background: var(--surface2); }
+  td code { font-size: 11px; }
+
+  .badge {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 12px;
+    white-space: nowrap;
+  }
+  .badge.blue { background: var(--blue-dim); color: var(--blue); }
+  .badge.green { background: var(--green-dim); color: var(--green); }
+  .badge.orange { background: var(--orange-dim); color: var(--orange); }
+  .badge.purple { background: var(--purple-dim); color: var(--purple); }
+  .badge.red { background: var(--red-dim); color: var(--red); }
+  .badge.yellow { background: var(--yellow-dim); color: var(--yellow); }
+
+  /* ============ CALLOUT ============ */
+  .callout {
+    border-radius: 0 8px 8px 0;
+    padding: 16px 20px;
+    margin: 16px 0;
+    border-left: 3px solid;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text-dim);
+  }
+  .callout strong { display: block; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .callout.info { background: var(--blue-dim); border-color: var(--blue); }
+  .callout.success { background: var(--green-dim); border-color: var(--green); }
+  .callout.warn { background: var(--yellow-dim); border-color: var(--yellow); }
+  .callout.danger { background: var(--red-dim); border-color: var(--red); }
+
+  /* ============ CONCEPT GRID ============ */
+  .concept-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .concept-grid > * { min-width: 0; }
+
+  /* ============ LISTS ============ */
+  .node-list {
+    list-style: none;
+    font-size: 13px;
+    line-height: 1.8;
+    padding: 0;
+    margin: 8px 0;
+  }
+  .node-list li {
+    padding-left: 16px;
+    position: relative;
+    color: var(--text-dim);
+  }
+  .node-list li::before {
+    content: '>';
+    color: var(--text-dim);
+    font-weight: 600;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    position: absolute;
+    left: 0;
+  }
+  .node-list li strong { color: var(--text); }
+
+  /* ============ MERMAID ============ */
+  .mermaid-wrap {
+    position: relative;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 32px 24px;
+    overflow: auto;
+    margin: 16px 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .mermaid-wrap::-webkit-scrollbar { width: 6px; height: 6px; }
+  .mermaid-wrap::-webkit-scrollbar-track { background: transparent; }
+  .mermaid-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .mermaid-wrap .mermaid {
+    display: flex;
+    justify-content: center;
+    transition: transform 0.2s ease;
+    transform-origin: top center;
+  }
+  .zoom-controls {
+    position: absolute; top: 8px; right: 8px;
+    display: flex; gap: 2px; z-index: 10;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 2px;
+  }
+  .zoom-controls button {
+    width: 28px; height: 28px; border: none;
+    background: transparent; color: var(--text-dim);
+    font-family: var(--font-mono); font-size: 14px;
+    cursor: pointer; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .zoom-controls button:hover { background: var(--border); color: var(--text); }
+  .mermaid-wrap.is-zoomed { cursor: grab; }
+  .mermaid-wrap.is-panning { cursor: grabbing; user-select: none; }
+  .mermaid .nodeLabel { color: var(--text) !important; }
+  .mermaid .edgeLabel { color: var(--text-dim) !important; background-color: var(--bg) !important; }
+  .mermaid .edgeLabel rect { fill: var(--bg) !important; }
+  .mermaid .nodeLabel { font-family: var(--font-body) !important; font-size: 14px !important; }
+  .mermaid .edgeLabel { font-family: var(--font-mono) !important; font-size: 12px !important; }
+  .mermaid .node rect, .mermaid .node circle, .mermaid .node polygon { stroke-width: 1.5px !important; }
+  .mermaid .edge-pattern-solid { stroke-width: 1.5px !important; }
+
+  /* ============ FILE TREE ============ */
+  .file-tree {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.8;
+    color: var(--text-dim);
+    padding: 16px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 16px 0;
+    overflow-x: auto;
+  }
+  .file-tree .dir { color: var(--blue); font-weight: 600; }
+  .file-tree .new { color: var(--green); }
+  .file-tree .mod { color: var(--orange); }
+  .file-tree .reuse { color: var(--purple); }
+  .file-tree .cm { color: var(--text-dim); font-style: italic; }
+
+  /* ============ KPI ROW ============ */
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .kpi {
+    background: var(--surface-elevated);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    text-align: center;
+  }
+  .kpi-val { font-size: 28px; font-weight: 700; letter-spacing: -1px; }
+  .kpi-label { font-family: var(--font-mono); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-dim); margin-top: 4px; }
+
+  /* ============ RESPONSIVE ============ */
+  @media (max-width: 768px) {
+    body { padding: 16px; }
+    h1 { font-size: 24px; }
+    .concept-grid { grid-template-columns: 1fr; }
+    .kpi-row { grid-template-columns: 1fr 1fr; }
+  }
+
+  /* ============ FLOW ARROW ============ */
+  .flow-arrow {
+    display: flex; justify-content: center; align-items: center;
+    gap: 8px; color: var(--text-dim);
+    font-family: var(--font-mono); font-size: 12px; padding: 4px 0;
+  }
+  .flow-arrow svg {
+    width: 20px; height: 20px;
+    fill: none; stroke: var(--border-bright);
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ═══════ TOC ═══════ -->
+  <nav class="toc" id="toc">
+    <div class="toc-title">Contents</div>
+    <a href="#s0">Overview</a>
+    <a href="#s1">1. Networking Changes</a>
+    <a href="#s2">2. Share Link Flow</a>
+    <a href="#s3">3. Viewer Connection</a>
+    <a href="#s4">4. Sequence Diagram</a>
+    <a href="#s5">5. Database Models</a>
+    <a href="#s6">6. API Endpoints</a>
+    <a href="#s7">7. Hub Architecture</a>
+    <a href="#s8">8. Frontend Changes</a>
+    <a href="#s9">9. Security</a>
+    <a href="#s10">10. What Stays Same</a>
+  </nav>
+
+  <div class="main">
+
+    <!-- ═══════ HERO ═══════ -->
+    <h1 class="anim" style="--i:0">Shared Session Streaming</h1>
+    <p class="subtitle anim" style="--i:1">yudai.app/session/{slug} &mdash; live agent trajectory for viewers</p>
+
+    <div id="s0" class="sec-head blue anim" style="--i:2">Overview</div>
+
+    <p class="anim" style="--i:3">
+      Build a <strong>shareable, read-only live view</strong> of an agent run. An owner creates a session,
+      gets a link like <code class="code-blue">yudai.app/session/bananarepublic</code>, and shares it.
+      Viewers open the link and see the agent's trajectory streamed in real-time from the Modal sandbox.
+    </p>
+
+    <div class="kpi-row anim-s" style="--i:4">
+      <div class="kpi">
+        <div class="kpi-val" style="color:var(--green)">0</div>
+        <div class="kpi-label">New Servers</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val" style="color:var(--green)">0</div>
+        <div class="kpi-label">New Ports</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val" style="color:var(--green)">0</div>
+        <div class="kpi-label">DNS Changes</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val" style="color:var(--blue)">2</div>
+        <div class="kpi-label">New DB Tables</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val" style="color:var(--blue)">4</div>
+        <div class="kpi-label">New Endpoints</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val" style="color:var(--blue)">1</div>
+        <div class="kpi-label">New WS Route</div>
+      </div>
+    </div>
+
+
+    <!-- ═══════ 1. NETWORKING ═══════ -->
+    <div id="s1" class="sec-head blue anim" style="--i:5">1 &mdash; What Changes from the Network Diagram</div>
+
+    <p class="anim" style="--i:6">
+      The existing networking infrastructure handles everything. No new servers, ports, DNS records,
+      or Caddy config. The only change is <strong>one new WebSocket route</strong> inside FastAPI that
+      piggybacks on the existing <code>:443</code> &rarr; Caddy &rarr; <code>:8000</code> pipeline.
+    </p>
+
+    <div class="diff-panels anim" style="--i:7">
+      <div class="diff-hdr diff-hdr--before">Current (Owner Only)</div>
+      <div class="diff-hdr diff-hdr--after">After (Owner + Viewers)</div>
+      <div class="diff-body">
+        <ul class="node-list">
+          <li><strong>1 WS route</strong> &mdash; <code>/controller/sessions/{id}/ws/unified</code></li>
+          <li><strong>Auth:</strong> Bearer token (owner's session token)</li>
+          <li><strong>Access:</strong> Read + Write (can send commands)</li>
+          <li><strong>Hub:</strong> <code>SessionWebSocketHub</code> broadcasts to owner only</li>
+        </ul>
+      </div>
+      <div class="diff-body">
+        <ul class="node-list">
+          <li><strong>Existing route unchanged</strong></li>
+          <li><strong>+ New WS route</strong> &mdash; <span class="diff-new">/share/{slug}/ws</span></li>
+          <li><strong>Auth:</strong> Viewer token (from share link resolution)</li>
+          <li><strong>Access:</strong> Read-only (can't send commands)</li>
+          <li><strong>Hub:</strong> Viewers register as <span class="diff-new">read_only=True</span> listeners on the same session hub</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout info anim" style="--i:8">
+      <strong>Traffic path is identical for viewers</strong>
+      Viewer's browser &rarr; DNS resolves <code>api.yudai.app</code> to <code>139.84.154.9</code> &rarr;
+      Caddy on <code>:443</code> terminates TLS &rarr; forwards to <code>localhost:8000</code> &rarr;
+      FastAPI handles the <code>/share/{slug}/ws</code> WebSocket upgrade. Same ports, same proxy, same cert.
+    </div>
+
+    <div class="concept-grid anim" style="--i:9">
+      <div class="card">
+        <h3 style="font-size:14px;margin:0 0 8px;">DNS</h3>
+        <p style="margin:0;font-size:13px;">No changes. <code>yudai.app</code> still points to Vercel.
+        <code>api.yudai.app</code> still points to <code>139.84.154.9</code>.
+        <code>/session/*</code> is a client-side route handled by React Router inside the SPA.</p>
+      </div>
+      <div class="card">
+        <h3 style="font-size:14px;margin:0 0 8px;">Caddy</h3>
+        <p style="margin:0;font-size:13px;">No changes to <code>/etc/caddy/Caddyfile</code>.
+        The <code>reverse_proxy localhost:8000</code> rule already forwards all paths including
+        <code>/share/*</code>. WebSocket upgrade is handled automatically.</p>
+      </div>
+      <div class="card">
+        <h3 style="font-size:14px;margin:0 0 8px;">Firewall (UFW)</h3>
+        <p style="margin:0;font-size:13px;">No changes. Only <code>:22</code>, <code>:80</code>,
+        <code>:443</code> open. All viewer traffic enters through <code>:443</code> like everything else.</p>
+      </div>
+      <div class="card">
+        <h3 style="font-size:14px;margin:0 0 8px;">CORS</h3>
+        <p style="margin:0;font-size:13px;">No changes. <code>ALLOW_ORIGINS=https://yudai.app</code>
+        already permits the frontend origin. Viewer's browser makes requests from the same origin.</p>
+      </div>
+    </div>
+
+
+    <!-- ═══════ 2. SHARE LINK FLOW ═══════ -->
+    <div id="s2" class="sec-head green anim" style="--i:10">2 &mdash; Share Link Generation Flow</div>
+
+    <p>The owner creates a shareable link from their active agent session.</p>
+
+    <div class="card anim" style="--i:11">
+      <div class="steps">
+        <div class="step">
+          <div class="step-num blue">1</div>
+          <div class="step-body">
+            <h4>Owner starts an agent session</h4>
+            <p>Creates <code>ChatSession</code> + <code>SessionRuntime</code> + Modal sandbox.
+            The existing unified WebSocket streams trajectory to the owner's browser.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num blue">2</div>
+          <div class="step-body">
+            <h4>Owner clicks "Share"</h4>
+            <p>Frontend calls <code class="code-green">POST /sessions/{sessionId}/share</code>
+            with the owner's Bearer token.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num blue">3</div>
+          <div class="step-body">
+            <h4>Backend creates a SessionShare record</h4>
+            <p>Generates a unique slug (e.g., <code>bananarepublic</code>) and a <code>share_token</code>.
+            Stores in the <code>session_shares</code> table with the session_id and permissions.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num blue">4</div>
+          <div class="step-body">
+            <h4>Backend returns the share URL</h4>
+            <p>Returns <code class="code-green">{ slug: "bananarepublic", share_url: "https://yudai.app/session/bananarepublic" }</code></p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num green">5</div>
+          <div class="step-body">
+            <h4>Owner copies and shares the link</h4>
+            <p>The link can be sent via Slack, Discord, email, etc. Anyone with the link can view the session.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════ 3. VIEWER CONNECTION ═══════ -->
+    <div id="s3" class="sec-head purple anim" style="--i:12">3 &mdash; Viewer Connection Flow</div>
+
+    <p>What happens when someone opens a shared session link.</p>
+
+    <div class="card anim" style="--i:13">
+      <div class="steps">
+        <div class="step">
+          <div class="step-num purple">1</div>
+          <div class="step-body">
+            <h4>Viewer opens <code>https://yudai.app/session/bananarepublic</code></h4>
+            <p>Browser resolves <code>yudai.app</code> &rarr; <code>76.76.21.21</code> (Vercel CDN).
+            Vercel serves the React SPA bundle &mdash; the same <code>index.html</code> + <code>index.js</code> as always.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num purple">2</div>
+          <div class="step-body">
+            <h4>React Router matches <code>/session/:slug</code></h4>
+            <p>Renders the new <code>&lt;SharedSessionPage /&gt;</code> component. No auth required to load this page.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num purple">3</div>
+          <div class="step-body">
+            <h4>Component calls <code class="code-green">GET https://api.yudai.app/share/bananarepublic</code></h4>
+            <p>No auth header needed. Backend resolves slug &rarr; session_id, checks <code>is_active</code> and <code>expires_at</code>,
+            returns session metadata (title, current mode, repo info) + a temporary <code>viewer_token</code>.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num purple">4</div>
+          <div class="step-body">
+            <h4>Component opens WebSocket</h4>
+            <p><code class="code-blue">wss://api.yudai.app/share/bananarepublic/ws?token={viewer_token}</code><br>
+            Backend validates token, registers the WS as a <strong>read-only listener</strong> on the session's <code>SessionWebSocketHub</code>.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num green">5</div>
+          <div class="step-body">
+            <h4>Viewer sees live trajectory</h4>
+            <p>The hub broadcasts <code>trajectory_update</code>, <code>llm_stream</code>, <code>sandbox_stream</code>,
+            <code>tool_call</code>, <code>state_event</code> events to all listeners &mdash; including the viewer.
+            The viewer's UI renders the trajectory in real-time using the existing <code>TrajectoryViewer</code> component.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ═══════ 4. SEQUENCE DIAGRAM ═══════ -->
+    <div id="s4" class="sec-head cyan anim" style="--i:14">4 &mdash; Full Sequence Diagram</div>
+
+    <div class="mermaid-wrap anim" style="--i:15">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+      </div>
+      <pre class="mermaid">
+sequenceDiagram
+    participant V as Viewer Browser
+    participant CDN as Vercel CDN
+    participant C as Caddy :443
+    participant API as FastAPI :8000
+    participant Hub as WS Hub
+    participant DB as PostgreSQL
+
+    V->>CDN: GET yudai.app/session/bananarepublic
+    CDN-->>V: React SPA bundle
+
+    V->>C: GET /share/bananarepublic
+    C->>API: proxy
+    API->>DB: SELECT * FROM session_shares WHERE slug = ?
+    DB-->>API: share record + session metadata
+    API-->>C: { session_info, viewer_token }
+    C-->>V: 200 OK
+
+    V->>C: WS /share/bananarepublic/ws?token=xyz
+    C->>API: WS upgrade
+    API->>DB: validate viewer_token
+    DB-->>API: valid
+    API->>Hub: register(session_id, ws, read_only=true)
+    Hub-->>V: trajectory_update events
+    Hub-->>V: llm_stream events
+    Hub-->>V: sandbox_stream events
+    Hub-->>V: state_event events
+      </pre>
+    </div>
+
+
+    <!-- ═══════ 5. DATABASE ═══════ -->
+    <div id="s5" class="sec-head orange anim" style="--i:16">5 &mdash; New Database Models</div>
+
+    <p>Two new tables added to the existing PostgreSQL schema. No changes to existing tables.</p>
+
+    <pre class="codeblock anim" style="--i:17"><span class="cm">-- New table: session_shares</span>
+<span class="kw">CREATE TABLE</span> <span class="fn">session_shares</span> (
+    <span class="ty">id</span>              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    <span class="ty">session_id</span>      UUID NOT NULL REFERENCES chat_sessions(session_id),
+    <span class="ty">slug</span>            VARCHAR(64) UNIQUE NOT NULL,   <span class="cm">-- "bananarepublic"</span>
+    <span class="ty">share_token</span>     VARCHAR(256) NOT NULL,          <span class="cm">-- HMAC-signed token</span>
+    <span class="ty">created_by</span>      INTEGER NOT NULL REFERENCES users(id),
+    <span class="ty">permissions</span>     VARCHAR(20) DEFAULT <span class="str">'view'</span>,   <span class="cm">-- 'view' | 'interact'</span>
+    <span class="ty">is_active</span>       BOOLEAN DEFAULT TRUE,
+    <span class="ty">expires_at</span>      TIMESTAMPTZ,                    <span class="cm">-- NULL = no expiry</span>
+    <span class="ty">created_at</span>      TIMESTAMPTZ DEFAULT now()
+);
+
+<span class="kw">CREATE INDEX</span> idx_shares_slug <span class="kw">ON</span> session_shares(slug);
+<span class="kw">CREATE INDEX</span> idx_shares_session <span class="kw">ON</span> session_shares(session_id);
+
+<span class="cm">-- New table: session_share_viewers (analytics/audit)</span>
+<span class="kw">CREATE TABLE</span> <span class="fn">session_share_viewers</span> (
+    <span class="ty">id</span>              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    <span class="ty">share_id</span>        UUID NOT NULL REFERENCES session_shares(id),
+    <span class="ty">viewer_ip</span>       VARCHAR(45),                    <span class="cm">-- IPv4 or IPv6</span>
+    <span class="ty">viewer_token</span>    VARCHAR(256) NOT NULL,          <span class="cm">-- temp token for this viewer</span>
+    <span class="ty">connected_at</span>    TIMESTAMPTZ DEFAULT now(),
+    <span class="ty">disconnected_at</span> TIMESTAMPTZ                     <span class="cm">-- set on WS close</span>
+);</pre>
+
+    <p>The corresponding SQLAlchemy models go in <code>backend/models.py</code> following the existing patterns
+    (<code>ChatSession</code>, <code>SessionRuntime</code>, etc.).</p>
+
+
+    <!-- ═══════ 6. API ENDPOINTS ═══════ -->
+    <div id="s6" class="sec-head yellow anim" style="--i:18">6 &mdash; New API Endpoints</div>
+
+    <div class="table-wrap anim" style="--i:19">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>Path</th>
+              <th>Auth</th>
+              <th>Purpose</th>
+              <th>Returns</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="badge green">POST</span></td>
+              <td><code>/sessions/{sessionId}/share</code></td>
+              <td><span class="badge blue">Bearer</span> owner</td>
+              <td>Create share link for a session</td>
+              <td><code>{ slug, share_url, share_token }</code></td>
+            </tr>
+            <tr>
+              <td><span class="badge red">DELETE</span></td>
+              <td><code>/sessions/{sessionId}/share</code></td>
+              <td><span class="badge blue">Bearer</span> owner</td>
+              <td>Revoke share link (sets <code>is_active=false</code>)</td>
+              <td><code>204 No Content</code></td>
+            </tr>
+            <tr>
+              <td><span class="badge blue">GET</span></td>
+              <td><code>/share/{slug}</code></td>
+              <td><span class="badge purple">None</span></td>
+              <td>Resolve slug to session metadata for viewers</td>
+              <td><code>{ session_info, viewer_token }</code></td>
+            </tr>
+            <tr>
+              <td><span class="badge orange">WS</span></td>
+              <td><code>/share/{slug}/ws?token={viewerToken}</code></td>
+              <td><span class="badge purple">Viewer token</span></td>
+              <td>Read-only trajectory stream via WebSocket</td>
+              <td>WSEnvelope events (trajectory_update, llm_stream, etc.)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="callout info">
+      <strong>Reuses existing WSEnvelope protocol</strong>
+      The viewer WebSocket sends the exact same <code>WSEnvelope</code> format
+      (type, ts, payload, seq) as the owner's unified WS. Frontend can reuse the
+      <code>useSessionWebSocket</code> message parsing logic.
+    </div>
+
+
+    <!-- ═══════ 7. HUB ARCHITECTURE ═══════ -->
+    <div id="s7" class="sec-head blue anim" style="--i:20">7 &mdash; Hub Fan-Out Architecture</div>
+
+    <p>The existing <code>SessionWebSocketHub</code> already broadcasts to all registered WebSockets
+    for a session. Viewers simply register as additional listeners with a <code>read_only</code> flag.</p>
+
+    <div class="mermaid-wrap anim" style="--i:21">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+      </div>
+      <pre class="mermaid">
+graph LR
+    subgraph Modal
+      SB["Modal Sandbox"]
+    end
+
+    subgraph Backend
+      BE["FastAPI :8000"]
+      HUB["SessionWebSocketHub"]
+    end
+
+    subgraph Viewers
+      V1["Viewer 1<br/>read_only"]
+      V2["Viewer 2<br/>read_only"]
+      VN["Viewer N<br/>read_only"]
+    end
+
+    SB -->|"trajectory events"| BE
+    BE -->|"send_to_session()"| HUB
+
+    HUB -->|"full access"| OWN["Owner Browser<br/>read + write"]
+    HUB -.->|"read-only"| V1
+    HUB -.->|"read-only"| V2
+    HUB -.->|"read-only"| VN
+
+    OWN -->|"commands"| BE
+      </pre>
+    </div>
+
+    <h3>Hub Changes (Minimal)</h3>
+    <pre class="codeblock anim" style="--i:22"><span class="cm"># backend/realtime/ws_hub.py — additions</span>
+
+<span class="kw">class</span> <span class="fn">SessionWebSocketHub</span>:
+
+    <span class="kw">async def</span> <span class="fn">register</span>(self, session_id: <span class="ty">str</span>, ws: WebSocket,
+                       read_only: <span class="ty">bool</span> = <span class="str">False</span>) -> <span class="ty">None</span>:
+        <span class="cm"># Existing logic + store read_only flag</span>
+        self._connections[session_id].append({
+            <span class="str">"ws"</span>: ws,
+            <span class="str">"read_only"</span>: read_only
+        })
+
+    <span class="kw">def</span> <span class="fn">is_read_only</span>(self, session_id: <span class="ty">str</span>, ws: WebSocket) -> <span class="ty">bool</span>:
+        <span class="cm"># Used by message handlers to reject commands from viewers</span>
+        <span class="kw">for</span> conn <span class="kw">in</span> self._connections.get(session_id, []):
+            <span class="kw">if</span> conn[<span class="str">"ws"</span>] == ws:
+                <span class="kw">return</span> conn[<span class="str">"read_only"</span>]
+        <span class="kw">return</span> <span class="str">True</span></pre>
+
+
+    <!-- ═══════ 8. FRONTEND ═══════ -->
+    <div id="s8" class="sec-head green anim" style="--i:23">8 &mdash; Frontend Changes</div>
+
+    <div class="file-tree anim" style="--i:24">
+<span class="dir">src/</span>
+<span class="dir">  App.tsx</span>                          <span class="mod">MOD</span> <span class="cm">&mdash; add route: /session/:slug</span>
+<span class="dir">  config/</span>
+    <span class="mod">api.ts</span>                        <span class="mod">MOD</span> <span class="cm">&mdash; add SHARE endpoints</span>
+<span class="dir">  pages/</span>
+    <span class="new">SharedSessionPage.tsx</span>        <span class="new">NEW</span> <span class="cm">&mdash; public viewer page</span>
+<span class="dir">  hooks/</span>
+    <span class="new">useSharedSessionStream.ts</span>   <span class="new">NEW</span> <span class="cm">&mdash; WS hook for viewers</span>
+    <span class="reuse">useSessionWebSocket.ts</span>      <span class="reuse">REUSE</span> <span class="cm">&mdash; extract message parsing</span>
+    <span class="reuse">useTrajectoryStream.ts</span>      <span class="reuse">REUSE</span> <span class="cm">&mdash; trajectory rendering logic</span>
+<span class="dir">  components/</span>
+    <span class="reuse">TrajectoryViewer.tsx</span>        <span class="reuse">REUSE</span> <span class="cm">&mdash; existing trajectory UI</span>
+    <span class="new">ShareButton.tsx</span>             <span class="new">NEW</span> <span class="cm">&mdash; copy-link UI for owners</span>
+    </div>
+
+    <h3>Key Frontend Details</h3>
+
+    <div class="concept-grid anim" style="--i:25">
+      <div class="card">
+        <h3 style="font-size:14px;margin:0 0 8px;">Route Setup</h3>
+        <pre class="codeblock" style="margin:0;padding:12px;font-size:12px;">&lt;Route
+  path=<span class="str">"/session/:slug"</span>
+  element={&lt;SharedSessionPage /&gt;}
+/&gt;</pre>
+        <p style="margin:8px 0 0;font-size:12px;">No <code>ProtectedRoute</code> wrapper &mdash; this page is public.</p>
+      </div>
+      <div class="card">
+        <h3 style="font-size:14px;margin:0 0 8px;">API Config Additions</h3>
+        <pre class="codeblock" style="margin:0;padding:12px;font-size:12px;"><span class="kw">SHARE</span>: {
+  <span class="fn">CREATE</span>: <span class="str">`/sessions/{id}/share`</span>,
+  <span class="fn">REVOKE</span>: <span class="str">`/sessions/{id}/share`</span>,
+  <span class="fn">RESOLVE</span>: <span class="str">`/share/{slug}`</span>,
+  <span class="fn">WS</span>: <span class="str">`/share/{slug}/ws`</span>,
+}</pre>
+      </div>
+    </div>
+
+    <div class="callout success anim" style="--i:26">
+      <strong>Maximum code reuse</strong>
+      The viewer page reuses the existing <code>TrajectoryViewer</code> component and
+      <code>WSEnvelope</code> parsing logic. The new <code>useSharedSessionStream</code> hook
+      is a simplified version of <code>useSessionWebSocket</code> that only handles incoming
+      messages (no send capability).
+    </div>
+
+
+    <!-- ═══════ 9. SECURITY ═══════ -->
+    <div id="s9" class="sec-head red anim" style="--i:27">9 &mdash; Security Considerations</div>
+
+    <div class="concept-grid anim" style="--i:28">
+      <div class="card" style="border-left: 3px solid var(--red);">
+        <h3 style="font-size:14px;margin:0 0 8px;">Token Isolation</h3>
+        <p style="margin:0;font-size:13px;">Share tokens are completely separate from auth tokens.
+        A viewer token grants <strong>zero access</strong> to the owner's session, account, or other sessions.
+        It only permits reading from a specific session's WebSocket hub.</p>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--red);">
+        <h3 style="font-size:14px;margin:0 0 8px;">Read-Only WebSocket</h3>
+        <p style="margin:0;font-size:13px;">If a viewer sends <code>EXEC_START</code>, <code>CHAT_MESSAGE</code>,
+        <code>EXEC_STDIN</code>, or any write-type message, the backend silently drops it.
+        The <code>read_only</code> flag on the hub connection enforces this.</p>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--orange);">
+        <h3 style="font-size:14px;margin:0 0 8px;">Instant Revocation</h3>
+        <p style="margin:0;font-size:13px;">Owner calls <code>DELETE /sessions/{id}/share</code>.
+        Backend sets <code>is_active = false</code> and disconnects all active viewer WebSockets
+        immediately. The slug URL returns 404 from that point.</p>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--orange);">
+        <h3 style="font-size:14px;margin:0 0 8px;">Optional Expiry</h3>
+        <p style="margin:0;font-size:13px;">The <code>expires_at</code> column enables time-limited sharing.
+        Backend checks expiry on both the <code>GET /share/{slug}</code> and WS connection.
+        Expired shares return 410 Gone.</p>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--yellow);">
+        <h3 style="font-size:14px;margin:0 0 8px;">Slug Entropy</h3>
+        <p style="margin:0;font-size:13px;">Slugs must be unguessable. Use cryptographically random slugs
+        (e.g., <code>secrets.token_urlsafe(16)</code> produces 22-char base64 slugs with 128 bits of entropy).
+        Human-readable slugs like "bananarepublic" are optional aliases set by the user.</p>
+      </div>
+      <div class="card" style="border-left: 3px solid var(--yellow);">
+        <h3 style="font-size:14px;margin:0 0 8px;">Rate Limiting</h3>
+        <p style="margin:0;font-size:13px;">Rate limit <code>GET /share/{slug}</code> per IP
+        (e.g., 30 req/min) to prevent slug enumeration.
+        Rate limit WS connections per share (e.g., max 50 concurrent viewers per session).</p>
+      </div>
+    </div>
+
+
+    <!-- ═══════ 10. WHAT STAYS ═══════ -->
+    <div id="s10" class="sec-head green anim" style="--i:29">10 &mdash; What Does NOT Change</div>
+
+    <div class="card card--recessed anim" style="--i:30">
+      <ul class="node-list">
+        <li><strong>No new servers or containers</strong> &mdash; FastAPI handles the new routes inside the existing <code>yudai-be</code> container</li>
+        <li><strong>No new Docker services</strong> &mdash; <code>docker-compose.backend-only.yml</code> unchanged</li>
+        <li><strong>No new ports or firewall rules</strong> &mdash; everything flows through <code>:443</code></li>
+        <li><strong>No DNS record changes</strong> &mdash; <code>/session/*</code> is client-side routing on Vercel</li>
+        <li><strong>No Caddy configuration changes</strong> &mdash; <code>reverse_proxy localhost:8000</code> already covers all paths</li>
+        <li><strong>No changes to Modal sandbox</strong> &mdash; it already streams trajectory to the backend; the fan-out to viewers happens in the hub</li>
+        <li><strong>No CORS changes</strong> &mdash; <code>ALLOW_ORIGINS=https://yudai.app</code> covers viewer requests</li>
+        <li><strong>No changes to the WSEnvelope protocol</strong> &mdash; viewers receive the same message format</li>
+        <li><strong>No changes to existing WebSocket route</strong> &mdash; owner's <code>/controller/sessions/{id}/ws/unified</code> stays exactly as-is</li>
+      </ul>
+    </div>
+
+    <div class="callout success anim" style="--i:31">
+      <strong>Summary</strong>
+      This feature layers cleanly on top of the existing infrastructure. The network path is identical &mdash;
+      <code>:443</code> &rarr; Caddy &rarr; <code>:8000</code> &rarr; FastAPI &rarr; <code>SessionWebSocketHub</code>.
+      The only additions are: 2 DB tables, 4 API endpoints, 1 new WS route, 1 new React page,
+      and a <code>read_only</code> flag on the existing hub. Zero infrastructure changes.
+    </div>
+
+    <p style="text-align:center; font-size:11px; color: var(--text-dim); margin-top: 48px;">
+      YudaiV3 Shared Session Streaming Architecture &mdash; Generated 2026-03-05
+    </p>
+
+  </div><!-- /main -->
+</div><!-- /wrap -->
+
+<!-- ═══════ MERMAID ═══════ -->
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    look: 'classic',
+    themeVariables: {
+      primaryColor: isDark ? '#1c2333' : '#e8ecf0',
+      primaryBorderColor: isDark ? '#58a6ff' : '#0969da',
+      primaryTextColor: isDark ? '#e6edf3' : '#1f2328',
+      secondaryColor: isDark ? '#21262d' : '#f0f3f6',
+      secondaryBorderColor: isDark ? '#3fb950' : '#1a7f37',
+      secondaryTextColor: isDark ? '#e6edf3' : '#1f2328',
+      tertiaryColor: isDark ? '#2d2018' : '#fff8e6',
+      tertiaryBorderColor: isDark ? '#ffa657' : '#bf5e12',
+      tertiaryTextColor: isDark ? '#e6edf3' : '#1f2328',
+      lineColor: isDark ? '#8b949e' : '#656d76',
+      fontSize: '14px',
+      fontFamily: "'Geist', system-ui, sans-serif",
+      noteBkgColor: isDark ? '#1c2333' : '#fefce8',
+      noteTextColor: isDark ? '#e6edf3' : '#1f2328',
+      noteBorderColor: isDark ? '#e3b341' : '#9a6700',
+      actorBkg: isDark ? '#1c2333' : '#e8ecf0',
+      actorBorder: isDark ? '#58a6ff' : '#0969da',
+      actorTextColor: isDark ? '#e6edf3' : '#1f2328',
+      signalColor: isDark ? '#8b949e' : '#656d76',
+      signalTextColor: isDark ? '#e6edf3' : '#1f2328',
+      activationBkgColor: isDark ? '#21262d' : '#f0f3f6',
+      activationBorderColor: isDark ? '#58a6ff' : '#0969da',
+      sequenceNumberColor: isDark ? '#0d1117' : '#ffffff',
+    }
+  });
+</script>
+
+<!-- ═══════ ZOOM CONTROLS ═══════ -->
+<script>
+  function updateZoomState(wrap) {
+    var target = wrap.querySelector('.mermaid');
+    var zoom = parseFloat(target.dataset.zoom || '1');
+    wrap.classList.toggle('is-zoomed', zoom > 1);
+  }
+  function zoomDiagram(btn, factor) {
+    var wrap = btn.closest('.mermaid-wrap');
+    var target = wrap.querySelector('.mermaid');
+    var current = parseFloat(target.dataset.zoom || '1');
+    var next = Math.min(Math.max(current * factor, 0.3), 5);
+    target.dataset.zoom = next;
+    target.style.transform = 'scale(' + next + ')';
+    updateZoomState(wrap);
+  }
+  function resetZoom(btn) {
+    var wrap = btn.closest('.mermaid-wrap');
+    var target = wrap.querySelector('.mermaid');
+    target.dataset.zoom = '1';
+    target.style.transform = 'scale(1)';
+    updateZoomState(wrap);
+  }
+  document.querySelectorAll('.mermaid-wrap').forEach(function(wrap) {
+    wrap.addEventListener('wheel', function(e) {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      var target = wrap.querySelector('.mermaid');
+      var current = parseFloat(target.dataset.zoom || '1');
+      var factor = e.deltaY < 0 ? 1.1 : 0.9;
+      var next = Math.min(Math.max(current * factor, 0.3), 5);
+      target.dataset.zoom = next;
+      target.style.transform = 'scale(' + next + ')';
+      updateZoomState(wrap);
+    }, { passive: false });
+    var startX, startY, scrollL, scrollT;
+    wrap.addEventListener('mousedown', function(e) {
+      if (e.target.closest('.zoom-controls')) return;
+      var target = wrap.querySelector('.mermaid');
+      if (parseFloat(target.dataset.zoom || '1') <= 1) return;
+      wrap.classList.add('is-panning');
+      startX = e.clientX; startY = e.clientY;
+      scrollL = wrap.scrollLeft; scrollT = wrap.scrollTop;
+    });
+    window.addEventListener('mousemove', function(e) {
+      if (!wrap.classList.contains('is-panning')) return;
+      wrap.scrollLeft = scrollL - (e.clientX - startX);
+      wrap.scrollTop = scrollT - (e.clientY - startY);
+    });
+    window.addEventListener('mouseup', function() {
+      wrap.classList.remove('is-panning');
+    });
+  });
+</script>
+
+<!-- ═══════ SCROLL SPY ═══════ -->
+<script>
+(function() {
+  const toc = document.getElementById('toc');
+  const links = toc.querySelectorAll('a');
+  const sections = [];
+  links.forEach(link => {
+    const id = link.getAttribute('href').slice(1);
+    const el = document.getElementById(id);
+    if (el) sections.push({ id, el, link });
+  });
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const match = sections.find(s => s.el === entry.target);
+        if (match) {
+          match.link.classList.add('active');
+          if (window.innerWidth <= 1000) {
+            match.link.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+          }
+        }
+      }
+    });
+  }, { rootMargin: '-10% 0px -80% 0px' });
+  sections.forEach(s => observer.observe(s.el));
+  links.forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      const id = link.getAttribute('href').slice(1);
+      const el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        history.replaceState(null, '', '#' + id);
+      }
+    });
+  });
+})();
+</script>
+
+</body>
+</html>
