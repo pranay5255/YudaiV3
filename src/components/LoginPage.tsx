@@ -3,7 +3,7 @@ import { useAuth } from '../hooks/useAuth';
 
 /**
  * LoginPage component handles GitHub OAuth login
- * YudaiV3: Context-engineered coding agent for review-ready PRs
+ * YudaiV3: Enterprise onboarding and delivery orchestration landing page
  */
 export const LoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(() => {
@@ -67,28 +67,29 @@ export const LoginPage: React.FC = () => {
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_60%_40%_at_100%_0%,rgba(34,211,238,0.05),transparent_50%)]" />
 
         <div className="relative max-w-6xl mx-auto px-6 lg:px-8 pt-20 pb-16">
-          <div className="max-w-3xl">
+          <div className="grid items-start gap-10 lg:grid-cols-12">
+            <div className="max-w-3xl lg:col-span-7">
             {/* Eyebrow */}
             <div className="flex items-center gap-3 mb-6">
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-bg-tertiary border border-border text-xs font-mono text-text-secondary">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                context-engineered agent
+                enterprise-ready delivery orchestration
               </span>
             </div>
 
             {/* Headline */}
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-semibold tracking-tight leading-[1.1] mb-6">
-              <span className="text-text-primary">Chat summaries,</span>
+              <span className="text-text-primary">From requirement,</span>
               <br />
-              <span className="text-text-primary">file insights,</span>
+              <span className="text-text-primary">to issue, tests,</span>
               <br />
-              <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-amber-500">review-ready PRs.</span>
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-amber-500">and review-ready PRs.</span>
             </h1>
 
             {/* Subheadline */}
             <p className="text-lg sm:text-xl text-text-secondary leading-relaxed max-w-2xl mb-8">
-              YudaiV3 connects to your GitHub repo and turns curated context into small,
-              focused pull requests—with full auditable trajectories for every decision.
+              YudaiV3 connects to your GitHub stack and runs a governed Architect → Tester → Coder
+              pipeline with full trajectory logs for audit and review confidence.
             </p>
 
             {/* Value props */}
@@ -97,19 +98,49 @@ export const LoginPage: React.FC = () => {
                 <svg className="w-4 h-4 text-accent-cyan" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
                 </svg>
-                <span className="text-sm text-text-secondary">File dependency mapping</span>
+                <span className="text-sm text-text-secondary">Governed Architect → Tester → Coder flow</span>
               </div>
               <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-secondary border border-border">
                 <svg className="w-4 h-4 text-accent-amber" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
                 </svg>
-                <span className="text-sm text-text-secondary">Curated chat context</span>
+                <span className="text-sm text-text-secondary">Audit-ready trajectory and artifact trail</span>
               </div>
               <div className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-secondary border border-border">
                 <svg className="w-4 h-4 text-accent-emerald" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <span className="text-sm text-text-secondary">Auditable trajectories</span>
+                <span className="text-sm text-text-secondary">Org-scoped sandbox runtime controls</span>
+              </div>
+            </div>
+          </div>
+
+            {/* Hero video preview */}
+            <div className="lg:col-span-5">
+              <div className="rounded-2xl p-[1px] bg-gradient-to-br from-accent-cyan/35 via-border to-accent-amber/35 shadow-[0_24px_60px_rgba(2,6,23,0.5)]">
+                <div className="rounded-2xl border border-border/80 bg-bg-secondary/90 p-3 backdrop-blur-sm">
+                  <div className="overflow-hidden rounded-xl border border-border/70 bg-black">
+                    <video
+                      autoPlay
+                      muted
+                      loop
+                      playsInline
+                      preload="metadata"
+                      aria-label="Enterprise delivery workflow preview video"
+                      className="w-full aspect-[4/5] object-cover"
+                    >
+                      <source src="/videos/yudai-enterprise-intro.mp4" type="video/mp4" />
+                    </video>
+                  </div>
+                  <div className="mt-3 px-1">
+                    <p className="text-[11px] font-mono tracking-[0.2em] uppercase text-text-muted">
+                      Live workflow preview
+                    </p>
+                    <p className="mt-1 text-sm text-text-secondary leading-relaxed">
+                      Watch issue planning, test generation, and PR delivery with full trajectory visibility.
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -130,26 +161,26 @@ export const LoginPage: React.FC = () => {
                 {[
                   {
                     step: '01',
-                    title: 'Connect',
-                    description: 'Link your GitHub repository. YudaiV3 maps file dependencies and extracts structural context automatically.',
+                    title: 'Provision',
+                    description: 'Select org, repo, and branch to initialize your controlled org + repo + environment runtime.',
                     color: 'cyan'
                   },
                   {
                     step: '02',
-                    title: 'Converse',
-                    description: 'Chat naturally about your codebase. Context cards capture and distill key insights from each conversation.',
+                    title: 'Specify',
+                    description: 'Architect mode converts requirements into scoped GitHub issues with acceptance criteria.',
                     color: 'amber'
                   },
                   {
                     step: '03',
-                    title: 'Generate',
-                    description: 'The agent produces small, focused PRs from your curated context—scoped for easy review and quick iteration.',
+                    title: 'Assure',
+                    description: 'Tester mode writes coverage-first unit, integration, and edge-case tests before coding.',
                     color: 'emerald'
                   },
                   {
                     step: '04',
-                    title: 'Audit',
-                    description: 'Every decision is logged with full trajectory. Trace exactly how context informed each code change.',
+                    title: 'Deliver',
+                    description: 'Coder mode implements, validates, and opens a PR while preserving traceable trajectory logs.',
                     color: 'violet'
                   }
                 ].map((item) => (
@@ -175,12 +206,12 @@ export const LoginPage: React.FC = () => {
               <h2 className="text-sm font-mono text-text-muted uppercase tracking-wider mb-6">Capabilities</h2>
               <div className="grid sm:grid-cols-2 gap-4">
                 {[
-                  { title: 'File Dependency Analysis', desc: 'Understand how your codebase connects' },
-                  { title: 'Chat-to-Context Cards', desc: 'Distill conversations into actionable insights' },
-                  { title: 'Small, Focused PRs', desc: 'Scoped changes that are easy to review' },
-                  { title: 'Full Trajectory Logs', desc: 'Audit every decision the agent makes' },
-                  { title: 'Analytics Dashboard', desc: 'Track patterns and insights over time' },
-                  { title: 'GitHub-Native', desc: 'Works seamlessly with your existing workflow' },
+                  { title: 'Governed Multi-Mode Pipeline', desc: 'Architect, Tester, and Coder execute with controlled handoffs' },
+                  { title: 'Sandbox Identity Isolation', desc: 'Runtime keyed by org + repo + environment' },
+                  { title: 'Real-Time Operational Telemetry', desc: 'WebSocket chat plus SSE trajectory streaming' },
+                  { title: 'Issue-to-PR Lifecycle Gate', desc: 'Execution completes only after issue and PR are created' },
+                  { title: 'Audit Artifacts + Logs', desc: 'Trace requirement, tests, implementation, and outcomes' },
+                  { title: 'GitHub-Native Controls', desc: 'Integrates with enterprise branch and review workflows' },
                 ].map((feature) => (
                   <div key={feature.title} className="p-4 rounded-lg bg-bg-secondary border border-bg-tertiary hover:border-border transition-colors">
                     <h3 className="text-sm font-medium text-text-primary mb-1">{feature.title}</h3>
@@ -199,14 +230,14 @@ export const LoginPage: React.FC = () => {
 
                 {/* Header */}
                 <div className="mb-6">
-                  <h2 className="text-xl font-semibold text-text-primary mb-2">Get Started</h2>
-                  <p className="text-sm text-text-secondary">Connect your GitHub to start generating context-aware PRs.</p>
+                  <h2 className="text-xl font-semibold text-text-primary mb-2">Start an Enterprise Session</h2>
+                  <p className="text-sm text-text-secondary">Connect GitHub to run governed Architect → Tester → Coder delivery workflows.</p>
                 </div>
 
                 {/* Two-step indicator */}
                 <div className="mb-6 p-3 rounded-lg bg-accent-amber/5 border border-accent-amber/10">
-                  <p className="text-xs font-mono text-accent-amber/80 mb-1">TWO-STEP SETUP</p>
-                  <p className="text-sm text-text-secondary">Authenticate with GitHub, then install the app for repo access.</p>
+                  <p className="text-xs font-mono text-accent-amber/80 mb-1">ENTERPRISE ONBOARDING</p>
+                  <p className="text-sm text-text-secondary">Authenticate with GitHub, then install the app to grant secure repository access.</p>
                 </div>
 
                 {/* Error Display */}
@@ -264,9 +295,9 @@ export const LoginPage: React.FC = () => {
                 {/* Feature bullets */}
                 <div className="space-y-2.5 mb-6 py-4 border-y border-bg-tertiary">
                   {[
-                    'Map file dependencies automatically',
-                    'Generate focused, review-ready PRs',
-                    'Full audit trail for every change'
+                    'Policy-aligned issue planning',
+                    'Coverage-first test generation',
+                    'Traceable PR delivery with audit logs'
                   ].map((item) => (
                     <div key={item} className="flex items-center gap-2.5 text-sm text-text-secondary">
                       <svg className="w-4 h-4 text-accent-emerald flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -287,7 +318,7 @@ export const LoginPage: React.FC = () => {
                   <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515a.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0a12.64 12.64 0 0 0-.617-1.25a.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057a19.9 19.9 0 0 0 5.993 3.03a.078.078 0 0 0 .084-.028a14.09 14.09 0 0 0 1.226-1.994a.076.076 0 0 0-.041-.106a13.107 13.107 0 0 1-1.872-.892a.077.077 0 0 1-.008-.128a10.2 10.2 0 0 0 .372-.292a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127a12.299 12.299 0 0 1-1.873.892a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028a19.839 19.839 0 0 0 6.002-3.03a.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.956-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419c0-1.333.955-2.419 2.157-2.419c1.21 0 2.176 1.096 2.157 2.42c0 1.333-.946 2.418-2.157 2.418z"/>
                   </svg>
-                  <span>Join Discord Community</span>
+                  <span>Join Engineering Community</span>
                 </a>
 
                 {/* Footer */}
@@ -308,24 +339,24 @@ export const LoginPage: React.FC = () => {
         <div className="max-w-4xl mx-auto px-6 lg:px-8 py-12">
           <div className="text-center">
             <p className="text-text-secondary mb-4">
-              <span className="text-text-primary font-medium">Context-engineered coding agent</span> that turns your conversations and file insights into small, review-ready pull requests.
+              <span className="text-text-primary font-medium">Built for enterprise engineering teams</span> that need governed delivery, operational visibility, and reliable issue-to-PR execution.
             </p>
             <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm text-text-muted">
               <span className="flex items-center gap-1.5">
                 <span className="w-1 h-1 rounded-full bg-accent-cyan" />
-                File dependencies
+                Org + repo + environment isolation
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-1 h-1 rounded-full bg-accent-amber" />
-                Chat summaries
+                Real-time operational telemetry
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-1 h-1 rounded-full bg-accent-emerald" />
-                Auditable trajectories
+                Issue + PR completion controls
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="w-1 h-1 rounded-full bg-accent-violet" />
-                Review-ready PRs
+                Auditable solver trajectories
               </span>
             </div>
           </div>
