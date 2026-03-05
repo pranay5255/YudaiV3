@@ -1050,17 +1050,18 @@
           User approves.
 
   11. GH   GitHub redirects to:
-          https://yudai.app/auth/callback?code=abc123
+          https://api.yudai.app/auth/callback?code=abc123
 
-  12. JS   React /auth/callback page extracts ?code=abc123
-          Sends it to FastAPI: POST /auth/callback?code=abc123
-
-  13. API  FastAPI calls GitHub API to exchange code → access token
+  12. API  FastAPI receives callback with code
+          Calls GitHub API to exchange code → access token
           Creates/updates user in PostgreSQL (yudai-db)
           Creates session token (stored in session_tokens table)
-          Returns: { "session_token": "xyz..." }
 
-  14. JS   React stores session_token in memory/localStorage
+  13. API  FastAPI redirects to frontend:
+          https://yudai.app/auth/success?session_token=xyz...
+
+  14. JS   React /auth/success page extracts session_token
+          Stores session_token in memory/localStorage
           All future requests include: Authorization: Bearer xyz...
 
   15. ✅   User is logged in.
@@ -1105,7 +1106,7 @@
 <span class="c-blue">ALLOW_ORIGINS</span>=<span class="c-green">https://yudai.app</span>
 <span class="c-blue">ALLOW_ORIGIN_REGEX</span>=<span class="c-green">^https://.*\.vercel\.app$</span>   <span class="c-muted"># allows preview deployments</span>
 <span class="c-blue">FRONTEND_URL</span>=<span class="c-green">https://yudai.app</span>
-<span class="c-blue">GITHUB_REDIRECT_URI</span>=<span class="c-green">https://yudai.app/auth/callback</span></pre>
+<span class="c-blue">GITHUB_REDIRECT_URI</span>=<span class="c-green">https://api.yudai.app/auth/callback</span></pre>
 
     <div class="callout warn">
       <strong>Common CORS mistake</strong>
@@ -1218,7 +1219,7 @@
 <span class="c-blue">BACKEND_URL</span>          = <span class="c-green">https://api.yudai.app</span>
 <span class="c-blue">FRONTEND_URL</span>         = <span class="c-green">https://yudai.app</span>
 <span class="c-blue">ALLOW_ORIGINS</span>        = <span class="c-green">https://yudai.app</span>
-<span class="c-blue">GITHUB_REDIRECT_URI</span>  = <span class="c-green">https://yudai.app/auth/callback</span></pre>
+<span class="c-blue">GITHUB_REDIRECT_URI</span>  = <span class="c-green">https://api.yudai.app/auth/callback</span></pre>
   </section>
 
 
