@@ -36,7 +36,7 @@ Set these values in `backend/.env.prod`:
 - `ALLOW_ORIGIN_REGEX=^https://.*\.vercel\.app$`
 - `FRONTEND_URL=https://yudai.app`
 - `BACKEND_URL=https://api.yudai.app`
-- `GITHUB_REDIRECT_URI=https://yudai.app/auth/callback`
+- `GITHUB_REDIRECT_URI=https://api.yudai.app/auth/callback`
 
 ---
 
@@ -145,5 +145,5 @@ docker compose -f docker-compose.backend-only.yml restart backend
 
 Common issues:
 1. `403`/CORS: ensure `ALLOW_ORIGINS` and `ALLOW_ORIGIN_REGEX` are set correctly.
-2. OAuth callback mismatch: ensure `GITHUB_REDIRECT_URI=https://yudai.app/auth/callback`.
+2. OAuth callback mismatch: ensure `GITHUB_REDIRECT_URI=https://api.yudai.app/auth/callback`.
 3. Frontend calling wrong host: verify Vercel `VITE_API_BASE_URL=https://api.yudai.app`.
