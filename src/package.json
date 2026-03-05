@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",
+    "@remotion/cli": "^4.0.433",
     "@testing-library/jest-dom": "^6.4.2",
     "@testing-library/react": "^14.2.1",
     "@testing-library/user-event": "^14.5.2",
@@ -44,6 +45,7 @@
     "globals": "^15.9.0",
     "jsdom": "^24.0.0",
     "postcss": "^8.4.35",
+    "remotion": "^4.0.433",
     "rollup-plugin-visualizer": "^5.12.0",
     "tailwindcss": "^3.4.1",
     "tsx": "^4.20.3",
