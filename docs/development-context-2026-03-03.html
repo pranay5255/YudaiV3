@@ -168,6 +168,81 @@
       margin: 0 0 .45rem 0;
       font-size: .86rem;
     }
+
+    .mermaid-container {
+      position: relative;
+      background: #0d1117;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      margin: .45rem 0;
+    }
+
+    .mermaid-wrapper {
+      overflow: auto;
+      cursor: grab;
+      background: #0d1117;
+      min-height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .mermaid-wrapper:active {
+      cursor: grabbing;
+    }
+
+    .mermaid-wrapper .mermaid {
+      transform-origin: center center;
+      transition: transform 0.1s ease-out;
+    }
+
+    .mermaid-controls {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: flex;
+      gap: 4px;
+      z-index: 10;
+      background: rgba(13, 17, 23, 0.9);
+      padding: 4px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+    }
+
+    .mermaid-controls button {
+      background: var(--card-2);
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 4px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-family: var(--mono);
+      transition: all 0.15s ease;
+    }
+
+    .mermaid-controls button:hover {
+      background: var(--accent);
+      color: var(--bg-1);
+      border-color: var(--accent);
+    }
+
+    .mermaid-controls button:active {
+      transform: scale(0.95);
+    }
+
+    .mermaid-error {
+      color: var(--danger);
+      padding: 1rem;
+      font-family: var(--mono);
+      font-size: .8rem;
+      white-space: pre-wrap;
+    }
+
+    .mermaid svg {
+      max-width: none !important;
+    }
   </style>
 </head>
 <body>
@@ -220,50 +295,71 @@
 
     <section class="card">
       <h2>Architecture Flow</h2>
-      <p class="diagram-note">HTTP API and WebSocket can now be configured independently.</p>
-      <pre class="mermaid">
-flowchart LR
-  Browser[Browser on https://yudai.app] --> FE[Vercel Frontend App]
-  FE -->|REST calls (VITE_API_BASE_URL)| API[(https://api.yudai.app)]
-  Browser -->|WebSocket (VITE_WS_BASE_URL)| WS[ws://... or wss://...]
-  WS --> BE[Backend run_controller :8000]
-  BE --> DB[(PostgreSQL)]
-      </pre>
+      <p class="diagram-note">HTTP API and WebSocket can now be configured independently. Use mouse wheel to zoom, drag to pan.</p>
+      <div class="mermaid-container">
+        <div class="mermaid-controls">
+          <button onclick="zoomDiagram(this, 0.1)" title="Zoom In">+</button>
+          <button onclick="zoomDiagram(this, -0.1)" title="Zoom Out">-</button>
+          <button onclick="resetDiagram(this)" title="Reset">Reset</button>
+        </div>
+        <div class="mermaid-wrapper">
+          <div class="mermaid">flowchart LR
+    Browser["Browser on https://yudai.app"] --> FE["Vercel Frontend App"]
+    FE -->|"REST calls (VITE_API_BASE_URL)"| API["https://api.yudai.app"]
+    Browser -->|"WebSocket (VITE_WS_BASE_URL)"| WS["ws://... or wss://..."]
+    WS --> BE["Backend run_controller :8000"]
+    BE --> DB["PostgreSQL"]</div>
+        </div>
+      </div>
     </section>
 
     <section class="grid two">
       <article class="card">
         <h3>Deployment Sequence</h3>
-        <pre class="mermaid">
-sequenceDiagram
-  participant Dev as You
-  participant Srv as Server 139.84.154.9
-  participant BE as Backend (Docker Compose)
-  participant VC as Vercel CLI
-  participant FE as Frontend CDN
+        <div class="mermaid-container">
+          <div class="mermaid-controls">
+            <button onclick="zoomDiagram(this, 0.1)" title="Zoom In">+</button>
+            <button onclick="zoomDiagram(this, -0.1)" title="Zoom Out">-</button>
+            <button onclick="resetDiagram(this)" title="Reset">Reset</button>
+          </div>
+          <div class="mermaid-wrapper">
+            <div class="mermaid">sequenceDiagram
+    participant Dev as You
+    participant Srv as Server 139.84.154.9
+    participant BE as Backend (Docker Compose)
+    participant VC as Vercel CLI
+    participant FE as Frontend CDN
 
-  Dev->>Srv: docker compose -f docker-compose.backend-only.yml up -d --build
-  Srv->>BE: boot app + init schema path
-  Dev->>BE: curl http://localhost:8000/health
-  BE-->>Dev: healthy
-  Dev->>VC: cd src && vercel --prod
-  VC->>FE: publish frontend build
-  FE-->>Dev: production available
-        </pre>
+    Dev->>Srv: docker compose -f docker-compose.backend-only.yml up -d --build
+    Srv->>BE: boot app + init schema path
+    Dev->>BE: curl http://localhost:8000/health
+    BE-->>Dev: healthy
+    Dev->>VC: cd src && vercel --prod
+    VC->>FE: publish frontend build
+    FE-->>Dev: production available</div>
+          </div>
+        </div>
       </article>
 
       <article class="card">
         <h3>WebSocket Risk State</h3>
-        <pre class="mermaid">
-stateDiagram-v2
-  [*] --> SplitRoutingEnabled
-  SplitRoutingEnabled: VITE_API_BASE_URL + VITE_WS_BASE_URL
-  SplitRoutingEnabled --> WsInsecureFromHttps: WS=ws:// and page=https://
-  WsInsecureFromHttps --> BrowserBlocked
-  SplitRoutingEnabled --> WsSecure: WS=wss://...
-  WsSecure --> StableRealtime
-  BrowserBlocked --> WsSecure: add TLS endpoint, switch to wss://
-        </pre>
+        <div class="mermaid-container">
+          <div class="mermaid-controls">
+            <button onclick="zoomDiagram(this, 0.1)" title="Zoom In">+</button>
+            <button onclick="zoomDiagram(this, -0.1)" title="Zoom Out">-</button>
+            <button onclick="resetDiagram(this)" title="Reset">Reset</button>
+          </div>
+          <div class="mermaid-wrapper">
+            <div class="mermaid">stateDiagram-v2
+    [*] --> SplitRoutingEnabled
+    SplitRoutingEnabled: VITE_API_BASE_URL + VITE_WS_BASE_URL
+    SplitRoutingEnabled --> WsInsecureFromHttps: WS=ws:// and page=https://
+    WsInsecureFromHttps --> BrowserBlocked
+    SplitRoutingEnabled --> WsSecure: WS=wss://...
+    WsSecure --> StableRealtime
+    BrowserBlocked --> WsSecure: add TLS endpoint, switch to wss://</div>
+          </div>
+        </div>
       </article>
     </section>
 
@@ -314,8 +410,8 @@ VITE_WS_BASE_URL=wss://api.yudai.app</pre>
  M docs/deployment-vercel-backend.md
  M scripts/deploy.sh
  M src/tests/frontend/realtimeRouting.test.ts
-?? backend/realtime/mswea_mode_configs/
-?? backend/tests/test_session_routes_questions.py</pre>
+ ?? backend/realtime/mswea_mode_configs/
+ ?? backend/tests/test_session_routes_questions.py</pre>
       </article>
     </section>
 
@@ -349,12 +445,87 @@ VITE_WS_BASE_URL=wss://api.yudai.app</pre>
 
   <script type="module">
     import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
     mermaid.initialize({
       startOnLoad: true,
       theme: 'dark',
       securityLevel: 'loose',
-      flowchart: { useMaxWidth: true, htmlLabels: true }
+      flowchart: { useMaxWidth: false, htmlLabels: true },
+      sequence: { useMaxWidth: false },
+      state: { useMaxWidth: false }
     });
+
+    window.diagramStates = new Map();
+
+    window.zoomDiagram = function(btn, delta) {
+      const container = btn.closest('.mermaid-container');
+      const wrapper = container.querySelector('.mermaid-wrapper');
+      const mermaidEl = wrapper.querySelector('.mermaid');
+
+      if (!mermaidEl) return;
+
+      const state = window.diagramStates.get(mermaidEl) || { scale: 1, panning: false, pointX: 0, pointY: 0, startX: 0, startY: 0 };
+      state.scale = Math.max(0.3, Math.min(5, state.scale + delta));
+      window.diagramStates.set(mermaidEl, state);
+
+      mermaidEl.style.transform = `translate(${state.pointX}px, ${state.pointY}px) scale(${state.scale})`;
+    };
+
+    window.resetDiagram = function(btn) {
+      const container = btn.closest('.mermaid-container');
+      const wrapper = container.querySelector('.mermaid-wrapper');
+      const mermaidEl = wrapper.querySelector('.mermaid');
+
+      if (!mermaidEl) return;
+
+      const state = { scale: 1, panning: false, pointX: 0, pointY: 0, startX: 0, startY: 0 };
+      window.diagramStates.set(mermaidEl, state);
+
+      mermaidEl.style.transform = 'translate(0px, 0px) scale(1)';
+    };
+
+    function setupPanZoom(wrapper) {
+      const mermaidEl = wrapper.querySelector('.mermaid');
+      if (!mermaidEl) return;
+
+      const state = { scale: 1, panning: false, pointX: 0, pointY: 0, startX: 0, startY: 0 };
+      window.diagramStates.set(mermaidEl, state);
+
+      wrapper.addEventListener('mousedown', (e) => {
+        if (e.target.closest('.mermaid-controls')) return;
+        state.panning = true;
+        state.startX = e.clientX - state.pointX;
+        state.startY = e.clientY - state.pointY;
+        wrapper.style.cursor = 'grabbing';
+      });
+
+      wrapper.addEventListener('mousemove', (e) => {
+        if (!state.panning) return;
+        e.preventDefault();
+        state.pointX = e.clientX - state.startX;
+        state.pointY = e.clientY - state.startY;
+        mermaidEl.style.transform = `translate(${state.pointX}px, ${state.pointY}px) scale(${state.scale})`;
+      });
+
+      wrapper.addEventListener('mouseup', () => {
+        state.panning = false;
+        wrapper.style.cursor = 'grab';
+      });
+
+      wrapper.addEventListener('mouseleave', () => {
+        state.panning = false;
+        wrapper.style.cursor = 'grab';
+      });
+
+      wrapper.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        state.scale = Math.max(0.3, Math.min(5, state.scale + delta));
+        mermaidEl.style.transform = `translate(${state.pointX}px, ${state.pointY}px) scale(${state.scale})`;
+      }, { passive: false });
+    }
+
+    document.querySelectorAll('.mermaid-wrapper').forEach(setupPanZoom);
 
     const commits = [
       {hash:"d1f7ffa", date:"2026-03-03", author:"pranay5255", subject:"chore(nginx): remove deprecated api.yudai.app nginx config", area:"nginx"},
