@@ -191,7 +191,7 @@ deploy_backend() {
     upsert_env "$env_file" "API_DOMAIN" "$BACKEND_DOMAIN"
     upsert_env "$env_file" "ALLOW_ORIGINS" "https://$FRONTEND_DOMAIN"
     upsert_env "$env_file" "ALLOW_ORIGIN_REGEX" "^https://.*\\.vercel\\.app$"
-    upsert_env "$env_file" "GITHUB_REDIRECT_URI" "https://$FRONTEND_DOMAIN/auth/callback"
+    upsert_env "$env_file" "GITHUB_REDIRECT_URI" "https://api.yudai.app/auth/callback"
     upsert_env "$env_file" "CONTROLLER_BASE_URL" "https://$FRONTEND_DOMAIN"
 
     compose -f docker-compose.backend-only.yml pull 2>/dev/null || true
