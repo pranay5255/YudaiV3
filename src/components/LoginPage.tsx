@@ -24,7 +24,7 @@ export const LoginPage: React.FC = () => {
       return `https://github.com/apps/${appSlug}/installations/new`;
     }
 
-    return 'https://github.com/apps/yudai/installations/new';
+    return 'https://github.com/apps/yudaiv3';
   }, []);
 
   const handleGitHubLogin = async () => {
