@@ -24,7 +24,10 @@ import {
 } from '../types/sessionTypes';
 import { API, buildApiUrl } from '../config/api';
 import { realtimeFeatureFlags } from '../config/realtimeFlags';
-import { buildControllerSessionTargetUrl } from '../utils/realtimeRouting';
+import {
+  buildControllerSessionTargetUrl,
+  buildUnifiedSessionWebSocketUrl,
+} from '../utils/realtimeRouting';
 import { useAuthStore } from './authStore';
 
 export type SessionStatus =
@@ -110,6 +113,186 @@ const buildSessionTargetUrl = (
   params: Record<string, string>
 ): string => {
   return buildControllerSessionTargetUrl(endpoint, params);
+};
+
+const WS_CHAT_TIMEOUT_MS = 60_000;
+
+type ChatRepositoryPayload = {
+  owner: string;
+  name: string;
+  branch?: string;
+};
+
+type UnifiedWsChatSendParams = {
+  sessionId: string;
+  sessionToken: string;
+  content: string;
+  contextCards?: string[];
+  repository?: ChatRepositoryPayload;
+  onChunk?: (text: string) => void;
+};
+
+type UnifiedWsChatSendResult = {
+  reply: string;
+  messageId: string;
+  processingTimeMs: number;
+};
+
+const getWsBaseUrl = (): string | undefined => {
+  const value = (import.meta.env.VITE_WS_BASE_URL || '').trim();
+  return value || undefined;
+};
+
+const sendChatMessageViaUnifiedWs = ({
+  sessionId,
+  sessionToken,
+  content,
+  contextCards,
+  repository,
+  onChunk,
+}: UnifiedWsChatSendParams): Promise<UnifiedWsChatSendResult> => {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const wsUrl = buildUnifiedSessionWebSocketUrl({
+      sessionId,
+      sessionToken,
+      controllerWsBaseUrl: getWsBaseUrl(),
+    });
+
+    const ws = new WebSocket(wsUrl);
+    let settled = false;
+    let reply = '';
+    let messageId = '';
+
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+      try {
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+        }
+      } catch {
+        // no-op
+      }
+    };
+
+    const resolveOnce = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve({
+        reply,
+        messageId: messageId || `ws_assistant_${Date.now()}`,
+        processingTimeMs: Date.now() - startedAt,
+      });
+    };
+
+    const rejectOnce = (error: AppError) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+
+    const timeoutId = setTimeout(() => {
+      rejectOnce(
+        new AppError(
+          'WS_CHAT_TIMEOUT',
+          'Timed out waiting for chat response over WebSocket.'
+        )
+      );
+    }, WS_CHAT_TIMEOUT_MS);
+
+    ws.onopen = () => {
+      const payload: Record<string, unknown> = { content };
+      if (contextCards && contextCards.length > 0) {
+        payload.context_cards = contextCards;
+      }
+      if (repository) {
+        payload.repository = repository;
+      }
+
+      ws.send(
+        JSON.stringify({
+          type: 'chat_message',
+          payload,
+        })
+      );
+    };
+
+    ws.onmessage = (event: MessageEvent<string>) => {
+      let envelope: {
+        type?: string;
+        payload?: Record<string, unknown>;
+      };
+      try {
+        envelope = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+
+      const payload = envelope.payload || {};
+      if (envelope.type === 'llm_stream') {
+        const chunk = typeof payload.text === 'string' ? payload.text : '';
+        if (chunk) {
+          reply += chunk;
+          if (onChunk) {
+            onChunk(reply);
+          }
+        }
+
+        if (typeof payload.message_id === 'string' && payload.message_id.trim()) {
+          messageId = payload.message_id.trim();
+        }
+
+        if (payload.final === true) {
+          resolveOnce();
+        }
+        return;
+      }
+
+      if (envelope.type === 'error') {
+        const errorCode = typeof payload.code === 'string' ? payload.code : 'WS_CHAT_ERROR';
+        const errorMessage = typeof payload.message === 'string'
+          ? payload.message
+          : 'WebSocket chat request failed';
+        rejectOnce(new AppError(errorCode, errorMessage));
+      }
+    };
+
+    ws.onclose = (event: CloseEvent) => {
+      if (settled) {
+        return;
+      }
+
+      if (event.code === 4401) {
+        rejectOnce(new AppError('SESSION_AUTH_EXPIRED', SESSION_AUTH_EXPIRED_MESSAGE));
+        return;
+      }
+
+      if (event.code === 4404) {
+        rejectOnce(new AppError('SESSION_NOT_FOUND', 'Session not found for WebSocket chat.'));
+        return;
+      }
+
+      rejectOnce(
+        new AppError(
+          'WS_CHAT_CLOSED',
+          event.reason || 'WebSocket closed before chat completion.'
+        )
+      );
+    };
+
+    ws.onerror = () => {
+      if (settled) {
+        return;
+      }
+      rejectOnce(new AppError('WS_CHAT_ERROR', 'WebSocket connection failed.'));
+    };
+  });
 };
 
 // Unified Session State Interface - matches backend models perfectly
@@ -1121,8 +1304,118 @@ export const useSessionStore = create<SessionState>()(
             throw new AppError('SESSION_NOT_READY', 'No active session or session token available');
           }
 
+          const wsChatEnabled =
+            realtimeFeatureFlags.wsChatEnabled || realtimeFeatureFlags.wsUnifiedEnabled;
+          const normalizedRepository: ChatRepositoryPayload | undefined = repository
+            ? {
+                owner:
+                  repository.repository.owner?.login
+                  || repository.repository.full_name.split('/')[0],
+                name: repository.repository.name,
+                branch: repository.branch || undefined,
+              }
+            : undefined;
+
+          let optimisticUserMessageId: string | null = null;
+          let optimisticAssistantMessageId: string | null = null;
+
           try {
             set({ isLoadingMessages: true, messageError: null, sessionStatus: 'sending' });
+
+            if (wsChatEnabled) {
+              const localBaseId = Date.now();
+              const now = new Date().toISOString();
+              optimisticUserMessageId = `local_user_${localBaseId}`;
+              optimisticAssistantMessageId = `local_assistant_stream_${localBaseId + 1}`;
+
+              const localUserMessage: ChatMessage = {
+                id: localBaseId,
+                message_id: optimisticUserMessageId,
+                message_text: message,
+                sender_type: 'user',
+                role: 'user',
+                tokens: Math.max(1, Math.ceil(message.length / 4)),
+                created_at: now,
+                updated_at: now,
+              };
+              const localAssistantMessage: ChatMessage = {
+                id: localBaseId + 1,
+                message_id: optimisticAssistantMessageId,
+                message_text: '',
+                sender_type: 'assistant',
+                role: 'assistant',
+                tokens: 0,
+                created_at: now,
+                updated_at: now,
+              };
+
+              set((state) => ({
+                messages: [...state.messages, localUserMessage, localAssistantMessage],
+                lastActivity: new Date(),
+              }));
+
+              const wsResponse = await sendChatMessageViaUnifiedWs({
+                sessionId: activeSessionId,
+                sessionToken,
+                content: message,
+                contextCards,
+                repository: normalizedRepository,
+                onChunk: (replyText: string) => {
+                  if (!optimisticAssistantMessageId) {
+                    return;
+                  }
+                  const updatedAt = new Date().toISOString();
+                  set((state) => ({
+                    messages: state.messages.map((entry) => (
+                      entry.message_id === optimisticAssistantMessageId
+                        ? {
+                            ...entry,
+                            message_text: replyText,
+                            tokens: Math.max(1, Math.ceil(replyText.length / 4)),
+                            updated_at: updatedAt,
+                          }
+                        : entry
+                    )),
+                    lastActivity: new Date(),
+                  }));
+                },
+              });
+
+              const reply = wsResponse.reply || '';
+              const response: ChatResponse = {
+                reply,
+                conversation: [[message, reply]],
+                message_id: wsResponse.messageId || optimisticAssistantMessageId,
+                processing_time: wsResponse.processingTimeMs / 1000,
+                session_id: activeSessionId,
+              };
+
+              const finalAssistantMessageId = response.message_id || optimisticAssistantMessageId;
+              const finalizedAt = new Date().toISOString();
+              set((state) => ({
+                messages: state.messages.map((entry) => (
+                  entry.message_id === optimisticAssistantMessageId
+                    ? {
+                        ...entry,
+                        message_id: finalAssistantMessageId,
+                        message_text: reply,
+                        tokens: Math.max(1, Math.ceil(reply.length / 4)),
+                        updated_at: finalizedAt,
+                      }
+                    : entry
+                )),
+                isLoadingMessages: false,
+                messageError: null,
+                sessionStatus: 'ready',
+                lastActivity: new Date(),
+              }));
+
+              void get().loadMessages(activeSessionId).catch((reconcileError) => {
+                console.warn('[SessionStore] Message reconciliation failed:', reconcileError);
+              });
+
+              return response;
+            }
 
             const chatRequest: ChatRequest = {
               session_id: activeSessionId,
@@ -1130,11 +1423,7 @@ export const useSessionStore = create<SessionState>()(
                 message_text: message,
               },
               context_cards: contextCards,
-              repository: repository ? {
-                owner: repository.repository.owner?.login || repository.repository.full_name.split('/')[0],
-                name: repository.repository.name,
-                branch: repository.branch,
-              } : undefined,
+              repository: normalizedRepository,
             };
 
             const chatUrl = buildSessionTargetUrl(API.SESSIONS.CHAT, {
@@ -1151,9 +1440,10 @@ export const useSessionStore = create<SessionState>()(
 
             // Deterministic local append for both user and assistant response.
             const now = new Date().toISOString();
+            const localBaseId = Date.now();
             const localUserMessage: ChatMessage = {
-              id: Date.now(),
-              message_id: `local_user_${Date.now()}`,
+              id: localBaseId,
+              message_id: `local_user_${localBaseId}`,
               message_text: message,
               sender_type: 'user',
               role: 'user',
@@ -1162,8 +1452,8 @@ export const useSessionStore = create<SessionState>()(
               updated_at: now,
             };
             const localAssistantMessage: ChatMessage = {
-              id: Date.now() + 1,
-              message_id: response.message_id || `local_assistant_${Date.now()}`,
+              id: localBaseId + 1,
+              message_id: response.message_id || `local_assistant_${localBaseId + 1}`,
               message_text: response.reply || '',
               sender_type: 'assistant',
               role: 'assistant',
@@ -1189,6 +1479,17 @@ export const useSessionStore = create<SessionState>()(
           } catch (error) {
             const appError = toAppError(error, 'CHAT_SEND_FAILED', 'Failed to send message');
             console.error('Failed to send chat message:', appError);
+            if (optimisticUserMessageId || optimisticAssistantMessageId) {
+              set((state) => ({
+                messages: state.messages.filter((entry) => (
+                  entry.message_id !== optimisticUserMessageId
+                  && entry.message_id !== optimisticAssistantMessageId
+                )),
+              }));
+              void get().loadMessages(activeSessionId).catch((reconcileError) => {
+                console.warn('[SessionStore] Message reconciliation failed:', reconcileError);
+              });
+            }
             set({
               isLoadingMessages: false,
               messageError: appError.message,
