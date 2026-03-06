@@ -40,7 +40,7 @@ def _get_realtime_sandbox_image() -> modal.Image:
     if _realtime_sandbox_image is None:
         image = (
             modal.Image.debian_slim(python_version="3.11")
-            .apt_install("git", "curl")
+            .apt_install("git", "curl", "libpq-dev", "gcc")
             .pip_install(
                 "fastapi",
                 "uvicorn[standard]",
@@ -52,6 +52,8 @@ def _get_realtime_sandbox_image() -> modal.Image:
                 "websockets",
                 "python-jose[cryptography]",
                 "passlib",
+                "pgvector",
+                "psycopg2-binary",
             )
             .env({"PYTHONPATH": "/app/backend"})
         )
@@ -110,6 +112,9 @@ class RealtimeModalSandbox:
             "SANDBOX_ID": sandbox_db_id,
             "CONTROLLER_BASE_URL": controller_base_url,
         }
+        controller_database_url = os.getenv("DATABASE_URL") or os.getenv("CONTROLLER_DATABASE_URL")
+        if controller_database_url:
+            sandbox_env["CONTROLLER_DATABASE_URL"] = controller_database_url
         controller_internal_ws_secret = os.getenv("CONTROLLER_INTERNAL_WS_SECRET")
         if controller_internal_ws_secret:
             sandbox_env["CONTROLLER_INTERNAL_WS_SECRET"] = controller_internal_ws_secret
