@@ -6,9 +6,10 @@ import asyncio
 import json
 import logging
 import os
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from auth.github_oauth import get_current_user, validate_session_token
+from daifuUserAgent.ChatOps import ChatOps
 from db.database import get_db
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, WebSocket, status
 from models import ChatSession, SessionRuntime, User
@@ -30,6 +31,25 @@ from .ws_protocol import WSMessageType, build_envelope
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["realtime-controller"])
+
+
+def _normalize_context_cards(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    values: list[str] = []
+    for item in raw:
+        candidate = str(item or "").strip()
+        if candidate:
+            values.append(candidate)
+    return values
+
+
+def _chunk_text(text: str, chunk_size: int) -> list[str]:
+    if chunk_size <= 0:
+        return [text]
+    if not text:
+        return [""]
+    return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
 
 def _to_sandbox_response(sandbox) -> SandboxResponse:
     return SandboxResponse(
@@ -356,6 +376,7 @@ async def unified_session_websocket(
     )
 
     shutdown = asyncio.Event()
+    ws_chat_chunk_size = int(os.getenv("REALTIME_WS_CHAT_CHUNK_SIZE", "120"))
 
     async def heartbeat_loop() -> None:
         while not shutdown.is_set():
@@ -367,6 +388,19 @@ async def unified_session_websocket(
             except Exception:
                 shutdown.set()
                 return
+
+    async def stream_llm_chunks(*, text: str, message_id: Optional[str]) -> None:
+        chunks = _chunk_text(text, ws_chat_chunk_size)
+        for index, chunk in enumerate(chunks):
+            is_final = index == len(chunks) - 1
+            payload: Dict[str, Any] = {
+                "stream": "llm",
+                "text": chunk,
+                "final": is_final,
+            }
+            if is_final and message_id:
+                payload["message_id"] = message_id
+            await websocket.send_text(build_envelope(WSMessageType.LLM_STREAM, payload))
 
     async def receive_loop() -> None:
         while not shutdown.is_set():
@@ -389,11 +423,59 @@ async def unified_session_websocket(
 
             msg_type = message.get("type")
             if msg_type == WSMessageType.CHAT_MESSAGE.value:
-                content = str((message.get("payload") or {}).get("content") or "").strip()
+                payload = message.get("payload", {}) or {}
+                content = str(payload.get("content") or "").strip()
+                context_cards = _normalize_context_cards(payload.get("context_cards"))
+                repository = payload.get("repository")
+                if not isinstance(repository, dict):
+                    repository = None
+
+                if not content:
+                    await websocket.send_text(
+                        build_envelope(
+                            WSMessageType.ERROR,
+                            {"message": "Missing chat content", "code": "CHAT_CONTENT_MISSING"},
+                        )
+                    )
+                    continue
+
                 await websocket.send_text(
                     build_envelope(
-                        WSMessageType.LLM_STREAM,
-                        {"stream": "llm", "text": f"Received message ({len(content)} chars).", "final": True},
+                        WSMessageType.STATUS,
+                        {"status": "chat_processing"},
+                    )
+                )
+
+                try:
+                    chat_ops = ChatOps(db)
+                    result = await chat_ops.process_chat_message(
+                        session_id=session_id,
+                        user_id=user.id,
+                        message_text=content,
+                        context_cards=context_cards or None,
+                        repository=repository,
+                    )
+                    reply_text = str(result.get("reply") or "")
+                    message_id = str(result.get("message_id") or "").strip() or None
+                except Exception as chat_error:
+                    logger.error(
+                        "Unified websocket chat processing failed for session %s: %s",
+                        session_id,
+                        chat_error,
+                    )
+                    await websocket.send_text(
+                        build_envelope(
+                            WSMessageType.ERROR,
+                            {"message": "Chat processing failed", "code": "CHAT_PROCESSING_FAILED"},
+                        )
+                    )
+                    continue
+
+                await stream_llm_chunks(text=reply_text, message_id=message_id)
+                await websocket.send_text(
+                    build_envelope(
+                        WSMessageType.STATUS,
+                        {"status": "chat_completed"},
                     )
                 )
             elif msg_type == WSMessageType.USER_RESPONSE.value:
