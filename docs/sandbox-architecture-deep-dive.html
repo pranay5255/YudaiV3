@@ -1,0 +1,1160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sandbox Architecture — Deep Dive</title>
+  <style>
+    :root {
+      --bg-1: #0f1117;
+      --bg-2: #151b27;
+      --card: #1a2030;
+      --card-2: #1e2640;
+      --ink: #e8edf5;
+      --muted: #7a8aa0;
+      --line: #2a3347;
+      --accent: #4f8ef7;
+      --accent-2: #f7934f;
+      --accent-3: #4fccb8;
+      --ok: #4fcb82;
+      --warn: #f7c94f;
+      --bad: #f74f4f;
+      --purple: #a78bfa;
+      --shadow: 0 24px 60px rgba(0,0,0,0.5);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Space Grotesk", "Inter", "Segoe UI", sans-serif;
+      background: var(--bg-1);
+      color: var(--ink);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 32px 20px 80px; }
+
+    /* ── Hero ── */
+    .hero {
+      background: linear-gradient(135deg, #1a2240 0%, #0f1530 100%);
+      border: 1px solid #2d3a55;
+      border-radius: 20px;
+      padding: 32px 28px 24px;
+      margin-bottom: 28px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: "";
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at 80% 20%, rgba(79,142,247,0.12), transparent 60%),
+                  radial-gradient(ellipse at 15% 80%, rgba(79,204,184,0.10), transparent 55%);
+      pointer-events: none;
+    }
+    .kicker {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 12px; border-radius: 999px;
+      background: linear-gradient(90deg, #1c3060, #1a3555);
+      border: 1px solid #3a5080;
+      font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+      color: var(--accent); text-transform: uppercase; margin-bottom: 12px;
+    }
+    .hero h1 {
+      font-size: clamp(1.7rem, 3vw, 2.5rem);
+      line-height: 1.1; font-weight: 800;
+      background: linear-gradient(135deg, #e8edf5 30%, #7ab0f7);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      margin-bottom: 10px;
+    }
+    .hero .sub { color: var(--muted); max-width: 80ch; font-size: 0.97rem; }
+
+    /* ── Tabs ── */
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 20px; }
+    .tab {
+      padding: 8px 16px; border-radius: 10px; cursor: pointer;
+      font-size: 13px; font-weight: 700; border: 1px solid var(--line);
+      background: var(--card); color: var(--muted);
+      transition: all 0.18s ease;
+    }
+    .tab:hover { border-color: var(--accent); color: var(--ink); }
+    .tab.active {
+      background: linear-gradient(135deg, #1c3060, #172845);
+      border-color: var(--accent); color: var(--accent);
+    }
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* ── Grid ── */
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(12, 1fr); margin-bottom: 16px; }
+    .span-12 { grid-column: span 12; }
+    .span-8  { grid-column: span 8; }
+    .span-6  { grid-column: span 6; }
+    .span-5  { grid-column: span 5; }
+    .span-4  { grid-column: span 4; }
+    .span-3  { grid-column: span 3; }
+    @media(max-width:900px){
+      .span-8,.span-6,.span-5,.span-4,.span-3 { grid-column: span 12; }
+    }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px; padding: 20px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .card.accent-l { border-left: 3px solid var(--accent); }
+    .card.accent-2l { border-left: 3px solid var(--accent-2); }
+    .card.accent-3l { border-left: 3px solid var(--accent-3); }
+    .card.purple-l { border-left: 3px solid var(--purple); }
+    .card.warn-l   { border-left: 3px solid var(--warn); }
+    .card.bad-l    { border-left: 3px solid var(--bad); }
+    .card.ok-l     { border-left: 3px solid var(--ok); }
+    .card h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: 10px; color: var(--ink); }
+    .card h3 { font-size: 0.92rem; font-weight: 700; margin-bottom: 8px; color: var(--accent); }
+    .card p  { color: var(--muted); font-size: 0.9rem; margin-bottom: 8px; }
+    .card ul { padding-left: 18px; }
+    .card li { color: var(--muted); font-size: 0.9rem; margin-bottom: 5px; }
+    .card li strong { color: var(--ink); }
+
+    /* ── Section header ── */
+    .sec-header {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 18px; padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .sec-header h2 { font-size: 1.25rem; font-weight: 800; }
+    .sec-num {
+      width: 32px; height: 32px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 800;
+      background: linear-gradient(135deg, var(--accent), #2a66cc);
+      flex-shrink: 0;
+    }
+
+    /* ── Flow diagram ── */
+    .flow {
+      background: #0d1220;
+      border: 1px solid #1e2a42;
+      border-radius: 14px;
+      padding: 20px;
+      font-family: "Fira Code", "Consolas", monospace;
+      font-size: 12.5px;
+      line-height: 1.9;
+      overflow-x: auto;
+      white-space: pre;
+      color: #94b4d4;
+    }
+    .flow .c-blue  { color: #7ab0f7; }
+    .flow .c-green { color: #4fcb82; }
+    .flow .c-orange{ color: #f7934f; }
+    .flow .c-purple{ color: #c3a6ff; }
+    .flow .c-teal  { color: #4fccb8; }
+    .flow .c-yellow{ color: #f7c94f; }
+    .flow .c-red   { color: #f77a7a; }
+    .flow .c-dim   { color: #3d5070; }
+
+    /* ── Pill badges ── */
+    .pill {
+      display: inline-block; padding: 3px 9px; border-radius: 8px;
+      font-size: 11px; font-weight: 700; margin: 0 4px 4px 0;
+    }
+    .pill-blue   { background:#1c3060; border:1px solid #3a5080; color:#7ab0f7; }
+    .pill-green  { background:#0d3020; border:1px solid #1e5a38; color:#4fcb82; }
+    .pill-orange { background:#3d2010; border:1px solid #6a3a18; color:#f7934f; }
+    .pill-purple { background:#2d1e50; border:1px solid #5a3a90; color:#c3a6ff; }
+    .pill-teal   { background:#0d3030; border:1px solid #1e5a55; color:#4fccb8; }
+    .pill-warn   { background:#3d3010; border:1px solid #6a5a18; color:#f7c94f; }
+    .pill-red    { background:#3d1010; border:1px solid #6a2020; color:#f77a7a; }
+
+    /* ── Callout boxes ── */
+    .callout {
+      border-radius: 12px; padding: 14px 16px;
+      margin: 12px 0; font-size: 0.88rem;
+    }
+    .callout-warn  { background:#2a2010; border:1px solid #5a4a20; color:#f7c94f; }
+    .callout-info  { background:#0f1e3a; border:1px solid #2a3f6a; color:#7ab0f7; }
+    .callout-ok    { background:#0a2018; border:1px solid #1a4a30; color:#4fcb82; }
+    .callout-bad   { background:#2a0f0f; border:1px solid #5a2020; color:#f77a7a; }
+    .callout strong { font-weight: 800; }
+
+    /* ── Code inline ── */
+    code {
+      background: #0d1525; border: 1px solid #1e2a3f;
+      border-radius: 5px; padding: 1px 6px;
+      font-family: "Fira Code", monospace; font-size: 0.83em;
+      color: #a8c4f0;
+    }
+
+    /* ── Table ── */
+    table { width: 100%; border-collapse: collapse; font-size: 0.87rem; }
+    th {
+      background: #111827; color: var(--muted);
+      font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+      text-transform: uppercase; text-align: left;
+      padding: 10px 14px; border-bottom: 1px solid var(--line);
+    }
+    td { padding: 10px 14px; border-bottom: 1px solid #1a2235; vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #151d2e; }
+
+    /* ── Latency bar ── */
+    .lat-bar {
+      display: flex; align-items: center; gap: 10px; margin: 6px 0;
+      font-size: 0.83rem;
+    }
+    .lat-label { width: 200px; flex-shrink: 0; color: var(--muted); }
+    .lat-track {
+      flex: 1; height: 8px; background: #1a2235; border-radius: 4px; overflow: hidden;
+    }
+    .lat-fill {
+      height: 100%; border-radius: 4px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    }
+    .lat-val { width: 60px; text-align: right; font-weight: 700; font-size: 0.82rem; }
+
+    /* ── Q&A ── */
+    .question {
+      background: #12192a; border: 1px solid #2a3550;
+      border-radius: 14px; padding: 18px 20px; margin-bottom: 14px;
+    }
+    .q-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 26px; height: 26px; border-radius: 50%;
+      background: linear-gradient(135deg, #4f8ef7, #2a66cc);
+      font-size: 12px; font-weight: 800; flex-shrink: 0; margin-right: 8px;
+    }
+    .q-title {
+      font-size: 1rem; font-weight: 700; color: var(--ink);
+      display: flex; align-items: flex-start; gap: 4px; margin-bottom: 10px;
+    }
+    .q-body { color: var(--muted); font-size: 0.88rem; padding-left: 34px; }
+    .q-body ul { padding-left: 18px; margin-top: 6px; }
+    .q-body li { margin-bottom: 4px; }
+    .q-options { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-left: 34px; }
+    .q-opt {
+      padding: 5px 12px; border-radius: 8px; font-size: 12px; font-weight: 600;
+      cursor: pointer; border: 1px solid var(--line); background: #1a2235; color: var(--muted);
+      transition: all 0.15s;
+    }
+    .q-opt:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Improvement card ── */
+    .improvement {
+      background: #12192a; border-radius: 14px; padding: 18px;
+      border: 1px solid #1e2a40; margin-bottom: 12px;
+    }
+    .improvement .i-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .improvement h3 { font-size: 0.97rem; font-weight: 700; color: var(--ink); }
+    .impact-badge {
+      padding: 3px 10px; border-radius: 8px; font-size: 11px; font-weight: 700;
+    }
+    .impact-high   { background:#1a3520; border:1px solid #2a5a35; color:#4fcb82; }
+    .impact-medium { background:#2a2810; border:1px solid #5a4a20; color:#f7c94f; }
+    .impact-low    { background:#1a2235; border:1px solid #2a3550; color:#7a8aa0; }
+    .improvement p { color: var(--muted); font-size: 0.87rem; margin-bottom: 8px; }
+
+    /* ── Step list ── */
+    .steps { counter-reset: step; }
+    .step {
+      display: flex; gap: 14px; margin-bottom: 14px;
+      padding: 14px 16px; background: #111827;
+      border-radius: 12px; border: 1px solid var(--line);
+    }
+    .step-num {
+      width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: #1c3060; border: 1px solid #3a5080;
+      font-size: 12px; font-weight: 800; color: var(--accent);
+      margin-top: 1px;
+    }
+    .step-body h4 { font-size: 0.92rem; font-weight: 700; margin-bottom: 4px; }
+    .step-body p  { color: var(--muted); font-size: 0.85rem; margin: 0; }
+
+    /* ── Connection surface table ── */
+    .surf-row { display: flex; gap: 12px; margin-bottom: 10px; align-items: flex-start; }
+    .surf-icon {
+      width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+    .surf-body h4 { font-size: 0.9rem; font-weight: 700; margin-bottom: 3px; }
+    .surf-body p  { color: var(--muted); font-size: 0.83rem; }
+
+    hr.dim { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
+    .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ── Hero ── -->
+  <div class="hero">
+    <div class="kicker">⬡ YudaiV3 · Phase 3 Internals</div>
+    <h1>Sandbox Architecture Deep Dive</h1>
+    <p class="sub">
+      How Modal sandboxes are provisioned, what runs inside them, how they stay connected
+      to the controller API, where latency hides, and what you need to decide before
+      optimising for production.
+    </p>
+  </div>
+
+  <!-- ── Tab bar ── -->
+  <div class="tabs">
+    <button class="tab active" onclick="show('arch',this)">Architecture</button>
+    <button class="tab" onclick="show('surfaces',this)">Controller ↔ Sandbox Surfaces</button>
+    <button class="tab" onclick="show('latency',this)">Latency Map</button>
+    <button class="tab" onclick="show('improvements',this)">Improvements</button>
+    <button class="tab" onclick="show('questions',this)">Design Questions</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       TAB 1 — ARCHITECTURE
+  ══════════════════════════════════════════════ -->
+  <div id="arch" class="panel active">
+
+    <div class="sec-header">
+      <div class="sec-num">1</div>
+      <h2>Two Completely Different Sandbox Types</h2>
+    </div>
+
+    <div class="callout callout-info">
+      <strong>Critical mental model:</strong> there are two independently provisioned Modal sandboxes.
+      One runs your <em>web server</em>. One runs the <em>coding agent</em>. They never share a process,
+      filesystem, or network namespace. The solver sandbox is spawned from <em>inside</em> the realtime sandbox.
+    </div>
+
+    <div class="grid" style="margin-top:16px">
+      <div class="card accent-l span-6">
+        <h2>🟦 Sandbox Type 1 — Realtime (Session Server)</h2>
+        <span class="pill pill-blue">Modal app: yudai-realtime</span>
+        <span class="pill pill-teal">Long-lived</span>
+        <span class="pill pill-green">1 per session</span>
+        <hr class="dim">
+        <p><strong>What runs inside:</strong></p>
+        <div class="flow" style="font-size:11px;padding:10px 14px">uvicorn run_sandbox_server:app --port 8100
+  ├── sandbox_router   (healthz, internal WS exec)
+  └── solve_router     (start / status / cancel / SSE stream)</div>
+        <hr class="dim">
+        <p><strong>Entrypoint:</strong> <code>modal.Sandbox.create("python", "-m", "uvicorn", ...)</code></p>
+        <p><strong>Image:</strong> debian-slim + git + fastapi + uvicorn + backend source code copied in at <code>/app/backend/</code></p>
+        <p><strong>Tunnel:</strong> Modal exposes port 8100 over HTTPS → <code>sandbox.tunnels()[8100].url</code></p>
+        <p><strong>Lifetime:</strong> Stays alive until issue + PR are both created, or manual terminate</p>
+      </div>
+
+      <div class="card accent-2l span-6">
+        <h2>🟧 Sandbox Type 2 — Solver (mini-swe-agent)</h2>
+        <span class="pill pill-orange">Modal app: yudai-solver</span>
+        <span class="pill pill-warn">Short-lived</span>
+        <span class="pill pill-purple">1 per solve run</span>
+        <hr class="dim">
+        <p><strong>What runs inside:</strong></p>
+        <div class="flow" style="font-size:11px;padding:10px 14px">python /home/user/run_agent.py
+  1. git clone {repo} → /home/user/testbed/
+  2. fetch issue text from GitHub API
+  3. mini-swe-agent.DefaultAgent.run(task)
+     → trajectory saved to /home/user/last_mini_run.traj.json
+  4. exit 0 on "Submitted"
+
+bash /home/user/create_pr.sh  (Phase 2, only on success)
+  1. git checkout -b yudai/fix-issue-{N}-{ts}
+  2. git add -A && git commit && git push
+  3. gh pr create → prints PR URL</div>
+        <hr class="dim">
+        <p><strong>Image:</strong> debian-slim + git + gh CLI + mini-swe-agent installed from GitHub</p>
+        <p><strong>Created by:</strong> <code>HeadlessSandboxExecutor.run()</code> inside the realtime sandbox process</p>
+        <p><strong>Lifetime:</strong> One solve run (30–90 min). Terminates in <code>finally</code> block.</p>
+      </div>
+    </div>
+
+    <!-- Full call chain -->
+    <div class="card span-12" style="margin-top:0">
+      <h2>Full Call Chain — from Browser to Agent</h2>
+      <div class="flow">
+<span class="c-dim">╔══════════════════════════════════════════════════════════════════════════════════════╗
+║  BROWSER / FRONTEND                                                                  ║
+╚══════════════════════════════════════════════════════════════════════════════════════╝</span>
+
+<span class="c-blue">Step 1</span>  POST /controller/sessions/{id}/runtime/ensure
+        ↓ (<span class="c-teal">Controller API</span> — run_controller.py)
+        lifecycle.create_runtime_for_session()
+          ├─ build identity key:  org/repo_owner/repo_name/environment
+          ├─ check DB: existing non-terminated sandbox for this identity?
+          │    YES → reuse (attach to session, update tunnel_url)
+          │    NO  → create new Sandbox row (status=PROVISIONING)
+          │
+          ├─ if modal_provisioning_enabled:
+          │    <span class="c-orange">RealtimeModalSandbox.create()</span>
+          │      modal.Sandbox.create(
+          │        "python -m uvicorn run_sandbox_server:app",
+          │        image = realtime-image (backend source copied in),
+          │        encrypted_ports = [8100],
+          │        env = {SANDBOX_ID, CONTROLLER_BASE_URL, CONTROLLER_DATABASE_URL,
+          │               GITHUB_TOKEN, SESSION_PUBLIC_ID, REPO_URL, REPO_BRANCH}
+          │      )
+          │      tunnel_url = sandbox.tunnels()[8100].url   <span class="c-dim">← HTTPS tunnel</span>
+          │
+          ├─ SandboxManager.ensure_git_bootstrap()          <span class="c-dim">← clone on CONTROLLER HOST</span>
+          ├─ create/update SessionRuntime row (tunnel_url, started_at)
+          ├─ write SessionAuditEvent (SANDBOX_START)
+          ├─ start liveness probe loop                      <span class="c-dim">← probes {tunnel_url}/healthz every 10s</span>
+          └─ return RuntimeEnvelope {sandbox, runtime}
+
+        ← 201 {sandbox_id, tunnel_url, status: "running"}
+
+<span class="c-dim">──────────────────────────────────────────────────────────────────────────</span>
+
+        <span class="c-dim">Meanwhile, inside the new realtime sandbox:</span>
+        <span class="c-green">  uvicorn starts, sandbox_router + solve_router mounted</span>
+        <span class="c-green">  heartbeat loop → POST {CONTROLLER_BASE_URL}/controller/sandboxes/{SANDBOX_ID}/heartbeat</span>
+        <span class="c-green">                   every 10 seconds</span>
+
+<span class="c-dim">──────────────────────────────────────────────────────────────────────────</span>
+
+<span class="c-blue">Step 2</span>  GET /controller/sandboxes/{sandbox_id}/tunnel/resolve
+        ↓ (Controller resolves + returns signed tunnel URL)
+        ← {tunnel_url: "https://modal.run/...", token_ttl_seconds: 3600}
+
+<span class="c-dim">──────────────────────────────────────────────────────────────────────────</span>
+
+<span class="c-blue">Step 3</span>  POST <span class="c-orange">{tunnel_url}</span>/sessions/{id}/solve/start
+        ↓ (<span class="c-orange">Realtime Sandbox Server</span> — solve_routes.py)
+        DefaultSolverManager.start_solve()
+          ├─ query ChatSession, Issue, AuthToken from DB
+          │    (DB access via CONTROLLER_DATABASE_URL — same Postgres!)
+          ├─ create Solve + SolveRun rows
+          ├─ lifecycle.record_solve_start()
+          ├─ asyncio.create_task(_execute_runs())           <span class="c-dim">← fire-and-forget</span>
+          └─ return {solve_session_id, status: "pending"}   <span class="c-dim">← returns immediately</span>
+
+<span class="c-dim">──────────────────────────────────────────────────────────────────────────</span>
+
+        <span class="c-dim">Background task inside realtime sandbox:</span>
+        HeadlessSandboxExecutor.run(request)
+          ├─ <span class="c-purple">modal.Sandbox.create(</span>
+          │    app="yudai-solver",
+          │    image = solver-image (mini-swe-agent pre-installed),
+          │    env = {OPENROUTER_API_KEY, GITHUB_TOKEN}
+          │  <span class="c-purple">)</span>                                              <span class="c-dim">← 2nd Modal sandbox spawned!</span>
+          │
+          ├─ generate Python script via agentScriptGen.py
+          ├─ upload script to /home/user/run_agent.py in solver sandbox
+          ├─ sandbox.exec("python /home/user/run_agent.py")
+          │
+          │    <span class="c-dim">INSIDE SOLVER SANDBOX:</span>
+          │    git clone {repo_url} → /home/user/testbed/
+          │    mini-swe-agent runs, edits files, saves trajectory
+          │    exit 0 on success
+          │
+          ├─ if exit_code == 0:
+          │    upload create_pr.sh → sandbox.exec("bash /home/user/create_pr.sh")
+          │    extract PR URL from stdout
+          │
+          ├─ download trajectory file back to controller host
+          ├─ solver sandbox terminates (finally block)
+          └─ lifecycle.mark_pr_created()
+               → completion_detected = True
+               → export artifact bundle
+               → terminate realtime sandbox
+
+<span class="c-blue">Step 4</span>  GET <span class="c-orange">{tunnel_url}</span>/sessions/{id}/solve/stream/{solve_id}/{run_id}?token=...
+        <span class="c-dim">(SSE — polls executor.read_trajectory() every 3s)</span>
+        ← stream: trajectory_update / heartbeat / done events</div>
+    </div>
+
+    <!-- Identity system -->
+    <div class="grid" style="margin-top:0">
+      <div class="card span-6 accent-3l">
+        <h2>Identity System</h2>
+        <p>Each sandbox is identified by a canonical key derived from org, repo owner, repo name, and environment. This prevents two sessions from spawning duplicate sandboxes for the same repo.</p>
+        <div class="flow" style="font-size:11px;padding:10px 14px">identity_key = "{org}/{repo_owner}/{repo_name}/{environment}"
+  e.g.  "yudai/acme/api-service/main"
+
+Rules:
+  - lowercase
+  - replace [^a-z0-9._-] → "-"
+  - collapse "--" → "-"
+  - strip leading/trailing separators</div>
+        <div class="callout callout-warn" style="margin-top:10px">
+          <strong>Single Active Editor:</strong> if a non-terminated sandbox with this identity_key already
+          exists and is attached to a <em>different</em> session, provisioning raises
+          <code>SINGLE_ACTIVE_EDITOR_CONFLICT</code>.
+        </div>
+      </div>
+
+      <div class="card span-6 purple-l">
+        <h2>Git Bootstrap — Controller Host Cache</h2>
+        <p>When the controller provisions a sandbox it also runs a git clone/fetch on the <strong>controller host filesystem</strong> at <code>/home/yudai/.cache/repos/{identity_key}/</code>.</p>
+        <p>This is separate from the git clone inside the solver sandbox. Its purpose is to pre-warm a local copy on the controller host for context generation (yudai-grep, facts_and_memories).</p>
+        <div class="flow" style="font-size:11px;padding:10px 14px">Status outcomes:
+  "cloned"  → first time, full git clone
+  "fetched" → elapsed ≥ 300s, ran git fetch --all --prune
+  "reused"  → cache fresh, no network call
+  "skipped" → repo_url missing</div>
+      </div>
+    </div>
+
+    <!-- DB model summary -->
+    <div class="card span-12">
+      <h2>Database Models Involved</h2>
+      <table>
+        <thead><tr><th>Model</th><th>Purpose</th><th>Key Fields</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>Sandbox</code></td>
+            <td>One row per Modal realtime sandbox</td>
+            <td><code>id</code>, <code>identity_key</code>, <code>status</code>, <code>tunnel_url</code>, <code>last_heartbeat_at</code>, <code>active_session_id</code></td>
+          </tr>
+          <tr>
+            <td><code>SessionRuntime</code></td>
+            <td>Active execution context linking session ↔ sandbox</td>
+            <td><code>runtime_id</code>, <code>sandbox_id</code>, <code>tunnel_url</code>, <code>completion_issue_created</code>, <code>completion_pr_created</code>, <code>completion_detected</code></td>
+          </tr>
+          <tr>
+            <td><code>Solve</code></td>
+            <td>A solve session (one or more runs)</td>
+            <td><code>id</code>, <code>status</code>, <code>matrix</code>, <code>champion_run_id</code></td>
+          </tr>
+          <tr>
+            <td><code>SolveRun</code></td>
+            <td>One model run within a solve</td>
+            <td><code>id</code>, <code>status</code>, <code>trajectory_data</code>, <code>pr_url</code>, <code>sandbox_id</code></td>
+          </tr>
+          <tr>
+            <td><code>SessionAuditEvent</code></td>
+            <td>Append-only audit log of all lifecycle events</td>
+            <td><code>event_name</code>, <code>event_payload</code>, <code>session_id</code>, <code>sandbox_id</code></td>
+          </tr>
+          <tr>
+            <td><code>SessionArtifact</code></td>
+            <td>Bundle metadata after completion</td>
+            <td><code>cache_manifest_path</code>, <code>bundle_path</code>, <code>checksum_sha256</code>, <code>byte_size</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div><!-- /arch -->
+
+
+  <!-- ══════════════════════════════════════════════
+       TAB 2 — SURFACES
+  ══════════════════════════════════════════════ -->
+  <div id="surfaces" class="panel">
+
+    <div class="sec-header">
+      <div class="sec-num">2</div>
+      <h2>Controller ↔ Sandbox Connection Surfaces</h2>
+    </div>
+
+    <div class="callout callout-info">
+      There are <strong>5 distinct connection surfaces</strong> between the controller API host and the realtime sandbox.
+      Understanding each surface's direction, frequency, failure mode, and latency cost is essential for designing a reliable system.
+    </div>
+
+    <div class="grid" style="margin-top:16px">
+
+      <!-- Surface 1 -->
+      <div class="card span-12 accent-l">
+        <div class="surf-row">
+          <div class="surf-icon" style="background:#1c3060">🏓</div>
+          <div class="surf-body">
+            <h4>Surface 1 — Sandbox → Controller Heartbeat  <span class="pill pill-green">sandbox-push</span><span class="pill pill-warn">every 10s</span></h4>
+            <p>The sandbox server runs a background <code>asyncio</code> loop that sends
+            <code>POST {CONTROLLER_BASE_URL}/controller/sandboxes/{SANDBOX_ID}/heartbeat</code> every 10 seconds.
+            The controller updates <code>sandbox.last_heartbeat_at</code>.
+            Stale detection threshold: 600s (10 min) — after that, <code>cleanup_stale_sandboxes()</code> terminates it.</p>
+          </div>
+        </div>
+        <table style="margin-top:10px">
+          <tr><td><strong>Direction</strong></td><td>Sandbox → Controller</td><td><strong>Auth</strong></td><td><code>X-Controller-Heartbeat-Secret</code> header</td></tr>
+          <tr><td><strong>Failure mode</strong></td><td>Sandbox marked STOPPED after missing heartbeats</td><td><strong>File</strong></td><td><code>run_sandbox_server.py:_heartbeat_loop()</code></td></tr>
+          <tr><td><strong>Latency budget</strong></td><td>5s HTTP timeout</td><td><strong>Risk</strong></td><td>Controller restart resets the stale timer — could falsely terminate healthy sandboxes</td></tr>
+        </table>
+      </div>
+
+      <!-- Surface 2 -->
+      <div class="card span-12 accent-3l">
+        <div class="surf-row">
+          <div class="surf-icon" style="background:#0d3030">🔍</div>
+          <div class="surf-body">
+            <h4>Surface 2 — Controller → Sandbox Liveness Probe  <span class="pill pill-teal">controller-pull</span><span class="pill pill-warn">every 10s</span></h4>
+            <p>The <code>SandboxManager</code> runs a probe loop against <code>{tunnel_url}/healthz</code> every 10 seconds
+            using httpx with a 3s timeout. On each result it fires a <code>ProbeCallback</code> that writes
+            back to the DB: updates <code>sandbox.last_heartbeat_at</code>, transitions status
+            PROVISIONING→RUNNING or RUNNING→STOPPED.</p>
+          </div>
+        </div>
+        <div class="callout callout-warn" style="margin-top:8px">
+          <strong>Note:</strong> Both Surface 1 and Surface 2 update <code>last_heartbeat_at</code> independently. This means
+          heartbeat and probe can interfere — a probe failure does not immediately mean the sandbox is dead if heartbeats are still arriving.
+          Currently there is no de-duplication logic between these two signals.
+        </div>
+        <table style="margin-top:10px">
+          <tr><td><strong>Direction</strong></td><td>Controller → Sandbox (via tunnel)</td><td><strong>Auth</strong></td><td>None (public <code>/healthz</code>)</td></tr>
+          <tr><td><strong>Failure mode</strong></td><td>sandbox.status → STOPPED; probe continues</td><td><strong>File</strong></td><td><code>sandbox_manager.py:start_probe()</code></td></tr>
+        </table>
+      </div>
+
+      <!-- Surface 3 -->
+      <div class="card span-12 accent-2l">
+        <div class="surf-row">
+          <div class="surf-icon" style="background:#3d2010">🗄️</div>
+          <div class="surf-body">
+            <h4>Surface 3 — Shared PostgreSQL  <span class="pill pill-orange">both read/write</span><span class="pill pill-red">highest risk</span></h4>
+            <p>The sandbox server receives <code>CONTROLLER_DATABASE_URL</code> as an env var at boot,
+            pointing to the same PostgreSQL instance as the controller.
+            <code>solve_manager.py</code> writes <code>Solve</code>, <code>SolveRun</code> rows and reads
+            <code>ChatSession</code>, <code>Issue</code>, <code>AuthToken</code>, <code>AIModel</code>
+            directly — no HTTP intermediary.</p>
+          </div>
+        </div>
+        <table style="margin-top:10px">
+          <tr>
+            <td><strong>Controller writes</strong></td>
+            <td>Sandbox, SessionRuntime, SessionAuditEvent, SessionArtifact</td>
+          </tr>
+          <tr>
+            <td><strong>Sandbox writes</strong></td>
+            <td>Solve, SolveRun (via solve_manager), lifecycle events (via lifecycle service calls)</td>
+          </tr>
+          <tr>
+            <td><strong>Failure mode</strong></td>
+            <td>If DB is unreachable from sandbox, solve_manager raises; runs stay PENDING forever</td>
+          </tr>
+          <tr>
+            <td><strong>Risk</strong></td>
+            <td>Multiple sandboxes writing to the same DB tables simultaneously — no row-level locking on Solve beyond SQLAlchemy session scope</td>
+          </tr>
+        </table>
+        <div class="callout callout-bad" style="margin-top:8px">
+          <strong>Security note:</strong> The sandbox has full read access to <em>all</em> DB tables including <code>AuthToken</code>
+          (GitHub tokens for all users). If the sandbox process is compromised, it can exfiltrate all OAuth tokens.
+          This is the highest-risk surface in the current architecture.
+        </div>
+      </div>
+
+      <!-- Surface 4 -->
+      <div class="card span-12 purple-l">
+        <div class="surf-row">
+          <div class="surf-icon" style="background:#2d1e50">🔌</div>
+          <div class="surf-body">
+            <h4>Surface 4 — Controller WebSocket → Sandbox WS Exec  <span class="pill pill-purple">controller-push</span><span class="pill pill-blue">on-demand</span></h4>
+            <p>The controller can open an internal WebSocket to
+            <code>wss://{tunnel_url}/internal/sessions/{session_id}/ws/exec</code>
+            authenticated by <code>CONTROLLER_INTERNAL_WS_SECRET</code>.
+            This allows the controller to run arbitrary shell commands inside the sandbox
+            and stream stdout/stderr back in real time.</p>
+          </div>
+        </div>
+        <table style="margin-top:10px">
+          <tr><td><strong>Direction</strong></td><td>Controller → Sandbox (internal)</td><td><strong>Auth</strong></td><td><code>?secret=</code> query param</td></tr>
+          <tr><td><strong>Commands</strong></td><td>Arbitrary bash (for mode orchestrator MSWEA)</td><td><strong>File</strong></td><td><code>sandbox_routes.py:websocket_internal_exec()</code></td></tr>
+          <tr><td><strong>Status</strong></td><td>Implemented but not yet called in production flow</td><td><strong>Risk</strong></td><td>Arbitrary code execution if secret leaks</td></tr>
+        </table>
+      </div>
+
+      <!-- Surface 5 -->
+      <div class="card span-12 ok-l">
+        <div class="surf-row">
+          <div class="surf-icon" style="background:#0d3020">📡</div>
+          <div class="surf-body">
+            <h4>Surface 5 — Sandbox SSE → Frontend  <span class="pill pill-green">sandbox-push</span><span class="pill pill-blue">streaming</span></h4>
+            <p>Once the frontend resolves the tunnel URL from the controller, it connects directly to the
+            sandbox server for trajectory streaming:
+            <code>GET {tunnel_url}/sessions/{id}/solve/stream/{solve_id}/{run_id}?token=...</code>.
+            The sandbox polls <code>HeadlessSandboxExecutor.read_trajectory()</code> every 3 seconds and
+            pushes SSE events. Auth is a JWT passed as a query param (EventSource cannot set headers).</p>
+          </div>
+        </div>
+        <table style="margin-top:10px">
+          <tr><td><strong>Direction</strong></td><td>Sandbox → Frontend (bypass controller)</td><td><strong>Polling interval</strong></td><td>3 seconds</td></tr>
+          <tr><td><strong>Auth</strong></td><td>?token= JWT validated against DB</td><td><strong>File</strong></td><td><code>solve_routes.py:stream_trajectory()</code></td></tr>
+          <tr><td><strong>Events emitted</strong></td><td><code>trajectory_update</code>, <code>heartbeat</code>, <code>status</code>, <code>done</code>, <code>error</code></td><td><strong>Heartbeat</strong></td><td>Every 15s (5 polls)</td></tr>
+        </table>
+      </div>
+
+    </div>
+
+    <!-- Surface map diagram -->
+    <div class="card span-12" style="margin-top:0">
+      <h2>Surface Map Diagram</h2>
+      <div class="flow">
+<span class="c-dim">  ┌─────────────────────────────┐            ┌───────────────────────────────────────────┐</span>
+<span class="c-dim">  │</span>      <span class="c-teal">CONTROLLER API HOST</span>       <span class="c-dim">│</span>            <span class="c-dim">│</span>          <span class="c-orange">REALTIME SANDBOX</span>                    <span class="c-dim">│</span>
+<span class="c-dim">  │</span>    run_controller.py        <span class="c-dim">│</span>            <span class="c-dim">│</span>         run_sandbox_server.py             <span class="c-dim">│</span>
+<span class="c-dim">  │</span>                             <span class="c-dim">│</span>            <span class="c-dim">│</span>   ┌─────────────────────────────────────┐ <span class="c-dim">│</span>
+<span class="c-dim">  │</span>  controller_routes.py       <span class="c-dim">│</span>            <span class="c-dim">│</span>   <span class="c-dim">│</span>  sandbox_router (healthz + ws/exec)  <span class="c-dim">│ │</span>
+<span class="c-dim">  │</span>  lifecycle.py               <span class="c-dim">│</span>            <span class="c-dim">│</span>   <span class="c-dim">│</span>  solve_router (start/status/stream)  <span class="c-dim">│ │</span>
+<span class="c-dim">  │</span>  sandbox_manager.py         <span class="c-dim">│</span>            <span class="c-dim">│</span>   <span class="c-dim">│</span>  solve_manager.py                    <span class="c-dim">│ │</span>
+<span class="c-dim">  │</span>  ws_hub.py                  <span class="c-dim">│</span>            <span class="c-dim">│</span>   <span class="c-dim">└─────────────────────────────────────┘ │</span>
+<span class="c-dim">  │</span>                             <span class="c-dim">│</span>            <span class="c-dim">│</span>                                           <span class="c-dim">│</span>
+<span class="c-dim">  └─────────────────────────────┘</span>            <span class="c-dim">└───────────────────────────────────────────┘</span>
+              <span class="c-dim">│  ▲                                  ▲  │         │  ▲</span>
+<span class="c-green">  [S2] PROBE ─┘  └─ [S1] HEARTBEAT</span>            <span class="c-dim">│  │</span>         <span class="c-dim">│  │</span>
+                                     <span class="c-orange">[S5] SSE ─┘  │</span>         <span class="c-blue">│  └─ [S4] WS EXEC</span>
+                                   <span class="c-orange">(trajectory)   │</span>         <span class="c-blue">└─ CONTROLLER→SANDBOX cmd</span>
+                                               <span class="c-dim">│</span>
+<span class="c-dim">  ┌─────────────────────────────────────────────┤─────────────────────────────────────────┐</span>
+<span class="c-dim">  │</span>                             <span class="c-purple">POSTGRESQL (shared)</span>                                       <span class="c-dim">│</span>
+<span class="c-dim">  │</span>  Controller writes: Sandbox, SessionRuntime, SessionAuditEvent, SessionArtifact       <span class="c-dim">│</span>
+<span class="c-dim">  │</span>  Sandbox   writes: Solve, SolveRun, SessionAuditEvent (via lifecycle calls)           <span class="c-dim">│</span>
+<span class="c-dim">  └─────────────────────────────────────────────────────────────────────────────────────────┘</span>
+
+                                <span class="c-dim">[S3] SHARED POSTGRES</span>
+              <span class="c-dim">Both processes read/write same DB — no HTTP boundary between them</span>
+
+                                       <span class="c-dim">│</span>
+                                       <span class="c-dim">▼</span>
+<span class="c-dim">  ┌─────────────────────────────────────────────────────────────────────────────────────────┐</span>
+<span class="c-dim">  │</span>                             <span class="c-purple">SOLVER SANDBOX (Modal)</span>                                    <span class="c-dim">│</span>
+<span class="c-dim">  │</span>  Spawned by HeadlessSandboxExecutor inside realtime sandbox                           <span class="c-dim">│</span>
+<span class="c-dim">  │</span>  /home/user/testbed/  ← git clone here                                                <span class="c-dim">│</span>
+<span class="c-dim">  │</span>  /home/user/last_mini_run.traj.json  ← trajectory (polled via sandbox.read_file)     <span class="c-dim">│</span>
+<span class="c-dim">  └─────────────────────────────────────────────────────────────────────────────────────────┘</span></div>
+    </div>
+
+  </div><!-- /surfaces -->
+
+
+  <!-- ══════════════════════════════════════════════
+       TAB 3 — LATENCY MAP
+  ══════════════════════════════════════════════ -->
+  <div id="latency" class="panel">
+
+    <div class="sec-header">
+      <div class="sec-num">3</div>
+      <h2>Latency Map — Where Time Goes</h2>
+    </div>
+
+    <div class="callout callout-warn">
+      <strong>The critical path from "user clicks Start" to "agent is editing code"</strong> currently has 4 blocking steps
+      that can add 3–7 minutes of dead time before a single line of code is touched.
+    </div>
+
+    <!-- Phase breakdown -->
+    <div class="card span-12">
+      <h2>Critical Path Breakdown</h2>
+      <div class="lat-bar"><div class="lat-label">Modal sandbox cold start</div><div class="lat-track"><div class="lat-fill" style="width:85%"></div></div><div class="lat-val" style="color:#f77a7a">30–90s</div></div>
+      <div class="lat-bar"><div class="lat-label">Image pull (first time)</div><div class="lat-track"><div class="lat-fill" style="width:60%;background:linear-gradient(90deg,#f7934f,#f77a7a)"></div></div><div class="lat-val" style="color:#f7934f">60–120s</div></div>
+      <div class="lat-bar"><div class="lat-label">uvicorn boot inside sandbox</div><div class="lat-track"><div class="lat-fill" style="width:15%;background:linear-gradient(90deg,#4fcb82,#4f8ef7)"></div></div><div class="lat-val" style="color:#4fcb82">1–3s</div></div>
+      <div class="lat-bar"><div class="lat-label">Tunnel URL resolution</div><div class="lat-track"><div class="lat-fill" style="width:10%;background:linear-gradient(90deg,#4fcb82,#4f8ef7)"></div></div><div class="lat-val" style="color:#4fcb82">&lt;1s</div></div>
+      <div class="lat-bar"><div class="lat-label">Solver sandbox cold start</div><div class="lat-track"><div class="lat-fill" style="width:90%;background:linear-gradient(90deg,#f77a7a,#f7934f)"></div></div><div class="lat-val" style="color:#f77a7a">40–120s</div></div>
+      <div class="lat-bar"><div class="lat-label">git clone inside solver sandbox</div><div class="lat-track"><div class="lat-fill" style="width:55%;background:linear-gradient(90deg,#f7c94f,#f7934f)"></div></div><div class="lat-val" style="color:#f7c94f">10–90s</div></div>
+      <div class="lat-bar"><div class="lat-label">mini-swe-agent init + first LLM call</div><div class="lat-track"><div class="lat-fill" style="width:20%;background:linear-gradient(90deg,#4f8ef7,#a78bfa)"></div></div><div class="lat-val" style="color:#a78bfa">5–15s</div></div>
+      <div class="lat-bar"><div class="lat-label">Trajectory poll lag (3s interval)</div><div class="lat-track"><div class="lat-fill" style="width:8%;background:linear-gradient(90deg,#4fcb82,#4f8ef7)"></div></div><div class="lat-val" style="color:#4fcb82">0–3s</div></div>
+      <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--line)">
+        <span class="pill pill-red">Total cold path: 3–7 minutes</span>
+        <span class="pill pill-warn">Warm path (cached image): 45–90s</span>
+        <span class="pill pill-green">Hot path (pre-warmed sandbox): 5–15s</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card span-6 bad-l">
+        <h2>Worst-Case Bottlenecks</h2>
+        <ul>
+          <li><strong>Modal image pull:</strong> mini-swe-agent is installed from GitHub at image build time.
+          If the image is not cached in Modal's layer cache, the <code>pip install -e /opt/mini-swe-agent</code>
+          runs fresh — 60–120s alone.</li>
+          <li><strong>Nested sandbox creation:</strong> The realtime sandbox must boot fully before
+          it can spawn the solver sandbox. Two sequential cold starts compound.</li>
+          <li><strong>git clone per run:</strong> Every solve run clones the repo fresh into
+          <code>/home/user/testbed/</code>. Large repos (>500MB) can take 60–90s.</li>
+          <li><strong>Trajectory polling:</strong> The SSE endpoint polls every 3s.
+          If the agent finishes in 2.9s, the UI sees nothing for 3s. At high step frequency,
+          the UI is always 0–3s behind.</li>
+        </ul>
+      </div>
+
+      <div class="card span-6 warn-l">
+        <h2>Structural Latency Sources</h2>
+        <ul>
+          <li><strong>Two-hop architecture:</strong> Browser → Controller → (tunnel resolve) → Sandbox.
+          Every user action that goes via the controller adds a round trip before reaching the sandbox.</li>
+          <li><strong>3s poll on trajectory:</strong> The realtime sandbox polls
+          <code>solver_sandbox.read_file()</code> → Modal's <code>sandbox.open()</code> → file read from solver sandbox filesystem.
+          This is a blocking I/O operation in every poll loop iteration.</li>
+          <li><strong>Synchronous git bootstrap:</strong> <code>SandboxManager.ensure_git_bootstrap()</code>
+          calls <code>subprocess.run()</code> synchronously on the controller thread during provisioning.
+          A slow clone blocks the controller's async event loop.</li>
+          <li><strong>DB writes on critical path:</strong> Every heartbeat writes to Postgres.
+          At 10s intervals with N active sandboxes, this is O(N) DB writes/s from the controller alone.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card span-12">
+      <h2>Latency per Connection Surface</h2>
+      <table>
+        <thead><tr><th>Surface</th><th>Typical Latency</th><th>P99 Risk</th><th>Blocking?</th></tr></thead>
+        <tbody>
+          <tr><td>[S1] Heartbeat (sandbox→controller)</td><td>&lt;50ms</td><td>5s timeout, then skip</td><td>No — background task</td></tr>
+          <tr><td>[S2] Probe (controller→sandbox)</td><td>&lt;100ms over tunnel</td><td>3s timeout before STOPPED</td><td>No — asyncio task</td></tr>
+          <tr><td>[S3] Shared DB access from sandbox</td><td>1–10ms (same region)</td><td>Connection pool exhaustion</td><td>Yes — sync writes in solve_manager</td></tr>
+          <tr><td>[S4] Internal WS exec</td><td>~50ms + command duration</td><td>Unbounded (command-dependent)</td><td>No — WS stream</td></tr>
+          <tr><td>[S5] SSE trajectory stream</td><td>0–3s lag (poll interval)</td><td>3s if event fires just after poll</td><td>Partial — 3s poll delay</td></tr>
+          <tr><td>Solver sandbox file read</td><td>50–500ms per read_file()</td><td>&gt;1s on large trajectory files</td><td>Yes — blocks SSE poll loop</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div><!-- /latency -->
+
+
+  <!-- ══════════════════════════════════════════════
+       TAB 4 — IMPROVEMENTS
+  ══════════════════════════════════════════════ -->
+  <div id="improvements" class="panel">
+
+    <div class="sec-header">
+      <div class="sec-num">4</div>
+      <h2>Improvement Recommendations</h2>
+    </div>
+
+    <!-- Improvement 1 -->
+    <div class="improvement">
+      <div class="i-header">
+        <h3>1 — Pre-warm Solver Sandbox Image (Warm Pool)</h3>
+        <span class="impact-badge impact-high">High Impact</span>
+      </div>
+      <p>
+        The single biggest latency win. Instead of creating the solver Modal sandbox on-demand
+        when <code>solve/start</code> is called, maintain a small warm pool of pre-created
+        solver sandboxes with mini-swe-agent already booted, sitting idle.
+        When a solve starts, claim one from the pool and replenish asynchronously.
+      </p>
+      <div class="flow" style="font-size:11px">Current:   solve/start → modal.Sandbox.create() → wait 40–120s → upload script → execute
+With pool:  solve/start → claim from pool (< 1s) → upload script → execute
+            background task replenishes pool to target size (e.g. 2 warm sandboxes)</div>
+      <p style="margin-top:10px"><strong>Implementation:</strong> A <code>SolverSandboxWarmPool</code> singleton in
+      the realtime sandbox server. On boot, pre-create N sandboxes. Expose pool size in <code>/healthz</code>.</p>
+      <div class="tag-row">
+        <span class="pill pill-green">saves 40–120s per solve</span>
+        <span class="pill pill-warn">Modal cost: idle sandboxes still billed</span>
+        <span class="pill pill-blue">target pool size: 1–3</span>
+      </div>
+    </div>
+
+    <!-- Improvement 2 -->
+    <div class="improvement">
+      <div class="i-header">
+        <h3>2 — Pre-clone Repo at Sandbox Boot (Shared Workspace)</h3>
+        <span class="impact-badge impact-high">High Impact</span>
+      </div>
+      <p>
+        Currently the solver sandbox clones the repo fresh every run.
+        Instead, the realtime sandbox should clone the repo at boot time into a shared volume
+        or pass a pre-cloned tarball into the solver sandbox at creation time.
+        Modal supports mounting volumes that persist across sandbox invocations.
+      </p>
+      <div class="flow" style="font-size:11px">Option A — Volume mount:
+  realtime sandbox boots → git clone repo → Modal.Volume("/workspace")
+  solver sandbox created with same volume → skip clone, just git reset --hard HEAD
+
+Option B — Tarball injection:
+  realtime sandbox boots → git archive HEAD → upload tarball to solver sandbox
+  solver sandbox: tar -xzf repo.tar.gz → /home/user/testbed/ (no git history needed)</div>
+      <div class="tag-row">
+        <span class="pill pill-green">saves 10–90s per solve</span>
+        <span class="pill pill-warn">requires Modal volume setup or tarball upload step</span>
+      </div>
+    </div>
+
+    <!-- Improvement 3 -->
+    <div class="improvement">
+      <div class="i-header">
+        <h3>3 — Push-based Trajectory Streaming via WS (replace 3s poll)</h3>
+        <span class="impact-badge impact-high">High Impact</span>
+      </div>
+      <p>
+        The current SSE endpoint polls <code>executor.read_trajectory()</code> every 3s.
+        This means up to 3s lag on every trajectory update and a constant file-read overhead.
+        Replace with push-based streaming: mini-swe-agent writes each step to the trajectory file
+        <em>and</em> sends a signal (via a Unix socket, named pipe, or small HTTP call to localhost)
+        that tells the sandbox server to immediately read and push the new step.
+      </p>
+      <div class="flow" style="font-size:11px">Option A — Named pipe / Unix socket:
+  run_agent.py: after each step → write to /tmp/traj_events.pipe
+  sandbox server: asyncio.open_unix_connection() → read each step → push to SSE/WS immediately
+
+Option B — Patch DefaultAgent (if open source allows):
+  Override agent.save() → call localhost HTTP endpoint after writing trajectory
+
+Option C — inotify on the trajectory file:
+  Use watchfiles/aionotify to watch /home/user/last_mini_run.traj.json → push on change</div>
+      <div class="tag-row">
+        <span class="pill pill-green">reduces trajectory lag: 3s → &lt;100ms</span>
+        <span class="pill pill-blue">removes constant file-read overhead</span>
+        <span class="pill pill-warn">requires modifying agent script or using inotify</span>
+      </div>
+    </div>
+
+    <!-- Improvement 4 -->
+    <div class="improvement">
+      <div class="i-header">
+        <h3>4 — Move git Bootstrap off the Controller Thread</h3>
+        <span class="impact-badge impact-medium">Medium Impact</span>
+      </div>
+      <p>
+        <code>SandboxManager.ensure_git_bootstrap()</code> calls <code>subprocess.run()</code>
+        synchronously during <code>create_runtime_for_session()</code>, which runs in an async
+        FastAPI handler. A large git clone blocks the controller's event loop for the duration
+        of the clone. Wrap it in <code>asyncio.to_thread()</code> or dispatch to a background task.
+      </p>
+      <div class="flow" style="font-size:11px">Current:  await lifecycle.create_runtime_for_session()  ← blocks on git clone
+Fixed:    asyncio.to_thread(sandbox_manager.ensure_git_bootstrap, ...)
+          or: return early, clone happens in background</div>
+      <div class="tag-row">
+        <span class="pill pill-green">unblocks event loop during provisioning</span>
+        <span class="pill pill-blue">1-line fix: asyncio.to_thread</span>
+      </div>
+    </div>
+
+    <!-- Improvement 5 -->
+    <div class="improvement">
+      <div class="i-header">
+        <h3>5 — Decouple Heartbeat + Probe Signals</h3>
+        <span class="impact-badge impact-medium">Medium Impact</span>
+      </div>
+      <p>
+        Currently both S1 (sandbox heartbeat) and S2 (controller probe) update <code>last_heartbeat_at</code>.
+        This means a single field tracks two different health signals. If the sandbox is alive
+        (heartbeats arriving) but the tunnel is down (probes failing), the sandbox appears healthy.
+        Separate these into two fields: <code>last_heartbeat_at</code> and <code>last_probe_at</code>.
+        Use compound logic for stale detection: stale if <em>both</em> signals are absent.
+      </p>
+      <div class="tag-row">
+        <span class="pill pill-green">more accurate liveness tracking</span>
+        <span class="pill pill-blue">DB migration: add last_probe_at column</span>
+      </div>
+    </div>
+
+    <!-- Improvement 6 -->
+    <div class="improvement">
+      <div class="i-header">
+        <h3>6 — Scope DB Access from Sandbox (Least Privilege)</h3>
+        <span class="impact-badge impact-high">High Impact (Security)</span>
+      </div>
+      <p>
+        The sandbox currently has full read access to all DB tables including <code>AuthToken</code>
+        (all users' GitHub OAuth tokens). Apply least-privilege: either use a scoped Postgres role
+        that only has access to <code>solves</code>, <code>solve_runs</code>, and the specific
+        <code>chat_sessions</code> / <code>issues</code> rows it needs — or proxy all sensitive reads
+        through a controller API endpoint that validates ownership before returning data.
+      </p>
+      <div class="flow" style="font-size:11px">Option A — DB role scoping:
+  CREATE ROLE sandbox_worker WITH LOGIN PASSWORD '...'
+  GRANT SELECT ON chat_sessions, issues, ai_models TO sandbox_worker
+  GRANT SELECT, INSERT, UPDATE ON solves, solve_runs TO sandbox_worker
+  (no access to auth_tokens, users, other users' data)
+
+Option B — Data passed at provisioning time:
+  Controller resolves github_token, repo_url, issue text at solve/start time
+  Passes them in the solve request body — sandbox never touches auth_tokens table</div>
+      <div class="tag-row">
+        <span class="pill pill-red">current: sandbox can read all auth_tokens</span>
+        <span class="pill pill-green">Option B is simpler and eliminates the risk entirely</span>
+      </div>
+    </div>
+
+    <!-- Improvement 7 -->
+    <div class="improvement">
+      <div class="i-header">
+        <h3>7 — Replace SSE with WebSocket for Trajectory (Unified Stream)</h3>
+        <span class="impact-badge impact-medium">Medium Impact</span>
+      </div>
+      <p>
+        The unified WS endpoint (<code>ws_hub.py</code>) already exists on the controller.
+        The frontend's <code>useSessionWebSocket</code> hook already has reconnect logic.
+        Consolidate trajectory streaming into this channel:
+        the sandbox server pushes trajectory events to the controller's WS hub via an internal
+        HTTP call or by writing to a shared Redis pub/sub channel, and the controller fans out
+        to connected frontend sockets. This removes the need for the frontend to directly
+        connect to the sandbox tunnel URL.
+      </p>
+      <div class="flow" style="font-size:11px">Current:  Frontend → (tunnel URL) → SSE on sandbox server
+Target:   Frontend → (WS) → Controller WS hub
+          Sandbox → (internal HTTP) → Controller "push trajectory event" endpoint
+          Controller WS hub broadcasts to all connected frontend sockets for this session</div>
+      <div class="tag-row">
+        <span class="pill pill-blue">frontend no longer needs the tunnel URL</span>
+        <span class="pill pill-warn">requires a controller-side trajectory event endpoint</span>
+        <span class="pill pill-green">enables WS reconnect without losing session context</span>
+      </div>
+    </div>
+
+  </div><!-- /improvements -->
+
+
+  <!-- ══════════════════════════════════════════════
+       TAB 5 — DESIGN QUESTIONS
+  ══════════════════════════════════════════════ -->
+  <div id="questions" class="panel">
+
+    <div class="sec-header">
+      <div class="sec-num">5</div>
+      <h2>Critical Design Questions</h2>
+    </div>
+
+    <p style="color:var(--muted);margin-bottom:20px;font-size:0.92rem">
+      These are the architectural decisions that must be made before implementing the
+      low-latency optimisations. Each one has a significant downstream impact on the
+      shape of the system. Answer these to lock down the design.
+    </p>
+
+    <!-- Q1 -->
+    <div class="question">
+      <div class="q-title"><span class="q-num">1</span>Where does the coding agent actually execute — inside the realtime sandbox or in a separate nested solver sandbox?</div>
+      <div class="q-body">
+        <p>Right now: the realtime sandbox (FastAPI server) <em>creates a second Modal sandbox</em> to run mini-swe-agent.
+        This means two Modal sandboxes are alive simultaneously per session.</p>
+        <ul>
+          <li><strong>Keep nested:</strong> Clean separation — the server and the agent can't interfere. But adds 40–120s cold start and doubles Modal cost.</li>
+          <li><strong>Collapse into one:</strong> The realtime sandbox runs mini-swe-agent directly as a subprocess. Faster, cheaper, but the agent process can kill the server.</li>
+          <li><strong>Hybrid:</strong> Pre-warm nested solver sandboxes so the creation cost is paid upfront.</li>
+        </ul>
+        <div class="q-options">
+          <div class="q-opt">Keep nested (current)</div>
+          <div class="q-opt">Collapse into one sandbox</div>
+          <div class="q-opt">Keep nested + warm pool</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Q2 -->
+    <div class="question">
+      <div class="q-title"><span class="q-num">2</span>How should the frontend get trajectory updates — SSE from the sandbox tunnel, or WS from the controller?</div>
+      <div class="q-body">
+        <p>This determines the frontend's connection model and whether it ever needs to know the sandbox tunnel URL.</p>
+        <ul>
+          <li><strong>SSE from tunnel (current):</strong> Frontend must resolve tunnel URL, connect directly to sandbox. Simple. But frontend needs tunnel access, and SSE reconnects don't recover session state.</li>
+          <li><strong>WS from controller:</strong> Frontend has one stable WS connection to the controller. Sandbox pushes events to controller via internal HTTP. Controller fans out. More resilient to sandbox restarts.</li>
+          <li><strong>Hybrid:</strong> WS for chat/status events (controller), SSE for raw trajectory bytes (sandbox). Separates concerns but adds complexity.</li>
+        </ul>
+        <div class="q-options">
+          <div class="q-opt">SSE direct from sandbox</div>
+          <div class="q-opt">WS via controller hub</div>
+          <div class="q-opt">Hybrid WS+SSE</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Q3 -->
+    <div class="question">
+      <div class="q-title"><span class="q-num">3</span>Should the sandbox have direct database access, or should all sensitive reads go through the controller API?</div>
+      <div class="q-body">
+        <p>This is a security vs. simplicity trade-off. Currently the sandbox reads <code>AuthToken</code>, <code>User</code>, and other sensitive tables directly.</p>
+        <ul>
+          <li><strong>Direct DB (current):</strong> Fastest. Simple code. But sandbox can read all auth tokens. Risk: sandbox compromise = all GitHub tokens leaked.</li>
+          <li><strong>Proxy through controller:</strong> Sandbox calls <code>POST /controller/sessions/{id}/solve/resolve-context</code> to get pre-resolved {github_token, issue_text, repo_url}. No direct DB access. Requires one more HTTP round-trip at solve start.</li>
+          <li><strong>Scoped DB role:</strong> Middle ground — sandbox gets a Postgres role with only the tables/rows it needs. Requires DB migration and role management.</li>
+        </ul>
+        <div class="q-options">
+          <div class="q-opt">Direct DB (current)</div>
+          <div class="q-opt">Proxy via controller API</div>
+          <div class="q-opt">Scoped Postgres role</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Q4 -->
+    <div class="question">
+      <div class="q-title"><span class="q-num">4</span>What is the repo delivery strategy for the solver sandbox — clone at runtime, pre-clone at provisioning, or volume mount?</div>
+      <div class="q-body">
+        <p>The git clone is currently the largest variable-latency operation (10–90s depending on repo size).</p>
+        <ul>
+          <li><strong>Clone at runtime (current):</strong> Simple. Always fresh. But adds 10–90s to critical path every solve.</li>
+          <li><strong>Clone at realtime sandbox boot:</strong> Realtime sandbox clones on boot, passes as a tarball or mounts via Modal volume. Saves time on solve start but requires workspace management.</li>
+          <li><strong>Shallow clone + filter:</strong> Use <code>--depth 1 --filter=blob:none</code> to minimise clone size. Fast even for large repos.</li>
+          <li><strong>Modal Volume:</strong> Persistent volume shared between solver sandbox runs for the same identity key. First clone is slow, subsequent runs get <code>git reset --hard HEAD</code>.</li>
+        </ul>
+        <div class="q-options">
+          <div class="q-opt">Clone at runtime (current)</div>
+          <div class="q-opt">Shallow clone (--depth 1)</div>
+          <div class="q-opt">Pre-clone at boot + tarball</div>
+          <div class="q-opt">Modal Volume</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Q5 -->
+    <div class="question">
+      <div class="q-title"><span class="q-num">5</span>How should sandbox-to-controller communication work when the controller is unavailable — fail hard or buffer?</div>
+      <div class="q-body">
+        <p>If the controller goes down during a solve, the sandbox continues running but heartbeats fail.
+        The controller's stale detection would terminate the sandbox row after 600s even if the agent is mid-solve.</p>
+        <ul>
+          <li><strong>Fail hard (current implicit):</strong> No retry logic on heartbeats beyond the interval. Controller restart marks sandbox stale.</li>
+          <li><strong>Buffer heartbeats:</strong> Sandbox retries heartbeats with exponential backoff. Controller distinguishes "missed heartbeats" from "terminated".</li>
+          <li><strong>Self-contained solve:</strong> Sandbox completes the solve regardless of controller availability, writes results to DB, controller reconciles on recovery.</li>
+        </ul>
+        <div class="q-options">
+          <div class="q-opt">Fail hard + user retries</div>
+          <div class="q-opt">Buffer + retry heartbeats</div>
+          <div class="q-opt">Self-contained solve</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Q6 -->
+    <div class="question">
+      <div class="q-title"><span class="q-num">6</span>What is the target latency from "user clicks Solve" to "first agent step visible in UI"?</div>
+      <div class="q-body">
+        <p>This shapes everything from warm pool sizing to whether you need pre-provisioning at session creation time.
+        Different targets require fundamentally different architectures.</p>
+        <ul>
+          <li><strong>&lt;5 seconds:</strong> Requires warm pools, pre-cloned repos, and push-based streaming. Significant infrastructure investment.</li>
+          <li><strong>5–30 seconds:</strong> Achievable with warm pool + shallow clone + push streaming. Moderate investment.</li>
+          <li><strong>30–120 seconds:</strong> Achievable with just shallow clone + better progress UX. Low investment.</li>
+          <li><strong>&gt;2 minutes acceptable:</strong> Current architecture with minor improvements is fine.</li>
+        </ul>
+        <div class="q-options">
+          <div class="q-opt">&lt;5 seconds (enterprise)</div>
+          <div class="q-opt">5–30 seconds (fast)</div>
+          <div class="q-opt">30–120 seconds (standard)</div>
+          <div class="q-opt">&gt;2 min OK for now</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Q7 -->
+    <div class="question">
+      <div class="q-title"><span class="q-num">7</span>Should one realtime sandbox be reused across multiple solve runs for the same session, or create a fresh one per run?</div>
+      <div class="q-body">
+        <p>Currently a realtime sandbox terminates when a PR is created. If the user wants to run another solve,
+        a new sandbox must be provisioned (cold start again). Reuse would amortise the cold-start cost.</p>
+        <ul>
+          <li><strong>Terminate on completion (current):</strong> Clean slate per solve. But cold start on every new solve within the same session.</li>
+          <li><strong>Keep alive between solves:</strong> Faster for multi-solve sessions. But idle billing and state management complexity (stale workspace).</li>
+          <li><strong>Keep alive with TTL:</strong> Reuse for N minutes after last solve. If user comes back within TTL, instant start. After TTL, terminate.</li>
+        </ul>
+        <div class="q-options">
+          <div class="q-opt">Terminate on completion (current)</div>
+          <div class="q-opt">Keep alive between solves</div>
+          <div class="q-opt">Keep alive with TTL</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout callout-ok" style="margin-top:8px">
+      <strong>Recommended decision order:</strong> Answer Q6 first (target latency), then Q1 (one vs. two sandboxes),
+      then Q4 (repo delivery), then Q3 (DB access security), then Q2 (streaming architecture), then Q5 + Q7 (resilience).
+      The answer to Q6 collapses most of the others.
+    </div>
+
+  </div><!-- /questions -->
+
+</div><!-- /wrap -->
+
+<script>
+  function show(id, btn) {
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    btn.classList.add('active');
+  }
+</script>
+</body>
+</html>
