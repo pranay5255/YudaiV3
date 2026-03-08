@@ -15,6 +15,7 @@ from db.database import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from realtime.sandbox_routes import router as sandbox_router
+from realtime.solve_routes import router as solve_router
 
 
 async def _heartbeat_loop() -> None:
@@ -79,6 +80,7 @@ app.add_middleware(
 )
 
 app.include_router(sandbox_router)
+app.include_router(solve_router)
 
 
 @app.get("/")
