@@ -136,7 +136,6 @@ from models import (
     UserIssueResponse,
 )
 from pgvector.sqlalchemy import Vector
-from solver.solver import router as solver_api_router
 from sqlalchemy.orm import Session
 
 from utils import utc_now
@@ -145,7 +144,6 @@ from .llm_service import LLMService
 from .session_service import SessionService
 
 router = APIRouter(tags=["sessions"])
-router.include_router(solver_api_router)
 
 # Configure logging
 logger = logging.getLogger(__name__)
