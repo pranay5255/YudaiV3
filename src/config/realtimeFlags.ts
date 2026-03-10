@@ -13,7 +13,6 @@ export interface RealtimeFeatureFlags {
   sandboxInternalExecEnabled: boolean;
   modeOrchestratorEnabled: boolean;
   wsChatEnabled: boolean;
-  sseStreamEnabled: boolean;
   wsUnifiedEnabled: boolean;
   contractVersion: string;
 }
@@ -36,10 +35,6 @@ export const realtimeFeatureFlags: RealtimeFeatureFlags = {
     true
   ),
   wsChatEnabled: parseFlag(import.meta.env.VITE_REALTIME_WS_CHAT_ENABLED, false),
-  sseStreamEnabled: parseFlag(
-    import.meta.env.VITE_REALTIME_SSE_STREAM_ENABLED,
-    false
-  ),
   wsUnifiedEnabled: parseFlag(
     import.meta.env.VITE_REALTIME_WS_UNIFIED_ENABLED,
     false
