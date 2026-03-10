@@ -1,4 +1,11 @@
-"""Modal compute provisioning for realtime sandbox sessions."""
+"""
+Unified Modal sandbox image and provisioning.
+
+Single image runs both the sandbox FastAPI server (uvicorn) and
+mini-swe-agent solver runs as subprocesses — no nested Modal sandboxes.
+The sandbox is long-lived and reused across multiple solve runs within
+a session. The cloned repo persists between runs (git fetch + reset).
+"""
 
 from __future__ import annotations
 
@@ -15,50 +22,103 @@ import modal
 logger = logging.getLogger(__name__)
 
 _BACKEND_SOURCE_DIR = Path(__file__).resolve().parents[1]
-_realtime_sandbox_image: Optional[modal.Image] = None
+_MSWEA_CONFIG_DIR = Path(__file__).resolve().parent / "mswea_mode_configs"
+
+_unified_sandbox_image: Optional[modal.Image] = None
 
 _modal_app: Optional[modal.App] = None
 _modal_app_lock = asyncio.Lock()
 
+# ── GitHub CLI install script (gh) ──────────────────────────────────────
+_GH_CLI_INSTALL = (
+    "curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg "
+    "| dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg "
+    "&& chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg "
+    "&& echo 'deb [arch=$(dpkg --print-architecture) "
+    "signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] "
+    "https://cli.github.com/packages stable main' "
+    "| tee /etc/apt/sources.list.d/github-cli.list > /dev/null "
+    "&& apt-get update && apt-get install -y gh"
+)
 
-def _with_backend_source(image: modal.Image) -> modal.Image:
-    """Attach local backend source code, supporting Modal SDK API variants."""
-    copy_local_dir = getattr(image, "copy_local_dir", None)
-    if callable(copy_local_dir):
-        return copy_local_dir(str(_BACKEND_SOURCE_DIR), "/app/backend/")
 
-    add_local_dir = getattr(image, "add_local_dir", None)
-    if callable(add_local_dir):
-        return add_local_dir(str(_BACKEND_SOURCE_DIR), remote_path="/app/backend/", copy=True)
+def _copy_local_dir(image: modal.Image, local_path: str, remote_path: str) -> modal.Image:
+    """Attach a local directory, supporting Modal SDK API variants."""
+    copy_fn = getattr(image, "copy_local_dir", None)
+    if callable(copy_fn):
+        return copy_fn(local_path, remote_path)
+
+    add_fn = getattr(image, "add_local_dir", None)
+    if callable(add_fn):
+        return add_fn(local_path, remote_path=remote_path, copy=True)
 
     raise AttributeError("Modal Image API missing copy_local_dir/add_local_dir")
 
 
-def _get_realtime_sandbox_image() -> modal.Image:
-    """Lazily build the Modal image so non-Modal tests can import this module."""
-    global _realtime_sandbox_image
-    if _realtime_sandbox_image is None:
-        image = (
-            modal.Image.debian_slim(python_version="3.11")
-            .apt_install("git", "curl", "libpq-dev", "gcc")
-            .pip_install(
-                "fastapi",
-                "uvicorn[standard]",
-                "httpx",
-                "sqlalchemy",
-                "pydantic",
-                "pyyaml",
-                "requests",
-                "websockets",
-                "python-jose[cryptography]",
-                "passlib",
-                "pgvector",
-                "psycopg2-binary",
-            )
-            .env({"PYTHONPATH": "/app/backend"})
+def _get_unified_sandbox_image() -> modal.Image:
+    """Build the unified image: server + solver + gh CLI + mode configs.
+
+    Layers (top to bottom):
+      1. debian-slim 3.11 + system packages (git, curl, gh, gcc, libpq)
+      2. Python packages for server (fastapi, uvicorn, sqlalchemy, …)
+      3. Python packages for solver (minisweagent + its deps)
+      4. Backend source code  →  /app/backend/
+      5. MSWEA mode configs   →  /app/mswea_mode_configs/
+      6. Workspace directory   →  /workspace/  (empty, created at build)
+    """
+    global _unified_sandbox_image
+    if _unified_sandbox_image is not None:
+        return _unified_sandbox_image
+
+    image = (
+        modal.Image.debian_slim(python_version="3.11")
+        # ── System packages ──
+        .apt_install("git", "curl", "libpq-dev", "gcc", "gnupg")
+        # ── GitHub CLI (gh) ──
+        .run_commands(_GH_CLI_INSTALL)
+        # ── Server Python deps ──
+        .pip_install(
+            "fastapi",
+            "uvicorn[standard]",
+            "httpx",
+            "sqlalchemy",
+            "pydantic",
+            "pyyaml",
+            "requests",
+            "websockets",
+            "python-jose[cryptography]",
+            "passlib",
+            "pgvector",
+            "psycopg2-binary",
         )
-        _realtime_sandbox_image = _with_backend_source(image)
-    return _realtime_sandbox_image
+        # ── Solver Python deps (mini-swe-agent) ──
+        .pip_install(
+            "minisweagent",
+        )
+        # ── Workspace dir for cloned repos ──
+        .run_commands("mkdir -p /workspace")
+        .env({
+            "PYTHONPATH": "/app/backend",
+            "WORKSPACE_PATH": "/workspace/repo",
+        })
+    )
+
+    # Attach backend source code
+    image = _copy_local_dir(image, str(_BACKEND_SOURCE_DIR), "/app/backend/")
+
+    # Attach MSWEA mode configs (architect/tester/coder yamls)
+    if _MSWEA_CONFIG_DIR.is_dir():
+        image = _copy_local_dir(image, str(_MSWEA_CONFIG_DIR), "/app/mswea_mode_configs/")
+
+    _unified_sandbox_image = image
+    return _unified_sandbox_image
+
+
+# ── Default workspace path (single canonical location) ──────────────────
+SANDBOX_WORKSPACE_PATH = "/workspace/repo"
+
+# ── MSWEA mode config paths inside the sandbox ──────────────────────────
+SANDBOX_MSWEA_CONFIG_ROOT = "/app/mswea_mode_configs"
 
 
 async def _call_modal_async(fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -70,7 +130,7 @@ async def _call_modal_async(fn: Callable[..., Any], *args: Any, **kwargs: Any) -
 
 
 async def _get_modal_app() -> modal.App:
-    """Lazily initialize and cache the Modal app for realtime sandboxes."""
+    """Lazily initialize and cache the Modal app."""
     global _modal_app
     if _modal_app is not None:
         return _modal_app
@@ -87,7 +147,16 @@ async def _get_modal_app() -> modal.App:
 
 @dataclass
 class RealtimeModalSandbox:
-    """Manages a single Modal sandbox running run_sandbox_server.py."""
+    """Manages a single unified Modal sandbox.
+
+    The sandbox runs:
+      - uvicorn (sandbox server) as the main process
+      - mini-swe-agent solve runs as subprocesses (via exec broker WS)
+      - gh CLI for PR creation as subprocesses
+
+    The sandbox persists across multiple solve runs within a session.
+    The cloned repo at /workspace/repo is reused (git fetch + reset).
+    """
 
     _sandbox: modal.Sandbox
     _tunnel_url: str
@@ -108,16 +177,20 @@ class RealtimeModalSandbox:
     ) -> "RealtimeModalSandbox":
         app = await _get_modal_app()
 
+        # ── Build environment ────────────────────────────────────────
         sandbox_env: Dict[str, str] = {
             "SANDBOX_ID": sandbox_db_id,
             "CONTROLLER_BASE_URL": controller_base_url,
+            "WORKSPACE_PATH": workspace_path or SANDBOX_WORKSPACE_PATH,
+            "MSWEA_CONFIG_ROOT": SANDBOX_MSWEA_CONFIG_ROOT,
         }
-        controller_database_url = os.getenv("DATABASE_URL") or os.getenv("CONTROLLER_DATABASE_URL")
-        if controller_database_url:
-            sandbox_env["CONTROLLER_DATABASE_URL"] = controller_database_url
+
         controller_internal_ws_secret = os.getenv("CONTROLLER_INTERNAL_WS_SECRET")
         if controller_internal_ws_secret:
             sandbox_env["CONTROLLER_INTERNAL_WS_SECRET"] = controller_internal_ws_secret
+
+        # GitHub token is passed at sandbox creation for repo cloning.
+        # Per-solve tokens are forwarded via the exec broker env dict.
         if github_token:
             sandbox_env["GITHUB_TOKEN"] = github_token
         if session_public_id:
@@ -126,24 +199,14 @@ class RealtimeModalSandbox:
             sandbox_env["REPO_URL"] = repo_url
         if repo_branch:
             sandbox_env["REPO_BRANCH"] = repo_branch
-        if workspace_path:
-            sandbox_env["WORKSPACE_PATH"] = workspace_path
+
         if env_inputs:
             for key, value in env_inputs.items():
                 if key and value is not None:
                     sandbox_env[key] = str(value)
-        sandbox_env["SANDBOX_SETUP_CONTEXT"] = json.dumps(
-            {
-                "session_public_id": session_public_id,
-                "repo_url": repo_url,
-                "repo_branch": repo_branch,
-                "workspace_path": workspace_path,
-                "env_inputs": env_inputs or {},
-            }
-        )
 
         logger.info(
-            "Creating Modal sandbox for db_id=%s controller=%s timeout=%d",
+            "Creating unified sandbox db_id=%s controller=%s timeout=%d",
             sandbox_db_id,
             controller_base_url,
             timeout,
@@ -160,7 +223,7 @@ class RealtimeModalSandbox:
             "--port",
             "8100",
             app=app,
-            image=_get_realtime_sandbox_image(),
+            image=_get_unified_sandbox_image(),
             encrypted_ports=[8100],
             env=sandbox_env,
             timeout=timeout,
@@ -172,7 +235,7 @@ class RealtimeModalSandbox:
 
         modal_sandbox_id = str(sandbox.object_id)
         logger.info(
-            "Modal sandbox created: modal_id=%s tunnel_url=%s",
+            "Unified sandbox created: modal_id=%s tunnel_url=%s",
             modal_sandbox_id,
             tunnel_url,
         )
@@ -194,9 +257,9 @@ class RealtimeModalSandbox:
     async def terminate(self) -> None:
         try:
             await _call_modal_async(self._sandbox.terminate)
-            logger.info("Modal sandbox terminated: %s", self._modal_sandbox_id)
+            logger.info("Unified sandbox terminated: %s", self._modal_sandbox_id)
         except Exception as e:
-            logger.warning("Failed to terminate Modal sandbox %s: %s", self._modal_sandbox_id, e)
+            logger.warning("Failed to terminate sandbox %s: %s", self._modal_sandbox_id, e)
 
     async def exec(self, command: str) -> Any:
         return await _call_modal_async(self._sandbox.exec, "bash", "-c", command)
