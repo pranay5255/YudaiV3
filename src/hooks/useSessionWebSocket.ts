@@ -13,6 +13,8 @@ type WSStatus = 'idle' | 'connecting' | 'connected' | 'streaming' | 'completed' 
 
 interface UseSessionWebSocketParams {
   sessionId: string;
+  solveId?: string;
+  runId?: string;
   enabled: boolean;
 }
 
@@ -38,6 +40,8 @@ const getWsBaseUrl = (): string | undefined => {
 
 export function useSessionWebSocket({
   sessionId,
+  solveId,
+  runId,
   enabled,
 }: UseSessionWebSocketParams): UseSessionWebSocketResult {
   const [trajectory, setTrajectory] = useState<TrajectoryData | null>(null);
@@ -52,6 +56,42 @@ export function useSessionWebSocket({
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionToken = useAuthStore((state) => state.sessionToken);
+
+  const matchesSolveTarget = useCallback(
+    (payload: Record<string, unknown>, requireScopedPayload: boolean = false) => {
+      const payloadSolveId =
+        typeof payload.solve_id === 'string' ? payload.solve_id : undefined;
+      const payloadRunId =
+        typeof payload.run_id === 'string' ? payload.run_id : undefined;
+
+      if (!solveId && !runId) {
+        return true;
+      }
+
+      if (requireScopedPayload && !payloadSolveId && !payloadRunId) {
+        return false;
+      }
+
+      if (solveId && payloadSolveId && payloadSolveId !== solveId) {
+        return false;
+      }
+
+      if (runId && payloadRunId && payloadRunId !== runId) {
+        return false;
+      }
+
+      if (solveId && requireScopedPayload && !payloadSolveId) {
+        return false;
+      }
+
+      if (runId && requireScopedPayload && !payloadRunId) {
+        return false;
+      }
+
+      return true;
+    },
+    [runId, solveId]
+  );
 
   const resetHeartbeatTimer = useCallback(() => {
     if (heartbeatTimerRef.current) {
@@ -85,6 +125,14 @@ export function useSessionWebSocket({
     reconnectAttemptsRef.current = MAX_RECONNECT_ATTEMPTS; // prevent reconnect
     setStatus('idle');
   }, [cleanup]);
+
+  useEffect(() => {
+    setTrajectory(null);
+    setMessageCount(0);
+    setError(null);
+    setToolCalls([]);
+    setAgentQuestion(null);
+  }, [runId, sessionId, solveId]);
 
   const connect = useCallback(() => {
     if (!sessionToken || !sessionId) return;
@@ -129,9 +177,26 @@ export function useSessionWebSocket({
 
       switch (envelope.type) {
         case 'status': {
-          const s = (envelope.payload as { status?: string }).status;
+          const payload = envelope.payload as Record<string, unknown>;
+          const s = typeof payload.status === 'string' ? payload.status : undefined;
+          if (!s) {
+            break;
+          }
+          const isSolveScopedStatus = ['running', 'completed', 'failed', 'cancelled'].includes(s);
+          if (isSolveScopedStatus && !matchesSolveTarget(payload, true)) {
+            break;
+          }
           if (s === 'connected') setStatus('connected');
+          if (s === 'running') setStatus('streaming');
           if (s === 'completed') setStatus('completed');
+          if (s === 'failed') {
+            setStatus('error');
+            setError('Solve failed.');
+          }
+          if (s === 'cancelled') {
+            setStatus('error');
+            setError('Solve cancelled.');
+          }
           break;
         }
 
@@ -140,30 +205,45 @@ export function useSessionWebSocket({
           break;
 
         case 'trajectory_update': {
+          const payload = envelope.payload as Record<string, unknown>;
+          if (!matchesSolveTarget(payload, true)) {
+            break;
+          }
           setStatus('streaming');
-          const payload = envelope.payload as {
+          const trajectoryPayload = envelope.payload as {
             messages: Array<{ role: string; content: string; extra?: Record<string, unknown> }>;
             info: Record<string, unknown>;
             message_count: number;
+            new_message_start_index?: number;
           };
 
           setTrajectory((prev) => {
+            const startIndex =
+              typeof trajectoryPayload.new_message_start_index === 'number'
+                ? trajectoryPayload.new_message_start_index
+                : prev?.messages.length ?? 0;
             if (!prev) {
               return {
-                info: payload.info as TrajectoryData['info'],
-                messages: payload.messages,
+                info: trajectoryPayload.info as TrajectoryData['info'],
+                messages: trajectoryPayload.messages,
               };
             }
             return {
-              info: payload.info as TrajectoryData['info'],
-              messages: [...prev.messages, ...payload.messages],
+              info: trajectoryPayload.info as TrajectoryData['info'],
+              messages: [
+                ...prev.messages.slice(0, Math.max(startIndex, 0)),
+                ...trajectoryPayload.messages,
+              ],
             };
           });
-          setMessageCount(payload.message_count);
+          setMessageCount(trajectoryPayload.message_count);
           break;
         }
 
         case 'llm_stream': {
+          if (solveId || runId) {
+            break;
+          }
           setStatus('streaming');
           const payload = envelope.payload as { text?: string };
           const text = payload.text || '';
@@ -181,6 +261,9 @@ export function useSessionWebSocket({
         }
 
         case 'sandbox_stream': {
+          if (solveId || runId) {
+            break;
+          }
           setStatus('streaming');
           const payload = envelope.payload as { event?: string; data?: string; exit_code?: number };
           const content =
@@ -200,6 +283,9 @@ export function useSessionWebSocket({
 
         case 'mode_event':
         case 'state_event': {
+          if (solveId || runId) {
+            break;
+          }
           const payload = envelope.payload as { state?: string; mode?: string };
           if (payload.state === 'workflow_complete' || payload.mode === 'complete') {
             setStatus('completed');
@@ -250,8 +336,14 @@ export function useSessionWebSocket({
         }
 
         case 'error': {
-          const msg = (envelope.payload as { message?: string }).message || 'Unknown error';
+          const payload = envelope.payload as Record<string, unknown>;
+          if (!matchesSolveTarget(payload, Boolean(solveId || runId))) {
+            break;
+          }
+          const msg =
+            typeof payload.message === 'string' ? payload.message : 'Unknown error';
           setError(msg);
+          setStatus('error');
           break;
         }
 
@@ -285,7 +377,16 @@ export function useSessionWebSocket({
     ws.onerror = () => {
       // onclose will fire after this
     };
-  }, [sessionToken, sessionId, cleanup, resetHeartbeatTimer, status]);
+  }, [
+    cleanup,
+    matchesSolveTarget,
+    resetHeartbeatTimer,
+    runId,
+    sessionId,
+    sessionToken,
+    solveId,
+    status,
+  ]);
 
   useEffect(() => {
     if (enabled) {
@@ -296,7 +397,7 @@ export function useSessionWebSocket({
       setStatus('idle');
     }
     return cleanup;
-  }, [enabled, sessionId, sessionToken]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cleanup, connect, enabled, runId, sessionId, sessionToken, solveId]);
 
   const sendChatMessage = useCallback(
     (content: string) => {
