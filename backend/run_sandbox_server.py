@@ -11,11 +11,9 @@ import httpx
 import uvicorn
 
 from config.realtime_flags import get_realtime_feature_flags
-from db.database import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from realtime.sandbox_routes import router as sandbox_router
-from realtime.solve_routes import router as solve_router
 
 
 async def _heartbeat_loop() -> None:
@@ -48,8 +46,6 @@ async def _heartbeat_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("[sandbox] starting sandbox session server")
-    init_db()
-
     heartbeat_task = asyncio.create_task(_heartbeat_loop(), name="sandbox-heartbeat")
 
     yield
@@ -80,7 +76,6 @@ app.add_middleware(
 )
 
 app.include_router(sandbox_router)
-app.include_router(solve_router)
 
 
 @app.get("/")
