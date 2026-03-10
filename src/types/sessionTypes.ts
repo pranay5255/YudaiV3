@@ -842,21 +842,6 @@ export interface TrajectoryData {
   messages: TrajectoryMessage[];
 }
 
-export interface TrajectoryUpdateEvent {
-  messages: TrajectoryMessage[];
-  info: TrajectoryInfo;
-  message_count: number;
-  new_message_start_index: number;
-}
-
-export interface TrajectoryStatusEvent {
-  status: string;
-}
-
-export interface TrajectoryErrorEvent {
-  message: string;
-}
-
 export interface SolveSessionOut {
   id: number;
   user_id: number;
