@@ -20,6 +20,7 @@ def _install_import_stubs() -> None:
     sys.modules["solver.solver"] = fake_solver
 
     fake_context = types.ModuleType("context")
+    fake_context.__path__ = []
     for name in (
         "EmbeddingPipeline",
         "FactsAndMemoriesService",
@@ -28,10 +29,18 @@ def _install_import_stubs() -> None:
     ):
         setattr(fake_context, name, type(name, (), {}))
     sys.modules["context"] = fake_context
+    fake_context_facts = types.ModuleType("context.facts_and_memories")
+    fake_context_facts.FactsAndMemoriesService = type("FactsAndMemoriesService", (), {})
+    fake_context_facts.RepositorySnapshotService = type("RepositorySnapshotService", (), {})
+    sys.modules["context.facts_and_memories"] = fake_context_facts
 
     fake_githubops = types.ModuleType("daifuUserAgent.githubOps")
     fake_githubops.GitHubOps = type("GitHubOps", (), {})
     sys.modules["daifuUserAgent.githubOps"] = fake_githubops
+
+    fake_chatops = types.ModuleType("daifuUserAgent.ChatOps")
+    fake_chatops.ChatOps = type("ChatOps", (), {})
+    sys.modules["daifuUserAgent.ChatOps"] = fake_chatops
 
     fake_llm_service = types.ModuleType("daifuUserAgent.llm_service")
     fake_llm_service.LLMService = type("LLMService", (), {})
@@ -49,10 +58,14 @@ def test_run_controller_mounts_canonical_routes_only():
 
     # Canonical mounts
     assert "/daifu/sessions" in paths
+    assert "/daifu/sessions/{session_id}/solve/start" in paths
+    assert "/daifu/sessions/{session_id}/solve/status/{solve_id}" in paths
+    assert "/daifu/sessions/{session_id}/solve/cancel/{solve_id}" in paths
     assert "/auth/api/login" in paths
     assert "/controller/sessions/{session_id}/runtime" in paths
     assert "/controller/sessions/{session_id}/ws/unified" in paths
     assert "/health" in paths
+    assert "/daifu/sessions/{session_id}/solve/stream/{solve_id}/{run_id}" not in paths
 
     # No alias mounts
     assert "/api/daifu/sessions" not in paths
@@ -60,6 +73,20 @@ def test_run_controller_mounts_canonical_routes_only():
     assert "/api/controller/sessions/{session_id}/runtime" not in paths
     assert "/api/controller/sessions/{session_id}/ws/unified" not in paths
     assert "/api/health" not in paths
+
+
+def test_run_sandbox_server_mounts_internal_routes_only():
+    _install_import_stubs()
+
+    import importlib
+
+    run_sandbox_server = importlib.import_module("run_sandbox_server")
+    paths = {getattr(route, "path", None) for route in run_sandbox_server.app.routes}
+
+    assert "/healthz" in paths
+    assert "/internal/sessions/{session_id}/ws/exec" in paths
+    assert "/sessions/{session_id}/solve/start" not in paths
+    assert "/sessions/{session_id}/solve/stream/{solve_id}/{run_id}" not in paths
 
 
 def test_parse_allow_origins_trims_and_drops_empty_values():
