@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from github import github_router
 from realtime.controller_routes import router as controller_router
+from realtime.solve_routes import router as solve_router
 
 
 def _parse_allow_origins(raw: str) -> list[str]:
@@ -53,6 +54,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(github_router, prefix="/github", tags=["github"])
 app.include_router(session_router, prefix="/daifu", tags=["sessions"])
+app.include_router(solve_router, prefix="/daifu", tags=["solve"])
 app.include_router(controller_router)
 
 
