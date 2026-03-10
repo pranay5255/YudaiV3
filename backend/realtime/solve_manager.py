@@ -12,8 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
+from pathlib import Path
+import re
+import shlex
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -43,18 +47,22 @@ from models import (
     StartSolveResponse,
     User,
 )
+from realtime.agentScriptGen import AgentScriptParams, build_agent_script, build_pr_script
 from realtime.lifecycle import get_realtime_lifecycle_service
-from realtime.solve_sandbox import (
-    HeadlessSandboxExecutor,
-    HeadlessSandboxRequest,
-    SandboxExecutionError,
-    SandboxRunResult,
-)
+from realtime.modal_sandbox import SANDBOX_WORKSPACE_PATH
+from realtime.sandbox_exec_broker import get_sandbox_exec_broker
+from realtime.solve_stream_protocol import SOLVE_RESULT_PREFIX, TRAJECTORY_UPDATE_PREFIX
+from realtime.ws_hub import get_ws_hub
+from realtime.ws_protocol import WSMessageType
 from sqlalchemy.orm import Session, joinedload
 
 from utils import utc_now
 
 logger = logging.getLogger(__name__)
+TRAJECTORY_STORAGE_DIR = Path(
+    os.getenv("TRAJECTORY_STORAGE_DIR", "/tmp/yudai/trajectories")
+)
+TRAJECTORY_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ============================================================================
@@ -63,12 +71,211 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class TrajectoryMetadata:
+    exit_status: Optional[str] = None
+    submission: Optional[str] = None
+    instance_cost: Optional[float] = None
+    api_calls: Optional[int] = None
+    mini_version: Optional[str] = None
+    model_name: Optional[str] = None
+    total_messages: Optional[int] = None
+
+
+@dataclass
+class SolveExecutionResult:
+    sandbox_id: str
+    exit_code: int
+    stdout: str
+    stderr: str
+    command: str
+    duration_ms: int
+    completed_at: datetime
+    trajectory_file: Optional[str] = None
+    local_trajectory_path: Optional[str] = None
+    trajectory_metadata: Optional[TrajectoryMetadata] = None
+    pr_url: Optional[str] = None
+    script_path: Optional[str] = None
+    error: Optional[str] = None
+
+
+@dataclass
+class SolveExecutionRequest:
+    session_public_id: str
+    issue_url: str
+    issue_text: Optional[str]
+    repo_url: str
+    branch_name: str
+    model_name: str
+    temperature: float
+    small_change: bool
+    best_effort: bool
+    max_iterations: int
+    max_cost: float
+    max_tokens: int
+    solve_id: str
+    solve_run_id: str
+    issue_title: Optional[str] = None
+    issue_body: Optional[str] = None
+    github_token: Optional[str] = None
+    workspace_path: str = ""  # resolved from modal_sandbox.SANDBOX_WORKSPACE_PATH
+    timeout: int = 1800
+    verbose: bool = True
+
+
+class SolveExecutionError(Exception):
+    def __init__(self, message: str, logs: str = ""):
+        super().__init__(message)
+        self.logs = logs
+
+
+class TrajectoryStreamAccumulator:
+    def __init__(self, *, solve_id: str, run_id: str) -> None:
+        self.solve_id = solve_id
+        self.run_id = run_id
+        self._buffer = ""
+        self._trajectory: Dict[str, Any] = {"info": {}, "messages": []}
+        self._solve_result: Dict[str, Any] = {}
+
+    def ingest_stdout(self, chunk: str) -> List[Dict[str, Any]]:
+        updates: List[Dict[str, Any]] = []
+        self._buffer += chunk
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            payload = self._consume_line(line.rstrip("\r"))
+            if payload is not None:
+                updates.append(payload)
+        return updates
+
+    def finalize(self) -> List[Dict[str, Any]]:
+        updates: List[Dict[str, Any]] = []
+        if self._buffer:
+            payload = self._consume_line(self._buffer.rstrip("\r"))
+            if payload is not None:
+                updates.append(payload)
+            self._buffer = ""
+        return updates
+
+    @property
+    def trajectory(self) -> Optional[Dict[str, Any]]:
+        info = self._trajectory.get("info", {})
+        messages = self._trajectory.get("messages", [])
+        if not info and not messages:
+            return None
+        if self._solve_result:
+            if self._solve_result.get("exit_status"):
+                info["exit_status"] = self._solve_result["exit_status"]
+            if self._solve_result.get("submission"):
+                info["submission"] = self._solve_result["submission"]
+        return {"info": info, "messages": messages}
+
+    def _consume_line(self, line: str) -> Optional[Dict[str, Any]]:
+        if not line:
+            return None
+
+        if line.startswith(TRAJECTORY_UPDATE_PREFIX):
+            raw = line[len(TRAJECTORY_UPDATE_PREFIX) :]
+            payload = json.loads(raw) if raw else {}
+            if not isinstance(payload, dict):
+                return None
+
+            info = payload.get("info", {})
+            messages = payload.get("messages", [])
+            if not isinstance(info, dict):
+                info = {}
+            if not isinstance(messages, list):
+                messages = []
+
+            try:
+                current_count = int(payload.get("message_count", len(messages)))
+            except (TypeError, ValueError):
+                current_count = len(messages)
+            try:
+                start_index = int(payload.get("new_message_start_index", 0))
+            except (TypeError, ValueError):
+                start_index = 0
+
+            existing_messages = list(self._trajectory.get("messages", []))
+            if start_index < 0 or start_index > len(existing_messages):
+                start_index = max(min(start_index, len(existing_messages)), 0)
+            if current_count < start_index:
+                start_index = 0
+
+            self._trajectory["info"] = info
+            self._trajectory["messages"] = existing_messages[:start_index] + messages
+
+            return {
+                "solve_id": self.solve_id,
+                "run_id": self.run_id,
+                "messages": messages,
+                "info": info,
+                "message_count": current_count,
+                "new_message_start_index": start_index,
+            }
+
+        if line.startswith(SOLVE_RESULT_PREFIX):
+            raw = line[len(SOLVE_RESULT_PREFIX) :]
+            payload = json.loads(raw) if raw else {}
+            if isinstance(payload, dict):
+                self._solve_result = payload
+
+        return None
+
+
+def _build_script_command(
+    *,
+    script_path: str,
+    script_contents: str,
+    runner: str,
+) -> str:
+    marker = "__YUDAI_SCRIPT__"
+    script_dir = Path(script_path).parent
+    return "\n".join(
+        [
+            "set -euo pipefail",
+            f"mkdir -p {shlex.quote(str(script_dir))}",
+            f"cat <<'{marker}' > {shlex.quote(script_path)}",
+            script_contents,
+            marker,
+            f"chmod +x {shlex.quote(script_path)}",
+            f"{runner} {shlex.quote(script_path)}",
+        ]
+    )
+
+
+def _extract_trajectory_metadata(trajectory_data: Dict[str, Any]) -> TrajectoryMetadata:
+    info = trajectory_data.get("info", {})
+    if not isinstance(info, dict):
+        info = {}
+    model_stats = info.get("model_stats", {})
+    if not isinstance(model_stats, dict):
+        model_stats = {}
+    config = info.get("config", {})
+    if not isinstance(config, dict):
+        config = {}
+    model_config = config.get("model", {})
+    if not isinstance(model_config, dict):
+        model_config = {}
+    messages = trajectory_data.get("messages", [])
+    if not isinstance(messages, list):
+        messages = []
+
+    return TrajectoryMetadata(
+        exit_status=info.get("exit_status"),
+        submission=info.get("submission"),
+        instance_cost=model_stats.get("instance_cost"),
+        api_calls=model_stats.get("api_calls"),
+        mini_version=info.get("mini_version"),
+        model_name=model_config.get("model_name"),
+        total_messages=len(messages),
+    )
+
+
+@dataclass
 class SolveTaskState:
     """Tracks background task metadata for running solves."""
 
     solve_id: str
     run_ids: List[str]
-    executors: Dict[str, HeadlessSandboxExecutor]
     task: asyncio.Task
 
 
@@ -144,6 +351,20 @@ class DefaultSolverManager(SolverManager):
             "max_cost": self._coerce_float(matrix.get("max_cost"), 10.0),
         }
 
+    @staticmethod
+    def _build_issue_text(
+        *, issue_title: Optional[str], issue_body: Optional[str]
+    ) -> Optional[str]:
+        title = str(issue_title or "").strip()
+        body = str(issue_body or "").strip()
+        if not title and not body:
+            return None
+        if title and body:
+            return f"GitHub Issue: {title}\n\n{body}"
+        if title:
+            return f"GitHub Issue: {title}"
+        return body
+
     async def _build_solve_metadata(
         self,
         *,
@@ -185,6 +406,7 @@ class DefaultSolverManager(SolverManager):
         issue_title: Optional[str] = None
         issue_body: Optional[str] = None
         github_token: Optional[str] = None
+        workspace_path = SANDBOX_WORKSPACE_PATH
 
         db = self._session_factory()
         try:
@@ -242,6 +464,25 @@ class DefaultSolverManager(SolverManager):
                     status.HTTP_400_BAD_REQUEST,
                     detail="Repository URL is required for solver execution",
                 )
+            runtime_branch = chat_session.repo_branch or "main"
+            branch_name = request.branch_name or runtime_branch
+
+            lifecycle = get_realtime_lifecycle_service()
+            await lifecycle.create_runtime_for_session(
+                db,
+                session=chat_session,
+                user_id=user.id,
+                org=None,
+                repo_owner=chat_session.repo_owner,
+                repo_name=chat_session.repo_name,
+                environment=runtime_branch,
+                repo_branch=runtime_branch,
+                repo_url=repo_url,
+                env_inputs={
+                    "SESSION_PUBLIC_ID": chat_session.session_id,
+                    "WORKSPACE_PATH": chat_session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH,
+                },
+            )
 
             solve_metadata: Dict[str, Any] = {}
             try:
@@ -342,12 +583,12 @@ class DefaultSolverManager(SolverManager):
                 solve_id=solve_id,
                 run_ids=[plan.run_id for plan in model_run_plans],
             )
+            workspace_path = chat_session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH
             db.commit()
         finally:
             db.close()
 
         run_ids = [plan.run_id for plan in model_run_plans]
-        executor_registry: Dict[str, HeadlessSandboxExecutor] = {}
 
         task = asyncio.create_task(
             self._execute_runs(
@@ -355,11 +596,16 @@ class DefaultSolverManager(SolverManager):
                 run_plans=model_run_plans,
                 issue_url=issue_url or "",
                 repo_url=repo_url,
-                branch_name=request.branch_name,
-                executor_registry=executor_registry,
+                branch_name=branch_name,
+                session_public_id=session_id,
+                workspace_path=workspace_path,
                 github_token=github_token,
                 issue_title=issue_title,
                 issue_body=issue_body,
+                issue_text=self._build_issue_text(
+                    issue_title=issue_title,
+                    issue_body=issue_body,
+                ),
             ),
             name=f"solve-{solve_id}",
         )
@@ -372,7 +618,6 @@ class DefaultSolverManager(SolverManager):
             self._tasks[solve_id] = SolveTaskState(
                 solve_id=solve_id,
                 run_ids=run_ids,
-                executors=executor_registry,
                 task=task,
             )
 
@@ -389,12 +634,14 @@ class DefaultSolverManager(SolverManager):
         issue_url: str,
         repo_url: str,
         branch_name: str,
-        executor_registry: Dict[str, HeadlessSandboxExecutor],
+        session_public_id: str,
+        workspace_path: str,
         github_token: Optional[str] = None,
         issue_title: Optional[str] = None,
         issue_body: Optional[str] = None,
+        issue_text: Optional[str] = None,
     ):
-        """Execute each requested run sequentially inside its own sandbox."""
+        """Execute each requested run sequentially inside the session sandbox."""
 
         if not run_plans:
             logger.error("No run plans available for solve %s", solve_id)
@@ -402,37 +649,26 @@ class DefaultSolverManager(SolverManager):
 
         try:
             for plan in run_plans:
-                if plan.run_id in executor_registry:
-                    logger.warning(
-                        "Run %s already has an executor registered. Skipping duplicate.",
-                        plan.run_id,
-                    )
-                    continue
-
-                executor = HeadlessSandboxExecutor()
-                executor_registry[plan.run_id] = executor
                 logger.info(
                     "Launching run %s for solve %s with model %s",
                     plan.run_id,
                     solve_id,
                     plan.model_identifier,
                 )
-
-                try:
-                    await self._execute_run(
-                        solve_id=solve_id,
-                        run_id=plan.run_id,
-                        issue_url=issue_url,
-                        repo_url=repo_url,
-                        branch_name=branch_name,
-                        model_name=plan.model_identifier,
-                        executor=executor,
-                        github_token=github_token,
-                        issue_title=issue_title,
-                        issue_body=issue_body,
-                    )
-                finally:
-                    executor_registry.pop(plan.run_id, None)
+                await self._execute_run(
+                    solve_id=solve_id,
+                    run_id=plan.run_id,
+                    issue_url=issue_url,
+                    repo_url=repo_url,
+                    branch_name=branch_name,
+                    model_name=plan.model_identifier,
+                    session_public_id=session_public_id,
+                    workspace_path=workspace_path,
+                    github_token=github_token,
+                    issue_title=issue_title,
+                    issue_body=issue_body,
+                    issue_text=issue_text,
+                )
         except asyncio.CancelledError:
             logger.info("Solve %s execution loop cancelled", solve_id)
             raise
@@ -499,8 +735,6 @@ class DefaultSolverManager(SolverManager):
             state = self._tasks.get(solve_id)
 
         if state:
-            for executor in list(state.executors.values()):
-                await executor.cancel()
             state.task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await state.task
@@ -571,20 +805,25 @@ class DefaultSolverManager(SolverManager):
         *,
         solve_id: str,
         run_id: str,
+        session_public_id: str,
         issue_url: str,
         repo_url: str,
         branch_name: str,
+        workspace_path: str,
         model_name: str,
-        executor: HeadlessSandboxExecutor,
+        issue_text: Optional[str] = None,
         github_token: Optional[str] = None,
         issue_title: Optional[str] = None,
         issue_body: Optional[str] = None,
-    ):
+    ) -> None:
         db = self._session_factory()
         try:
             solve = db.query(Solve).filter(Solve.id == solve_id).first()
             run = db.query(SolveRun).filter(SolveRun.id == run_id).first()
-            if not solve or not run:
+            chat_session = (
+                db.query(ChatSession).filter(ChatSession.session_id == session_public_id).first()
+            )
+            if not solve or not run or not chat_session:
                 logger.warning("Solve or run record missing for %s", solve_id)
                 return
 
@@ -602,13 +841,22 @@ class DefaultSolverManager(SolverManager):
             run.status = SolveStatus.RUNNING.value
             run.started_at = now
             db.commit()
+            await self._broadcast_run_status(
+                session_public_id=session_public_id,
+                solve_id=solve_id,
+                run_id=run_id,
+                status_value="running",
+            )
 
             options = self._extract_solve_options(solve)
 
-            request = self._build_headless_request(
+            request = self._build_execution_request(
+                session_public_id=session_public_id,
                 issue_url=issue_url,
+                issue_text=issue_text,
                 repo_url=repo_url,
                 branch_name=branch_name,
+                workspace_path=workspace_path,
                 model_name=model_name,
                 run=run,
                 solve=solve,
@@ -619,9 +867,33 @@ class DefaultSolverManager(SolverManager):
             )
 
             try:
-                result = await executor.run(request)
+                result = await self._run_in_session_sandbox(
+                    db=db,
+                    session=chat_session,
+                    request=request,
+                )
                 self._record_success(db, solve, run, result)
-            except SandboxExecutionError as exc:
+                if result.exit_code == 0:
+                    await self._broadcast_run_status(
+                        session_public_id=session_public_id,
+                        solve_id=solve_id,
+                        run_id=run_id,
+                        status_value="completed",
+                    )
+                else:
+                    await self._broadcast_run_status(
+                        session_public_id=session_public_id,
+                        solve_id=solve_id,
+                        run_id=run_id,
+                        status_value="failed",
+                    )
+                    await self._broadcast_run_error(
+                        session_public_id=session_public_id,
+                        solve_id=solve_id,
+                        run_id=run_id,
+                        message="Agent execution failed",
+                    )
+            except SolveExecutionError as exc:
                 self._record_failure(
                     db,
                     solve,
@@ -629,8 +901,26 @@ class DefaultSolverManager(SolverManager):
                     error_message=str(exc),
                     logs=exc.logs,
                 )
+                await self._broadcast_run_status(
+                    session_public_id=session_public_id,
+                    solve_id=solve_id,
+                    run_id=run_id,
+                    status_value="failed",
+                )
+                await self._broadcast_run_error(
+                    session_public_id=session_public_id,
+                    solve_id=solve_id,
+                    run_id=run_id,
+                    message=str(exc),
+                )
             except asyncio.CancelledError:
                 self._record_cancelled(db, solve, run)
+                await self._broadcast_run_status(
+                    session_public_id=session_public_id,
+                    solve_id=solve_id,
+                    run_id=run_id,
+                    status_value="cancelled",
+                )
                 raise
             except Exception as exc:  # pragma: no cover - defensive programming
                 logger.exception("Solver run failed: %s", exc)
@@ -641,15 +931,24 @@ class DefaultSolverManager(SolverManager):
                     error_message=str(exc),
                     logs="",
                 )
+                await self._broadcast_run_error(
+                    session_public_id=session_public_id,
+                    solve_id=solve_id,
+                    run_id=run_id,
+                    message=str(exc),
+                )
         finally:
             db.close()
 
-    def _build_headless_request(
+    def _build_execution_request(
         self,
         *,
+        session_public_id: str,
         issue_url: str,
+        issue_text: Optional[str],
         repo_url: str,
         branch_name: str,
+        workspace_path: str,
         model_name: str,
         run: SolveRun,
         solve: Solve,
@@ -657,19 +956,23 @@ class DefaultSolverManager(SolverManager):
         github_token: Optional[str] = None,
         issue_title: Optional[str] = None,
         issue_body: Optional[str] = None,
-    ) -> HeadlessSandboxRequest:
-        """Create a sandbox execution request for a solver run."""
+    ) -> SolveExecutionRequest:
+        """Create a controller-brokered solve execution request."""
 
-        return HeadlessSandboxRequest(
+        return SolveExecutionRequest(
+            session_public_id=session_public_id,
             issue_url=issue_url,
+            issue_text=issue_text,
             repo_url=repo_url,
             branch_name=branch_name,
+            workspace_path=workspace_path,
             model_name=model_name,
             temperature=run.temperature,
             small_change=options["small_change"],
             best_effort=options["best_effort"],
             max_iterations=options["max_iterations"],
             max_cost=options["max_cost"],
+            max_tokens=4000,
             solve_id=solve.id,
             solve_run_id=run.id,
             verbose=True,
@@ -679,7 +982,7 @@ class DefaultSolverManager(SolverManager):
         )
 
     def _record_success(
-        self, db: Session, solve: Solve, run: SolveRun, result: SandboxRunResult
+        self, db: Session, solve: Solve, run: SolveRun, result: SolveExecutionResult
     ):
         timestamp = result.completed_at
         succeeded = result.exit_code == 0
@@ -788,33 +1091,225 @@ class DefaultSolverManager(SolverManager):
         self._finalize_solve_if_complete(db, solve, completed_at=timestamp)
         db.commit()
 
-    def get_executor_for_run(
-        self, solve_id: str, run_id: str
-    ) -> Optional[HeadlessSandboxExecutor]:
-        """
-        Get the live executor for a specific run.
-
-        Args:
-            solve_id: Solve session identifier
-            run_id: Run identifier
-
-        Returns:
-            Live executor or None if not found or run completed
-        """
-        state = self._tasks.get(solve_id)
-        if not state:
-            return None
-        return state.executors.get(run_id)
-
-    def get_active_executors(
+    async def _run_in_session_sandbox(
         self,
-    ) -> List[tuple[tuple[str, str], HeadlessSandboxExecutor]]:
-        """Return all currently registered executors as ((solve_id, run_id), executor) pairs."""
-        results: List[tuple[tuple[str, str], HeadlessSandboxExecutor]] = []
-        for solve_id, state in self._tasks.items():
-            for run_id, executor in state.executors.items():
-                results.append(((solve_id, run_id), executor))
-        return results
+        *,
+        db: Session,
+        session: ChatSession,
+        request: SolveExecutionRequest,
+    ) -> SolveExecutionResult:
+        openrouter_api_key = str(os.getenv("OPENROUTER_API_KEY") or "").strip()
+        if not openrouter_api_key:
+            raise SolveExecutionError("OPENROUTER_API_KEY environment variable required")
+
+        script_params = AgentScriptParams.from_payload(
+            model_name=request.model_name,
+            repo_url=request.repo_url,
+            branch_name=request.branch_name,
+            issue_url=request.issue_url,
+            issue_text=request.issue_text,
+            payload={
+                "temperature": request.temperature,
+                "max_tokens": request.max_tokens,
+                "max_iterations": request.max_iterations,
+                "max_cost": request.max_cost,
+                "small_change": request.small_change,
+                "best_effort": request.best_effort,
+                "issue_title": request.issue_title,
+                "issue_body": request.issue_body,
+            },
+            verbose=request.verbose,
+        )
+
+        remote_root = f"/tmp/yudai-solve/{request.solve_id}/{request.solve_run_id}"
+        script_path = f"{remote_root}/run_agent.py"
+        trajectory_path = f"{remote_root}/trajectory.json"
+        command = _build_script_command(
+            script_path=script_path,
+            script_contents=build_agent_script(script_params),
+            runner="python3",
+        )
+
+        broker = get_sandbox_exec_broker()
+        accumulator = TrajectoryStreamAccumulator(
+            solve_id=request.solve_id,
+            run_id=request.solve_run_id,
+        )
+        base_env = {
+            "OPENROUTER_API_KEY": openrouter_api_key,
+            "WORKSPACE_PATH": request.workspace_path or SANDBOX_WORKSPACE_PATH,
+            "REPO_URL": request.repo_url,
+            "REPO_BRANCH": request.branch_name,
+            "TRAJECTORY_PATH": trajectory_path,
+            "PYTHONUNBUFFERED": "1",
+        }
+        if request.github_token:
+            base_env["GITHUB_TOKEN"] = request.github_token
+
+        async def on_event(event: Dict[str, Any]) -> None:
+            if event.get("type") != WSMessageType.SANDBOX_STREAM.value:
+                return
+            payload = event.get("payload", {}) or {}
+            if payload.get("event") != "stdout":
+                return
+            chunk = payload.get("data")
+            if not isinstance(chunk, str):
+                return
+            for update in accumulator.ingest_stdout(chunk):
+                await self._broadcast_trajectory(
+                    session_public_id=session.session_id,
+                    payload=update,
+                )
+
+        try:
+            command_result = await broker.run_command(
+                db,
+                session=session,
+                command=command,
+                cwd=request.workspace_path or SANDBOX_WORKSPACE_PATH,
+                env=base_env,
+                timeout_seconds=request.timeout,
+                on_event=on_event,
+            )
+        except Exception as exc:
+            raise SolveExecutionError(str(exc)) from exc
+
+        for update in accumulator.finalize():
+            await self._broadcast_trajectory(
+                session_public_id=session.session_id,
+                payload=update,
+            )
+
+        trajectory = accumulator.trajectory
+        local_trajectory_path, trajectory_metadata = self._persist_trajectory_snapshot(
+            solve_id=request.solve_id,
+            run_id=request.solve_run_id,
+            repo_url=request.repo_url,
+            trajectory=trajectory,
+        )
+
+        stdout = str(command_result.get("stdout") or "")
+        stderr = str(command_result.get("stderr") or "")
+        duration_ms = int(command_result.get("duration_ms") or 0)
+        pr_url: Optional[str] = None
+
+        if int(command_result.get("exit_code") or 0) == 0:
+            pr_script_path = f"{remote_root}/create_pr.sh"
+            pr_command = _build_script_command(
+                script_path=pr_script_path,
+                script_contents=build_pr_script(script_params),
+                runner="bash",
+            )
+            try:
+                pr_result = await broker.run_command(
+                    db,
+                    session=session,
+                    command=pr_command,
+                    cwd=request.workspace_path or SANDBOX_WORKSPACE_PATH,
+                    env=base_env,
+                    timeout_seconds=120,
+                )
+                stdout = "\n".join(
+                    part for part in [stdout, str(pr_result.get("stdout") or "")] if part
+                )
+                stderr = "\n".join(
+                    part for part in [stderr, str(pr_result.get("stderr") or "")] if part
+                )
+                duration_ms += int(pr_result.get("duration_ms") or 0)
+                pr_url = self._extract_pr_url(stdout) or self._extract_pr_url(stderr)
+                if pr_url:
+                    from realtime.solve_video import kick_off_video_generation
+
+                    asyncio.create_task(
+                        kick_off_video_generation(
+                            pr_url=pr_url,
+                            repo_url=request.repo_url,
+                            issue_url=request.issue_url,
+                            branch_name=request.branch_name,
+                            github_token=request.github_token or "",
+                            solve_id=request.solve_id,
+                            run_id=request.solve_run_id,
+                        )
+                    )
+            except Exception as exc:  # pragma: no cover - best effort follow-up
+                logger.warning(
+                    "PR creation failed for solve %s run %s: %s",
+                    request.solve_id,
+                    request.solve_run_id,
+                    exc,
+                )
+
+        return SolveExecutionResult(
+            sandbox_id=str(command_result.get("sandbox_id") or ""),
+            exit_code=int(command_result.get("exit_code") or 0),
+            stdout=stdout,
+            stderr=stderr,
+            command=command,
+            duration_ms=duration_ms,
+            completed_at=utc_now(),
+            trajectory_file=trajectory_path,
+            local_trajectory_path=local_trajectory_path,
+            trajectory_metadata=trajectory_metadata,
+            pr_url=pr_url,
+            script_path=script_path,
+        )
+
+    def _persist_trajectory_snapshot(
+        self,
+        *,
+        solve_id: str,
+        run_id: str,
+        repo_url: str,
+        trajectory: Optional[Dict[str, Any]],
+    ) -> tuple[Optional[str], Optional[TrajectoryMetadata]]:
+        if not trajectory:
+            return None, None
+
+        repo_slug = repo_url.replace("https://", "").replace("http://", "")
+        repo_slug = repo_slug.replace("github.com/", "").replace("/", "_").replace(".", "_")
+        local_path = TRAJECTORY_STORAGE_DIR / f"{repo_slug}_{solve_id}_{run_id}.traj.json"
+        local_path.write_text(json.dumps(trajectory), encoding="utf-8")
+        return str(local_path), _extract_trajectory_metadata(trajectory)
+
+    async def _broadcast_trajectory(
+        self,
+        *,
+        session_public_id: str,
+        payload: Dict[str, Any],
+    ) -> None:
+        await get_ws_hub().send_to_session(
+            session_public_id,
+            WSMessageType.TRAJECTORY_UPDATE,
+            payload,
+        )
+
+    async def _broadcast_run_status(
+        self,
+        *,
+        session_public_id: str,
+        solve_id: str,
+        run_id: str,
+        status_value: str,
+    ) -> None:
+        await get_ws_hub().send_to_session(
+            session_public_id,
+            WSMessageType.STATUS,
+            {"status": status_value, "solve_id": solve_id, "run_id": run_id},
+        )
+
+    async def _broadcast_run_error(
+        self,
+        *,
+        session_public_id: str,
+        solve_id: str,
+        run_id: str,
+        message: str,
+    ) -> None:
+        await get_ws_hub().send_to_session(
+            session_public_id,
+            WSMessageType.ERROR,
+            {"message": message, "solve_id": solve_id, "run_id": run_id},
+        )
 
     async def _cleanup_task(self, solve_id: str):
         async with self._lock:
@@ -862,6 +1357,13 @@ class DefaultSolverManager(SolverManager):
         else:
             solve.status = SolveStatus.FAILED.value
             solve.error_message = solve.error_message or "All runs failed"
+
+    @staticmethod
+    def _extract_pr_url(output_text: Optional[str]) -> Optional[str]:
+        if not output_text:
+            return None
+        match = re.search(r"https://github\.com/[^\s/]+/[^\s/]+/pull/\d+", output_text)
+        return match.group(0) if match else None
 
     @staticmethod
     def _extract_pr_number_from_url(pr_url: Optional[str]) -> Optional[int]:
