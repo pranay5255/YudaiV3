@@ -122,11 +122,9 @@ class RealtimeLifecycleService:
         flags = get_realtime_feature_flags()
         if flags.modal_provisioning_enabled:
             controller_base_url = os.getenv("CONTROLLER_BASE_URL", "http://localhost:8000")
-            github_token = os.getenv("GITHUB_TOKEN")
             modal_sb = await RealtimeModalSandbox.create(
                 sandbox_db_id=sandbox.id,
                 controller_base_url=controller_base_url,
-                github_token=github_token,
                 session_public_id=session.session_id,
                 repo_url=repo_url,
                 repo_branch=repo_branch or "main",
@@ -156,7 +154,8 @@ class RealtimeLifecycleService:
             lifecycle_metadata["modal_sandbox_id"] = modal_sb.modal_sandbox_id
         sandbox.lifecycle_metadata = lifecycle_metadata
 
-        git_bootstrap = self.sandbox_manager.ensure_git_bootstrap(
+        git_bootstrap = await asyncio.to_thread(
+            self.sandbox_manager.ensure_git_bootstrap,
             identity_key=identity.key,
             repo_url=repo_url,
             repo_branch=repo_branch,
