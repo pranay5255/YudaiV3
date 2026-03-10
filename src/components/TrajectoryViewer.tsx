@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { FileText, ChevronRight, ChevronDown, DollarSign, MessageSquare, Clock, CheckCircle, XCircle, AlertCircle, Radio, Wrench } from 'lucide-react';
-import { useTrajectoryStream } from '../hooks/useTrajectoryStream';
 import { useSessionWebSocket } from '../hooks/useSessionWebSocket';
-import { realtimeFeatureFlags } from '../config/realtimeFlags';
 import type { TrajectoryData, ToolCallInfo, AgentQuestionInfo } from '../types/sessionTypes';
 import trajectoryData from '../data/last_mini_run.traj.json';
 import { UserQuestionPrompt } from './UserQuestionPrompt';
@@ -28,29 +26,19 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({
   const [expandedMessages, setExpandedMessages] = useState<Set<number>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const useWsMode = isLive && realtimeFeatureFlags.wsUnifiedEnabled;
-
-  // WS unified hook (Phase 5)
   const wsStream = useSessionWebSocket({
-    sessionId,
-    enabled: useWsMode,
-  });
-
-  // SSE streaming hook (legacy)
-  const sseStream = useTrajectoryStream({
     sessionId,
     solveId,
     runId,
-    enabled: isLive && !realtimeFeatureFlags.wsUnifiedEnabled,
+    enabled: isLive,
   });
 
-  // Unify the two streams
-  const liveTrajectory = useWsMode ? wsStream.trajectory : sseStream.trajectory;
-  const streamStatus = useWsMode ? wsStream.status : sseStream.streamStatus;
-  const streamError = useWsMode ? wsStream.error : sseStream.error;
-  const liveMessageCount = useWsMode ? wsStream.messageCount : sseStream.messageCount;
-  const toolCalls: ToolCallInfo[] = useWsMode ? wsStream.toolCalls : [];
-  const agentQuestion: AgentQuestionInfo | null = useWsMode ? wsStream.agentQuestion : null;
+  const liveTrajectory = wsStream.trajectory;
+  const streamStatus = wsStream.status;
+  const streamError = wsStream.error;
+  const liveMessageCount = wsStream.messageCount;
+  const toolCalls: ToolCallInfo[] = wsStream.toolCalls;
+  const agentQuestion: AgentQuestionInfo | null = wsStream.agentQuestion;
 
   // Static fallback data
   const [staticState, setStaticState] = useState<{
