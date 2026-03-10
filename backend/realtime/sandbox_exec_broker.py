@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import time
@@ -115,6 +116,13 @@ class SandboxExecBroker:
 
                     if event_type == WSMessageType.ERROR.value:
                         raise RuntimeError(str(payload.get("message") or "Sandbox execution failed"))
+        except asyncio.CancelledError:
+            with contextlib.suppress(Exception):
+                async with websockets.connect(ws_url, max_size=None, open_timeout=5) as upstream:
+                    await upstream.send(
+                        json.dumps({"type": WSMessageType.EXEC_CANCEL.value, "payload": {}})
+                    )
+            raise
         except asyncio.TimeoutError:
             raise RuntimeError("Sandbox execution timed out")
         except Exception as exc:
