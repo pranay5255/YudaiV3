@@ -115,7 +115,6 @@ def _flags(*, orchestrator_enabled: bool) -> RealtimeFeatureFlags:
         sandbox_internal_exec_enabled=True,
         mode_orchestrator_enabled=orchestrator_enabled,
         ws_chat_enabled=False,
-        sse_stream_enabled=False,
         modal_provisioning_enabled=False,
         ws_unified_enabled=False,
         contract_version="test",
