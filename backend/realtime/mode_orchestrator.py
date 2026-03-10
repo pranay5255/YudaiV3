@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from utils import utc_now
 
 from .lifecycle import RealtimeLifecycleService, get_realtime_lifecycle_service
+from .modal_sandbox import SANDBOX_MSWEA_CONFIG_ROOT, SANDBOX_WORKSPACE_PATH
 from .sandbox_exec_broker import SandboxExecBroker, get_sandbox_exec_broker
 from .ws_hub import SessionWebSocketHub, get_ws_hub
 from .ws_protocol import WSMessageType
@@ -31,13 +32,16 @@ MODE_ORDER: tuple[str, str, str] = (
     SessionMode.CODER.value,
 )
 
-MSWEA_CONFIG_ROOT = "/workspace/configs"
+# Paths as they exist inside the unified Modal sandbox image.
+# Mode config yamls are baked into the image at build time.
+MSWEA_CONFIG_ROOT = SANDBOX_MSWEA_CONFIG_ROOT
 MSWEA_CONFIG_PATHS = {
     SessionMode.ARCHITECT.value: f"{MSWEA_CONFIG_ROOT}/architect/config.yaml",
     SessionMode.TESTER.value: f"{MSWEA_CONFIG_ROOT}/tester/config.yaml",
     SessionMode.CODER.value: f"{MSWEA_CONFIG_ROOT}/coder/config.yaml",
 }
 
+# Local template root (used only by _build_mode_configs to read + push to sandbox)
 _MODE_CONFIG_TEMPLATE_ROOT = Path(__file__).resolve().parent / "mswea_mode_configs"
 _MODE_CONFIG_TEMPLATE_PATHS = {
     SessionMode.ARCHITECT.value: _MODE_CONFIG_TEMPLATE_ROOT / "architect" / "config.yaml",
@@ -333,12 +337,20 @@ class ModeOrchestrator:
         config_path = MSWEA_CONFIG_PATHS[mode]
         command_lines = [
             "set -eu",
-            "workspace=\"${WORKSPACE_PATH:-/workspace/repo}\"",
-            "if [ ! -d \"$workspace/.git\" ] && [ -n \"${REPO_URL:-}\" ]; then",
+            f"workspace=\"${{WORKSPACE_PATH:-{SANDBOX_WORKSPACE_PATH}}}\"",
+            "if [ -d \"$workspace/.git\" ]; then",
+            "  cd \"$workspace\"",
+            "  git fetch --all --prune 2>/dev/null || true",
+            "  git checkout -f \"${REPO_BRANCH:-main}\" 2>/dev/null || true",
+            "  git reset --hard \"origin/${REPO_BRANCH:-main}\" 2>/dev/null || true",
+            "  git clean -fdx 2>/dev/null || true",
+            "elif [ -n \"${REPO_URL:-}\" ]; then",
             "  mkdir -p \"$(dirname \"$workspace\")\"",
             "  git clone --depth 1 -b \"${REPO_BRANCH:-main}\" \"$REPO_URL\" \"$workspace\"",
+            "  cd \"$workspace\"",
+            "else",
+            "  if [ -d \"$workspace\" ]; then cd \"$workspace\"; fi",
             "fi",
-            "if [ -d \"$workspace\" ]; then cd \"$workspace\"; fi",
             "help_text=\"$(python -m mswea.solve --help 2>&1 || true)\"",
             f"config_path=\"{config_path}\"",
             "cmd=(python -m mswea.solve --config \"$config_path\" --yolo-mode)",
@@ -460,7 +472,7 @@ class ModeOrchestrator:
             db,
             session=session,
             command=self._build_config_write_command(),
-            cwd=session.runtime_workspace_path or "/workspace/repo",
+            cwd=session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH,
             timeout_seconds=180,
             on_event=_relay_event,
         )
@@ -532,7 +544,7 @@ class ModeOrchestrator:
             db,
             session=session,
             command=command,
-            cwd=session.runtime_workspace_path or "/workspace/repo",
+            cwd=session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH,
             env=env,
             timeout_seconds=timeout_seconds,
             on_event=_relay_event,
