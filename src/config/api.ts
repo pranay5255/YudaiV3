@@ -57,13 +57,11 @@ export const API = {
       START: `${API_BASE}/daifu/sessions/{sessionId}/solve/start`,
       STATUS: `${API_BASE}/daifu/sessions/{sessionId}/solve/status/{solveSessionId}`,
       CANCEL: `${API_BASE}/daifu/sessions/{sessionId}/solve/cancel/{solveSessionId}`,
-      STREAM: `${API_BASE}/daifu/sessions/{sessionId}/solve/stream/{solveId}/{runId}`,
     },
   },
   CONTROLLER: {
     SANDBOXES: `${API_BASE}/controller/sandboxes`,
     SANDBOX_DETAIL: `${API_BASE}/controller/sandboxes/{sandboxId}`,
-    RESOLVE_TUNNEL: `${API_BASE}/controller/sandboxes/{sandboxId}/resolve-tunnel`,
     HEARTBEAT: `${API_BASE}/controller/sandboxes/{sandboxId}/heartbeat`,
     CLEANUP: `${API_BASE}/controller/sandboxes/cleanup`,
     RUNTIME_ENSURE: `${API_BASE}/controller/sessions/{sessionId}/runtime`,
