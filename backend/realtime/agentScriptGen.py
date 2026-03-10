@@ -19,6 +19,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
+from .solve_stream_protocol import SOLVE_RESULT_PREFIX, TRAJECTORY_UPDATE_PREFIX
+
 
 def _safe_bool(value: Any, default: bool = False) -> bool:
     if value is None:
@@ -166,6 +168,12 @@ class AgentScriptParams:
             "cost_limit": f"{self.max_cost:.2f}",
             "small_change": "True" if self.small_change else "False",
             "best_effort": "True" if self.best_effort else "False",
+            "trajectory_update_prefix_literal": json.dumps(
+                TRAJECTORY_UPDATE_PREFIX, ensure_ascii=True
+            ),
+            "solve_result_prefix_literal": json.dumps(
+                SOLVE_RESULT_PREFIX, ensure_ascii=True
+            ),
         }
 
 
@@ -194,9 +202,10 @@ API contract (mini-swe-agent Python bindings):
 import json
 import logging
 import os
+import contextlib
 import subprocess
 import sys
-import traceback
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -221,8 +230,12 @@ COST_LIMIT       = %(cost_limit)s
 SMALL_CHANGE     = %(small_change)s
 BEST_EFFORT      = %(best_effort)s
 
-TESTBED_PATH = Path("/home/user/testbed")
-OUTPUT_PATH  = Path("/home/user/last_mini_run.traj.json")
+TRAJECTORY_UPDATE_PREFIX = %(trajectory_update_prefix_literal)s
+SOLVE_RESULT_PREFIX     = %(solve_result_prefix_literal)s
+WORKSPACE_PATH          = Path(os.getenv("WORKSPACE_PATH", "/workspace/repo"))
+OUTPUT_PATH             = Path(
+    os.getenv("TRAJECTORY_PATH", "/workspace/trajectory.json")
+)
 
 # Env vars forwarded into every subshell the agent runs
 _AGENT_ENV = {
@@ -235,34 +248,133 @@ _AGENT_ENV = {
 
 
 # ---------------------------------------------------------------------------
+# Streaming helpers
+# ---------------------------------------------------------------------------
+
+def emit_marker(prefix: str, payload: dict) -> None:
+    print(prefix + json.dumps(payload, ensure_ascii=True), flush=True)
+
+
+def _load_trajectory() -> Optional[dict]:
+    if not OUTPUT_PATH.exists():
+        return None
+    data = json.loads(OUTPUT_PATH.read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) else None
+
+
+def start_trajectory_watcher() -> tuple[threading.Event, threading.Thread]:
+    stop_event = threading.Event()
+    state = {"message_count": 0, "fingerprint": None}
+
+    def publish(force: bool = False) -> None:
+        trajectory = _load_trajectory()
+        if not trajectory:
+            return
+
+        messages = trajectory.get("messages", [])
+        info = trajectory.get("info", {})
+        if not isinstance(messages, list):
+            messages = []
+        if not isinstance(info, dict):
+            info = {}
+
+        current_count = len(messages)
+        try:
+            fingerprint = (OUTPUT_PATH.stat().st_mtime_ns, current_count)
+        except FileNotFoundError:
+            return
+
+        if not force and fingerprint == state["fingerprint"]:
+            return
+
+        start_index = state["message_count"]
+        if current_count < start_index:
+            start_index = 0
+
+        new_messages = messages[start_index:]
+        if not new_messages and not force:
+            state["fingerprint"] = fingerprint
+            return
+
+        emit_marker(
+            TRAJECTORY_UPDATE_PREFIX,
+            {
+                "messages": new_messages,
+                "info": info,
+                "message_count": current_count,
+                "new_message_start_index": start_index,
+            },
+        )
+        state["message_count"] = current_count
+        state["fingerprint"] = fingerprint
+
+    def _watch_loop() -> None:
+        while not stop_event.wait(0.25):
+            with contextlib.suppress(Exception):
+                publish()
+        with contextlib.suppress(Exception):
+            publish(force=True)
+
+    thread = threading.Thread(
+        target=_watch_loop,
+        name="trajectory-watcher",
+        daemon=True,
+    )
+    thread.start()
+    return stop_event, thread
+
+
+# ---------------------------------------------------------------------------
 # Repository setup
 # ---------------------------------------------------------------------------
 
+def _setup_git_credentials() -> None:
+    github_token = os.getenv("GITHUB_TOKEN")
+    if not github_token or "github.com" not in REPO_URL:
+        return
+    netrc = Path.home() / ".netrc"
+    netrc.write_text(f"machine github.com login x-token password {github_token}\\n")
+    netrc.chmod(0o600)
+
+
 def clone_repository() -> None:
-    if TESTBED_PATH.exists():
-        logger.info("Testbed already exists at %%s", TESTBED_PATH)
+    _setup_git_credentials()
+
+    if (WORKSPACE_PATH / ".git").exists():
+        # Sandbox reuse: repo already cloned from a previous solve run.
+        # Fetch latest and reset to the target branch.
+        logger.info("Repo exists at %%s — fetching and resetting to %%s", WORKSPACE_PATH, BRANCH_NAME)
+        fetch = subprocess.run(
+            ["git", "fetch", "--all", "--prune"],
+            cwd=str(WORKSPACE_PATH), capture_output=True, text=True,
+        )
+        if fetch.returncode != 0:
+            logger.warning("git fetch failed: %%s", fetch.stderr)
+
+        # Clean working tree and reset to branch HEAD
+        subprocess.run(["git", "checkout", "-f", BRANCH_NAME or "main"],
+                        cwd=str(WORKSPACE_PATH), capture_output=True, text=True)
+        subprocess.run(["git", "reset", "--hard", f"origin/{BRANCH_NAME or 'main'}"],
+                        cwd=str(WORKSPACE_PATH), capture_output=True, text=True)
+        subprocess.run(["git", "clean", "-fdx"],
+                        cwd=str(WORKSPACE_PATH), capture_output=True, text=True)
+        logger.info("Workspace reset to origin/%%s", BRANCH_NAME or "main")
         return
 
     repo_url = REPO_URL
-    github_token = os.getenv("GITHUB_TOKEN")
-    if github_token and "github.com" in repo_url:
-        # Use git credential store instead of embedding token in URL
-        netrc = Path("/home/user/.netrc")
-        netrc.write_text(f"machine github.com login x-token password {github_token}\\n")
-        netrc.chmod(0o600)
-
     clone_cmd = ["git", "clone", "--depth", "1"]
     if BRANCH_NAME:
         clone_cmd.extend(["--branch", BRANCH_NAME])
     if not repo_url.endswith(".git"):
         repo_url += ".git"
-    clone_cmd.extend([repo_url, str(TESTBED_PATH)])
+    WORKSPACE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    clone_cmd.extend([repo_url, str(WORKSPACE_PATH)])
 
     logger.info("Cloning repository: %%s", REPO_URL)
     result = subprocess.run(clone_cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"Failed to clone repository: {result.stderr}")
-    logger.info("Repository cloned to %%s", TESTBED_PATH)
+    logger.info("Repository cloned to %%s", WORKSPACE_PATH)
 
 
 # ---------------------------------------------------------------------------
@@ -316,8 +428,10 @@ def main() -> int:
     if not os.getenv("OPENROUTER_API_KEY"):
         raise RuntimeError("OPENROUTER_API_KEY environment variable required")
 
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     clone_repository()
     task = resolve_task()
+    stop_event, watcher = start_trajectory_watcher()
 
     # --- Load builtin mini-swe-agent config for system/instance templates ---
     from minisweagent.run.utilities.config import get_config_from_spec
@@ -357,15 +471,15 @@ def main() -> int:
     from minisweagent.environments.local import LocalEnvironment
 
     env = LocalEnvironment(
-        cwd=str(TESTBED_PATH),
+        cwd=str(WORKSPACE_PATH),
         env=merged_env,
     )
-    logger.info("LocalEnvironment cwd=%%s", TESTBED_PATH)
+    logger.info("LocalEnvironment cwd=%%s", WORKSPACE_PATH)
 
     # --- Agent ---
-    # output_path causes DefaultAgent.save() to be called after every step,
-    # so the trajectory file is written incrementally (readable mid-run via
-    # sandbox.read_file for SSE streaming).
+# output_path causes DefaultAgent.save() to be called after every step,
+# so the trajectory file is written incrementally and the watcher thread
+# can emit controller-consumable trajectory markers during the run.
     from minisweagent.agents.default import DefaultAgent
 
     agent = DefaultAgent(
@@ -385,9 +499,22 @@ def main() -> int:
     # "LimitsExceeded"-> step or cost limit hit
     # Any exception class name -> unhandled error
     logger.info("Executing agent...")
-    result      = agent.run(task)
+    try:
+        result = agent.run(task)
+    finally:
+        stop_event.set()
+        watcher.join(timeout=2)
+
     exit_status = result.get("exit_status", "")
-    submission  = result.get("submission", "")
+    submission = result.get("submission", "")
+    emit_marker(
+        SOLVE_RESULT_PREFIX,
+        {
+            "exit_status": exit_status,
+            "submission": submission,
+            "trajectory_path": str(OUTPUT_PATH),
+        },
+    )
 
     logger.info("Agent finished: exit_status=%%s", exit_status)
 
@@ -447,8 +574,8 @@ MODEL_NAME='{model_name}'
 ISSUE_URL='{issue_url}'
 REPO_URL='{repo_url}'
 PR_BRANCH='{pr_branch}'
-TESTBED='/home/user/testbed'
-TRAJ_PATH='/home/user/last_mini_run.traj.json'
+TESTBED='${WORKSPACE_PATH:-/workspace/repo}'
+TRAJ_PATH='${TRAJECTORY_PATH:-/workspace/trajectory.json}'
 
 FALLBACK_TITLE='{fallback_title}'
 FALLBACK_BODY='{fallback_body}'
