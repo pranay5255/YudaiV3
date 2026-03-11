@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>daifuUserAgent — Agent Memory System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+/* ── THEME ── */
+:root {
+  --font-body: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+
+  /* dark-first */
+  --bg:       #07060f;
+  --surface:  #100e1e;
+  --surface2: #1a1730;
+  --surface3: #231f3a;
+  --border:   rgba(139,92,246,.13);
+  --border-b: rgba(139,92,246,.28);
+  --text:     #e2d9f3;
+  --dim:      #8b7faa;
+
+  --purple:  #a78bfa; --purple-d: rgba(167,139,250,.13);
+  --blue:    #60a5fa; --blue-d:   rgba(96,165,250,.12);
+  --cyan:    #22d3ee; --cyan-d:   rgba(34,211,238,.10);
+  --green:   #34d399; --green-d:  rgba(52,211,153,.10);
+  --amber:   #fbbf24; --amber-d:  rgba(251,191,36,.10);
+  --pink:    #f472b6; --pink-d:   rgba(244,114,182,.10);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:       #f5f3ff;
+    --surface:  #ffffff;
+    --surface2: #ede9fe;
+    --surface3: #ddd6fe;
+    --border:   rgba(109,40,217,.09);
+    --border-b: rgba(109,40,217,.22);
+    --text:     #1e0a3c;
+    --dim:      #6d5fa0;
+
+    --purple:  #7c3aed; --purple-d: rgba(124,58,237,.10);
+    --blue:    #2563eb; --blue-d:   rgba(37,99,235,.10);
+    --cyan:    #0891b2; --cyan-d:   rgba(8,145,178,.10);
+    --green:   #059669; --green-d:  rgba(5,150,105,.10);
+    --amber:   #d97706; --amber-d:  rgba(217,119,6,.10);
+    --pink:    #db2777; --pink-d:   rgba(219,39,119,.10);
+  }
+}
+
+/* ── RESET ── */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg);
+  background-image:
+    radial-gradient(ellipse 70% 40% at 15% 10%, rgba(139,92,246,.07) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 35% at 85% 90%, rgba(96,165,250,.06) 0%, transparent 55%);
+  color: var(--text);
+  font-family: var(--font-body);
+  padding: 52px 24px 80px;
+  min-height: 100vh;
+  line-height: 1.5;
+}
+
+.wrap { max-width: 1080px; margin: 0 auto; }
+
+/* ── ANIMATIONS ── */
+@keyframes fadeUp {
+  from { opacity:0; transform:translateY(14px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+@keyframes glow {
+  0%,100% { box-shadow: 0 0 0 0 transparent; }
+  50%      { box-shadow: 0 0 18px 2px var(--purple-d); }
+}
+
+.anim { animation: fadeUp .5s ease-out both; animation-delay: calc(var(--i,0) * .07s); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration:.01ms!important; animation-delay:0ms!important; transition-duration:.01ms!important; }
+}
+
+/* ── HEADER ── */
+.tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--purple-d); border: 1px solid var(--border-b);
+  color: var(--purple); font-family: var(--font-mono); font-size: 10px;
+  padding: 4px 12px; border-radius: 20px; margin-bottom: 18px;
+  letter-spacing: .08em; text-transform: uppercase;
+}
+
+h1 {
+  font-size: clamp(34px, 6vw, 58px);
+  font-weight: 700; letter-spacing: -2px; line-height: 1.04; margin-bottom: 14px;
+  background: linear-gradient(135deg, var(--purple) 0%, var(--blue) 55%, var(--cyan) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+
+.sub {
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--dim); max-width: 560px; line-height: 1.7; margin-bottom: 60px;
+}
+
+/* ── SECTION LABEL ── */
+.sec-row {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--dim); text-transform: uppercase; letter-spacing: .12em;
+  margin-bottom: 18px;
+}
+.sec-row::after { content:''; flex:1; height:1px; background:var(--border); }
+.sec-n {
+  background: var(--surface2); color: var(--purple);
+  border: 1px solid var(--border-b); font-family: var(--font-mono);
+  font-size: 9px; padding: 2px 7px; border-radius: 4px;
+}
+
+h2 { font-size: 26px; font-weight: 700; letter-spacing: -.5px; margin-bottom: 20px; }
+
+.section { margin-bottom: 64px; }
+
+/* ── PROBLEM CARDS ── */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+.pcard {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 28px; position: relative; overflow: hidden;
+}
+.pcard::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:3px;
+}
+.pcard.desk::before   { background: linear-gradient(90deg, var(--amber), var(--pink)); }
+.pcard.cabinet::before{ background: linear-gradient(90deg, var(--purple), var(--blue)); }
+
+.pcard-icon { font-size:36px; display:block; margin-bottom:14px; line-height:1; }
+.pcard h3 { font-size:15px; font-weight:600; margin-bottom:8px; }
+.pcard p  { font-size:12px; color:var(--dim); line-height:1.7; }
+.pcard p + p { margin-top:10px; }
+.pcard strong { color:var(--text); }
+
+/* ── MEMORY TYPE CARDS ── */
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+
+.mcard {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 24px; position: relative; overflow: hidden;
+  transition: border-color .2s, transform .2s;
+}
+.mcard:hover { border-color: var(--border-b); transform: translateY(-3px); }
+.mcard::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; }
+.mcard.semantic::before  { background: linear-gradient(90deg, var(--purple), var(--blue)); }
+.mcard.episodic::before  { background: linear-gradient(90deg, var(--blue), var(--cyan)); }
+.mcard.highl::before     { background: linear-gradient(90deg, var(--cyan), var(--green)); }
+
+.mbadge {
+  display:inline-block; font-family:var(--font-mono); font-size:9px;
+  text-transform:uppercase; letter-spacing:.1em; padding:2px 9px;
+  border-radius:20px; margin-bottom:14px; border: 1px solid var(--border-b);
+}
+.semantic .mbadge { background:var(--purple-d); color:var(--purple); }
+.episodic .mbadge { background:var(--blue-d);   color:var(--blue); }
+.highl    .mbadge { background:var(--cyan-d);   color:var(--cyan); }
+
+.mcard h3 { font-size:14px; font-weight:600; margin-bottom:8px; }
+.mcard p  { font-size:12px; color:var(--dim); line-height:1.6; margin-bottom:14px; }
+
+.mex {
+  background:var(--surface2); border:1px solid var(--border);
+  border-radius:7px; padding:10px 12px;
+  font-family:var(--font-mono); font-size:10px; color:var(--dim); line-height:1.6;
+}
+.mex span { color:var(--green); }
+
+.mstore {
+  margin-top:10px; font-family:var(--font-mono); font-size:10px; color:var(--dim);
+}
+.mstore code { color:var(--purple); }
+
+/* ── MERMAID ── */
+.mwrap {
+  position:relative; background:var(--surface); border:1px solid var(--border);
+  border-radius:14px; padding:32px 20px; overflow:auto; margin-bottom:8px;
+  min-height:200px;
+  scrollbar-width:thin; scrollbar-color:var(--border) transparent;
+}
+.mwrap::-webkit-scrollbar { width:6px; height:6px; }
+.mwrap::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+.mwrap .mermaid {
+  display:flex; justify-content:center;
+  transition:transform .2s; transform-origin:top center;
+}
+.mwrap.is-zoomed   { cursor:grab; }
+.mwrap.is-panning  { cursor:grabbing; user-select:none; }
+
+.zoom-bar {
+  position:absolute; top:8px; right:8px; z-index:10;
+  display:flex; gap:2px;
+  background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:2px;
+}
+.zoom-bar button {
+  width:28px; height:28px; border:none; background:transparent;
+  color:var(--dim); font-family:var(--font-mono); font-size:14px;
+  cursor:pointer; border-radius:4px; display:flex; align-items:center; justify-content:center;
+  transition:background .15s, color .15s;
+}
+.zoom-bar button:hover { background:var(--border); color:var(--text); }
+
+.mermaid .nodeLabel { font-family:var(--font-body)!important; font-size:13px!important; }
+.mermaid .edgeLabel { font-family:var(--font-mono)!important; font-size:11px!important; }
+
+.diagram-hint {
+  font-family:var(--font-mono); font-size:10px; color:var(--dim);
+  text-align:center; margin-top:6px;
+}
+
+/* ── MECHANISM CARDS ── */
+.mech-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+
+.mech {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:14px; padding:22px;
+  display:grid; grid-template-columns:44px 1fr; gap:16px; align-items:start;
+}
+
+.mnum {
+  width:44px; height:44px; border-radius:50%; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+  font-family:var(--font-mono); font-size:17px; font-weight:700;
+  border: 1px solid var(--border-b);
+}
+.mech:nth-child(1) .mnum { background:var(--purple-d); color:var(--purple); }
+.mech:nth-child(2) .mnum { background:var(--blue-d);   color:var(--blue); }
+.mech:nth-child(3) .mnum { background:var(--amber-d);  color:var(--amber); }
+.mech:nth-child(4) .mnum { background:var(--green-d);  color:var(--green); }
+
+.mc h3 { font-size:14px; font-weight:600; margin-bottom:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.mc p  { font-size:12px; color:var(--dim); line-height:1.65; margin-bottom:10px; }
+
+.mtag {
+  display:inline-block; font-family:var(--font-mono); font-size:9px;
+  padding:1px 7px; border-radius:3px;
+}
+.mtag.done   { background:var(--green-d); color:var(--green); border:1px solid rgba(52,211,153,.2); }
+.mtag.future { background:var(--amber-d); color:var(--amber); border:1px solid rgba(251,191,36,.2); }
+
+.mimpl {
+  font-family:var(--font-mono); font-size:10px;
+  background:var(--surface2); border:1px solid var(--border);
+  border-radius:7px; padding:9px 11px; color:var(--purple);
+  white-space:pre; overflow-x:auto; overflow-wrap:normal;
+}
+
+/* ── BEFORE / AFTER ── */
+.ba { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+
+.ba-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:14px; padding:24px;
+}
+.ba-card.before { border-top:3px solid var(--pink); }
+.ba-card.after  { border-top:3px solid var(--green); }
+
+.ba-head { display:flex; align-items:center; gap:10px; margin-bottom:18px; }
+.ba-head h3 { font-size:14px; font-weight:600; }
+.ba-pill {
+  font-family:var(--font-mono); font-size:9px; padding:2px 9px; border-radius:20px;
+}
+.before .ba-pill { background:var(--pink-d);  color:var(--pink);  border:1px solid rgba(244,114,182,.2); }
+.after  .ba-pill { background:var(--green-d); color:var(--green); border:1px solid rgba(52,211,153,.2); }
+
+.ba-list { list-style:none; display:flex; flex-direction:column; gap:9px; }
+.ba-list li {
+  font-size:12px; color:var(--dim); line-height:1.55;
+  padding-left:18px; position:relative; overflow-wrap:break-word;
+}
+.ba-list li::before {
+  content:''; position:absolute; left:0; top:5px;
+  width:7px; height:7px; border-radius:50%;
+}
+.before .ba-list li::before { background:var(--pink); }
+.after  .ba-list li::before { background:var(--green); }
+.ba-list code {
+  font-family:var(--font-mono); font-size:10px;
+  background:var(--surface2); color:var(--purple);
+  padding:1px 5px; border-radius:3px;
+}
+
+/* ── JSON BLOCK ── */
+.jblock {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:14px; padding:28px; overflow-x:auto;
+}
+.jblock pre {
+  font-family:var(--font-mono); font-size:12.5px; line-height:1.75;
+  min-width:0; overflow-wrap:normal;
+}
+.jk { color:var(--purple); }
+.js { color:var(--green); }
+.jp { color:var(--dim); }
+.jc { color:var(--dim); font-style:italic; opacity:.7; }
+
+/* ── TABLE ── */
+.twrap {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:14px; overflow:hidden;
+}
+table { width:100%; border-collapse:collapse; font-size:13px; }
+thead th {
+  padding:11px 16px; text-align:left;
+  font-family:var(--font-mono); font-size:9px;
+  text-transform:uppercase; letter-spacing:.1em; color:var(--dim);
+  background:var(--surface2); border-bottom:1px solid var(--border);
+  white-space:nowrap;
+}
+tbody tr { border-bottom:1px solid var(--border); }
+tbody tr:last-child { border-bottom:none; }
+tbody tr:hover { background:var(--surface2); }
+td { padding:14px 16px; vertical-align:top; line-height:1.55; }
+td:first-child { white-space:nowrap; }
+td code {
+  font-family:var(--font-mono); font-size:11px;
+  background:var(--surface2); color:var(--purple); padding:2px 6px; border-radius:4px;
+}
+
+.meth {
+  display:inline-block; font-family:var(--font-mono); font-size:10px; font-weight:700;
+  padding:2px 7px; border-radius:4px; margin-right:6px;
+}
+.meth.POST { background:var(--green-d); color:var(--green); border:1px solid rgba(52,211,153,.2); }
+.meth.GET  { background:var(--blue-d);  color:var(--blue);  border:1px solid rgba(96,165,250,.2); }
+.meth.PUT  { background:var(--amber-d); color:var(--amber); border:1px solid rgba(251,191,36,.2); }
+.new-b {
+  display:inline-block; font-family:var(--font-mono); font-size:9px;
+  padding:1px 6px; border-radius:3px;
+  background:var(--purple-d); color:var(--purple); border:1px solid var(--border-b);
+  margin-left:6px; vertical-align:middle;
+}
+.stat { font-family:var(--font-mono); font-size:11px; }
+.stat.ex  { color:var(--dim); }
+.stat.new { color:var(--purple); }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 720px) {
+  body { padding:24px 16px 60px; }
+  h1 { letter-spacing:-1px; }
+  .grid-2, .grid-3, .mech-grid, .ba { grid-template-columns:1fr; }
+}
+@media (max-width: 480px) {
+  .grid-3 { grid-template-columns:1fr; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ── HEADER ── -->
+<div class="anim" style="--i:0">
+  <div class="tag">daifuUserAgent &middot; Memory System</div>
+  <h1>Agent Memory<br>for Session Chat</h1>
+  <p class="sub">How semantic facts, episodic memories, and file highlights persist across chat turns — and the architectural changes that make it work.</p>
+</div>
+
+<!-- ── 01 PROBLEM ── -->
+<div class="section anim" style="--i:1">
+  <div class="sec-row"><span class="sec-n">01</span> The Memory Problem</div>
+  <h2>The Blank Slate Problem</h2>
+  <div class="grid-2">
+    <div class="pcard desk">
+      <span class="pcard-icon">🗒️</span>
+      <h3>The Session — The Desk</h3>
+      <p>While a conversation is active, all messages live in the LLM&rsquo;s context window. But the context window is <strong>finite</strong>. When the session ends, everything on the desk is gone.</p>
+      <p>Out of the box, AI agents are <strong>stateless</strong>. Every turn is just an increasingly long context window. There is no memory between calls.</p>
+    </div>
+    <div class="pcard cabinet">
+      <span class="pcard-icon">🗄️</span>
+      <h3>Long-Term Memory — The Filing Cabinet</h3>
+      <p>The filing cabinet persists across sessions. Anything filed stays available in future conversations. Anything not filed is gone when the desk is cleared.</p>
+      <p>The hard part isn&rsquo;t the storage. It&rsquo;s <strong>knowing when to write and when to load</strong>. Get that right, and the rest is just files.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── 02 MEMORY TYPES ── -->
+<div class="section anim" style="--i:2">
+  <div class="sec-row"><span class="sec-n">02</span> Memory Taxonomy</div>
+  <h2>Three Types of Memory</h2>
+  <div class="grid-3">
+    <div class="mcard semantic">
+      <span class="mbadge">Semantic</span>
+      <h3>Facts</h3>
+      <p>Stable, file-backed facts about the repo. Change infrequently. Apply to every future conversation.</p>
+      <div class="mex">
+        <span>"Backend uses FastAPI + SQLAlchemy"</span><br>
+        <span>"Auth via GitHub OAuth in auth/"</span><br>
+        <span>"Models defined in models.py"</span>
+      </div>
+      <div class="mstore">key: <code>facts_and_memories.facts</code><br>cap: 30 &middot; new wins on collision</div>
+    </div>
+    <div class="mcard episodic">
+      <span class="mbadge">Episodic</span>
+      <h3>Memories</h3>
+      <p>Conversational takeaways and unresolved threads. What the user was working on and what remains open.</p>
+      <div class="mex">
+        <span>"User debugging auth flow"</span><br>
+        <span>"Wants WebSocket streaming"</span><br>
+        <span>"Issue #42 needs tester pass"</span>
+      </div>
+      <div class="mstore">key: <code>facts_and_memories.memories</code><br>cap: 20 &middot; rolling window</div>
+    </div>
+    <div class="mcard highl">
+      <span class="mbadge">Highlights</span>
+      <h3>Key Files</h3>
+      <p>Important files and folders from the yudai-grep ML model. Pinpoints where core logic lives in the repo.</p>
+      <div class="mex">
+        <span>"backend/daifuUserAgent/"</span><br>
+        <span>"backend/context/"</span><br>
+        <span>"backend/realtime/ws_hub.py"</span>
+      </div>
+      <div class="mstore">key: <code>facts_and_memories.highlights</code><br>cap: 15 &middot; ML-driven</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 03 ARCHITECTURE ── -->
+<div class="section anim" style="--i:3">
+  <div class="sec-row"><span class="sec-n">03</span> Architecture</div>
+  <h2>Chat Request Pipeline</h2>
+  <div class="mwrap">
+    <div class="zoom-bar">
+      <button onclick="zoomD(this,1.2)" title="Zoom in">+</button>
+      <button onclick="zoomD(this,0.8)" title="Zoom out">&minus;</button>
+      <button onclick="resetZ(this)" title="Reset">&#8634;</button>
+    </div>
+    <pre class="mermaid">
+flowchart TD
+    U(["👤 User Message"]) --> R["chat_in_session()\nsession_routes.py"]
+    R --> C["ChatOps.process_chat_message()"]
+
+    C --> H["_get_conversation_history()\nlast 10 msgs from DB"]
+    C --> X["_get_context_cards_content()\nuser-attached cards"]
+    C --> V["LLMService.get_relevant_file_contexts()\nvector search over embeddings"]
+    C --> B["_bootstrap_memory_context()\n★ Mechanism 1: Bootstrap Loading"]
+    B -->|reads| DB[("session.repo_context\nfacts_and_memories")]
+
+    C --> Q{"generate_facts_memories?"}
+    Q -->|"True"| F["_refresh_facts_memories_for_session()"]
+    F --> G["FactsAndMemoriesService.generate()"]
+    DB -->|"existing_memories\nfed back for\nLLM consolidation"| G
+    G --> K["build_yudai_grep_analysis()\nML: key file detection"]
+    G --> L["LLM call → facts, memories, highlights\n+ CONSOLIDATE/DEDUP/UPDATE instructions"]
+    L --> A["MemoryService.accumulate()\n★ Mechanism 2: Deterministic safety net"]
+    A -->|"persists"| DB
+
+    Q -->|"False"| SK["skip generation"]
+
+    C -.->|"session deactivation\n★ Mechanism 3"| SNAP["MemoryService.save_session_snapshot()\nlast 15 meaningful messages"]
+    SNAP -.->|"persists snapshot"| DB
+
+    H --> LLM["LLMService\n.generate_response_with_stored_context()"]
+    X --> LLM
+    V --> LLM
+    B --> LLM
+    F --> LLM
+    SK --> LLM
+
+    LLM --> O(["💬 Response sent\nINTERNAL_FACTS_MEMORIES\ninjected into system prompt"])
+
+    classDef default fill:#1a1730,stroke:#4c3a7a,color:#e2d9f3
+    classDef user    fill:#2d1b69,stroke:#a78bfa,color:#e2d9f3
+    classDef mech    fill:#162044,stroke:#60a5fa,color:#e2d9f3
+    classDef store   fill:#0f2d1f,stroke:#34d399,color:#e2d9f3
+    classDef out     fill:#0f1f2d,stroke:#22d3ee,color:#e2d9f3
+    classDef gate    fill:#2d2a0f,stroke:#fbbf24,color:#e2d9f3
+
+    class U user
+    class B,A,SNAP mech
+    class DB store
+    class O out
+    class Q gate
+    </pre>
+  </div>
+  <p class="diagram-hint">Ctrl/Cmd + scroll to zoom &middot; drag to pan when zoomed</p>
+</div>
+
+<!-- ── 04 MECHANISMS ── -->
+<div class="section anim" style="--i:4">
+  <div class="sec-row"><span class="sec-n">04</span> Implementation</div>
+  <h2>Four Mechanisms</h2>
+  <div class="mech-grid">
+
+    <div class="mech">
+      <div class="mnum">1</div>
+      <div class="mc">
+        <h3>Bootstrap Loading <span class="mtag done">implemented</span></h3>
+        <p>At the start of every chat turn, stored memories are injected into the LLM context — even before new F&amp;M are generated. The agent always starts with prior knowledge, not a blank slate.</p>
+        <pre class="mimpl">ChatOps._bootstrap_memory_context()
+→ reads session.repo_context["facts_and_memories"]
+→ formats as [INTERNAL_FACTS_MEMORIES] block
+→ injected into every chat turn unconditionally</pre>
+      </div>
+    </div>
+
+    <div class="mech">
+      <div class="mnum">2</div>
+      <div class="mc">
+        <h3>Accumulation / Consolidation <span class="mtag done">implemented</span></h3>
+        <p>Two-layer consolidation: first, existing memories are fed back into the LLM prompt so it can deduplicate, update contradictions, and merge intelligently (CONSOLIDATE/DEDUPLICATE/UPDATE/RETAIN/DROP instructions). Then a deterministic <code>MemoryService.accumulate()</code> pass enforces hard caps and catches remaining near-duplicates via 60-char prefix fingerprint. New entries win on collision.</p>
+        <pre class="mimpl">Layer 1: LLM consolidation
+→ existing_memories passed to FactsAndMemoriesService.generate()
+→ LLM deduplicates, updates contradictions, merges
+
+Layer 2: Deterministic safety net
+→ MemoryService.accumulate(existing, new_*)
+→ dedup via prefix fingerprint (60 chars)
+→ new entry wins on collision
+→ capped: facts 30, memories 20, highlights 15</pre>
+      </div>
+    </div>
+
+    <div class="mech">
+      <div class="mnum">3</div>
+      <div class="mc">
+        <h3>Session Snapshot <span class="mtag done">implemented</span></h3>
+        <p>When a session is deactivated (<code>is_active</code> True&rarr;False), the last N meaningful messages are captured as a snapshot — filtering out short messages (&lt;10 chars) and system/tool messages. Like OpenClaw&rsquo;s /new hook.</p>
+        <pre class="mimpl">MemoryService.save_session_snapshot(db, session)
+→ triggered on PUT /sessions/{id} when is_active → False
+→ filters: user/assistant only, len &gt; 10 chars
+→ saves last 15 meaningful turns to repo_context["session_snapshot"]
+→ MemoryService.get_session_snapshot() retrieves it</pre>
+      </div>
+    </div>
+
+    <div class="mech">
+      <div class="mnum">4</div>
+      <div class="mc">
+        <h3>"Remember This" <span class="mtag done">implemented</span></h3>
+        <p>Explicit memory generation is controlled per-session by a boolean flag set at creation time. When enabled, every chat turn triggers F&amp;M generation and accumulation automatically.</p>
+        <pre class="mimpl">ChatSession.generate_facts_memories (bool)
+→ True  → generate + accumulate each turn
+→ False → bootstrap from stored memories only</pre>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── 05 BEFORE / AFTER ── -->
+<div class="section anim" style="--i:5">
+  <div class="sec-row"><span class="sec-n">05</span> What Changed</div>
+  <h2>Before vs After</h2>
+  <div class="ba">
+    <div class="ba-card before">
+      <div class="ba-head">
+        <h3>Before</h3>
+        <span class="ba-pill">overwrite bug</span>
+      </div>
+      <ul class="ba-list">
+        <li>Every chat turn called <code>stored.update({...})</code> — completely overwriting prior facts with whatever was extracted from just the latest messages</li>
+        <li>No bootstrap: LLM started each turn with no prior memory, even if rich memories were stored in <code>repo_context</code></li>
+        <li>Turn 10 → newly extracted facts silently erased everything learned in turns 1–9</li>
+        <li>Agent felt amnesiac: had to re-discover repo structure on every turn</li>
+        <li>No API to inspect what the agent "knows" — black-box debugging</li>
+      </ul>
+    </div>
+    <div class="ba-card after">
+      <div class="ba-head">
+        <h3>After</h3>
+        <span class="ba-pill">accumulation</span>
+      </div>
+      <ul class="ba-list">
+        <li><strong>Two-layer consolidation:</strong> LLM-based merge (CONSOLIDATE/DEDUP/UPDATE/RETAIN/DROP) + deterministic <code>MemoryService.accumulate()</code> safety net</li>
+        <li>Bootstrap loading via <code>_bootstrap_memory_context()</code> injects prior memories into every turn's LLM context</li>
+        <li>Prefix fingerprint deduplication prevents "User prefers dark mode" × 20 cluttering the memory</li>
+        <li>Collision resolution: new entry wins, so user preferences can be cleanly updated over time</li>
+        <li>Session snapshots (M3): last 15 meaningful messages saved on deactivation via <code>MemoryService.save_session_snapshot()</code></li>
+        <li><code>GET /sessions/{id}/memories</code> exposes structured memory for frontend display and debugging</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ── 06 SCHEMA ── -->
+<div class="section anim" style="--i:6">
+  <div class="sec-row"><span class="sec-n">06</span> Storage</div>
+  <h2>session.repo_context JSON Schema</h2>
+  <div class="jblock">
+    <pre><span class="jp">{</span>
+  <span class="jk">"facts_and_memories"</span><span class="jp">: {</span>
+
+    <span class="jc">// Semantic memory — stable, file-backed repo facts (max 30)</span>
+    <span class="jk">"facts"</span><span class="jp">: [</span>
+      <span class="js">"FastAPI used in backend/main.py"</span><span class="jp">,</span>
+      <span class="js">"SQLAlchemy ORM models defined in models.py"</span><span class="jp">,</span>
+      <span class="js">"GitHub OAuth handled in auth/github_oauth.py"</span>
+    <span class="jp">],</span>
+
+    <span class="jc">// Episodic memory — conversational takeaways + unresolved threads (max 20)</span>
+    <span class="jk">"memories"</span><span class="jp">: [</span>
+      <span class="js">"User debugging auth flow in session_routes.py"</span><span class="jp">,</span>
+      <span class="js">"Wants to add WebSocket streaming for chat responses"</span>
+    <span class="jp">],</span>
+
+    <span class="jc">// Key files/folders from yudai-grep ML analysis (max 15)</span>
+    <span class="jk">"highlights"</span><span class="jp">: [</span>
+      <span class="js">"backend/daifuUserAgent/"</span><span class="jp">,</span>
+      <span class="js">"backend/context/facts_and_memories.py"</span><span class="jp">,</span>
+      <span class="js">"backend/realtime/ws_hub.py"</span>
+    <span class="jp">],</span>
+
+    <span class="jc">// ISO timestamp of last F&amp;M generation</span>
+    <span class="jk">"generated_at"</span><span class="jp">:</span> <span class="js">"2026-03-11T14:32:00.000Z"</span>
+
+  <span class="jp">},</span>
+
+  <span class="jc">// ★ Mechanism 3: Session snapshot — captured on deactivation</span>
+  <span class="jk">"session_snapshot"</span><span class="jp">: {</span>
+    <span class="jk">"messages"</span><span class="jp">: [</span>
+      <span class="jp">{</span> <span class="jk">"role"</span><span class="jp">:</span> <span class="js">"user"</span><span class="jp">,</span> <span class="jk">"text"</span><span class="jp">:</span> <span class="js">"How does the auth flow work?"</span> <span class="jp">},</span>
+      <span class="jp">{</span> <span class="jk">"role"</span><span class="jp">:</span> <span class="js">"assistant"</span><span class="jp">,</span> <span class="jk">"text"</span><span class="jp">:</span> <span class="js">"The auth uses GitHub OAuth via..."</span> <span class="jp">}</span>
+    <span class="jp">],</span>
+    <span class="jk">"captured_at"</span><span class="jp">:</span> <span class="js">"2026-03-11T15:00:00.000Z"</span><span class="jp">,</span>
+    <span class="jk">"message_count"</span><span class="jp">:</span> <span class="js">15</span>
+  <span class="jp">}</span>
+<span class="jp">}</span></pre>
+  </div>
+</div>
+
+<!-- ── 07 ENDPOINTS ── -->
+<div class="section anim" style="--i:7">
+  <div class="sec-row"><span class="sec-n">07</span> API</div>
+  <h2>Endpoints</h2>
+  <div class="twrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Method &amp; Path</th>
+          <th>Handler</th>
+          <th>Memory Role</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="meth POST">POST</span><code>/sessions/{id}/chat</code></td>
+          <td><code>chat_in_session()</code></td>
+          <td>Runs bootstrap loading (M1) on every turn. Runs F&amp;M generation + accumulation (M2) when flag is set.</td>
+          <td><span class="stat ex">existing</span></td>
+        </tr>
+        <tr>
+          <td>
+            <span class="meth GET">GET</span><code>/sessions/{id}/memories</code>
+            <span class="new-b">NEW</span>
+          </td>
+          <td><code>get_session_memories()</code></td>
+          <td>Returns structured <code>facts</code>, <code>memories</code>, <code>highlights</code>, and <code>generated_at</code> for a session. Useful for frontend display and debugging.</td>
+          <td><span class="stat new">added</span></td>
+        </tr>
+        <tr>
+          <td>
+            <span class="meth PUT">PUT</span><code>/sessions/{id}</code>
+          </td>
+          <td><code>update_session()</code></td>
+          <td>When <code>is_active</code> transitions True&rarr;False, triggers M3 session snapshot via <code>MemoryService.save_session_snapshot()</code>. Captures last 15 meaningful messages.</td>
+          <td><span class="stat ex">existing</span> <span class="new-b">+ M3</span></td>
+        </tr>
+        <tr>
+          <td><span class="meth GET">GET</span><code>/sessions/{id}/context</code></td>
+          <td><code>SessionService.get_context()</code></td>
+          <td>Full session context including messages, context cards, and file embeddings. Memory is embedded inside the session object.</td>
+          <td><span class="stat ex">existing</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</div><!-- /wrap -->
+
+<!-- MERMAID -->
+<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+import elkLayouts from 'https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk/dist/mermaid-layout-elk.esm.min.mjs';
+
+mermaid.registerLayoutLoaders(elkLayouts);
+mermaid.initialize({
+  startOnLoad: true,
+  theme: 'base',
+  look: 'classic',
+  layout: 'elk',
+  themeVariables: {
+    primaryColor:       '#1a1730',
+    primaryBorderColor: '#6d5ba8',
+    primaryTextColor:   '#e2d9f3',
+    secondaryColor:     '#162044',
+    secondaryBorderColor: '#60a5fa',
+    secondaryTextColor: '#e2d9f3',
+    tertiaryColor:      '#2d2a0f',
+    tertiaryBorderColor:'#fbbf24',
+    tertiaryTextColor:  '#e2d9f3',
+    lineColor:          '#6d5ba8',
+    background:         '#07060f',
+    mainBkg:            '#1a1730',
+    fontSize:           '13px',
+    fontFamily:         "'Space Grotesk', system-ui, sans-serif",
+    edgeLabelBackground:'#07060f',
+    clusterBkg:         '#1a1730',
+  }
+});
+</script>
+
+<!-- ZOOM / PAN -->
+<script>
+function getTarget(btn) { return btn.closest('.mwrap').querySelector('.mermaid'); }
+
+function zoomD(btn, f) {
+  var t = getTarget(btn), z = Math.min(Math.max((+t.dataset.zoom || 1) * f, .3), 5);
+  t.dataset.zoom = z; t.style.transform = 'scale('+z+')';
+  btn.closest('.mwrap').classList.toggle('is-zoomed', z > 1);
+}
+function resetZ(btn) {
+  var t = getTarget(btn);
+  t.dataset.zoom = 1; t.style.transform = 'scale(1)';
+  btn.closest('.mwrap').classList.remove('is-zoomed');
+}
+
+document.querySelectorAll('.mwrap').forEach(function(w) {
+  w.addEventListener('wheel', function(e) {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    var t = w.querySelector('.mermaid'), z = Math.min(Math.max((+t.dataset.zoom||1)*(e.deltaY<0?1.1:.9),.3),5);
+    t.dataset.zoom = z; t.style.transform = 'scale('+z+')';
+    w.classList.toggle('is-zoomed', z > 1);
+  }, {passive:false});
+
+  var sx, sy, sl, st;
+  w.addEventListener('mousedown', function(e) {
+    if (e.target.closest('.zoom-bar')) return;
+    if ((+w.querySelector('.mermaid').dataset.zoom||1) <= 1) return;
+    w.classList.add('is-panning'); sx=e.clientX; sy=e.clientY; sl=w.scrollLeft; st=w.scrollTop;
+  });
+  window.addEventListener('mousemove', function(e) {
+    if (!w.classList.contains('is-panning')) return;
+    w.scrollLeft = sl-(e.clientX-sx); w.scrollTop = st-(e.clientY-sy);
+  });
+  window.addEventListener('mouseup', function() { w.classList.remove('is-panning'); });
+});
+</script>
+</body>
+</html>
