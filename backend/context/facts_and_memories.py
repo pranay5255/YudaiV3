@@ -343,7 +343,16 @@ class FactsAndMemoriesService:
         snapshot: RepositorySnapshot,
         conversation: Optional[Sequence[Dict[str, Any]]] = None,
         max_messages: int = 10,
+        existing_memories: Optional[Dict[str, Any]] = None,
     ) -> FactsAndMemoriesResult:
+        """Generate facts & memories with LLM-based consolidation.
+
+        When ``existing_memories`` is provided the LLM is instructed to
+        *consolidate* — deduplicate, update contradictions, and merge — rather
+        than generate from scratch.  This follows the extraction-and-consolidation
+        pattern described in the agent-memory literature: a separate LLM pass
+        decides what to keep, what to merge, and what to update.
+        """
         repo_analysis = self.build_yudai_grep_analysis(
             snapshot,
             conversation,
@@ -355,6 +364,7 @@ class FactsAndMemoriesService:
             conversation,
             max_messages=max_messages,
             repo_analysis=repo_analysis,
+            existing_memories=existing_memories,
         )
         response = await LLMService.generate_response(
             prompt,
@@ -370,6 +380,7 @@ class FactsAndMemoriesService:
         conversation: Optional[Sequence[Dict[str, Any]]],
         max_messages: int,
         repo_analysis: Optional[Dict[str, Any]] = None,
+        existing_memories: Optional[Dict[str, Any]] = None,
     ) -> str:
         summary = snapshot.raw_response.get("raw_response", {}).get(
             "summary", "No summary available."
@@ -403,8 +414,41 @@ class FactsAndMemoriesService:
 {dir_structure[:800] if dir_structure else "Not available"}
 """
 
+        # Existing memories block for LLM-based consolidation.
+        # The article pattern: "a separate LLM instance takes a conversation
+        # and processes it, deciding what to keep, what to merge, and what to
+        # update."  We feed existing memories so the LLM can consolidate.
+        existing_block = ""
+        if existing_memories and isinstance(existing_memories, dict):
+            existing_facts = existing_memories.get("facts", [])
+            existing_mems = existing_memories.get("memories", [])
+            existing_hl = existing_memories.get("highlights", [])
+            parts = []
+            if existing_facts:
+                parts.append("### Existing Facts\n" + "\n".join(f"- {f}" for f in existing_facts))
+            if existing_mems:
+                parts.append("### Existing Memories\n" + "\n".join(f"- {m}" for m in existing_mems))
+            if existing_hl:
+                parts.append("### Existing Highlights\n" + "\n".join(f"- {h}" for h in existing_hl))
+            if parts:
+                existing_block = "\n## Previously Stored Memories (consolidate with new)\n" + "\n\n".join(parts)
+
+        consolidation_instructions = ""
+        if existing_block:
+            consolidation_instructions = """
+- CONSOLIDATE: You are updating an existing memory store. Merge new information with existing entries.
+- DEDUPLICATE: If a new fact says the same thing as an existing one, output only one (prefer the more specific version).
+- UPDATE: If information has changed (e.g. user switched preferences), output only the updated version.
+- RETAIN: Keep existing facts/memories that are still valid even if the latest conversation doesn't mention them.
+- DROP: Remove entries that are clearly outdated or contradicted by new information."""
+
         prompt = f"""
-You are an analytical assistant. Convert the repository information and recent chat into two buckets: FACTS (grounded, file-backed statements) and MEMORIES (useful conversation takeaways). Output valid JSON with keys "facts", "memories", and "highlights".
+You are an analytical assistant. Convert the repository information and recent chat into three buckets:
+- FACTS: grounded, file-backed semantic memory (stable truths about the repo)
+- MEMORIES: episodic memory (conversational takeaways, goals, unresolved threads)
+- HIGHLIGHTS: key files and folders
+
+Output valid JSON with keys "facts", "memories", and "highlights".
 
 ## Repository Summary
 {summary}
@@ -415,6 +459,7 @@ You are an analytical assistant. Convert the repository information and recent c
 ## Key Files
 {files_preview}
 {grep_analysis}
+{existing_block}
 
 ## Recent Conversation
 {convo_preview}
@@ -423,7 +468,7 @@ You are an analytical assistant. Convert the repository information and recent c
 - Use bullet-point style sentences.
 - Facts MUST cite specific files when possible (prioritize files identified by yudai-grep analysis).
 - Memories should capture goals or unresolved threads from the chat.
-- Highlights should focus on key files and folders identified by yudai-grep.
+- Highlights should focus on key files and folders identified by yudai-grep.{consolidation_instructions}
 - Respond ONLY with JSON.
 """
         return prompt.strip()
