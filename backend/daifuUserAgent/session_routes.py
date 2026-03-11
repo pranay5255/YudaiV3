@@ -764,6 +764,16 @@ async def update_session(
         if request.repo_branch is not None:
             db_session.repo_branch = request.repo_branch
         if request.is_active is not None:
+            # Mechanism 3 — session snapshot: when a session is deactivated,
+            # capture the last N meaningful messages as an intentional save
+            # point (the "filing cabinet" pattern from the agent-memory model).
+            if not request.is_active and db_session.is_active:
+                try:
+                    from .session_service import MemoryService
+                    MemoryService.save_session_snapshot(db, db_session)
+                    logger.info("Session snapshot saved for %s", session_id)
+                except Exception as snap_err:
+                    logger.warning("Failed to save session snapshot: %s", snap_err)
             db_session.is_active = request.is_active
         if request.generate_embeddings is not None:
             db_session.generate_embeddings = request.generate_embeddings
@@ -1757,6 +1767,30 @@ async def chat_in_session(
 
 
 # (Removed duplicate conversation history helpers; using ChatOps._get_conversation_history)
+
+
+# MEMORY ENDPOINTS
+# =================================================================================
+
+
+@router.get("/sessions/{session_id}/memories")
+async def get_session_memories(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Return the stored semantic and episodic memories for a session.
+
+    Memory taxonomy:
+    - facts     → semantic memory: stable, file-backed repo facts
+    - memories  → episodic memory: conversational takeaways and threads
+    - highlights → key files/folders identified by analysis
+    """
+    from .session_service import MemoryService
+
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    return MemoryService.get_memories(db_session)
 
 
 # FILE DEPENDENCIES ENDPOINTS - Consolidated from filedeps.py
