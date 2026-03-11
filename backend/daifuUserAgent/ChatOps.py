@@ -1,37 +1,21 @@
 #!/usr/bin/env python3
 """
-ChatOps Module - Consolidated Chat and Repository Operations
+ChatOps Module — Chat operations with agent memory.
 
-This module provides all chat-related operations including GitHub API integration,
-repository context fetching, and conversation management. It consolidates functionality
-previously scattered across multiple files and provides unified chat operations.
+Implements the four memory mechanisms from the agent-memory pattern:
 
-TODO: Implementation Tasks
-==========================
+  M1  Bootstrap loading   — ``_bootstrap_memory_context`` injects stored
+                             semantic + episodic memories into every LLM turn.
+  M2  Accumulation        — ``MemoryService.accumulate`` merges new facts into
+                             existing (no overwrite, prefix-fingerprint dedup).
+  M3  Session snapshot    — ``save_session_snapshot`` captures the last N
+                             meaningful messages when a session is deactivated.
+  M4  "Remember this"     — controlled by the per-session boolean flag
+                             ``ChatSession.generate_facts_memories``.
 
-HIGH PRIORITY:
-
-3. Facts & Memories Integration
-   - Complete FactsAndMemoriesService integration
-   - Implement automatic facts generation during conversations
-   - Add facts persistence and retrieval optimization
-   - Implement memories-based context enhancement
-
-MEDIUM PRIORITY:
-
-
-6. Frontend Integration
-   - Ensure response format matches frontend sessionTypes.ts
-   - Implement real-time conversation updates
-   - Implement conversation search and filtering
-
-LOW PRIORITY:
-7. Advanced Features
-   - Implement conversation summarization
-   - Add support for multi-repository conversations
-   - Implement conversation analytics and insights
-   - Add support for conversation templates and presets
-
+The LLM-based consolidation step (extraction *and* consolidation) lives in
+``FactsAndMemoriesService.generate`` which receives existing memories so it can
+deduplicate, update contradictions, and merge — rather than generate from scratch.
 """
 
 import json
@@ -125,6 +109,13 @@ class ChatOps:
                     logger.warning(
                         f"Failed to collect context card content: {card_error}"
                     )
+
+            # Mechanism 1: Bootstrap loading — inject stored memories at the start
+            # of every chat turn so the LLM always has prior context.
+            # This fires unconditionally; F&M generation below may add fresher entries.
+            bootstrap_ctx = self._bootstrap_memory_context(session)
+            if bootstrap_ctx:
+                context_inputs.append(bootstrap_ctx)
 
             # Get file contexts (with error handling)
             try:
@@ -321,7 +312,18 @@ class ChatOps:
         repo_owner: Optional[str],
         repo_name: Optional[str],
     ) -> Optional[str]:
-        """Generate and persist Facts & Memories for the current session."""
+        """Generate and persist Facts & Memories with LLM-based consolidation.
+
+        This implements two of the four memory mechanisms:
+
+        * **Extraction** — the LLM analyses the conversation and repo snapshot
+          to produce structured facts (semantic memory), memories (episodic
+          memory), and highlights.
+        * **Consolidation** — existing stored memories are fed *back* into the
+          LLM prompt so it can deduplicate, update contradictions, and merge
+          rather than generate from scratch.  After LLM output, a deterministic
+          ``MemoryService.accumulate`` pass ensures hard caps are enforced.
+        """
 
         if not session.generate_facts_memories:
             return None
@@ -336,26 +338,31 @@ class ChatOps:
                 repo_name=repo_name,
             )
 
-            result = await self._facts_service.generate(
-                snapshot=snapshot,
-                conversation=conversation_payload,
-                max_messages=12,
-            )
-
             repo_context = self._ensure_repo_context_dict(session.repo_context)
             stored = repo_context.get("facts_and_memories")
             if not isinstance(stored, dict):
                 stored = {}
 
-            stored.update(
-                {
-                    "facts": result.facts,
-                    "memories": result.memories,
-                    "highlights": result.highlights,
-                    "generated_at": utc_now().isoformat(),
-                }
+            # Pass existing memories to the LLM for consolidation.
+            result = await self._facts_service.generate(
+                snapshot=snapshot,
+                conversation=conversation_payload,
+                max_messages=12,
+                existing_memories=stored if stored else None,
             )
-            repo_context["facts_and_memories"] = stored
+
+            # Mechanism 2 (deterministic safety net): even after LLM
+            # consolidation, run prefix-fingerprint accumulation to enforce
+            # hard caps and catch any remaining near-duplicates.
+            from .session_service import MemoryService
+            accumulated = MemoryService.accumulate(
+                stored,
+                new_facts=result.facts,
+                new_memories=result.memories,
+                new_highlights=result.highlights,
+            )
+            accumulated["generated_at"] = utc_now().isoformat()
+            repo_context["facts_and_memories"] = accumulated
             session.repo_context = repo_context
 
             return self._format_internal_facts_context(result)
@@ -401,7 +408,12 @@ class ChatOps:
         repo_owner: Optional[str],
         repo_name: Optional[str],
     ) -> RepositorySnapshot:
-        """Create a minimal snapshot for Facts & Memories generation."""
+        """Create a minimal snapshot for Facts & Memories generation.
+
+        Includes a cached summary plus the full context string from the
+        GitIngest cache (if available) so the LLM has real file content to
+        cite when producing facts.
+        """
 
         summary_lines: List[str] = []
         if repo_owner and repo_name:
@@ -412,11 +424,11 @@ class ChatOps:
         if isinstance(description, str) and description.strip():
             summary_lines.append(f"Description: {description.strip()}")
 
-        existing_facts = repo_context.get("facts_and_memories")
-        if isinstance(existing_facts, dict) and existing_facts.get("facts"):
-            summary_lines.append(
-                "Existing Facts: " + "; ".join(existing_facts.get("facts", [])[:3])
-            )
+        # Include the cached GitIngest context_string for richer file-backed
+        # facts generation.
+        context_string = repo_context.get("context_string")
+        if isinstance(context_string, str) and context_string.strip():
+            summary_lines.append(context_string.strip()[:2000])
 
         summary_text = (
             "\n".join(summary_lines)
@@ -451,6 +463,27 @@ class ChatOps:
                 )
 
         return {}
+
+    def _bootstrap_memory_context(self, session: ChatSession) -> Optional[str]:
+        """
+        Mechanism 1 (Bootstrap loading): build a hidden context string from
+        memories already stored in the session so the LLM always starts
+        with prior knowledge — even before new F&M are generated this turn.
+        Returns None when no memories are stored yet.
+        """
+        repo_context = self._ensure_repo_context_dict(session.repo_context)
+        stored = repo_context.get("facts_and_memories")
+        if not isinstance(stored, dict):
+            return None
+        if not (stored.get("facts") or stored.get("memories")):
+            return None
+        return self._format_internal_facts_context(
+            FactsAndMemoriesResult(
+                facts=stored.get("facts", []),
+                memories=stored.get("memories", []),
+                highlights=stored.get("highlights", []),
+            )
+        )
 
     def _format_internal_facts_context(self, result: FactsAndMemoriesResult) -> str:
         """Prepare a hidden context string for the LLM prompt."""
