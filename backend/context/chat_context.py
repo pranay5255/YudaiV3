@@ -508,7 +508,18 @@ class ChatContext:
         return "\n\n".join(parts) if parts else None
 
     def _session_context_fragments(self) -> List[str]:
-        """Extract stored session context (facts/memories) for enrichment."""
+        """Extract stored session context for enrichment.
+
+        Surfaces all three memory types so that downstream prompt builders
+        (``build_combined_summary``, ``get_best_context_string``) benefit
+        from the full memory store:
+
+        * **Semantic** — stable facts about the repo (up to 10).
+        * **Episodic** — conversational memories / unresolved threads (up to 8).
+        * **Highlights** — key files / folders (up to 8).
+        * **Session snapshot** — raw last-N messages from a prior session
+          (first 3 entries only, to stay within token budget).
+        """
 
         if not self.session_obj or not getattr(self.session_obj, "repo_context", None):
             return []
@@ -530,23 +541,38 @@ class ChatContext:
             if isinstance(context_string, str) and context_string.strip():
                 fragments.append(context_string.strip())
 
+            # --- Agent memory: semantic + episodic + highlights ---
             fam = repo_context.get("facts_and_memories")
             if isinstance(fam, dict):
                 facts = fam.get("facts") or []
                 if isinstance(facts, list) and facts:
                     fragments.append(
-                        "Key Facts:\n"
-                        + "\n".join(f"- {str(fact).strip()}" for fact in facts[:3])
+                        "Semantic Memory (Facts):\n"
+                        + "\n".join(f"- {str(f).strip()}" for f in facts[:10])
+                    )
+                memories = fam.get("memories") or []
+                if isinstance(memories, list) and memories:
+                    fragments.append(
+                        "Episodic Memory (Memories):\n"
+                        + "\n".join(f"- {str(m).strip()}" for m in memories[:8])
                     )
                 highlights = fam.get("highlights") or []
                 if isinstance(highlights, list) and highlights:
                     fragments.append(
-                        "Highlights:\n"
-                        + "\n".join(
-                            f"- {str(highlight).strip()}"
-                            for highlight in highlights[:3]
-                        )
+                        "Key Files (Highlights):\n"
+                        + "\n".join(f"- {str(h).strip()}" for h in highlights[:8])
                     )
+
+            # --- Session snapshot (episodic) ---
+            snapshot = repo_context.get("session_snapshot")
+            if isinstance(snapshot, dict):
+                snap_msgs = snapshot.get("messages") or []
+                if snap_msgs:
+                    lines = [
+                        f"- {m.get('role', 'user')}: {str(m.get('text', '')).strip()[:200]}"
+                        for m in snap_msgs[:3]
+                    ]
+                    fragments.append("Session Snapshot (recent turns):\n" + "\n".join(lines))
 
         return fragments
 
