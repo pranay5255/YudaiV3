@@ -6,6 +6,7 @@ This module provides all session-related business logic and operations,
 extracted from the router handlers for better separation of concerns.
 """
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -401,6 +402,165 @@ class FileDepsService:
             List of file item dictionaries
         """
         return FileDepsService.list_for_session(db, db_session)
+
+
+class MemoryService:
+    """
+    Manages the three-tier memory taxonomy for session chat.
+
+    Memory types (from the Google whitepaper / OpenClaw model):
+      Semantic  → stable facts about the repo   → ``facts`` list
+      Episodic  → conversational takeaways       → ``memories`` list + session snapshot
+      Procedural→ (future) learned workflows
+
+    Four mechanisms:
+      M1  Bootstrap loading   – ``get_memories`` / ``get_bootstrap_context``
+      M2  Accumulation        – ``accumulate`` (prefix-fingerprint dedup)
+      M3  Session snapshot    – ``save_session_snapshot`` / ``get_session_snapshot``
+      M4  "Remember this"     – driven by ``ChatSession.generate_facts_memories``
+    """
+
+    MAX_FACTS = 30
+    MAX_MEMORIES = 20
+    MAX_HIGHLIGHTS = 15
+    SNAPSHOT_MESSAGE_LIMIT = 15
+
+    # ------------------------------------------------------------------
+    # M1 — Bootstrap loading
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_memories(db_session: ChatSession) -> Dict[str, Any]:
+        """Retrieve all stored memories for a session.
+
+        Returns a structured dict suitable for both API responses and LLM
+        context injection.
+        """
+        repo_context = MemoryService._ensure_dict(db_session.repo_context)
+        stored = repo_context.get("facts_and_memories", {})
+        if not isinstance(stored, dict):
+            stored = {}
+        return {
+            "facts": stored.get("facts", []),
+            "memories": stored.get("memories", []),
+            "highlights": stored.get("highlights", []),
+            "generated_at": stored.get("generated_at"),
+            "snapshot": MemoryService.get_session_snapshot(db_session),
+        }
+
+    # ------------------------------------------------------------------
+    # M2 — Accumulation / consolidation (deterministic safety net)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def accumulate(
+        existing: Dict[str, Any],
+        new_facts: List[str],
+        new_memories: List[str],
+        new_highlights: List[str],
+    ) -> Dict[str, Any]:
+        """Merge new F&M into existing without duplication.
+
+        Uses a 60-char prefix fingerprint to detect near-duplicates.
+        When entries collide the *new* entry wins — this handles preference
+        updates ("I switched from dark to light mode").
+        The list is capped at ``MAX_*`` to bound storage growth.
+        """
+
+        def _merge(old: List[str], new: List[str], cap: int) -> List[str]:
+            result = list(old)
+            for item in new:
+                fingerprint = item[:60].lower().strip()
+                collision_idx = next(
+                    (i for i, e in enumerate(result) if e[:60].lower().strip() == fingerprint),
+                    None,
+                )
+                if collision_idx is not None:
+                    result[collision_idx] = item
+                else:
+                    result.append(item)
+            return result[-cap:]
+
+        return {
+            "facts": _merge(existing.get("facts", []), new_facts, MemoryService.MAX_FACTS),
+            "memories": _merge(existing.get("memories", []), new_memories, MemoryService.MAX_MEMORIES),
+            "highlights": _merge(existing.get("highlights", []), new_highlights, MemoryService.MAX_HIGHLIGHTS),
+        }
+
+    # ------------------------------------------------------------------
+    # M3 — Session snapshot
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def save_session_snapshot(
+        db: Session, db_session: ChatSession, max_messages: int = 15,
+    ) -> Optional[Dict[str, Any]]:
+        """Capture the last *N* meaningful messages as a session snapshot.
+
+        Fires when a session is deactivated (``is_active`` set to False).
+        Filters out very short messages and system noise so the snapshot
+        contains only the substantive conversation — the same pattern as
+        OpenClaw's ``/new`` hook.
+
+        The snapshot is persisted in ``session.repo_context["session_snapshot"]``.
+        """
+        messages = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == db_session.id)
+            .order_by(ChatMessage.created_at.desc())
+            .limit(max_messages * 2)
+            .all()
+        )
+        messages.reverse()
+
+        meaningful = [
+            msg for msg in messages
+            if msg.sender_type in ("user", "assistant")
+            and msg.message_text
+            and len(msg.message_text.strip()) > 10
+        ][:max_messages]
+
+        if not meaningful:
+            return None
+
+        snapshot: Dict[str, Any] = {
+            "messages": [
+                {"role": msg.sender_type, "text": msg.message_text.strip()}
+                for msg in meaningful
+            ],
+            "saved_at": utc_now().isoformat(),
+            "message_count": len(meaningful),
+        }
+
+        repo_context = MemoryService._ensure_dict(db_session.repo_context)
+        repo_context["session_snapshot"] = snapshot
+        db_session.repo_context = repo_context
+
+        return snapshot
+
+    @staticmethod
+    def get_session_snapshot(db_session: ChatSession) -> Optional[Dict[str, Any]]:
+        """Retrieve a stored session snapshot (episodic memory)."""
+        repo_context = MemoryService._ensure_dict(db_session.repo_context)
+        snapshot = repo_context.get("session_snapshot")
+        return snapshot if isinstance(snapshot, dict) else None
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _ensure_dict(repo_context: Optional[Any]) -> Dict[str, Any]:
+        if isinstance(repo_context, dict):
+            return dict(repo_context)
+        if isinstance(repo_context, str) and repo_context.strip():
+            try:
+                parsed = json.loads(repo_context)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+        return {}
 
 
 class IssueService:
