@@ -157,9 +157,9 @@ export const LoginPage: React.FC = () => {
       <div className="pointer-events-none absolute right-[-7rem] top-16 h-80 w-80 rounded-full bg-emerald-400/10 blur-3xl" />
 
       <div className="relative mx-auto max-w-7xl px-6 lg:px-8">
-        <section className="border-b border-white/10 pb-16 pt-8 sm:pb-20 sm:pt-10 lg:pb-24 lg:pt-14">
-          <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] lg:items-start lg:gap-12">
-            <div className="space-y-8">
+        <section className="border-b border-white/10 pb-16 pt-8 sm:pb-20 sm:pt-10 lg:min-h-[calc(100vh-4rem)] lg:pb-20 lg:pt-10 xl:flex xl:items-center">
+          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(340px,390px)] lg:items-start lg:gap-10 xl:grid-cols-[minmax(0,1fr)_minmax(500px,40vw)_minmax(340px,390px)] xl:items-center xl:gap-8">
+            <div className="space-y-8 xl:pr-4">
               <div className="space-y-6">
                 <BrandLockup />
 
@@ -207,10 +207,10 @@ export const LoginPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="space-y-6 lg:sticky lg:top-8">
-              <div className="rounded-[30px] border border-white/10 bg-[linear-gradient(180deg,rgba(9,19,35,0.92),rgba(6,10,19,0.88))] p-3 shadow-[0_30px_80px_rgba(0,0,0,0.38)]">
-                <div className="rounded-[24px] border border-white/10 bg-[#08111d]/90 p-4 backdrop-blur-sm">
-                  <div className="mb-4 flex items-center justify-between gap-4">
+            <div className="flex justify-center lg:col-span-2 xl:col-span-1">
+              <div className="w-full max-w-[min(92vw,42rem)] rounded-[32px] border border-white/10 bg-[linear-gradient(180deg,rgba(9,19,35,0.94),rgba(6,10,19,0.9))] p-4 shadow-[0_30px_90px_rgba(0,0,0,0.42)] sm:p-5 xl:max-w-none">
+                <div className="rounded-[26px] border border-white/10 bg-[#08111d]/90 p-5 backdrop-blur-sm sm:p-6">
+                  <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                     <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.24em] text-text-muted">
                       <span className="h-2 w-2 rounded-full bg-cyan-300 motion-safe:animate-pulse motion-reduce:animate-none" />
                       Live workflow preview
@@ -220,7 +220,7 @@ export const LoginPage: React.FC = () => {
                     </span>
                   </div>
 
-                  <div className="overflow-hidden rounded-[20px] border border-white/10 bg-black">
+                  <div className="overflow-hidden rounded-[26px] border border-white/10 bg-black shadow-[0_28px_70px_rgba(0,0,0,0.42)]">
                     <video
                       autoPlay
                       muted
@@ -228,19 +228,21 @@ export const LoginPage: React.FC = () => {
                       playsInline
                       preload="metadata"
                       aria-label="Enterprise delivery workflow preview video"
-                      className="aspect-[16/10] w-full object-cover"
+                      className="h-[280px] w-full object-cover sm:h-[340px] lg:h-[380px] xl:h-[44vh] xl:max-h-[460px]"
                     >
                       <source src="/videos/yudai-enterprise-intro.mp4" type="video/mp4" />
                     </video>
                   </div>
 
-                  <p className="mt-4 text-sm leading-6 text-text-secondary">
+                  <p className="mt-5 text-sm leading-6 text-text-secondary">
                     Watch issue planning, test generation, and PR delivery with live trajectory visibility
                     before you connect GitHub.
                   </p>
                 </div>
               </div>
+            </div>
 
+            <div className="mx-auto w-full max-w-[420px] xl:mx-0 xl:max-w-none">
               <div className="rounded-[30px] border border-white/10 bg-white/[0.04] p-6 shadow-[0_30px_80px_rgba(0,0,0,0.32)] backdrop-blur-md sm:p-8">
                 <div className="mb-6 flex items-start justify-between gap-4">
                   <div>
@@ -255,9 +257,11 @@ export const LoginPage: React.FC = () => {
                     </p>
                   </div>
 
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2 text-right">
+                  <div className="shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5 text-left sm:text-right">
                     <p className="text-[10px] uppercase tracking-[0.24em] text-text-muted">Access</p>
-                    <p className="mt-1 text-sm font-medium text-white">OAuth + App install</p>
+                    <p className="mt-1 whitespace-nowrap text-sm font-medium leading-5 text-white">
+                      OAuth + App Install
+                    </p>
                   </div>
                 </div>
 
