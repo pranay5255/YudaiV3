@@ -515,6 +515,12 @@ class ChatContext:
 
         fragments: List[str] = []
         repo_context = self.session_obj.repo_context
+        if isinstance(repo_context, str):
+            try:
+                repo_context = json.loads(repo_context)
+            except json.JSONDecodeError:
+                repo_context = {}
+
         if isinstance(repo_context, dict):
             summary = repo_context.get("summary")
             if isinstance(summary, str) and summary.strip():
@@ -548,6 +554,34 @@ class ChatContext:
                         )
                     )
 
+            snapshot = repo_context.get("session_snapshot")
+            if isinstance(snapshot, dict):
+                snap_msgs = snapshot.get("messages") or []
+                github_refs = snapshot.get("github") or {}
+                lines: List[str] = []
+                if (
+                    isinstance(snapshot.get("trigger"), str)
+                    and snapshot.get("trigger").strip()
+                ):
+                    lines.append(
+                        f"- trigger: {str(snapshot.get('trigger')).strip().replace('_', ' ')}"
+                    )
+                if isinstance(github_refs, dict):
+                    if github_refs.get("issue_number") is not None:
+                        lines.append(f"- linked issue: #{github_refs['issue_number']}")
+                    if github_refs.get("pr_number") is not None:
+                        lines.append(f"- linked PR: #{github_refs['pr_number']}")
+                if snap_msgs:
+                    lines.extend(
+                        [
+                            f"- {m.get('role', 'user')}: {str(m.get('text', '')).strip()[:200]}"
+                            for m in snap_msgs[:3]
+                        ]
+                    )
+                if lines:
+                    fragments.append(
+                        "Session Snapshot (recent turns):\n" + "\n".join(lines)
+                    )
         return fragments
 
     async def build_combined_summary(self) -> Optional[str]:
