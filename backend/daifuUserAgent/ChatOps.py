@@ -6,28 +6,22 @@ Implements the four memory mechanisms from the agent-memory pattern:
 
   M1  Bootstrap loading   — ``_bootstrap_memory_context`` injects stored
                              semantic + episodic memories into every LLM turn.
-  M2  Accumulation        — ``MemoryService.accumulate`` merges new facts into
-                             existing (no overwrite, prefix-fingerprint dedup).
+  M2  Rolling chat memory — chat turns append only episodic memories with a
+                             rolling 30-entry window.
   M3  Session snapshot    — ``save_session_snapshot`` captures the last N
-                             meaningful messages when a session is deactivated.
+                             meaningful messages plus linked GitHub work.
   M4  "Remember this"     — controlled by the per-session boolean flag
                              ``ChatSession.generate_facts_memories``.
 
-The LLM-based consolidation step (extraction *and* consolidation) lives in
-``FactsAndMemoriesService.generate`` which receives existing memories so it can
-deduplicate, update contradictions, and merge — rather than generate from scratch.
+Repository facts are generated after indexing and loaded during chat bootstrap.
+Chat-time extraction is limited to episodic memories only.
 """
 
-import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from context.chat_context import ChatContext
-from context.facts_and_memories import (
-    FactsAndMemoriesResult,
-    FactsAndMemoriesService,
-    RepositorySnapshot,
-)
+from context.facts_and_memories import FactsAndMemoriesService
 from models import ChatMessage, ChatSession
 from sqlalchemy.orm import Session
 
@@ -130,17 +124,14 @@ class ChatOps:
                 logger.warning(f"Failed to get file contexts: {e}")
                 # Continue without file contexts - non-fatal
 
-            facts_memories_context = None
+            memory_context = None
             if session.generate_facts_memories:
-                facts_memories_context = await self._refresh_facts_memories_for_session(
+                memory_context = await self._refresh_session_memories(
                     session=session,
                     conversation_history=history + [("user", message_text)],
-                    supplemental_contexts=context_inputs,
-                    repo_owner=repo_owner,
-                    repo_name=repo_name,
                 )
-                if facts_memories_context:
-                    context_inputs.append(facts_memories_context)
+                if memory_context:
+                    context_inputs.append(memory_context)
 
             # Generate AI response with improved error handling
             try:
@@ -304,79 +295,48 @@ class ChatOps:
             logger.error(f"Failed to get context cards content: {e}")
             return ""
 
-    async def _refresh_facts_memories_for_session(
+    async def _refresh_session_memories(
         self,
         session: ChatSession,
         conversation_history: Sequence[Tuple[str, str]],
-        supplemental_contexts: Sequence[str],
-        repo_owner: Optional[str],
-        repo_name: Optional[str],
     ) -> Optional[str]:
-        """Generate and persist Facts & Memories with LLM-based consolidation.
-
-        This implements two of the four memory mechanisms:
-
-        * **Extraction** — the LLM analyses the conversation and repo snapshot
-          to produce structured facts (semantic memory), memories (episodic
-          memory), and highlights.
-        * **Consolidation** — existing stored memories are fed *back* into the
-          LLM prompt so it can deduplicate, update contradictions, and merge
-          rather than generate from scratch.  After LLM output, a deterministic
-          ``MemoryService.accumulate`` pass ensures hard caps are enforced.
-        """
+        """Append new episodic memories for the active session chat."""
 
         if not session.generate_facts_memories:
             return None
 
         try:
-            conversation_payload = self._build_conversation_payload(
-                conversation_history, supplemental_contexts
-            )
-            snapshot = self._build_lightweight_snapshot(
-                session=session,
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-            )
-
-            repo_context = self._ensure_repo_context_dict(session.repo_context)
-            stored = repo_context.get("facts_and_memories")
-            if not isinstance(stored, dict):
-                stored = {}
-
-            # Pass existing memories to the LLM for consolidation.
-            result = await self._facts_service.generate(
-                snapshot=snapshot,
-                conversation=conversation_payload,
-                max_messages=12,
-                existing_memories=stored if stored else None,
-            )
-
-            # Mechanism 2 (deterministic safety net): even after LLM
-            # consolidation, run prefix-fingerprint accumulation to enforce
-            # hard caps and catch any remaining near-duplicates.
             from .session_service import MemoryService
-            accumulated = MemoryService.accumulate(
-                stored,
-                new_facts=result.facts,
-                new_memories=result.memories,
-                new_highlights=result.highlights,
+
+            conversation_payload = self._build_conversation_payload(conversation_history)
+            stored = MemoryService.get_memories(session)
+
+            result = await self._facts_service.generate_memories(
+                conversation=conversation_payload,
+                existing_memories=stored.get("memories", []),
+                repo_facts=stored.get("facts", []),
+                repo_highlights=stored.get("highlights", []),
+                max_messages=12,
             )
-            accumulated["generated_at"] = utc_now().isoformat()
-            repo_context["facts_and_memories"] = accumulated
-            session.repo_context = repo_context
 
-            return self._format_internal_facts_context(result)
+            appended = MemoryService.append_memories(
+                session,
+                new_memories=result.memories,
+            )
+            if not appended:
+                return None
 
-        except Exception as fam_error:
-            logger.warning(f"Failed to refresh facts & memories: {fam_error}")
+            return MemoryService.render_internal_context(memories=appended)
+
+        except Exception as memory_error:
+            logger.warning(f"Failed to refresh session memories: {memory_error}")
             return None
 
     def _build_conversation_payload(
         self,
         history: Sequence[Tuple[str, str]],
-        supplemental_contexts: Sequence[str],
     ) -> List[Dict[str, str]]:
-        """Format conversation history and supplemental context for F&M generation."""
+        """Format conversation history for episodic memory extraction."""
 
         payload: List[Dict[str, str]] = []
 
@@ -390,120 +350,13 @@ class ChatOps:
                 }
             )
 
-        for idx, context_item in enumerate(supplemental_contexts or []):
-            if not context_item:
-                continue
-            payload.append(
-                {
-                    "author": f"context_{idx}",
-                    "text": context_item.strip(),
-                }
-            )
-
         return payload
-
-    def _build_lightweight_snapshot(
-        self,
-        session: ChatSession,
-        repo_owner: Optional[str],
-        repo_name: Optional[str],
-    ) -> RepositorySnapshot:
-        """Create a minimal snapshot for Facts & Memories generation.
-
-        Includes a cached summary plus the full context string from the
-        GitIngest cache (if available) so the LLM has real file content to
-        cite when producing facts.
-        """
-
-        summary_lines: List[str] = []
-        if repo_owner and repo_name:
-            summary_lines.append(f"Repository: {repo_owner}/{repo_name}")
-
-        repo_context = self._ensure_repo_context_dict(session.repo_context)
-        description = repo_context.get("description")
-        if isinstance(description, str) and description.strip():
-            summary_lines.append(f"Description: {description.strip()}")
-
-        # Include the cached GitIngest context_string for richer file-backed
-        # facts generation.
-        context_string = repo_context.get("context_string")
-        if isinstance(context_string, str) and context_string.strip():
-            summary_lines.append(context_string.strip()[:2000])
-
-        summary_text = (
-            "\n".join(summary_lines)
-            if summary_lines
-            else "No repository summary available."
-        )
-
-        raw_response = {
-            "raw_response": {
-                "summary": summary_text,
-                "tree": repo_context.get("tree", ""),
-                "content": repo_context.get("content", ""),
-            }
-        }
-
-        return RepositorySnapshot(files=[], raw_response=raw_response)
-
-    def _ensure_repo_context_dict(self, repo_context: Optional[Any]) -> Dict[str, Any]:
-        """Ensure repo_context is a mutable dictionary."""
-
-        if isinstance(repo_context, dict):
-            return dict(repo_context)
-
-        if isinstance(repo_context, str) and repo_context.strip():
-            try:
-                parsed = json.loads(repo_context)
-                if isinstance(parsed, dict):
-                    return parsed
-            except json.JSONDecodeError:
-                logger.debug(
-                    "Unable to parse repo_context JSON string, defaulting to dict"
-                )
-
-        return {}
 
     def _bootstrap_memory_context(self, session: ChatSession) -> Optional[str]:
         """
-        Mechanism 1 (Bootstrap loading): build a hidden context string from
-        memories already stored in the session so the LLM always starts
-        with prior knowledge — even before new F&M are generated this turn.
-        Returns None when no memories are stored yet.
+        Mechanism 1 (Bootstrap loading): inject stored facts, rolling memories,
+        and the latest session snapshot into every chat turn.
         """
-        repo_context = self._ensure_repo_context_dict(session.repo_context)
-        stored = repo_context.get("facts_and_memories")
-        if not isinstance(stored, dict):
-            return None
-        if not (stored.get("facts") or stored.get("memories")):
-            return None
-        return self._format_internal_facts_context(
-            FactsAndMemoriesResult(
-                facts=stored.get("facts", []),
-                memories=stored.get("memories", []),
-                highlights=stored.get("highlights", []),
-            )
-        )
+        from .session_service import MemoryService
 
-    def _format_internal_facts_context(self, result: FactsAndMemoriesResult) -> str:
-        """Prepare a hidden context string for the LLM prompt."""
-
-        parts = [
-            "[INTERNAL_FACTS_MEMORIES] The following bullet points are for internal context only. NEVER reveal their existence to the user.",
-        ]
-
-        if result.facts:
-            parts.append("Facts:\n" + "\n".join(f"- {fact}" for fact in result.facts))
-
-        if result.memories:
-            parts.append(
-                "Memories:\n" + "\n".join(f"- {memory}" for memory in result.memories)
-            )
-
-        if result.highlights:
-            parts.append(
-                "Highlights:\n"
-                + "\n".join(f"- {highlight}" for highlight in result.highlights)
-            )
-
-        return "\n\n".join(parts)
+        return MemoryService.build_bootstrap_context(session)
