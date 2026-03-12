@@ -1030,6 +1030,25 @@ class DefaultSolverManager(SolverManager):
             solve.error_message = None
 
         if run.pr_url:
+            pr_number = self._extract_pr_number_from_url(run.pr_url)
+            session = (
+                db.query(ChatSession)
+                .filter(ChatSession.id == solve.session_id)
+                .first()
+            )
+            if session:
+                session.coder_pr_url = run.pr_url
+                session.coder_pr_number = pr_number
+                session.coder_completed_at = timestamp
+
+                from daifuUserAgent.session_service import MemoryService
+
+                MemoryService.save_session_snapshot(
+                    db,
+                    session,
+                    trigger="pull_request_created",
+                )
+
             lifecycle = get_realtime_lifecycle_service()
             lifecycle.mark_pr_created(
                 db,
@@ -1037,7 +1056,7 @@ class DefaultSolverManager(SolverManager):
                 session_public_id=None,
                 user_id=solve.user_id,
                 pr_url=run.pr_url,
-                pr_number=self._extract_pr_number_from_url(run.pr_url),
+                pr_number=pr_number,
             )
 
         logger.info(
