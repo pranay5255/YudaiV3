@@ -1,0 +1,13 @@
+<svg width="900" height="320" viewBox="0 0 900 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g transform="translate(40 28)">
+    <path d="M36 24C36 17.3726 41.3726 12 48 12H104L146 54L104 96H48C41.3726 96 36 90.6274 36 84V24Z" fill="#11D992"/>
+    <path d="M36 124C36 117.373 41.3726 112 48 112H64L122 170V228L36 142V124Z" fill="#11D992"/>
+    <path d="M36 224C36 217.373 41.3726 212 48 212H74L106 244H220C226.627 244 232 249.373 232 256C232 262.627 226.627 268 220 268H98L36 206V224Z" fill="#11D992"/>
+    <path d="M190 106L225.641 126.5V167.5L190 188L154.359 167.5V126.5L190 106Z" fill="#22A8FF"/>
+    <path d="M36 168C36 161.373 41.3726 156 48 156H64L122 214V238C122 244.627 116.627 250 110 250H94L36 192V168Z" fill="#11D992"/>
+  </g>
+  <g fill="#F5F7FA">
+    <text x="320" y="145" font-family="Helvetica Neue, Arial, sans-serif" font-size="118" font-weight="800" letter-spacing="2">YUDAI</text>
+    <text x="320" y="250" font-family="Helvetica Neue, Arial, sans-serif" font-size="118" font-weight="800" letter-spacing="2">LABS</text>
+  </g>
+</svg>
