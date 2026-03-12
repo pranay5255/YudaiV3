@@ -645,6 +645,14 @@ class ModeOrchestrator:
             },
         )
 
+        from daifuUserAgent.session_service import MemoryService
+
+        MemoryService.save_session_snapshot(
+            db,
+            session,
+            trigger="architect_issue_created",
+        )
+
         self.lifecycle.mark_issue_created(
             db,
             session_public_id=session.session_id,
@@ -761,6 +769,14 @@ class ModeOrchestrator:
                 "coder_test_branch": test_branch,
                 "coder_config_path": result.get("config_path"),
             },
+        )
+
+        from daifuUserAgent.session_service import MemoryService
+
+        MemoryService.save_session_snapshot(
+            db,
+            session,
+            trigger="pull_request_created",
         )
 
         self.lifecycle.mark_pr_created(
