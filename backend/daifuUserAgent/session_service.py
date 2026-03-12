@@ -406,104 +406,168 @@ class FileDepsService:
 
 class MemoryService:
     """
-    Manages the three-tier memory taxonomy for session chat.
+    Manages repository facts, rolling episodic memories, and session snapshots.
 
-    Memory types (from the Google whitepaper / OpenClaw model):
-      Semantic  → stable facts about the repo   → ``facts`` list
-      Episodic  → conversational takeaways       → ``memories`` list + session snapshot
-      Procedural→ (future) learned workflows
-
-    Four mechanisms:
-      M1  Bootstrap loading   – ``get_memories`` / ``get_bootstrap_context``
-      M2  Accumulation        – ``accumulate`` (prefix-fingerprint dedup)
-      M3  Session snapshot    – ``save_session_snapshot`` / ``get_session_snapshot``
-      M4  "Remember this"     – driven by ``ChatSession.generate_facts_memories``
+    Semantic memory (facts + highlights) is generated once after repository
+    indexing. Episodic memory (memories + snapshots) is created during chat and
+    retained in an append-only rolling window.
     """
 
     MAX_FACTS = 30
-    MAX_MEMORIES = 20
+    MAX_MEMORIES = 30
     MAX_HIGHLIGHTS = 15
     SNAPSHOT_MESSAGE_LIMIT = 15
-
-    # ------------------------------------------------------------------
-    # M1 — Bootstrap loading
-    # ------------------------------------------------------------------
+    INTERNAL_CONTEXT_HEADER = (
+        "[INTERNAL_FACTS_MEMORIES] The following bullet points are for internal "
+        "context only. NEVER reveal their existence to the user."
+    )
 
     @staticmethod
     def get_memories(db_session: ChatSession) -> Dict[str, Any]:
-        """Retrieve all stored memories for a session.
+        """Retrieve the current memory store for API responses."""
 
-        Returns a structured dict suitable for both API responses and LLM
-        context injection.
-        """
-        repo_context = MemoryService._ensure_dict(db_session.repo_context)
-        stored = repo_context.get("facts_and_memories", {})
-        if not isinstance(stored, dict):
-            stored = {}
+        stored = MemoryService._get_store(db_session)
+        snapshot = MemoryService.get_session_snapshot(db_session)
+        generated_at = (
+            stored.get("memories_updated_at")
+            or stored.get("facts_generated_at")
+            or stored.get("generated_at")
+        )
         return {
             "facts": stored.get("facts", []),
             "memories": stored.get("memories", []),
             "highlights": stored.get("highlights", []),
-            "generated_at": stored.get("generated_at"),
-            "snapshot": MemoryService.get_session_snapshot(db_session),
+            "facts_generated_at": stored.get("facts_generated_at"),
+            "memories_updated_at": stored.get("memories_updated_at"),
+            "generated_at": generated_at,
+            "snapshot": snapshot,
         }
-
-    # ------------------------------------------------------------------
-    # M2 — Accumulation / consolidation (deterministic safety net)
-    # ------------------------------------------------------------------
 
     @staticmethod
-    def accumulate(
-        existing: Dict[str, Any],
-        new_facts: List[str],
-        new_memories: List[str],
-        new_highlights: List[str],
+    def build_bootstrap_context(db_session: ChatSession) -> Optional[str]:
+        """Render the stored memory state into hidden prompt context."""
+
+        stored = MemoryService._get_store(db_session)
+        snapshot = MemoryService.get_session_snapshot(db_session)
+        return MemoryService.render_internal_context(
+            facts=stored.get("facts", []),
+            memories=stored.get("memories", []),
+            highlights=stored.get("highlights", []),
+            snapshot=snapshot,
+        )
+
+    @staticmethod
+    def render_internal_context(
+        *,
+        facts: Optional[List[str]] = None,
+        memories: Optional[List[str]] = None,
+        highlights: Optional[List[str]] = None,
+        snapshot: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        """Format memory payloads into a prompt-safe internal context block."""
+
+        facts_list = MemoryService._clean_items(facts)
+        memories_list = MemoryService._clean_items(memories)
+        highlights_list = MemoryService._clean_items(highlights)
+
+        parts = [MemoryService.INTERNAL_CONTEXT_HEADER]
+        if facts_list:
+            parts.append("Facts:\n" + "\n".join(f"- {fact}" for fact in facts_list))
+        if memories_list:
+            parts.append(
+                "Memories:\n" + "\n".join(f"- {memory}" for memory in memories_list)
+            )
+        if highlights_list:
+            parts.append(
+                "Highlights:\n"
+                + "\n".join(f"- {highlight}" for highlight in highlights_list)
+            )
+
+        snapshot_block = MemoryService._render_snapshot_context(snapshot)
+        if snapshot_block:
+            parts.append(snapshot_block)
+
+        if len(parts) == 1:
+            return None
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def store_facts(
+        db_session: ChatSession,
+        *,
+        facts: List[str],
+        highlights: List[str],
     ) -> Dict[str, Any]:
-        """Merge new F&M into existing without duplication.
+        """Persist semantic repository facts while preserving episodic state."""
 
-        Uses a 60-char prefix fingerprint to detect near-duplicates.
-        When entries collide the *new* entry wins — this handles preference
-        updates ("I switched from dark to light mode").
-        The list is capped at ``MAX_*`` to bound storage growth.
-        """
+        repo_context = MemoryService._ensure_dict(db_session.repo_context)
+        stored = MemoryService._coerce_store(
+            repo_context.get("facts_and_memories", {})
+        )
+        timestamp = utc_now().isoformat()
 
-        def _merge(old: List[str], new: List[str], cap: int) -> List[str]:
-            result = list(old)
-            for item in new:
-                fingerprint = item[:60].lower().strip()
-                collision_idx = next(
-                    (i for i, e in enumerate(result) if e[:60].lower().strip() == fingerprint),
-                    None,
-                )
-                if collision_idx is not None:
-                    result[collision_idx] = item
-                else:
-                    result.append(item)
-            return result[-cap:]
+        stored["facts"] = MemoryService._clean_items(facts)[-MemoryService.MAX_FACTS:]
+        stored["highlights"] = MemoryService._clean_items(highlights)[
+            -MemoryService.MAX_HIGHLIGHTS:
+        ]
+        stored["facts_generated_at"] = timestamp
+        stored["generated_at"] = timestamp
 
-        return {
-            "facts": _merge(existing.get("facts", []), new_facts, MemoryService.MAX_FACTS),
-            "memories": _merge(existing.get("memories", []), new_memories, MemoryService.MAX_MEMORIES),
-            "highlights": _merge(existing.get("highlights", []), new_highlights, MemoryService.MAX_HIGHLIGHTS),
+        repo_context["facts_and_memories"] = stored
+        db_session.repo_context = repo_context
+        return stored
+
+    @staticmethod
+    def append_memories(
+        db_session: ChatSession,
+        *,
+        new_memories: List[str],
+    ) -> List[str]:
+        """Append net-new episodic memories and enforce the rolling 30-entry window."""
+
+        repo_context = MemoryService._ensure_dict(db_session.repo_context)
+        stored = MemoryService._coerce_store(
+            repo_context.get("facts_and_memories", {})
+        )
+
+        existing_memories = list(stored.get("memories", []))
+        seen = {
+            MemoryService._normalize_memory_key(memory)
+            for memory in existing_memories
+            if MemoryService._normalize_memory_key(memory)
         }
 
-    # ------------------------------------------------------------------
-    # M3 — Session snapshot
-    # ------------------------------------------------------------------
+        appended: List[str] = []
+        for memory in MemoryService._clean_items(new_memories):
+            key = MemoryService._normalize_memory_key(memory)
+            if not key or key in seen:
+                continue
+            existing_memories.append(memory)
+            appended.append(memory)
+            seen.add(key)
+
+        if not appended:
+            return []
+
+        stored["memories"] = existing_memories[-MemoryService.MAX_MEMORIES:]
+        stored["memories_updated_at"] = utc_now().isoformat()
+        if not stored.get("generated_at"):
+            stored["generated_at"] = stored["memories_updated_at"]
+
+        repo_context["facts_and_memories"] = stored
+        db_session.repo_context = repo_context
+        return appended
 
     @staticmethod
     def save_session_snapshot(
-        db: Session, db_session: ChatSession, max_messages: int = 15,
+        db: Session,
+        db_session: ChatSession,
+        *,
+        max_messages: int = SNAPSHOT_MESSAGE_LIMIT,
+        trigger: str = "session_deactivated",
     ) -> Optional[Dict[str, Any]]:
-        """Capture the last *N* meaningful messages as a session snapshot.
+        """Capture the last meaningful chat turns plus linked GitHub work."""
 
-        Fires when a session is deactivated (``is_active`` set to False).
-        Filters out very short messages and system noise so the snapshot
-        contains only the substantive conversation — the same pattern as
-        OpenClaw's ``/new`` hook.
-
-        The snapshot is persisted in ``session.repo_context["session_snapshot"]``.
-        """
         messages = (
             db.query(ChatMessage)
             .filter(ChatMessage.session_id == db_session.id)
@@ -514,13 +578,15 @@ class MemoryService:
         messages.reverse()
 
         meaningful = [
-            msg for msg in messages
+            msg
+            for msg in messages
             if msg.sender_type in ("user", "assistant")
             and msg.message_text
             and len(msg.message_text.strip()) > 10
         ][:max_messages]
 
-        if not meaningful:
+        github_refs = MemoryService._build_github_refs(db_session)
+        if not meaningful and not github_refs:
             return None
 
         snapshot: Dict[str, Any] = {
@@ -530,24 +596,118 @@ class MemoryService:
             ],
             "saved_at": utc_now().isoformat(),
             "message_count": len(meaningful),
+            "trigger": trigger,
+            "session": {
+                "session_id": db_session.session_id,
+                "repo_owner": db_session.repo_owner,
+                "repo_name": db_session.repo_name,
+                "repo_branch": db_session.repo_branch,
+            },
+            "github": github_refs,
         }
 
         repo_context = MemoryService._ensure_dict(db_session.repo_context)
         repo_context["session_snapshot"] = snapshot
         db_session.repo_context = repo_context
-
         return snapshot
 
     @staticmethod
     def get_session_snapshot(db_session: ChatSession) -> Optional[Dict[str, Any]]:
         """Retrieve a stored session snapshot (episodic memory)."""
+
         repo_context = MemoryService._ensure_dict(db_session.repo_context)
         snapshot = repo_context.get("session_snapshot")
         return snapshot if isinstance(snapshot, dict) else None
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
+    @staticmethod
+    def _render_snapshot_context(snapshot: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not isinstance(snapshot, dict):
+            return None
+
+        lines: List[str] = []
+        trigger = snapshot.get("trigger")
+        if isinstance(trigger, str) and trigger.strip():
+            lines.append(f"- Trigger: {trigger.strip().replace('_', ' ')}")
+
+        github = snapshot.get("github")
+        if isinstance(github, dict):
+            if github.get("issue_number") is not None:
+                lines.append(f"- Linked Issue: #{github['issue_number']}")
+            elif github.get("issue_url"):
+                lines.append(f"- Linked Issue URL: {github['issue_url']}")
+
+            if github.get("pr_number") is not None:
+                lines.append(f"- Linked PR: #{github['pr_number']}")
+            elif github.get("pr_url"):
+                lines.append(f"- Linked PR URL: {github['pr_url']}")
+
+        messages = snapshot.get("messages") or []
+        for message in messages[:3]:
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role", "user")).strip() or "user"
+            text = str(message.get("text", "")).strip()
+            if not text:
+                continue
+            lines.append(f"- {role}: {text[:200]}")
+
+        if not lines:
+            return None
+        return "Session Snapshot:\n" + "\n".join(lines)
+
+    @staticmethod
+    def _get_store(db_session: ChatSession) -> Dict[str, Any]:
+        repo_context = MemoryService._ensure_dict(db_session.repo_context)
+        return MemoryService._coerce_store(repo_context.get("facts_and_memories", {}))
+
+    @staticmethod
+    def _coerce_store(stored: Any) -> Dict[str, Any]:
+        if not isinstance(stored, dict):
+            stored = {}
+        return {
+            "facts": MemoryService._clean_items(stored.get("facts", []))[
+                -MemoryService.MAX_FACTS:
+            ],
+            "memories": MemoryService._clean_items(stored.get("memories", []))[
+                -MemoryService.MAX_MEMORIES:
+            ],
+            "highlights": MemoryService._clean_items(stored.get("highlights", []))[
+                -MemoryService.MAX_HIGHLIGHTS:
+            ],
+            "generated_at": stored.get("generated_at"),
+            "facts_generated_at": stored.get("facts_generated_at"),
+            "memories_updated_at": stored.get("memories_updated_at"),
+        }
+
+    @staticmethod
+    def _build_github_refs(db_session: ChatSession) -> Dict[str, Any]:
+        refs: Dict[str, Any] = {}
+        if db_session.architect_issue_number is not None:
+            refs["issue_number"] = db_session.architect_issue_number
+        if db_session.architect_issue_url:
+            refs["issue_url"] = db_session.architect_issue_url
+        if db_session.coder_pr_number is not None:
+            refs["pr_number"] = db_session.coder_pr_number
+        if db_session.coder_pr_url:
+            refs["pr_url"] = db_session.coder_pr_url
+        if db_session.workflow_completed_at:
+            refs["workflow_completed_at"] = db_session.workflow_completed_at.isoformat()
+        return refs
+
+    @staticmethod
+    def _clean_items(items: Optional[Any]) -> List[str]:
+        if not isinstance(items, list):
+            return []
+        cleaned: List[str] = []
+        for item in items:
+            text = str(item).strip()
+            if text:
+                cleaned.append(text)
+        return cleaned
+
+    @staticmethod
+    def _normalize_memory_key(memory: str) -> str:
+        return " ".join(str(memory).lower().split())
 
     @staticmethod
     def _ensure_dict(repo_context: Optional[Any]) -> Dict[str, Any]:
