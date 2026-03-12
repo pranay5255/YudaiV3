@@ -11,7 +11,6 @@ from models import (
     StartSolveResponse,
     User,
 )
-from sqlalchemy.orm import Session
 
 from .solve_manager import DefaultSolverManager
 
