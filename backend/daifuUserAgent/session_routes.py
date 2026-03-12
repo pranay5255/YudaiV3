@@ -141,7 +141,7 @@ from sqlalchemy.orm import Session
 from utils import utc_now
 
 from .llm_service import LLMService
-from .session_service import SessionService
+from .session_service import MemoryService, SessionService
 
 router = APIRouter(tags=["sessions"])
 
@@ -769,8 +769,11 @@ async def update_session(
             # point (the "filing cabinet" pattern from the agent-memory model).
             if not request.is_active and db_session.is_active:
                 try:
-                    from .session_service import MemoryService
-                    MemoryService.save_session_snapshot(db, db_session)
+                    MemoryService.save_session_snapshot(
+                        db,
+                        db_session,
+                        trigger="session_deactivated",
+                    )
                     logger.info("Session snapshot saved for %s", session_id)
                 except Exception as snap_err:
                     logger.warning("Failed to save session snapshot: %s", snap_err)
@@ -1783,12 +1786,10 @@ async def get_session_memories(
     Return the stored semantic and episodic memories for a session.
 
     Memory taxonomy:
-    - facts     → semantic memory: stable, file-backed repo facts
-    - memories  → episodic memory: conversational takeaways and threads
-    - highlights → key files/folders identified by analysis
+    - facts     → semantic memory generated after repository indexing
+    - memories  → append-only episodic session memory (rolling window of 30)
+    - highlights → key files/folders identified during indexing
     """
-    from .session_service import MemoryService
-
     db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
     return MemoryService.get_memories(db_session)
 
@@ -2482,43 +2483,24 @@ async def _index_repository_for_session_background(
         if generate_facts_memories:
             try:
                 logger.info(
-                    f"[Index] Generating Facts & Memories for session {session_uuid}"
+                    f"[Index] Generating repository facts for session {session_uuid}"
                 )
-                conversation = (
-                    db.query(ChatMessage)
-                    .filter(ChatMessage.session_id == chat_session.id)
-                    .order_by(ChatMessage.created_at.asc())
-                    .all()
-                )
-                conversation_payload = [
-                    {
-                        "author": message.sender_type,
-                        "text": message.message_text,
-                    }
-                    for message in conversation
-                ]
-
                 facts_service = FactsAndMemoriesService()
-                result = await facts_service.generate(
+                result = await facts_service.generate_facts(
                     snapshot=snapshot,
-                    conversation=conversation_payload,
                 )
-
-                repo_context = chat_session.repo_context or {}
-                repo_context["facts_and_memories"] = {
-                    "facts": result.facts,
-                    "memories": result.memories,
-                    "highlights": result.highlights,
-                    "generated_at": utc_now().isoformat(),
-                }
-                chat_session.repo_context = repo_context
+                MemoryService.store_facts(
+                    chat_session,
+                    facts=result.facts,
+                    highlights=result.highlights,
+                )
                 db.commit()
                 logger.info(
-                    f"[Index] Facts & Memories stored for session {session_uuid}"
+                    f"[Index] Repository facts stored for session {session_uuid}"
                 )
             except Exception as fam_error:
                 logger.warning(
-                    f"[Index] Facts & Memories generation failed for session {session_uuid}: {fam_error}"
+                    f"[Index] Repository facts generation failed for session {session_uuid}: {fam_error}"
                 )
                 db.rollback()
 
@@ -2900,10 +2882,9 @@ async def create_github_issue_from_user_issue_for_session(
     try:
         # Use the consolidated IssueOps service directly to avoid wrapper arg mismatch
         from .IssueOps import IssueService as IssueOpsService
-        from .session_service import SessionService
 
         # Ensure session exists and belongs to user
-        _ = SessionService.ensure_owned_session(db, current_user.id, session_id)
+        db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
 
         # Create GitHub issue using consolidated IssueOps (context assembled internally)
         issue_service = IssueOpsService(db)
@@ -2924,6 +2905,17 @@ async def create_github_issue_from_user_issue_for_session(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="GitHub issue was created but no URL was returned",
             )
+
+        db_session.architect_issue_url = result.github_issue_url
+        db_session.architect_issue_number = result.github_issue_number
+        if db_session.architect_completed_at is None:
+            db_session.architect_completed_at = utc_now()
+
+        MemoryService.save_session_snapshot(
+            db,
+            db_session,
+            trigger="github_issue_created",
+        )
 
         # Phase 1 completion tracking: issue creation event.
         lifecycle = get_realtime_lifecycle_service()
