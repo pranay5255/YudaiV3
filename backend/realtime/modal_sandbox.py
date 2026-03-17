@@ -10,7 +10,6 @@ a session. The cloned repo persists between runs (git fetch + reset).
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from dataclasses import dataclass
 import os

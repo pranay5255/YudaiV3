@@ -71,7 +71,7 @@ class ForwardingHandler(BaseHTTPRequestHandler):
 
     def _send_upstream_request(self, path: str, body):
         connection = http.client.HTTPSConnection(TARGET_HOST)
-        header_names = {k.lower() for k in self.headers.keys()}
+        {k.lower() for k in self.headers.keys()}
         connection.putrequest(self.command, path, skip_host=True, skip_accept_encoding=True)
 
         for key, value in self.headers.items():
