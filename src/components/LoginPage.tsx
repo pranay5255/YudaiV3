@@ -137,9 +137,7 @@ export const LoginPage: React.FC = () => {
   const handleGitHubLogin = async () => {
     try {
       setError(null);
-
       console.log('[LoginPage] Initiating GitHub OAuth login');
-
       await login();
     } catch (loginError) {
       console.error('[LoginPage] Login failed:', loginError);
@@ -273,6 +271,7 @@ export const LoginPage: React.FC = () => {
                     Authenticate with GitHub, then install the app to grant secure repository access.
                   </p>
                 </div>
+              )}
 
                 {errorMessage && (
                   <div
@@ -281,7 +280,6 @@ export const LoginPage: React.FC = () => {
                   >
                     <p className="text-sm text-red-300">{errorMessage}</p>
                   </div>
-                )}
 
                 <div className="mb-6">
                   <div className="mb-3 flex items-center gap-3">
@@ -292,6 +290,7 @@ export const LoginPage: React.FC = () => {
                   </div>
 
                   <button
+                    type="button"
                     onClick={handleGitHubLogin}
                     disabled={isLoading}
                     className="flex w-full cursor-pointer items-center justify-center gap-3 rounded-2xl bg-white px-6 py-4 text-sm font-semibold text-slate-950 transition-all duration-200 hover:-translate-y-0.5 hover:bg-slate-100 disabled:translate-y-0 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary"
@@ -324,15 +323,21 @@ export const LoginPage: React.FC = () => {
                     <span className="text-sm font-medium text-white">Install GitHub App</span>
                   </div>
 
+                  <p className="mt-3 text-sm leading-6 text-text-secondary">
+                    Grant repository access so YudaiV3 can create issues, tests, and pull requests.
+                  </p>
+
                   <a
                     href={githubAppInstallUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex w-full cursor-pointer items-center justify-center rounded-2xl border border-white/10 bg-white/[0.04] px-6 py-4 text-sm font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-primary"
                   >
-                    Install GitHub App
+                    <span>open_install_page</span>
+                    <span className="text-accent-amber">{'->'}</span>
                   </a>
                 </div>
+              </div>
 
                 <div className="mb-6 space-y-3 rounded-[22px] border border-white/10 bg-[#08111d]/80 px-4 py-5">
                   {AUTH_BULLETS.map((item) => (
@@ -446,8 +451,8 @@ export const LoginPage: React.FC = () => {
               </span>
             ))}
           </div>
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   );
 };
