@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import asyncio
 import logging
 import os
@@ -47,12 +48,40 @@ class SandboxManager:
         safe = safe or "sandbox"
         return self.repo_root / safe
 
+    def _is_github_https_repo(self, repo_url: Optional[str]) -> bool:
+        return bool(repo_url and repo_url.startswith("https://github.com/"))
+
+    def _git_auth_args(
+        self,
+        *,
+        repo_url: Optional[str],
+        github_token: Optional[str],
+    ) -> list[str]:
+        if not github_token or not self._is_github_https_repo(repo_url):
+            return []
+
+        encoded = base64.b64encode(f"x-access-token:{github_token}".encode("utf-8")).decode(
+            "ascii"
+        )
+        return [
+            "-c",
+            f"http.https://github.com/.extraheader=AUTHORIZATION: basic {encoded}",
+        ]
+
+    def _describe_git_command(self, cmd: list[str]) -> str:
+        if "clone" in cmd:
+            return "git clone"
+        if "fetch" in cmd:
+            return "git fetch"
+        return "git command"
+
     def ensure_git_bootstrap(
         self,
         *,
         identity_key: str,
         repo_url: Optional[str],
         repo_branch: Optional[str],
+        github_token: Optional[str] = None,
     ) -> Dict[str, object]:
         """
         Clone repository once for this sandbox identity and fetch periodically.
@@ -71,6 +100,7 @@ class SandboxManager:
             repo_dir.parent.mkdir(parents=True, exist_ok=True)
             cmd = [
                 "git",
+                *self._git_auth_args(repo_url=repo_url, github_token=github_token),
                 "clone",
                 "--branch",
                 branch,
@@ -96,7 +126,15 @@ class SandboxManager:
 
         elapsed = now - last_fetch
         if elapsed >= self.git_fetch_interval_seconds:
-            self._run_git_command(["git", "-C", str(repo_dir), "fetch", "--all", "--prune"])
+            self._run_git_command([
+                "git",
+                *self._git_auth_args(repo_url=repo_url, github_token=github_token),
+                "-C",
+                str(repo_dir),
+                "fetch",
+                "--all",
+                "--prune",
+            ])
             marker_file.write_text(str(now), encoding="utf-8")
             return {
                 "status": "fetched",
@@ -123,7 +161,7 @@ class SandboxManager:
         if result.returncode != 0:
             stderr_tail = (result.stderr or "")[-2000:]
             raise RuntimeError(
-                f"Git bootstrap command failed ({' '.join(cmd)}): {stderr_tail}"
+                f"{self._describe_git_command(cmd)} failed: {stderr_tail}"
             )
 
     async def start_probe(
