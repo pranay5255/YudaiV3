@@ -23,6 +23,26 @@ logger = logging.getLogger(__name__)
 _BACKEND_SOURCE_DIR = Path(__file__).resolve().parents[1]
 _MSWEA_CONFIG_DIR = Path(__file__).resolve().parent / "mswea_mode_configs"
 
+SANDBOX_SERVER_PIP_PACKAGES = (
+    "fastapi",
+    "uvicorn[standard]",
+    "httpx",
+    "sqlalchemy",
+    "pydantic",
+    "pyyaml",
+    "requests",
+    "websockets",
+    "python-jose[cryptography]",
+    "passlib",
+    "pgvector",
+    "psycopg2-binary",
+)
+
+# Import path stays `minisweagent`, but the published distribution is hyphenated.
+SANDBOX_SOLVER_PIP_PACKAGES = (
+    "mini-swe-agent",
+)
+
 _unified_sandbox_image: Optional[modal.Image] = None
 
 _modal_app: Optional[modal.App] = None
@@ -76,24 +96,9 @@ def _get_unified_sandbox_image() -> modal.Image:
         # ── GitHub CLI (gh) ──
         .run_commands(_GH_CLI_INSTALL)
         # ── Server Python deps ──
-        .pip_install(
-            "fastapi",
-            "uvicorn[standard]",
-            "httpx",
-            "sqlalchemy",
-            "pydantic",
-            "pyyaml",
-            "requests",
-            "websockets",
-            "python-jose[cryptography]",
-            "passlib",
-            "pgvector",
-            "psycopg2-binary",
-        )
+        .pip_install(*SANDBOX_SERVER_PIP_PACKAGES)
         # ── Solver Python deps (mini-swe-agent) ──
-        .pip_install(
-            "minisweagent",
-        )
+        .pip_install(*SANDBOX_SOLVER_PIP_PACKAGES)
         # ── Workspace dir for cloned repos ──
         .run_commands("mkdir -p /workspace")
         .env({
