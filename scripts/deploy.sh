@@ -41,9 +41,9 @@ usage() {
     echo ""
     echo "Options:"
     echo "  --backend-domain <domain>  Backend domain (default: api.yudai.app)"
-    echo "  --backend-ip <ip>          Backend server IP (optional, used for WS env default)"
+    echo "  --backend-ip <ip>          Backend server IP (optional, used in DNS output)"
     echo "  --frontend-domain <domain> Frontend domain (default: yudai.app)"
-    echo "  --ws-base-url <url>        Frontend WS base URL (e.g., ws://139.84.154.9:8000)"
+    echo "  --ws-base-url <url>        Secure frontend WS base URL (https://api.yudai.app or wss://api.yudai.app)"
     echo "  --vercel-token <token>     Vercel API token"
     echo "  --vercel-org-id <id>       Vercel organization ID"
     echo "  --vercel-project-id <id>   Vercel project ID"
@@ -110,11 +110,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# If backend IP is provided and WS base URL is not, derive WS URL from backend IP.
-if [ -z "$WS_BASE_URL" ] && [ -n "$BACKEND_IP" ]; then
-    WS_BASE_URL="ws://$BACKEND_IP:8000"
-fi
-
 compose() {
     if command -v docker-compose >/dev/null 2>&1; then
         docker-compose "$@"
@@ -133,6 +128,27 @@ upsert_env() {
     else
         echo "${key}=${value}" >> "$file"
     fi
+}
+
+validate_ws_base_url() {
+    local value="$1"
+
+    if [ -z "$value" ]; then
+        return
+    fi
+
+    case "$value" in
+        https://*|wss://*)
+            ;;
+        http://*|ws://*)
+            log_error "Insecure VITE_WS_BASE_URL '$value'. Use https://$BACKEND_DOMAIN or wss://$BACKEND_DOMAIN."
+            exit 1
+            ;;
+        *)
+            log_error "Unsupported VITE_WS_BASE_URL '$value'. Use an absolute https:// or wss:// URL."
+            exit 1
+            ;;
+    esac
 }
 
 # Check prerequisites
@@ -164,6 +180,8 @@ check_prerequisites() {
         exit 1
     fi
 
+    validate_ws_base_url "$WS_BASE_URL"
+
     log_success "All prerequisites met"
 }
 
@@ -192,12 +210,16 @@ deploy_backend() {
     upsert_env "$env_file" "ALLOW_ORIGINS" "https://$FRONTEND_DOMAIN"
     upsert_env "$env_file" "ALLOW_ORIGIN_REGEX" "^https://.*\\.vercel\\.app$"
     upsert_env "$env_file" "GITHUB_REDIRECT_URI" "https://api.yudai.app/auth/callback"
-    upsert_env "$env_file" "CONTROLLER_BASE_URL" "https://$FRONTEND_DOMAIN"
+    upsert_env "$env_file" "CONTROLLER_BASE_URL" "https://$BACKEND_DOMAIN"
 
     compose -f docker-compose.backend-only.yml pull 2>/dev/null || true
     compose -f docker-compose.backend-only.yml build --no-cache
-    compose -f docker-compose.backend-only.yml down
-    compose -f docker-compose.backend-only.yml up -d
+    log_info "Running Modal sandbox preflight before backend replacement..."
+    compose -f docker-compose.backend-only.yml up \
+        --abort-on-container-exit \
+        --exit-code-from modal-preflight \
+        modal-preflight
+    compose -f docker-compose.backend-only.yml up -d db backend
 
     log_info "Waiting for backend health endpoint..."
     local max_attempts=60
@@ -251,15 +273,16 @@ deploy_frontend() {
 
     cd "$FRONTEND_DIR"
 
+    local resolved_ws_base_url="${WS_BASE_URL:-https://$BACKEND_DOMAIN}"
     local vercel_env_args=(
         --env "VITE_API_BASE_URL=https://$BACKEND_DOMAIN"
+        --env "VITE_WS_BASE_URL=$resolved_ws_base_url"
     )
 
     if [ -n "$WS_BASE_URL" ]; then
-        vercel_env_args+=(--env "VITE_WS_BASE_URL=$WS_BASE_URL")
-        if [[ "$WS_BASE_URL" == ws://* ]]; then
-            log_warning "VITE_WS_BASE_URL uses ws://. Browsers usually block this from https:// pages."
-        fi
+        log_info "Using explicit secure websocket base URL: $resolved_ws_base_url"
+    else
+        log_info "Defaulting VITE_WS_BASE_URL to https://$BACKEND_DOMAIN"
     fi
 
     if [ -n "$VERCEL_TOKEN" ]; then
@@ -293,7 +316,11 @@ configure_dns() {
     echo "  - Or CNAME: $FRONTEND_DOMAIN -> cname.vercel-dns.com"
     echo ""
     echo "Backend domain:"
-    echo "  - A Record: $BACKEND_DOMAIN -> <YOUR_SERVER_IP>"
+    if [ -n "$BACKEND_IP" ]; then
+        echo "  - A Record: $BACKEND_DOMAIN -> $BACKEND_IP"
+    else
+        echo "  - A Record: $BACKEND_DOMAIN -> <YOUR_SERVER_IP>"
+    fi
     echo ""
     echo "DNS propagation can take up to 48 hours."
 }
