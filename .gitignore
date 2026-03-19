@@ -1,3 +1,5 @@
+.tmp-modal-artifacts/
+.tmp-modal-artifacts-uv/
 node_modules
 dist/
 .venv
