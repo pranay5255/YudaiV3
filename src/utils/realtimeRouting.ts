@@ -14,6 +14,31 @@ const getOriginFallback = (currentOrigin?: string): string => {
 
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, '');
 
+const toWebSocketProtocol = (protocol: string): 'ws:' | 'wss:' => {
+  switch (protocol) {
+    case 'https:':
+    case 'wss:':
+      return 'wss:';
+    case 'http:':
+    case 'ws:':
+      return 'ws:';
+    default:
+      throw new Error(`Unsupported WebSocket base protocol: ${protocol}`);
+  }
+};
+
+const assertNoMixedContentWebSocket = (
+  wsProtocol: 'ws:' | 'wss:',
+  currentOrigin?: string
+): void => {
+  const pageProtocol = new URL(getOriginFallback(currentOrigin)).protocol;
+  if (pageProtocol === 'https:' && wsProtocol === 'ws:') {
+    throw new Error(
+      'Insecure WebSocket configuration: an https:// page cannot connect to ws://. Remove VITE_WS_BASE_URL or use https://api.yudai.app / wss://api.yudai.app.'
+    );
+  }
+};
+
 export const buildControllerSessionTargetUrl = (
   endpoint: string,
   params: Record<string, string>
@@ -57,7 +82,8 @@ export const buildUnifiedSessionWebSocketUrl = ({
     controllerWsBaseUrl,
   });
   const parsed = new URL(controllerBase, getOriginFallback(currentOrigin));
-  const wsProtocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsProtocol = toWebSocketProtocol(parsed.protocol);
+  assertNoMixedContentWebSocket(wsProtocol, currentOrigin);
   return (
     `${wsProtocol}//${parsed.host}${parsed.pathname}` +
     `?token=${encodeURIComponent(sessionToken)}`
