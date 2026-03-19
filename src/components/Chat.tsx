@@ -236,11 +236,14 @@ export const Chat: React.FC<ChatProps> = ({
     fileContext,
     isLoadingMessages,
     messageError,
+    runtimeStatus,
     sendChatMessage,
     createContextCard,
     createIssueWithContext,
     createGitHubIssueFromUserIssue,
     loadMessages,
+    setRuntimeState,
+    syncRuntimeState,
   } = useSessionStore(
     useShallow((state) => ({
       activeSessionId: state.activeSessionId,
@@ -251,11 +254,14 @@ export const Chat: React.FC<ChatProps> = ({
       fileContext: state.fileContext,
       isLoadingMessages: state.isLoadingMessages,
       messageError: state.messageError,
+      runtimeStatus: state.runtimeStatus,
       sendChatMessage: state.sendChatMessage,
       createContextCard: state.createContextCard,
       createIssueWithContext: state.createIssueWithContext,
       createGitHubIssueFromUserIssue: state.createGitHubIssueFromUserIssue,
       loadMessages: state.loadMessages,
+      setRuntimeState: state.setRuntimeState,
+      syncRuntimeState: state.syncRuntimeState,
     }))
   );
 
@@ -508,8 +514,18 @@ export const Chat: React.FC<ChatProps> = ({
       return;
     }
 
+    const shouldMarkProvisioning =
+      runtimeStatus === 'not_provisioned'
+      || runtimeStatus === 'failed'
+      || runtimeStatus === 'terminated'
+      || runtimeStatus === 'stopped';
+
     try {
       console.log('[Chat] Starting solver for issue:', issueId);
+
+      if (shouldMarkProvisioning) {
+        setRuntimeState(null, 'provisioning', null);
+      }
 
       // Close the preview modal
       setIssuePreviewModal({
@@ -532,11 +548,20 @@ export const Chat: React.FC<ChatProps> = ({
       });
 
       if (!response.ok) {
-        throw new Error(`Solver request failed: ${response.statusText}`);
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage =
+          typeof errorData?.detail === 'object' && errorData.detail !== null
+            ? errorData.detail.message || errorData.detail.detail || response.statusText
+            : errorData?.detail || errorData?.message || response.statusText;
+        throw new Error(`Solver request failed: ${errorMessage}`);
       }
 
       const result = await response.json();
       console.log('[Chat] Solver started successfully:', result);
+
+      void syncRuntimeState(activeSessionId).catch((runtimeError) => {
+        console.warn('[Chat] Failed to refresh runtime state after solver start:', runtimeError);
+      });
 
       // Best-effort refresh so solver status updates can surface in chat history.
       if (activeSessionId) {
@@ -549,10 +574,23 @@ export const Chat: React.FC<ChatProps> = ({
       showError(`🚀 AI Solver started! Session ID: ${result.solve_session_id}. Watch the chat for progress updates.`);
 
     } catch (error) {
+      void syncRuntimeState(activeSessionId).catch((runtimeError) => {
+        console.warn('[Chat] Failed to refresh runtime state after solver error:', runtimeError);
+      });
       console.error('[Chat] Failed to start solver:', error);
       showError(`Failed to start solver: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [selectedRepository, activeSessionId, issuePreviewModal.data, sessionToken, showError, loadMessages]);
+  }, [
+    selectedRepository,
+    activeSessionId,
+    issuePreviewModal.data,
+    sessionToken,
+    showError,
+    loadMessages,
+    runtimeStatus,
+    setRuntimeState,
+    syncRuntimeState,
+  ]);
 
 
 
