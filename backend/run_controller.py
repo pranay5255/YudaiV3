@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
     print("[controller] shutting down")
 
 
-app = FastAPI(
+fastapi_app = FastAPI(
     title="Yudai Realtime Controller",
     description="Phase 1 controller host for sandbox lifecycle + metadata persistence",
     version="3.0.0",
@@ -39,26 +39,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_parse_allow_origins(
-        os.getenv("ALLOW_ORIGINS", "http://localhost:3000,https://yudai.app")
-    ),
-    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # Canonical API mounts only.
-app.include_router(auth_router, prefix="/auth", tags=["auth"])
-app.include_router(github_router, prefix="/github", tags=["github"])
-app.include_router(session_router, prefix="/daifu", tags=["sessions"])
-app.include_router(solve_router, prefix="/daifu", tags=["solve"])
-app.include_router(controller_router)
+fastapi_app.include_router(auth_router, prefix="/auth", tags=["auth"])
+fastapi_app.include_router(github_router, prefix="/github", tags=["github"])
+fastapi_app.include_router(session_router, prefix="/daifu", tags=["sessions"])
+fastapi_app.include_router(solve_router, prefix="/daifu", tags=["solve"])
+fastapi_app.include_router(controller_router)
 
 
-@app.get("/")
+@fastapi_app.get("/")
 def root():
     return {
         "service": "yudai-controller",
@@ -67,15 +56,32 @@ def root():
     }
 
 
-@app.get("/health")
+@fastapi_app.get("/health")
 def health():
     return {"status": "healthy", "service": "yudai-controller"}
 
 
-@app.get("/realtime/flags")
+@fastapi_app.get("/realtime/flags")
 def realtime_flags():
     flags = get_realtime_feature_flags()
     return {"flags": flags.as_dict()}
+
+
+# Wrap the full ASGI app so CORS headers are still added when FastAPI converts
+# unhandled exceptions into a 500 response.
+app = CORSMiddleware(
+    app=fastapi_app,
+    allow_origins=_parse_allow_origins(
+        os.getenv(
+            "ALLOW_ORIGINS",
+            "http://localhost:3000,https://yudai.app,https://www.yudai.app",
+        )
+    ),
+    allow_origin_regex=os.getenv("ALLOW_ORIGIN_REGEX"),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 if __name__ == "__main__":
