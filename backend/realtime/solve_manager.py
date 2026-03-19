@@ -478,6 +478,7 @@ class DefaultSolverManager(SolverManager):
                 environment=runtime_branch,
                 repo_branch=runtime_branch,
                 repo_url=repo_url,
+                github_token=github_token,
                 env_inputs={
                     "SESSION_PUBLIC_ID": chat_session.session_id,
                     "WORKSPACE_PATH": chat_session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH,
