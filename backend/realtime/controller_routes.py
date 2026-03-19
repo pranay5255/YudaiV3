@@ -12,7 +12,7 @@ from auth.github_oauth import get_current_user, validate_session_token
 from daifuUserAgent.ChatOps import ChatOps
 from db.database import get_db
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, WebSocket, status
-from models import ChatSession, SessionRuntime, User
+from models import AuthToken, ChatSession, SessionRuntime, User
 from sqlalchemy.orm import Session
 
 from .lifecycle import get_realtime_lifecycle_service
@@ -93,6 +93,19 @@ def _not_provisioned_runtime_response() -> RuntimeResponse:
     )
 
 
+def _get_user_github_token(db: Session, user_id: int) -> Optional[str]:
+    auth_token = (
+        db.query(AuthToken)
+        .filter(
+            AuthToken.user_id == user_id,
+            AuthToken.is_active.is_(True),
+        )
+        .order_by(AuthToken.created_at.desc())
+        .first()
+    )
+    return auth_token.access_token if auth_token else None
+
+
 @router.post(
     "/controller/sandboxes",
     response_model=SandboxResponse,
@@ -104,6 +117,7 @@ async def create_sandbox(
     current_user: User = Depends(get_current_user),
 ) -> SandboxResponse:
     lifecycle = get_realtime_lifecycle_service()
+    github_token = _get_user_github_token(db, current_user.id)
 
     session_obj: Optional[ChatSession] = None
     if request.session_id:
@@ -144,6 +158,7 @@ async def create_sandbox(
         environment=request.environment,
         repo_branch=request.repo_branch,
         repo_url=f"https://github.com/{request.repo_owner}/{request.repo_name}.git",
+        github_token=github_token,
         env_inputs={
             "SESSION_PUBLIC_ID": session_obj.session_id,
             "WORKSPACE_PATH": session_obj.runtime_workspace_path or "/workspace/repo",
@@ -268,6 +283,7 @@ async def ensure_runtime_for_session(
     current_user: User = Depends(get_current_user),
 ) -> RuntimeResponse:
     lifecycle = get_realtime_lifecycle_service()
+    github_token = _get_user_github_token(db, current_user.id)
 
     session_obj = (
         db.query(ChatSession)
@@ -291,6 +307,7 @@ async def ensure_runtime_for_session(
         repo_branch=request.repo_branch,
         repo_url=request.repo_url
         or f"https://github.com/{request.repo_owner}/{request.repo_name}.git",
+        github_token=github_token,
         env_inputs={
             "SESSION_PUBLIC_ID": session_obj.session_id,
             "WORKSPACE_PATH": session_obj.runtime_workspace_path or "/workspace/repo",
