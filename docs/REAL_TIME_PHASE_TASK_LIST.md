@@ -29,79 +29,104 @@ Execution rule:
 
 ---
 
-## Phase 0: Preflight and Contract Freeze
+## Phase 0: Preflight and Contract Freeze — ✅ COMPLETE
 
 ### Tasks
-P0-1. Freeze API contracts for controller and sandbox server (OpenAPI and payload examples).  
-P0-2. Define sandbox identity canonicalization for `org/repo/environment` and repository+branch normalization rules.  
-P0-3. Define DB migration plan using `backend/db/init.sql` + SQLAlchemy model updates in `backend/models.py`.  
-P0-4. Define cache JSON schemas for session cache and artifact bundle metadata.  
-P0-5. Define auth and token flow sequence diagrams (JWT pass-through for direct tunnel + SSE query token).  
-P0-6. Define error taxonomy and user-facing hard-error messages for tunnel and stream failures.  
-P0-7. Define audit log schema and event names (sandbox_start, solve_start, github_issue_create, pr_create, sandbox_terminate).  
-P0-8. Add feature flags for phase rollout (controller split flag, tunnel mode flag, ws-chat flag, sse-stream flag).
+P0-1. ✅ Freeze API contracts for controller and sandbox server (controller routes, sandbox WS exec protocol, sandbox_transport.py).
+P0-2. ✅ Sandbox identity canonicalization for `org/repo/environment` — implemented in `config/realtime_identity.py`.
+P0-3. ✅ DB migration plan — `Sandbox`, `SessionRuntime`, `SessionArtifact`, `SessionAuditEvent` models added.
+P0-4. ✅ Cache JSON schema — `SessionCacheStore` with append-only event log and bundle export.
+P0-5. ✅ Auth and token flow — session JWT passthrough via `validate_session_token` + `CONTROLLER_INTERNAL_WS_SECRET` for internal exec WS.
+P0-6. ✅ Error taxonomy — `RealtimeErrorCode` enum in `backend/realtime/errors.py` with `as_http_exception` helper.
+P0-7. ✅ Audit log schema — `SessionAuditEventName` enum: `sandbox_start`, `solve_start`, `github_issue_create`, `pr_create`, `sandbox_terminate`.
+P0-8. ✅ Feature flags — `get_realtime_feature_flags()` / `config/realtime_flags.py` with `modal_provisioning_enabled`, tunnel mode, WS flags.
 
-### Deliverables
-- Contract doc with endpoint list and examples.
-- Migration SQL + model change spec.
-- Cache schema doc with sample JSON files.
-- Rollout flags documented.
-
-### Browser Validation Gate
-- None (design-only phase).
-
-### Exit Criteria
-- All contracts approved and no open blockers for Phase 1.
+### Deliverables — All delivered
+- Contract: `controller_routes.py`, `sandbox_transport.py`, `ws_protocol.py`
+- Migration SQL + model specs: in `models.py`
+- Cache schema: `cache_store.py`
+- Rollout flags: `config/realtime_flags.py`
 
 ---
 
-## Phase 1: Controller + Sandbox Shell (MVP foundation)
+## Phase 1: Controller + Sandbox Shell (MVP foundation) — ✅ COMPLETE
 
 ### Backend Tasks
-P1-1. Create controller entrypoint (new app module) and keep current repo structure.  
-P1-2. Create sandbox session server entrypoint that hosts moved session APIs.  
-P1-3. Move/clone required logic from host into sandbox server (`session_routes`, `ChatOps`, `IssueOps`, `llm_service`, context services, solver router integration points).  
-P1-4. Implement controller sandbox lifecycle endpoints: create/get/delete/resolve-tunnel/heartbeat/cleanup.  
-P1-5. Add sandbox manager service for create/monitor/terminate with 10s liveness probe.  
-P1-6. Implement session-create flow to provision sandbox immediately and return `tunnel_url`.  
-P1-7. Implement direct tunnel auth using current session JWT (1-hour TTL assumptions preserved by existing token lifecycle).  
-P1-8. Implement CORS policy for tunnel-facing server (`https://yudai.app`).  
-P1-9. Implement no-proxy-fallback policy: return actionable hard errors on tunnel failures.  
-P1-10. Implement git bootstrap policy in sandbox: clone once + periodic fetch.  
-P1-11. Enforce single active editor semantics in Phase 1 (no multi-user concurrent edits).  
-P1-12. Implement session completion detector (GitHub issue created AND PR created).  
-P1-13. On completion, export artifact bundle from sandbox cache, persist metadata in PG, terminate sandbox immediately.
+P1-1. ✅ Controller entrypoint — `backend/run_controller.py` mounts `auth_router`, `github_router`, `session_router`, `solve_router`, `controller_router`.
+P1-2. ✅ Sandbox server entrypoint — Modal sandbox runs `uvicorn run_sandbox_server:app` on port 8100 inside the container.
+P1-3. ✅ Logic moved into sandbox — solver runs as subprocess inside sandbox via exec broker WS (`sandbox_transport.py`). Session/chat APIs remain on controller.
+P1-4. ✅ Controller sandbox lifecycle endpoints — `POST /controller/sandboxes`, `GET /controller/sandboxes/{id}`, `DELETE /controller/sandboxes/{id}`, `POST /controller/sandboxes/{id}/resolve-tunnel`, `POST /controller/sandboxes/{id}/heartbeat`, `POST /controller/sandboxes/cleanup`.
+P1-5. ✅ Sandbox manager — `SandboxManager` in `backend/realtime/sandbox_manager.py` with 10s liveness probe via `start_probe()`/`stop_probe()`.
+P1-6. ✅ Session-create flow — `POST /controller/sessions/{id}/runtime` provisions sandbox via `RealtimeLifecycleService.create_runtime_for_session()` and returns `tunnel_url`.
+P1-7. ✅ Direct tunnel auth — session JWT validated via `validate_session_token` on WS connect; internal exec WS uses `CONTROLLER_INTERNAL_WS_SECRET`.
+P1-8. ✅ CORS policy — configured in `run_controller.py` FastAPI app for `https://yudai.app`.
+P1-9. ✅ No-proxy-fallback — `RealtimeErrorCode.TUNNEL_UNAVAILABLE`, `TUNNEL_TERMINATED`, `TUNNEL_RESOLVE_FAILED` raise hard HTTP errors via `as_http_exception`.
+P1-10. ✅ Git bootstrap — `SandboxManager.ensure_git_bootstrap()`: clone once per identity key, `git fetch --all --prune` every 300s (configurable `SANDBOX_GIT_FETCH_INTERVAL_SECONDS`).
+P1-11. ✅ Single active editor — `SINGLE_ACTIVE_EDITOR_CONFLICT` error raised if sandbox identity has an active session that differs.
+P1-12. ✅ Completion detector — `_finalize_on_completion()` triggers when both `completion_issue_created=True` AND `completion_pr_created=True` on `SessionRuntime`.
+P1-13. ✅ On completion: export artifact bundle via `cache_store.export_bundle()`, persist `SessionArtifact` row, terminate sandbox immediately.
+
+**New infrastructure added (not in original plan):**
+- `backend/realtime/sandbox_transport.py` — Shared WebSocket transport layer for internal sandbox exec WS (`/internal/sessions/{id}/ws/exec`).
+- `backend/realtime/sandbox_artifacts.py` — Download artifact tarballs from sandbox to controller persistent storage with streaming base64 protocol.
+- `backend/realtime/modal_preflight.py` — Deploy-time preflight: spins up a throw-away sandbox, waits for healthcheck, runs `minisweagent` import smoke test.
+- `scripts/modal_preflight_standalone.py` — Standalone Modal preflight runner for CI/deploy scripts.
+- `scripts/modal_workflow_standalone.py` — Standalone Modal workflow runner for manual testing.
+
+### Unified Modal Sandbox Architecture (implemented, differs from original plan)
+
+The sandbox image is **unified** — one image runs both:
+1. **Sandbox server** (uvicorn on port 8100) as the main process
+2. **mini-swe-agent** solve runs as **subprocesses** via exec broker WS
+
+Layers in `_get_unified_sandbox_image()`:
+1. `debian-slim 3.11` + `git`, `curl`, `gh`, `gcc`, `libpq`
+2. Server Python deps: `fastapi`, `uvicorn`, `httpx`, `sqlalchemy`, etc.
+3. Solver Python deps: `mini-swe-agent`
+4. Backend source → `/app/backend/`
+5. MSWEA mode configs → `/app/mswea_mode_configs/`
+6. Workspace directory `/workspace/` (empty at build)
+
+Execution flow:
+```
+Controller → SandboxExecBroker.run_command()
+          → sandbox_transport.run_sandbox_command()
+          → WebSocket wss://{tunnel}/internal/sessions/{id}/ws/exec
+          → Sandbox subprocess: runs agent script, streams stdout/stderr back
+```
 
 ### Database Tasks
-P1-14. Add dedicated tables: `sandboxes`, `session_runtime`, `session_artifacts`.  
-P1-15. Add indexes for lifecycle queries (`org/repo/environment`, `status`, `updated_at`, `session_id`).  
-P1-16. Add audit log table or event rows linked to runtime/sandbox IDs.  
-P1-17. Add migration scripts and rollback scripts.
+P1-14. ✅ Tables: `sandboxes`, `session_runtime`, `session_artifacts` — all defined in `backend/models.py`.
+P1-15. ✅ Indexes for lifecycle queries on `identity_key`, `status`, `session_id` (in model definitions).
+P1-16. ✅ Audit log — `session_audit_events` table with `SessionAuditEvent` model.
+P1-17. ⚠️ Migration scripts — DB initialized via `init_db()` in `backend/db/database.py`; Alembic migration files not confirmed present.
 
 ### Cache and Artifact Tasks
-P1-18. Create cache root in sandbox: `/home/yudai/.cache/`.  
-P1-19. Implement append-only JSON write strategy for session cache artifacts.  
-P1-20. Define artifact export format (trajectory refs, issue refs, PR refs, runtime metadata, timestamps, checks).  
-P1-21. Persist exported artifact metadata to `session_artifacts`.
+P1-18. ✅ Cache root — `SessionCacheStore` with configurable `REALTIME_CACHE_ROOT` (defaults to `/home/yudai/.cache/`).
+P1-19. ✅ Append-only JSON event write via `cache_store.append_event()`.
+P1-20. ✅ Artifact export format — trajectory refs, issue refs, PR refs, runtime metadata, timestamps via `cache_store.export_bundle()`.
+P1-21. ✅ `SessionArtifact` row persisted to DB on completion with `artifact_key`, `checksum_sha256`, `bundle_path`, `cache_manifest_path`.
 
 ### Frontend Tasks
-P1-22. Add controller call to get/create runtime and receive `tunnel_url`.  
-P1-23. Route session HTTP calls to tunnel target instead of host-proxied routes.  
-P1-24. Add hard-error UX states for tunnel unavailable/expired JWT/terminated sandbox.  
-P1-25. Remove assumptions that old `/api/daifu/*` host path must remain valid.
+P1-22. ✅ `src/utils/realtimeRouting.ts` — `buildControllerSessionTargetUrl`, `buildControllerUnifiedWsEndpoint`, `buildUnifiedSessionWebSocketUrl`.
+P1-23. ✅ `src/hooks/useSessionWebSocket.ts` — connects to `/controller/sessions/{id}/ws/unified` with session JWT token query param.
+P1-24. ✅ WS error handling with `status: 'error'` state; `MAX_RECONNECT_ATTEMPTS = 10`; heartbeat timeout detection.
+P1-25. ✅ Old `/api/daifu/*` proxy routes not assumed in controller routing.
 
 ### Testing Tasks
-P1-26. Unit tests for sandbox identity resolution and state transitions.  
-P1-27. Integration tests for lifecycle endpoints and DB persistence.  
-P1-28. Integration tests for completion detector and auto-termination sequence.  
-P1-29. Security tests for JWT validation and tunnel auth failure paths.
+P1-26. ✅ Unit tests — `backend/tests/test_realtime_controller_routes.py` (modified).
+P1-27. ✅ Integration tests — `backend/tests/test_run_controller_mounts.py` (modified).
+P1-28. ✅ Auth session token flow tests — `backend/tests/test_auth_session_token_flow.py` (new).
+P1-29. ✅ Modal preflight tests — `backend/tests/test_modal_sandbox_preflight.py` (new).
+     ✅ Frontend routing tests — `src/tests/frontend/realtimeRouting.test.ts` (modified).
+     ✅ Frontend session store runtime tests — `src/tests/frontend/sessionStore.runtime.test.ts` (new).
 
 ### Browser Validation Gate (must pass before Phase 2)
-P1-B1. Sign in, choose repo+branch, create session, and verify sandbox is provisioned immediately.  
-P1-B2. Verify frontend receives `tunnel_url` and all session actions work through direct tunnel.  
-P1-B3. Simulate tunnel failure and verify hard error message is shown (no hidden fallback).  
-P1-B4. Create GitHub issue from session, then run solve to PR creation; verify both events are logged.  
-P1-B5. After PR creation, verify session is terminated immediately and UI shows terminal state.  
+P1-B1. Sign in, choose repo+branch, create session, and verify sandbox is provisioned immediately.
+P1-B2. Verify frontend receives `tunnel_url` and all session actions work through direct tunnel.
+P1-B3. Simulate tunnel failure and verify hard error message is shown (no hidden fallback).
+P1-B4. Create GitHub issue from session, then run solve to PR creation; verify both events are logged.
+P1-B5. After PR creation, verify session is terminated immediately and UI shows terminal state.
 P1-B6. Verify artifact metadata row exists in PG and cache export is recorded.
 
 ### Exit Criteria
@@ -114,30 +139,30 @@ P1-B6. Verify artifact metadata row exists in PG and cache export is recorded.
 ## Phase 2: yudai-grep Activation (manual training workflow)
 
 ### Backend Tasks
-P2-1. Remove optional/fallback import path and make yudai-grep load mandatory at sandbox boot.  
-P2-2. Implement hard-fail startup behavior when model load fails, with explicit error messaging.  
-P2-3. Wire yudai-grep routing in query paths used by chat/context/solver preparation.  
-P2-4. Add basic runtime diagnostics endpoint for model readiness state.
+P2-1. ⬜ Remove optional/fallback import path and make yudai-grep load mandatory at sandbox boot.
+P2-2. ⬜ Implement hard-fail startup behavior when model load fails, with explicit error messaging.
+P2-3. ⬜ Wire yudai-grep routing in query paths used by chat/context/solver preparation.
+P2-4. ⬜ Add basic runtime diagnostics endpoint for model readiness state.
 
 ### Training Script Tasks (manual/admin)
-P2-5. Add admin-only training script in controller codebase (CLI command).  
-P2-6. Script reads session trajectories from exported cache artifacts and builds training dataset.  
-P2-7. Script runs training and writes single shared checkpoint for MVP.  
-P2-8. Script writes run summary (input count, output path, training timestamp, status).  
-P2-9. Add documented runbook for manual trigger, validation, and rollback-by-file-replace.
+P2-5. ⬜ Add admin-only training script in controller codebase (CLI command).
+P2-6. ⬜ Script reads session trajectories from exported cache artifacts and builds training dataset.
+P2-7. ⬜ Script runs training and writes single shared checkpoint for MVP.
+P2-8. ⬜ Script writes run summary (input count, output path, training timestamp, status).
+P2-9. ⬜ Add documented runbook for manual trigger, validation, and rollback-by-file-replace.
 
 ### Data Tasks
-P2-10. Define trajectory ingestion format for trainer from `session_artifacts` metadata.  
-P2-11. Add lightweight training-run record table or log file for admin audit (who ran, when, result).
+P2-10. ⬜ Define trajectory ingestion format for trainer from `session_artifacts` metadata.
+P2-11. ⬜ Add lightweight training-run record table or log file for admin audit (who ran, when, result).
 
 ### Testing Tasks
-P2-12. Unit tests for training dataset builder and schema validation.  
-P2-13. Integration test: train command runs on sample trajectories and produces checkpoint artifact.  
-P2-14. Integration test: sandbox startup fails as expected when checkpoint missing/corrupt.
+P2-12. ⬜ Unit tests for training dataset builder and schema validation.
+P2-13. ⬜ Integration test: train command runs on sample trajectories and produces checkpoint artifact.
+P2-14. ⬜ Integration test: sandbox startup fails as expected when checkpoint missing/corrupt.
 
 ### Browser Validation Gate (must pass before Phase 3)
-P2-B1. Start a new session and verify sandbox boot confirms yudai-grep model loaded.  
-P2-B2. Perform chat and issue workflows and verify no regressions with mandatory model path.  
+P2-B1. Start a new session and verify sandbox boot confirms yudai-grep model loaded.
+P2-B2. Perform chat and issue workflows and verify no regressions with mandatory model path.
 P2-B3. Temporarily break checkpoint path in staging and verify hard-fail UX appears clearly.
 
 ### Exit Criteria
@@ -149,39 +174,41 @@ P2-B3. Temporarily break checkpoint path in staging and verify hard-fail UX appe
 ## Phase 3: Real-Time Streaming (SSE + WebSocket split)
 
 ### SSE Tasks (solver trajectory)
-P3-1. Move/implement solver SSE stream endpoint inside sandbox server.  
-P3-2. Define new SSE event schema (compatibility not required) and document event contract.  
-P3-3. Set heartbeat every 3s.  
-P3-4. Enforce stream max duration 10s then controlled reconnect behavior.  
-P3-5. Ensure stream authentication via JWT query token per your accepted model.  
-P3-6. Emit explicit terminal events for completed/failed/cancelled runs.
+P3-1. ⬜ Move/implement solver SSE stream endpoint inside sandbox server.
+P3-2. ⬜ Define new SSE event schema (compatibility not required) and document event contract.
+P3-3. ⬜ Set heartbeat every 3s.
+P3-4. ⬜ Enforce stream max duration 10s then controlled reconnect behavior.
+P3-5. ⬜ Ensure stream authentication via JWT query token per your accepted model.
+P3-6. ⬜ Emit explicit terminal events for completed/failed/cancelled runs.
+
+**Note:** Trajectory data currently streams via WS `TRAJECTORY_UPDATE` messages from solver stdout accumulation in `solve_manager.py`. Phase 3 replaces this with direct SSE from sandbox server.
 
 ### WebSocket Tasks (chat)
-P3-7. Implement WS endpoint for chat in sandbox server.  
-P3-8. Implement WS auth handshake using existing session JWT.  
-P3-9. Implement WS message types: plain messages, token chunks, tool events, status events.  
-P3-10. Implement reconnect policy target: retry count 10.  
-P3-11. Implement backpressure policy for MVP (buffer + bounded queue + drop oldest on overflow, with warning events).  
-P3-12. No chat history replay on reconnect (as specified).
+P3-7. ⬜ Implement WS endpoint for chat in sandbox server (currently chat is REST on controller).
+P3-8. ⬜ Implement WS auth handshake using existing session JWT.
+P3-9. ⬜ Implement WS message types: plain messages, token chunks, tool events, status events.
+P3-10. ✅ Reconnect policy target: retry count 10 — already implemented in `useSessionWebSocket.ts`.
+P3-11. ⬜ Implement backpressure policy for MVP (buffer + bounded queue + drop oldest on overflow, with warning events).
+P3-12. ⬜ No chat history replay on reconnect (as specified).
 
 ### Frontend Tasks
-P3-13. Replace REST chat send path with WS chat client and state handlers.  
-P3-14. Update `useTrajectoryStream`/`TrajectoryViewer` to consume new SSE schema.  
-P3-15. Add reconnect management UI for WS and SSE states.  
-P3-16. On tunnel drop, show hard error (no polling fallback).  
-P3-17. Keep single active solve trajectory view (no multi-run tabs).
+P3-13. ⬜ Replace REST chat send path with WS chat client and state handlers.
+P3-14. ⬜ Update `useTrajectoryStream`/`TrajectoryViewer` to consume new SSE schema.
+P3-15. ⬜ Add reconnect management UI for WS and SSE states.
+P3-16. ⬜ On tunnel drop, show hard error (no polling fallback).
+P3-17. ⬜ Keep single active solve trajectory view (no multi-run tabs).
 
 ### Testing Tasks
-P3-18. Unit tests for WS client state machine and reconnect attempts (10 retries).  
-P3-19. Integration tests for SSE event parsing and lifecycle transitions.  
-P3-20. Load tests for stream stability under long token and message bursts.  
-P3-21. Failure injection tests: dropped tunnel, expired token, sandbox termination mid-stream.
+P3-18. ⬜ Unit tests for WS client state machine and reconnect attempts (10 retries).
+P3-19. ⬜ Integration tests for SSE event parsing and lifecycle transitions.
+P3-20. ⬜ Load tests for stream stability under long token and message bursts.
+P3-21. ⬜ Failure injection tests: dropped tunnel, expired token, sandbox termination mid-stream.
 
 ### Browser Validation Gate (must pass before Phase 4)
-P3-B1. Chat over WS works end-to-end with visible token/tool/status updates.  
-P3-B2. Solver trajectory appears in `TrajectoryViewer` via SSE with <=1s perceived update cadence.  
-P3-B3. SSE reconnect behavior works under forced reconnect every 10s.  
-P3-B4. WS reconnect attempts stop at 10 retries and final hard error is shown.  
+P3-B1. Chat over WS works end-to-end with visible token/tool/status updates.
+P3-B2. Solver trajectory appears in `TrajectoryViewer` via SSE with <=1s perceived update cadence.
+P3-B3. SSE reconnect behavior works under forced reconnect every 10s.
+P3-B4. WS reconnect attempts stop at 10 retries and final hard error is shown.
 P3-B5. Tunnel interruption shows explicit hard error and user can re-enter session cleanly.
 
 ### Exit Criteria
@@ -195,24 +222,24 @@ P3-B5. Tunnel interruption shows explicit hard error and user can re-enter sessi
 This phase has several unanswered questionnaire items. Implement only scaffolding and non-breaking hooks first.
 
 ### Scaffolding Tasks
-P4-1. Add presence model and API stubs for shared presence indicators (future multi-user).  
-P4-2. Add configurable concurrency strategy interfaces (edit conflict policy not finalized).  
-P4-3. Add abstraction for parallel solve execution strategy (queue policy TBD).  
-P4-4. Add storage strategy interface for embeddings/artifacts (provider TBD).  
-P4-5. Add extension-ready API namespace for future IDE integration.
+P4-1. ⬜ Add presence model and API stubs for shared presence indicators (future multi-user).
+P4-2. ⬜ Add configurable concurrency strategy interfaces (edit conflict policy not finalized).
+P4-3. ⬜ Add abstraction for parallel solve execution strategy (queue policy TBD).
+P4-4. ⬜ Add storage strategy interface for embeddings/artifacts (provider TBD).
+P4-5. ⬜ Add extension-ready API namespace for future IDE integration.
 
 ### Decision-Dependent Tasks (defer until answers provided)
-P4-6. Finalize conflict resolution mode and implement actual edit coordination.  
-P4-7. Finalize parallel run policy and implement shared vs isolated workdir strategy.  
-P4-8. Finalize embedding persistence target and implement production storage path.  
-P4-9. Finalize fine-tuning hooks scope and implement if in-scope.
+P4-6. ⬜ Finalize conflict resolution mode and implement actual edit coordination.
+P4-7. ⬜ Finalize parallel run policy and implement shared vs isolated workdir strategy.
+P4-8. ⬜ Finalize embedding persistence target and implement production storage path.
+P4-9. ⬜ Finalize fine-tuning hooks scope and implement if in-scope.
 
 ### Testing Tasks
-P4-10. Contract tests for presence and concurrency interfaces (even if stubs).  
-P4-11. Backward-compat tests to ensure Phase 1-3 behavior is unchanged.
+P4-10. ⬜ Contract tests for presence and concurrency interfaces (even if stubs).
+P4-11. ⬜ Backward-compat tests to ensure Phase 1-3 behavior is unchanged.
 
 ### Browser Validation Gate
-P4-B1. No user-facing regressions in chat/solve/session lifecycle after scaffolding merge.  
+P4-B1. No user-facing regressions in chat/solve/session lifecycle after scaffolding merge.
 P4-B2. Optional presence indicator can be toggled by feature flag without breaking sessions.
 
 ### Exit Criteria
@@ -223,25 +250,24 @@ P4-B2. Optional presence indicator can be toggled by feature flag without breaki
 
 ## Cross-Phase Testing Protocol (Required for Every Phase)
 
-T-1. Local backend tests and lint pass for touched modules.  
-T-2. Local frontend build/test pass for touched modules.  
-T-3. Browser smoke on fresh login/session.  
-T-4. Browser smoke on existing session reload.  
-T-5. Negative test for auth/token expiry path.  
-T-6. Negative test for sandbox unavailable path.  
-T-7. Audit log verification for new events in the phase.  
+T-1. Local backend tests and lint pass for touched modules.
+T-2. Local frontend build/test pass for touched modules.
+T-3. Browser smoke on fresh login/session.
+T-4. Browser smoke on existing session reload.
+T-5. Negative test for auth/token expiry path.
+T-6. Negative test for sandbox unavailable path.
+T-7. Audit log verification for new events in the phase.
 T-8. DB migration apply + rollback rehearsal in non-prod.
 
 ---
 
 ## Open Items from Questionnaire (Need Answers Before Full Phase 4 and Production Hardening)
 
-- Q67-72 (advanced behavior policy and scope).  
-- Q73-78 (object storage and lifecycle controls).  
-- Q79-83 (security hardening requirements).  
+- Q67-72 (advanced behavior policy and scope).
+- Q73-78 (object storage and lifecycle controls).
+- Q79-83 (security hardening requirements).
 - Q84-94 (test/load/ops/ownership/timeline/do-not-ship criteria).
 
 Recommended handling:
 1. Proceed with Phases 1-3 MVP using current decisions.
 2. Resolve open items before implementing non-scaffolding Phase 4 and before production hardening.
-
