@@ -4,6 +4,7 @@ import sys
 import types
 
 from fastapi import APIRouter
+from fastapi.testclient import TestClient
 
 # Ensure backend imports resolve in tests.
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -54,7 +55,7 @@ def test_run_controller_mounts_canonical_routes_only():
 
     run_controller = importlib.import_module("run_controller")
 
-    paths = {getattr(route, "path", None) for route in run_controller.app.routes}
+    paths = {getattr(route, "path", None) for route in run_controller.fastapi_app.routes}
 
     # Canonical mounts
     assert "/daifu/sessions" in paths
@@ -96,3 +97,28 @@ def test_parse_allow_origins_trims_and_drops_empty_values():
     run_controller = importlib.import_module("run_controller")
     parsed = run_controller._parse_allow_origins(" https://app.example.com, ,http://localhost:3000 ")
     assert parsed == ["https://app.example.com", "http://localhost:3000"]
+
+
+def test_run_controller_adds_cors_headers_on_unhandled_500():
+    _install_import_stubs()
+    import importlib
+
+    run_controller = importlib.import_module("run_controller")
+
+    if not any(
+        getattr(route, "path", None) == "/__tests__/boom"
+        for route in run_controller.fastapi_app.routes
+    ):
+
+        @run_controller.fastapi_app.get("/__tests__/boom")
+        def boom():  # pragma: no cover - exercised via TestClient
+            raise RuntimeError("boom")
+
+    client = TestClient(run_controller.app, raise_server_exceptions=False)
+    response = client.get(
+        "/__tests__/boom",
+        headers={"Origin": "https://www.yudai.app"},
+    )
+
+    assert response.status_code == 500
+    assert response.headers["access-control-allow-origin"] == "https://www.yudai.app"
