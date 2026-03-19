@@ -42,17 +42,25 @@ export interface Session {
   tunnel_url?: string;
 }
 
+export type RuntimeStatus =
+  | 'not_provisioned'
+  | 'provisioning'
+  | 'running'
+  | 'stopped'
+  | 'terminated'
+  | 'failed';
+
 export interface SessionRuntimeInfo {
-  runtime_id: string;
-  sandbox_id: string;
-  identity_key: string;
-  status: string;
+  runtime_id?: string;
+  sandbox_id?: string;
+  identity_key?: string;
+  status: RuntimeStatus | string;
   tunnel_url?: string;
-  token_ttl_seconds: number;
+  token_ttl_seconds?: number;
   tunnel_expires_at?: string;
-  completion_issue_created: boolean;
-  completion_pr_created: boolean;
-  completion_detected: boolean;
+  completion_issue_created?: boolean;
+  completion_pr_created?: boolean;
+  completion_detected?: boolean;
   metadata?: Record<string, unknown>;
 }
 
