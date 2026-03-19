@@ -21,6 +21,7 @@ import {
   ChatResponse,
   CreateGitHubIssueResponse,
   SessionRuntimeInfo,
+  RuntimeStatus,
 } from '../types/sessionTypes';
 import { API, buildApiUrl } from '../config/api';
 import { realtimeFeatureFlags } from '../config/realtimeFlags';
@@ -138,9 +139,117 @@ type UnifiedWsChatSendResult = {
   processingTimeMs: number;
 };
 
+type RuntimeStateSnapshot = {
+  runtime: SessionRuntimeInfo | null;
+  runtimeStatus: RuntimeStatus;
+  runtimeError: string | null;
+};
+
 const getWsBaseUrl = (): string | undefined => {
   const value = (import.meta.env.VITE_WS_BASE_URL || '').trim();
   return value || undefined;
+};
+
+const shouldQueryControllerRuntime = (): boolean => (
+  realtimeFeatureFlags.controllerSplitEnabled
+  || realtimeFeatureFlags.controllerBrokerEnabled
+);
+
+const toRuntimeStatus = (status: string | null | undefined): RuntimeStatus => {
+  switch ((status || '').trim().toLowerCase()) {
+    case 'not_provisioned':
+      return 'not_provisioned';
+    case 'provisioning':
+      return 'provisioning';
+    case 'running':
+      return 'running';
+    case 'stopped':
+      return 'stopped';
+    case 'terminated':
+      return 'terminated';
+    case 'failed':
+      return 'failed';
+    default:
+      return 'failed';
+  }
+};
+
+const toRuntimeStateSnapshot = (
+  runtime: SessionRuntimeInfo | null | undefined,
+  runtimeError: string | null = null
+): RuntimeStateSnapshot => {
+  const runtimeStatus = toRuntimeStatus(runtime?.status);
+  if (!runtime || runtimeStatus === 'not_provisioned') {
+    return {
+      runtime: null,
+      runtimeStatus: 'not_provisioned',
+      runtimeError,
+    };
+  }
+
+  return {
+    runtime,
+    runtimeStatus,
+    runtimeError,
+  };
+};
+
+const mergeSessionWithRuntime = (
+  session: Session,
+  runtime: SessionRuntimeInfo | null
+): Session => ({
+  ...session,
+  runtime_id: runtime?.runtime_id,
+  sandbox_id: runtime?.sandbox_id,
+  tunnel_url: runtime?.tunnel_url,
+});
+
+const fetchRuntimeState = async (
+  sessionId: string,
+  sessionToken: string
+): Promise<RuntimeStateSnapshot> => {
+  if (!shouldQueryControllerRuntime()) {
+    return {
+      runtime: null,
+      runtimeStatus: 'not_provisioned',
+      runtimeError: null,
+    };
+  }
+
+  try {
+    const runtime = await handleApiResponse<SessionRuntimeInfo>(
+      await fetch(
+        buildApiUrl(API.CONTROLLER.RUNTIME_DETAIL, { sessionId }),
+        {
+          method: 'GET',
+          headers: getAuthHeaders(sessionToken),
+        }
+      )
+    );
+
+    return toRuntimeStateSnapshot(runtime);
+  } catch (error) {
+    const appError = toAppError(error, 'RUNTIME_LOAD_FAILED', 'Failed to load runtime');
+    const runtimeMissing =
+      appError.code === 'HTTP_404'
+      || appError.code === 'RUNTIME_NOT_FOUND'
+      || /runtime not found/i.test(appError.message);
+
+    if (runtimeMissing) {
+      return {
+        runtime: null,
+        runtimeStatus: 'not_provisioned',
+        runtimeError: null,
+      };
+    }
+
+    console.warn('[SessionStore] Runtime state unavailable:', appError);
+    return {
+      runtime: null,
+      runtimeStatus: 'failed',
+      runtimeError: appError.message,
+    };
+  }
 };
 
 const sendChatMessageViaUnifiedWs = ({
@@ -308,6 +417,8 @@ interface SessionState {
   sessionInitialized: boolean;
   sessionStatus: SessionStatus;
   runtime: SessionRuntimeInfo | null;
+  runtimeStatus: RuntimeStatus;
+  runtimeError: string | null;
 
   // ============================================================================
   // REPOSITORY STATE (GitHub integration)
@@ -452,7 +563,12 @@ interface SessionState {
   updateSessionStats: (tokens: number) => void;
   setConnectionStatus: (status: 'connected' | 'disconnected' | 'reconnecting') => void;
   setSessionStatus: (status: SessionStatus) => void;
-  setRuntime: (runtime: SessionRuntimeInfo | null) => void;
+  setRuntimeState: (
+    runtime: SessionRuntimeInfo | null,
+    runtimeStatus?: RuntimeStatus,
+    runtimeError?: string | null
+  ) => void;
+  syncRuntimeState: (sessionId?: string) => Promise<SessionRuntimeInfo | null>;
 
   // ============================================================================
   // CHAT MESSAGE SENDING (for sending messages through backend chat endpoint)
@@ -503,6 +619,8 @@ export const useSessionStore = create<SessionState>()(
         sessionInitialized: false,
         sessionStatus: 'no_repo',
         runtime: null,
+        runtimeStatus: 'not_provisioned',
+        runtimeError: null,
 
         // Repository state
         selectedRepository: null,
@@ -579,45 +697,15 @@ export const useSessionStore = create<SessionState>()(
               })
             );
 
-            const shouldProvisionRuntime =
-              realtimeFeatureFlags.controllerSplitEnabled ||
-              realtimeFeatureFlags.controllerBrokerEnabled;
-
-            let runtime: SessionRuntimeInfo | null = null;
-            if (shouldProvisionRuntime) {
-              runtime = await handleApiResponse<SessionRuntimeInfo>(
-                await fetch(
-                  buildApiUrl(API.CONTROLLER.RUNTIME_ENSURE, {
-                    sessionId: sessionData.session_id,
-                  }),
-                  {
-                    method: 'POST',
-                    headers: getAuthHeaders(sessionToken),
-                    body: JSON.stringify({
-                      org: 'yudai',
-                      repo_owner: repoOwner,
-                      repo_name: repoName,
-                      environment: repository.branch || 'main',
-                      repo_branch: repository.branch || 'main',
-                      repo_url: repository.repository.html_url,
-                    }),
-                  }
-                )
-              );
-
-            }
-
-            const resolvedSession: Session = {
-              ...sessionData,
-              runtime_id: runtime?.runtime_id || sessionData.runtime_id,
-              sandbox_id: runtime?.sandbox_id || sessionData.sandbox_id,
-              tunnel_url: runtime?.tunnel_url || sessionData.tunnel_url,
-            };
+            const runtimeState = toRuntimeStateSnapshot(null);
+            const resolvedSession = mergeSessionWithRuntime(sessionData, runtimeState.runtime);
 
             set({
               activeSessionId: resolvedSession.session_id,
               currentSession: resolvedSession,
-              runtime,
+              runtime: runtimeState.runtime,
+              runtimeStatus: runtimeState.runtimeStatus,
+              runtimeError: runtimeState.runtimeError,
               selectedRepository: repository,
               sessionInitialized: true,
               isLoading: false,
@@ -649,27 +737,6 @@ export const useSessionStore = create<SessionState>()(
           try {
             set({ isLoading: true, error: null });
 
-            const shouldLoadRuntime =
-              realtimeFeatureFlags.controllerSplitEnabled ||
-              realtimeFeatureFlags.controllerBrokerEnabled;
-            let runtime: SessionRuntimeInfo | null = null;
-            if (shouldLoadRuntime) {
-              runtime = await handleApiResponse<SessionRuntimeInfo>(
-                await fetch(
-                  buildApiUrl(API.CONTROLLER.RUNTIME_DETAIL, { sessionId }),
-                  {
-                    method: 'GET',
-                    headers: getAuthHeaders(sessionToken),
-                  }
-                )
-              );
-
-            }
-
-            if (runtime) {
-              set({ runtime });
-            }
-
             const sessionDetailUrl = buildSessionTargetUrl(API.SESSIONS.DETAIL, {
               sessionId,
             });
@@ -680,21 +747,19 @@ export const useSessionStore = create<SessionState>()(
                 headers: getAuthHeaders(sessionToken),
               })
             );
+            const runtimeState = await fetchRuntimeState(sessionId, sessionToken);
 
             const mergedSession: Session | null = context.session
-              ? {
-                  ...context.session,
-                  runtime_id: runtime?.runtime_id || context.session.runtime_id,
-                  sandbox_id: runtime?.sandbox_id || context.session.sandbox_id,
-                  tunnel_url: runtime?.tunnel_url || context.session.tunnel_url,
-                }
+              ? mergeSessionWithRuntime(context.session, runtimeState.runtime)
               : null;
 
             // Update all session state from context
             set({
               activeSessionId: sessionId,
               currentSession: mergedSession,
-              runtime,
+              runtime: runtimeState.runtime,
+              runtimeStatus: runtimeState.runtimeStatus,
+              runtimeError: runtimeState.runtimeError,
               sessionContext: context,
               messages: context.messages || [],
               contextCards: [],
@@ -740,44 +805,31 @@ export const useSessionStore = create<SessionState>()(
               throw new AppError('AUTH_MISSING_TOKEN', 'No session token available');
             }
 
-            const shouldLoadRuntime =
-              realtimeFeatureFlags.controllerSplitEnabled ||
-              realtimeFeatureFlags.controllerBrokerEnabled;
-            let runtime: SessionRuntimeInfo | null = null;
-            if (shouldLoadRuntime) {
-              runtime = await handleApiResponse<SessionRuntimeInfo>(
-                await fetch(
-                  buildApiUrl(API.CONTROLLER.RUNTIME_DETAIL, { sessionId }),
-                  {
-                    method: 'GET',
-                    headers: getAuthHeaders(sessionToken),
-                  }
-                )
-              );
-
-            }
-
-            if (runtime) {
-              set({ runtime });
-            }
-
             const sessionDetailUrl = buildSessionTargetUrl(API.SESSIONS.DETAIL, {
               sessionId,
             });
 
-            await handleApiResponse<SessionContext>(
+            const context = await handleApiResponse<SessionContext>(
               await fetch(sessionDetailUrl, {
                 method: 'GET',
                 headers: getAuthHeaders(sessionToken),
               })
             );
+            const runtimeState = await fetchRuntimeState(sessionId, sessionToken);
+            const mergedSession = context.session
+              ? mergeSessionWithRuntime(context.session, runtimeState.runtime)
+              : null;
 
             set({
               activeSessionId: sessionId,
+              currentSession: mergedSession,
+              sessionContext: context,
               sessionInitialized: true,
               error: null,
               sessionStatus: 'ready',
-              runtime,
+              runtime: runtimeState.runtime,
+              runtimeStatus: runtimeState.runtimeStatus,
+              runtimeError: runtimeState.runtimeError,
             });
           } catch (error) {
             console.warn(`[SessionStore] Session ${sessionId} does not exist or is not accessible:`, error);
@@ -853,6 +905,15 @@ export const useSessionStore = create<SessionState>()(
                 ? 'ready'
                 : 'awaiting_session'
               : 'no_repo',
+            runtime: repository && state.activeSessionId ? state.runtime : null,
+            runtimeStatus:
+              repository && state.activeSessionId
+                ? state.runtimeStatus
+                : 'not_provisioned',
+            runtimeError:
+              repository && state.activeSessionId
+                ? state.runtimeError
+                : null,
           })),
 
         setAvailableRepositories: (repositories: GitHubRepository[]) =>
@@ -1261,6 +1322,8 @@ export const useSessionStore = create<SessionState>()(
             sessionInitialized: false,
             sessionStatus: get().selectedRepository ? 'awaiting_session' : 'no_repo',
             runtime: null,
+            runtimeStatus: 'not_provisioned',
+            runtimeError: null,
             messages: [],
             contextCards: [],
             fileContext: [],
@@ -1289,8 +1352,46 @@ export const useSessionStore = create<SessionState>()(
           set({ connectionStatus: status }),
         setSessionStatus: (status: SessionStatus) =>
           set({ sessionStatus: status }),
-        setRuntime: (runtime: SessionRuntimeInfo | null) =>
-          set({ runtime }),
+        setRuntimeState: (
+          runtime: SessionRuntimeInfo | null,
+          runtimeStatus?: RuntimeStatus,
+          runtimeError: string | null = null
+        ) =>
+          set((state) => {
+            const runtimeState = runtimeStatus
+              ? {
+                  runtime: runtimeStatus === 'not_provisioned' ? null : runtime,
+                  runtimeStatus,
+                  runtimeError,
+                }
+              : toRuntimeStateSnapshot(runtime, runtimeError);
+
+            return {
+              runtime: runtimeState.runtime,
+              runtimeStatus: runtimeState.runtimeStatus,
+              runtimeError: runtimeState.runtimeError,
+              currentSession: state.currentSession
+                ? mergeSessionWithRuntime(state.currentSession, runtimeState.runtime)
+                : state.currentSession,
+            };
+          }),
+        syncRuntimeState: async (sessionId?: string) => {
+          const resolvedSessionId = sessionId || get().activeSessionId;
+          const sessionToken = useAuthStore.getState().sessionToken;
+
+          if (!resolvedSessionId || !sessionToken) {
+            get().setRuntimeState(null, 'not_provisioned', null);
+            return null;
+          }
+
+          const runtimeState = await fetchRuntimeState(resolvedSessionId, sessionToken);
+          get().setRuntimeState(
+            runtimeState.runtime,
+            runtimeState.runtimeStatus,
+            runtimeState.runtimeError
+          );
+          return runtimeState.runtime;
+        },
 
         // ============================================================================
         // CHAT MESSAGE SENDING IMPLEMENTATION
