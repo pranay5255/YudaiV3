@@ -3,12 +3,31 @@
 # Version: v2.0.0 (Controller Architecture)
 # ===========================================
 
+x-backend-build: &backend-build
+  context: ./backend
+  dockerfile: Dockerfile
+
 services:
+  # Modal sandbox provisioning + exec smoke test.
+  modal-preflight:
+    build: *backend-build
+    image: yudai-backend:local
+    restart: "no"
+    env_file:
+      - ./backend/.env.prod
+    environment:
+      - DOCKER_COMPOSE=true
+      - PYTHONPATH=/app
+    command: ["python", "-m", "realtime.modal_preflight"]
+    networks:
+      - yudai-network
+    security_opt:
+      - no-new-privileges:true
+
   # Backend API Service
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    build: *backend-build
+    image: yudai-backend:local
     container_name: yudai-be
     restart: unless-stopped
     # Load all env vars from backend/.env.prod
@@ -21,16 +40,20 @@ services:
       # Realtime/cache directories must be writable by appuser in-container
       - SANDBOX_GIT_ROOT=/tmp/sandbox_repos
       - SANDBOX_CACHE_ROOT=/tmp/sandbox_cache
+      - SANDBOX_ARTIFACT_ROOT=/data/sandbox_artifacts
     ports:
       - "${PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
+      modal-preflight:
+        condition: service_completed_successfully
     volumes:
       - app_logs:/app/logs
       - ./backend/yudaiv3.2025-09-07.private-key.pem:/app/yudaiv3.2025-09-07.private-key.pem:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - swe_runs:/data/swe_runs
+      - sandbox_artifacts:/data/sandbox_artifacts
       - transformers_cache:/tmp/transformers_cache
       - huggingface_cache:/tmp/huggingface_cache
     tmpfs:
@@ -88,6 +111,8 @@ volumes:
   app_logs:
     driver: local
   swe_runs:
+    driver: local
+  sandbox_artifacts:
     driver: local
   transformers_cache:
     driver: local
