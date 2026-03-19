@@ -137,26 +137,30 @@ export function useSessionWebSocket({
   const connect = useCallback(() => {
     if (!sessionToken || !sessionId) return;
 
-    const wsBaseUrl = getWsBaseUrl();
-    const wsUrl = buildUnifiedSessionWebSocketUrl({
-      sessionId,
-      sessionToken,
-      controllerWsBaseUrl: wsBaseUrl,
-    });
-
-    if (
-      typeof window !== 'undefined' &&
-      window.location.protocol === 'https:' &&
-      wsUrl.startsWith('ws://')
-    ) {
-      // Browsers generally block insecure websocket connections from HTTPS pages.
-      console.warn('[WebSocket] ws:// from an https:// page may be blocked by browser mixed-content policy');
-    }
-
     setStatus('connecting');
     setError(null);
 
-    const ws = new WebSocket(wsUrl);
+    let ws: WebSocket;
+    try {
+      const wsBaseUrl = getWsBaseUrl();
+      const wsUrl = buildUnifiedSessionWebSocketUrl({
+        sessionId,
+        sessionToken,
+        controllerWsBaseUrl: wsBaseUrl,
+      });
+
+      ws = new WebSocket(wsUrl);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : 'Failed to initialize WebSocket connection.';
+      console.error('[WebSocket] Failed to initialize unified session websocket:', error);
+      reconnectAttemptsRef.current = MAX_RECONNECT_ATTEMPTS;
+      setStatus('error');
+      setError(message);
+      return;
+    }
+
     wsRef.current = ws;
 
     ws.onopen = () => {
