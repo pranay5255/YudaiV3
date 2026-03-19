@@ -48,6 +48,24 @@ const sessionStatusTone: Record<string, string> = {
   error: 'text-error border-error/30 bg-error/10',
 };
 
+const runtimeStatusLabel: Record<string, string> = {
+  not_provisioned: 'Idle',
+  provisioning: 'Provisioning',
+  running: 'Running',
+  stopped: 'Stopped',
+  terminated: 'Terminated',
+  failed: 'Unavailable',
+};
+
+const runtimeStatusTone: Record<string, string> = {
+  not_provisioned: 'text-muted border-border bg-bg-tertiary',
+  provisioning: 'text-cyan border-cyan/30 bg-cyan/10',
+  running: 'text-success border-success/30 bg-success/10',
+  stopped: 'text-amber border-amber/30 bg-amber/10',
+  terminated: 'text-muted border-border bg-bg-tertiary',
+  failed: 'text-error border-error/30 bg-error/10',
+};
+
 export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
   const { user, login, isLoading } = useAuth();
   const {
@@ -55,6 +73,8 @@ export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
     setIndexCodebaseEnabled,
     selectedRepository,
     sessionStatus,
+    runtimeStatus,
+    runtimeError,
     messages,
     contextCards,
   } = useSessionStore(
@@ -63,6 +83,8 @@ export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
       setIndexCodebaseEnabled: state.setIndexCodebaseEnabled,
       selectedRepository: state.selectedRepository,
       sessionStatus: state.sessionStatus,
+      runtimeStatus: state.runtimeStatus,
+      runtimeError: state.runtimeError,
       messages: state.messages,
       contextCards: state.contextCards,
     }))
@@ -80,6 +102,9 @@ export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
 
   const statusClass = sessionStatusTone[sessionStatus] || sessionStatusTone.no_repo;
   const statusText = sessionStatusLabel[sessionStatus] || sessionStatus;
+  const runtimeClass =
+    runtimeStatusTone[runtimeStatus] || runtimeStatusTone.not_provisioned;
+  const runtimeText = runtimeStatusLabel[runtimeStatus] || runtimeStatus;
 
   return (
     <header className="border-b border-border bg-[linear-gradient(110deg,rgba(245,158,11,0.08)_0%,rgba(34,211,238,0.04)_34%,rgba(17,17,19,0.95)_100%)] backdrop-blur-sm">
@@ -100,6 +125,13 @@ export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
             title={`Session status: ${statusText}`}
           >
             Session {statusText}
+          </span>
+
+          <span
+            className={`px-3 py-1.5 rounded-md text-xs font-mono border ${runtimeClass}`}
+            title={runtimeError ? `Runtime status: ${runtimeText}. ${runtimeError}` : `Runtime status: ${runtimeText}`}
+          >
+            Runtime {runtimeText}
           </span>
 
           <button
