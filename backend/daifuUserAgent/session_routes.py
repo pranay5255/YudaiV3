@@ -593,57 +593,6 @@ async def create_session(
         sandbox_id: Optional[str] = None
         tunnel_url: Optional[str] = None
 
-        # Phase 1: Provision sandbox/runtime immediately when rollout is enabled.
-        realtime_flags = get_realtime_feature_flags()
-        if realtime_flags.controller_split_enabled or realtime_flags.controller_broker_enabled:
-            lifecycle = get_realtime_lifecycle_service()
-            repo_url = f"https://github.com/{request.repo_owner}/{request.repo_name}.git"
-
-            try:
-                envelope = await lifecycle.create_runtime_for_session(
-                    db,
-                    session=db_session,
-                    user_id=current_user.id,
-                    org=None,
-                    repo_owner=request.repo_owner,
-                    repo_name=request.repo_name,
-                    environment=request.repo_branch,
-                    repo_branch=request.repo_branch,
-                    repo_url=repo_url,
-                    env_inputs={
-                        "SESSION_PUBLIC_ID": session_id,
-                        "WORKSPACE_PATH": db_session.runtime_workspace_path or "/workspace/repo",
-                    },
-                )
-                db.commit()
-                db.refresh(envelope.runtime)
-                db.refresh(envelope.sandbox)
-
-                runtime_id = envelope.runtime.runtime_id
-                sandbox_id = envelope.sandbox.id
-                tunnel_url = (
-                    None
-                    if realtime_flags.controller_broker_enabled
-                    else envelope.sandbox.tunnel_url
-                )
-            except HTTPException:
-                raise
-            except Exception as realtime_error:
-                db.rollback()
-                logger.error(
-                    "Failed to provision realtime runtime for session %s: %s",
-                    session_id,
-                    realtime_error,
-                )
-                if realtime_flags.controller_broker_enabled:
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail=error_payload(
-                            RealtimeErrorCode.TUNNEL_UNAVAILABLE,
-                            detail=str(realtime_error),
-                        ),
-                    )
-
         # Kick off background indexing of the repository if requested
         if getattr(request, "index_codebase", True):
             try:
@@ -721,6 +670,8 @@ async def create_session(
             tunnel_url=tunnel_url,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(
