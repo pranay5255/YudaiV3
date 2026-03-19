@@ -3,32 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import json
-import os
-import time
 from typing import Any, Awaitable, Callable, Dict, Optional
-from urllib.parse import urlencode
-
-import websockets
 from sqlalchemy.orm import Session
 
 from models import ChatSession, Sandbox, SandboxStatus
 
 from .errors import RealtimeErrorCode, as_http_exception
 from .lifecycle import RealtimeLifecycleService, get_realtime_lifecycle_service
-from .ws_protocol import WSMessageType
+from .sandbox_transport import run_sandbox_command
 
 SandboxEventCallback = Callable[[Dict[str, Any]], Awaitable[None]]
-
-
-def _to_websocket_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if normalized.startswith("https://"):
-        return "wss://" + normalized[len("https://") :]
-    if normalized.startswith("http://"):
-        return "ws://" + normalized[len("http://") :]
-    return normalized
 
 
 class SandboxExecBroker:
@@ -62,79 +46,21 @@ class SandboxExecBroker:
         on_event: Optional[SandboxEventCallback] = None,
     ) -> Dict[str, Any]:
         sandbox, tunnel_url = self._resolve_runtime(db, session)
-
-        internal_path = f"/internal/sessions/{session.session_id}/ws/exec"
-        query: Dict[str, str] = {}
-        internal_secret = os.getenv("CONTROLLER_INTERNAL_WS_SECRET")
-        if internal_secret:
-            query["secret"] = internal_secret
-
-        ws_url = _to_websocket_url(tunnel_url) + internal_path
-        if query:
-            ws_url += "?" + urlencode(query)
-
-        request_payload: Dict[str, Any] = {
-            "type": WSMessageType.EXEC_START.value,
-            "payload": {
-                "command": command,
-                "cwd": cwd,
-                "env": env or {},
-            },
-        }
-
-        started_at = time.monotonic()
-        stdout_chunks: list[str] = []
-        stderr_chunks: list[str] = []
-        exit_code: Optional[int] = None
-
-        try:
-            async with websockets.connect(ws_url, max_size=None, open_timeout=10) as upstream:
-                await upstream.send(json.dumps(request_payload))
-
-                while True:
-                    remaining = max(timeout_seconds - int(time.monotonic() - started_at), 1)
-                    raw = await asyncio.wait_for(upstream.recv(), timeout=remaining)
-                    if isinstance(raw, bytes):
-                        raw = raw.decode("utf-8", errors="replace")
-                    event = json.loads(raw)
-
-                    event_type = event.get("type")
-                    payload = event.get("payload", {}) or {}
-
-                    if on_event is not None:
-                        await on_event(event)
-
-                    if event_type == WSMessageType.SANDBOX_STREAM.value:
-                        chunk = payload.get("data")
-                        if payload.get("event") == "stdout" and isinstance(chunk, str):
-                            stdout_chunks.append(chunk)
-                        elif payload.get("event") == "stderr" and isinstance(chunk, str):
-                            stderr_chunks.append(chunk)
-                        elif payload.get("event") == "exit":
-                            exit_code = int(payload.get("exit_code") or 0)
-                            break
-
-                    if event_type == WSMessageType.ERROR.value:
-                        raise RuntimeError(str(payload.get("message") or "Sandbox execution failed"))
-        except asyncio.CancelledError:
-            with contextlib.suppress(Exception):
-                async with websockets.connect(ws_url, max_size=None, open_timeout=5) as upstream:
-                    await upstream.send(
-                        json.dumps({"type": WSMessageType.EXEC_CANCEL.value, "payload": {}})
-                    )
-            raise
-        except asyncio.TimeoutError:
-            raise RuntimeError("Sandbox execution timed out")
-        except Exception as exc:
-            raise RuntimeError(f"Sandbox execution broker error: {exc}") from exc
-
-        duration_ms = int((time.monotonic() - started_at) * 1000)
+        result = await run_sandbox_command(
+            tunnel_url=tunnel_url,
+            session_public_id=session.session_id,
+            command=command,
+            cwd=cwd,
+            env=env,
+            timeout_seconds=timeout_seconds,
+            on_event=on_event,
+        )
         return {
             "sandbox_id": sandbox.id,
-            "exit_code": exit_code if exit_code is not None else 1,
-            "stdout": "".join(stdout_chunks),
-            "stderr": "".join(stderr_chunks),
-            "duration_ms": duration_ms,
+            "exit_code": result.exit_code,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "duration_ms": result.duration_ms,
         }
 
 
