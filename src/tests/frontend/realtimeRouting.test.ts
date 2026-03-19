@@ -40,6 +40,31 @@ describe('realtime routing helpers', () => {
     );
   });
 
+  it('builds websocket URL from an https controller base by upgrading to wss', () => {
+    const result = buildUnifiedSessionWebSocketUrl({
+      sessionId: 'session_abc',
+      sessionToken: 'token',
+      controllerWsBaseUrl: 'https://api.yudai.app',
+    });
+
+    expect(result).toBe(
+      'wss://api.yudai.app/controller/sessions/session_abc/ws/unified?token=token'
+    );
+  });
+
+  it('preserves an explicit wss controller websocket endpoint', () => {
+    const result = buildUnifiedSessionWebSocketUrl({
+      sessionId: 'session_abc',
+      sessionToken: 'token',
+      controllerWsBaseUrl:
+        'wss://api.yudai.app/controller/sessions/session_abc/ws/unified',
+    });
+
+    expect(result).toBe(
+      'wss://api.yudai.app/controller/sessions/session_abc/ws/unified?token=token'
+    );
+  });
+
   it('builds websocket URL from WS base host by appending unified endpoint', () => {
     const endpoint = buildControllerUnifiedWsEndpoint({
       sessionId: 'session_abc',
@@ -58,6 +83,17 @@ describe('realtime routing helpers', () => {
 
     expect(url).toBe(
       'ws://139.84.154.9:8000/controller/sessions/session_abc/ws/unified?token=token'
+    );
+  });
+
+  it('rejects insecure websocket overrides from an https frontend', () => {
+    expect(() => buildUnifiedSessionWebSocketUrl({
+      sessionId: 'session_abc',
+      sessionToken: 'token',
+      currentOrigin: 'https://www.yudai.app',
+      controllerWsBaseUrl: 'ws://139.84.154.9:8000',
+    })).toThrow(
+      'Insecure WebSocket configuration: an https:// page cannot connect to ws://.'
     );
   });
 });
