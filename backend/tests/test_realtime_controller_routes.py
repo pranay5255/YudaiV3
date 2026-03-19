@@ -30,7 +30,7 @@ def _install_import_stubs() -> None:
 _install_import_stubs()
 
 from config.realtime_flags import RealtimeFeatureFlags  # noqa: E402
-from models import Base, ChatSession, User  # noqa: E402
+from models import AuthToken, Base, ChatSession, User  # noqa: E402
 from realtime.cache_store import SessionCacheStore  # noqa: E402
 from realtime.controller_routes import (  # noqa: E402
     delete_sandbox,
@@ -145,6 +145,47 @@ def test_runtime_ensure_and_resolve_tunnel(db_and_user):
         current_user=user,
     )
     assert sandbox_response.status == "running"
+
+
+def test_runtime_ensure_forwards_user_github_token(db_and_user):
+    db, user, session = db_and_user
+
+    db.add(
+        AuthToken(
+            user_id=user.id,
+            access_token="gho_test_access_token",
+            is_active=True,
+        )
+    )
+    db.commit()
+
+    captured: dict[str, object] = {}
+    service = lifecycle_module.get_realtime_lifecycle_service()
+
+    def _capture_bootstrap(**kwargs):
+        captured.update(kwargs)
+        return {"status": "skipped"}
+
+    service.sandbox_manager.ensure_git_bootstrap = _capture_bootstrap
+
+    runtime_response = asyncio.run(
+        ensure_runtime_for_session(
+            session_id=session.session_id,
+            request=RuntimeEnsureRequest(
+                org="yudai",
+                repo_owner="octocat",
+                repo_name="yudaiv3",
+                environment="main",
+                repo_branch="main",
+                repo_url="https://github.com/octocat/yudaiv3.git",
+            ),
+            db=db,
+            current_user=user,
+        ),
+    )
+
+    assert runtime_response.runtime_id.startswith("rt_")
+    assert captured["github_token"] == "gho_test_access_token"
 
 
 def test_runtime_detail_returns_not_provisioned_when_runtime_absent(db_and_user):
