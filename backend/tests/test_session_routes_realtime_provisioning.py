@@ -97,9 +97,16 @@ def _flags(*, enabled: bool) -> RealtimeFeatureFlags:
     )
 
 
-def test_create_session_provisions_runtime_when_realtime_enabled(db_and_user, monkeypatch):
+def test_create_session_skips_runtime_when_realtime_enabled(db_and_user, monkeypatch):
     db, user, service = db_and_user
     monkeypatch.setattr(session_routes, "get_realtime_feature_flags", lambda: _flags(enabled=True))
+    runtime_calls = {"count": 0}
+
+    async def _track_runtime_call(*args, **kwargs):
+        runtime_calls["count"] += 1
+        raise AssertionError("create_runtime_for_session should not be called during session creation")
+
+    service.create_runtime_for_session = _track_runtime_call
     monkeypatch.setattr(session_routes, "get_realtime_lifecycle_service", lambda: service)
 
     response = asyncio.run(
@@ -119,19 +126,15 @@ def test_create_session_provisions_runtime_when_realtime_enabled(db_and_user, mo
     )
 
     assert response.session_id.startswith("session_")
-    assert response.runtime_id and response.runtime_id.startswith("rt_")
-    assert response.sandbox_id and response.sandbox_id.startswith("sbx_")
-    assert response.tunnel_url and response.tunnel_url.startswith("http://sandbox.local/")
+    assert response.runtime_id is None
+    assert response.sandbox_id is None
+    assert response.tunnel_url is None
+    assert runtime_calls["count"] == 0
 
     session_row = db.query(ChatSession).filter(ChatSession.session_id == response.session_id).first()
-    runtime_row = db.query(SessionRuntime).filter(SessionRuntime.runtime_id == response.runtime_id).first()
-    sandbox_row = db.query(Sandbox).filter(Sandbox.id == response.sandbox_id).first()
-
     assert session_row is not None
-    assert runtime_row is not None
-    assert sandbox_row is not None
-    assert runtime_row.status == "running"
-    assert sandbox_row.status == "running"
+    assert db.query(SessionRuntime).count() == 0
+    assert db.query(Sandbox).count() == 0
 
 
 def test_create_session_skips_runtime_when_realtime_disabled(db_and_user, monkeypatch):
@@ -161,3 +164,49 @@ def test_create_session_skips_runtime_when_realtime_disabled(db_and_user, monkey
     assert response.tunnel_url is None
     assert db.query(SessionRuntime).count() == 0
     assert db.query(Sandbox).count() == 0
+
+
+def test_create_session_succeeds_when_runtime_provisioning_would_fail(db_and_user, monkeypatch):
+    db, user, service = db_and_user
+
+    monkeypatch.setattr(session_routes, "get_realtime_feature_flags", lambda: RealtimeFeatureFlags(
+        controller_split_enabled=False,
+        controller_broker_enabled=True,
+        sandbox_internal_exec_enabled=True,
+        mode_orchestrator_enabled=True,
+        ws_chat_enabled=False,
+        modal_provisioning_enabled=True,
+        ws_unified_enabled=False,
+        contract_version="test",
+    ))
+
+    runtime_calls = {"count": 0}
+
+    async def _raise_if_called(*args, **kwargs):
+        runtime_calls["count"] += 1
+        raise AssertionError("create_runtime_for_session should not be called during session creation")
+
+    service.create_runtime_for_session = _raise_if_called
+    monkeypatch.setattr(session_routes, "get_realtime_lifecycle_service", lambda: service)
+
+    response = asyncio.run(
+        session_routes.create_session(
+            request=CreateSessionRequest(
+                repo_owner="octocat",
+                repo_name="yudaiv3",
+                repo_branch="main",
+                index_codebase=False,
+                generate_embeddings=False,
+                generate_facts_memories=False,
+            ),
+            current_user=user,
+            db=db,
+            background_tasks=BackgroundTasks(),
+        )
+    )
+
+    assert response.session_id.startswith("session_")
+    assert response.runtime_id is None
+    assert response.sandbox_id is None
+    assert response.tunnel_url is None
+    assert runtime_calls["count"] == 0

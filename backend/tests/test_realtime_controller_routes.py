@@ -2,6 +2,7 @@ import asyncio
 import os
 from pathlib import Path
 import sys
+import types
 
 from fastapi import HTTPException
 import pytest
@@ -15,6 +16,20 @@ if str(BACKEND_ROOT) not in sys.path:
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///tmp/realtime-controller-tests.db")
 
+
+def _install_import_stubs() -> None:
+    fake_chatops_module = types.ModuleType("daifuUserAgent.ChatOps")
+
+    class DummyChatOps:  # pragma: no cover - test import stub only
+        pass
+
+    fake_chatops_module.ChatOps = DummyChatOps
+    sys.modules["daifuUserAgent.ChatOps"] = fake_chatops_module
+
+
+_install_import_stubs()
+
+from config.realtime_flags import RealtimeFeatureFlags  # noqa: E402
 from models import Base, ChatSession, User  # noqa: E402
 from realtime.cache_store import SessionCacheStore  # noqa: E402
 from realtime.controller_routes import (  # noqa: E402
@@ -68,6 +83,20 @@ def db_and_user(tmp_path, monkeypatch):
     service.sandbox_manager.ensure_git_bootstrap = lambda **_: {"status": "skipped"}
     service._start_probe_if_possible = lambda **_: None
     service._stop_probe_if_possible = lambda *_: None
+    monkeypatch.setattr(
+        lifecycle_module,
+        "get_realtime_feature_flags",
+        lambda: RealtimeFeatureFlags(
+            controller_split_enabled=True,
+            controller_broker_enabled=False,
+            sandbox_internal_exec_enabled=True,
+            mode_orchestrator_enabled=True,
+            ws_chat_enabled=False,
+            modal_provisioning_enabled=False,
+            ws_unified_enabled=False,
+            contract_version="test",
+        ),
+    )
     lifecycle_module._service_singleton = service
 
     try:
@@ -116,6 +145,21 @@ def test_runtime_ensure_and_resolve_tunnel(db_and_user):
         current_user=user,
     )
     assert sandbox_response.status == "running"
+
+
+def test_runtime_detail_returns_not_provisioned_when_runtime_absent(db_and_user):
+    db, user, session = db_and_user
+
+    runtime_response = get_runtime_for_session(
+        session_id=session.session_id,
+        db=db,
+        current_user=user,
+    )
+
+    assert runtime_response.status == "not_provisioned"
+    assert runtime_response.runtime_id is None
+    assert runtime_response.sandbox_id is None
+    assert runtime_response.identity_key is None
 
 
 def test_terminated_sandbox_returns_hard_error(db_and_user):
