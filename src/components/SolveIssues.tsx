@@ -28,7 +28,11 @@ const apiCall = async (url: string, options?: RequestInit) => {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ message: response.statusText }));
-    throw new Error(errorData.detail || errorData.message || 'Request failed');
+    const errorMessage =
+      typeof errorData?.detail === 'object' && errorData.detail !== null
+        ? errorData.detail.message || errorData.detail.detail || response.statusText
+        : errorData.detail || errorData.message || response.statusText;
+    throw new Error(errorMessage || 'Request failed');
   }
 
   return response.json();
@@ -498,7 +502,17 @@ function SolveProgressModal({ solveStatus, sessionId, onClose, onCancel }: Solve
 
 export function SolveIssues() {
   const { selectedRepository } = useRepository();
-  const activeSessionId = useSessionStore((state) => state.activeSessionId);
+  const {
+    activeSessionId,
+    runtimeStatus,
+    setRuntimeState,
+    syncRuntimeState,
+  } = useSessionStore((state) => ({
+    activeSessionId: state.activeSessionId,
+    runtimeStatus: state.runtimeStatus,
+    setRuntimeState: state.setRuntimeState,
+    syncRuntimeState: state.syncRuntimeState,
+  }));
 
   const [issuesState, setIssuesState] = useState<{
     issues: GitHubIssue[];
@@ -635,8 +649,18 @@ export function SolveIssues() {
       return;
     }
 
+    const shouldMarkProvisioning =
+      runtimeStatus === 'not_provisioned'
+      || runtimeStatus === 'failed'
+      || runtimeStatus === 'terminated'
+      || runtimeStatus === 'stopped';
+
     try {
       setViewState((prev) => ({ ...prev, isLoading: true, error: null }));
+
+      if (shouldMarkProvisioning) {
+        setRuntimeState(null, 'provisioning', null);
+      }
 
       // Extract owner correctly - owner is an object, need to use .login or fallback to full_name
       const repoOwner = selectedRepository.repository.owner?.login ||
@@ -662,6 +686,9 @@ export function SolveIssues() {
       });
 
       const response = data as StartSolveResponse;
+      void syncRuntimeState(activeSessionId).catch((runtimeError) => {
+        console.warn('Failed to refresh runtime state after solve start:', runtimeError);
+      });
       setSolveUiState((prev) => ({
         ...prev,
         activeSolveId: response.solve_session_id,
@@ -681,6 +708,9 @@ export function SolveIssues() {
         selectedIssue: null,
       }));
     } catch (err) {
+      void syncRuntimeState(activeSessionId).catch((runtimeError) => {
+        console.warn('Failed to refresh runtime state after solve error:', runtimeError);
+      });
       console.error('Failed to start solve:', err);
       const startError = err as Error;
       setViewState((prev) => ({
