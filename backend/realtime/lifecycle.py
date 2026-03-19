@@ -72,6 +72,7 @@ class RealtimeLifecycleService:
         environment: Optional[str],
         repo_branch: Optional[str],
         repo_url: Optional[str],
+        github_token: Optional[str] = None,
         env_inputs: Optional[Dict[str, str]] = None,
     ) -> RuntimeEnvelope:
         identity = build_sandbox_identity(
@@ -125,6 +126,7 @@ class RealtimeLifecycleService:
             modal_sb = await RealtimeModalSandbox.create(
                 sandbox_db_id=sandbox.id,
                 controller_base_url=controller_base_url,
+                github_token=github_token,
                 session_public_id=session.session_id,
                 repo_url=repo_url,
                 repo_branch=repo_branch or "main",
@@ -159,6 +161,7 @@ class RealtimeLifecycleService:
             identity_key=identity.key,
             repo_url=repo_url,
             repo_branch=repo_branch,
+            github_token=github_token,
         )
 
         runtime = self._get_latest_runtime(db, session_id=session.id)
