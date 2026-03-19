@@ -58,12 +58,12 @@ class RuntimeEnsureRequest(BaseModel):
 
 
 class RuntimeResponse(BaseModel):
-    runtime_id: str
-    sandbox_id: str
-    identity_key: str
+    runtime_id: Optional[str] = None
+    sandbox_id: Optional[str] = None
+    identity_key: Optional[str] = None
     status: str
     tunnel_url: Optional[str] = None
-    token_ttl_seconds: int = 3600
+    token_ttl_seconds: Optional[int] = None
     tunnel_expires_at: Optional[datetime] = None
     completion_issue_created: bool = False
     completion_pr_created: bool = False

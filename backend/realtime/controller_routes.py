@@ -31,6 +31,7 @@ from .ws_protocol import WSMessageType, build_envelope
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["realtime-controller"])
+RUNTIME_STATUS_NOT_PROVISIONED = "not_provisioned"
 
 
 def _normalize_context_cards(raw: Any) -> list[str]:
@@ -79,6 +80,16 @@ def _to_runtime_response(runtime: SessionRuntime) -> RuntimeResponse:
         completion_pr_created=runtime.completion_pr_created,
         completion_detected=runtime.completion_detected,
         metadata=metadata,
+    )
+
+
+def _not_provisioned_runtime_response() -> RuntimeResponse:
+    return RuntimeResponse(
+        status=RUNTIME_STATUS_NOT_PROVISIONED,
+        completion_issue_created=False,
+        completion_pr_created=False,
+        completion_detected=False,
+        metadata={},
     )
 
 
@@ -320,7 +331,7 @@ def get_runtime_for_session(
 
     runtime = lifecycle._get_latest_runtime(db, session_id=session_obj.id)
     if not runtime:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Runtime not found")
+        return _not_provisioned_runtime_response()
 
     response = _to_runtime_response(runtime)
     sandbox = lifecycle.get_sandbox_or_404(db, runtime.sandbox_id) if runtime.sandbox_id else None
