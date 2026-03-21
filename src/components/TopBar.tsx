@@ -27,7 +27,7 @@ const tabs: Array<{
   { id: 'chat', label: 'Chat', icon: MessageCircle },
   { id: 'context', label: 'Context', icon: CreditCard },
   { id: 'ideas', label: 'Trajectory', icon: Route },
-  { id: 'solve', label: 'Solve', icon: Zap },
+  { id: 'solve', label: 'Execution', icon: Zap },
 ];
 
 const sessionStatusLabel: Record<string, string> = {
