@@ -190,18 +190,25 @@ def test_answer_question_marks_answered_and_resumes_pipeline(db_and_user, monkey
 
     captured: dict[str, object] = {}
 
-    async def _fake_pipeline(**kwargs):
-        captured["pipeline_kwargs"] = kwargs
+    class DummyOrchestrator:
+        async def resume_execution(self, db, *, session, user_id, objective):
+            session.mode_status = "running"
+            captured["resume_execution"] = {
+                "session_id": session.session_id,
+                "user_id": user_id,
+                "objective": objective,
+            }
+            return {
+                "execution_id": "execp_test_resume",
+                "mode": "architect",
+                "status": "running",
+            }
 
-    monkeypatch.setattr(session_routes, "run_mode_pipeline_background", _fake_pipeline)
-
-    def _fake_create_task(coro):
-        captured["task_created"] = True
-        # We only verify scheduling intent in this unit test.
-        coro.close()
-        return object()
-
-    monkeypatch.setattr(session_routes.asyncio, "create_task", _fake_create_task)
+    monkeypatch.setattr(
+        session_routes,
+        "get_session_execution_orchestrator",
+        lambda: DummyOrchestrator(),
+    )
 
     response = asyncio.run(
         session_routes.answer_session_question(
@@ -225,9 +232,6 @@ def test_answer_question_marks_answered_and_resumes_pipeline(db_and_user, monkey
     assert response.mode_status == "running"
     assert question.status == UserQuestionStatus.ANSWERED.value
     assert question.selected_option_ids == ["tests"]
-    assert captured.get("task_created") is True
-
-    objective_with_context = str((session.mode_metadata or {}).get("objective_with_context") or "")
-    assert "Primary Objective:" in objective_with_context
-    assert "Fix auth reconnection bug" in objective_with_context
-    assert "Clarifications from Q&A" in objective_with_context
+    assert captured["resume_execution"]["session_id"] == session.session_id
+    assert captured["resume_execution"]["user_id"] == user.id
+    assert captured["resume_execution"]["objective"] == "Prioritize test coverage and regression-proofing."
