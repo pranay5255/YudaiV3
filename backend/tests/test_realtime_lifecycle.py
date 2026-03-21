@@ -161,7 +161,7 @@ def test_single_active_editor_conflict(db_session, lifecycle_service):
     assert exc.value.status_code == 409
 
 
-def test_completion_detector_exports_artifact_and_terminates(db_session, lifecycle_service, tmp_path):
+def test_finalize_session_execution_exports_artifact_and_terminates(db_session, lifecycle_service, tmp_path):
     db = db_session
 
     user = _create_user(db, "charlie", "2001")
@@ -245,6 +245,38 @@ def test_completion_detector_exports_artifact_and_terminates(db_session, lifecyc
         pr_url="https://github.com/octocat/yudaiv3/pull/99",
         pr_number=99,
     )
+    bundle_path = tmp_path / "sandbox-workflow.tar.gz"
+    metadata_path = tmp_path / "sandbox-workflow.metadata.json"
+    bundle_path.write_bytes(b"bundle")
+    metadata_path.write_text('{"ok": true}\n', encoding="utf-8")
+
+    async def _fake_download_and_export_bundle(**kwargs):
+        return {
+            "metadata": {
+                "cache_manifest_path": str(lifecycle_service.cache_store.manifest_path(session.session_id)),
+                "sandbox_bundle": {
+                    "metadata_path": str(metadata_path),
+                },
+            },
+            "metadata_path": str(metadata_path),
+            "bundle_path": str(bundle_path),
+            "bundle_sha256": "abc123",
+            "manifest_sha256": "def456",
+            "bundle_size": bundle_path.stat().st_size,
+        }
+
+    lifecycle_service.cache_store.download_and_export_bundle = _fake_download_and_export_bundle
+
+    artifact_info = asyncio.run(
+        lifecycle_service.finalize_session_execution(
+            db,
+            session=session,
+            reason="workflow_complete",
+            execution_status="complete",
+            execution_id="execp_test_complete",
+            artifact_source_paths=[".yudai/executions/execp_test_complete"],
+        )
+    )
     db.commit()
 
     runtime = (
@@ -258,6 +290,9 @@ def test_completion_detector_exports_artifact_and_terminates(db_session, lifecyc
     assert runtime.completion_pr_created is True
     assert runtime.completion_detected is True
     assert runtime.status == SessionRuntimeStatus.TERMINATED.value
+    assert artifact_info is not None
+    assert artifact_info["bundle_path"] == str(bundle_path)
+    assert artifact_info["metadata_path"] == str(metadata_path)
 
     sandbox = db.query(Sandbox).filter(Sandbox.id == envelope.sandbox.id).first()
     assert sandbox is not None
