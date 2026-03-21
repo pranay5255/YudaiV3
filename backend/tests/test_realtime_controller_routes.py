@@ -161,12 +161,13 @@ def test_runtime_ensure_forwards_user_github_token(db_and_user):
 
     captured: dict[str, object] = {}
     service = lifecycle_module.get_realtime_lifecycle_service()
+    original_create_runtime = service.create_runtime_for_session
 
-    def _capture_bootstrap(**kwargs):
+    async def _capture_create_runtime(*args, **kwargs):
         captured.update(kwargs)
-        return {"status": "skipped"}
+        return await original_create_runtime(*args, **kwargs)
 
-    service.sandbox_manager.ensure_git_bootstrap = _capture_bootstrap
+    service.create_runtime_for_session = _capture_create_runtime
 
     runtime_response = asyncio.run(
         ensure_runtime_for_session(
