@@ -93,7 +93,11 @@ from db.database import SessionLocal, get_db
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from realtime.errors import RealtimeErrorCode, error_payload
 from realtime.lifecycle import get_realtime_lifecycle_service
-from realtime.mode_orchestrator import run_mode_pipeline_background
+from realtime.mode_orchestrator import (
+    ExecutionConflictError,
+    ExecutionNotFoundError,
+    get_session_execution_orchestrator,
+)
 from realtime.ws_hub import get_ws_hub
 from realtime.ws_protocol import WSMessageType
 
@@ -110,6 +114,7 @@ from models import (
     ChatRequest,
     ChatResponse,
     ChatSession,
+    CancelExecutionResponse,
     ConversationRequest,
     ConversationResponse,
     ContextCard,
@@ -119,6 +124,7 @@ from models import (
     CreateSessionRequest,
     ExecutionRequest,
     ExecutionResponse,
+    ExecutionStatusResponse,
     FileEmbedding,
     FileItem,
     FileItemResponse,
@@ -1431,7 +1437,6 @@ async def answer_session_question(
 
     resumed = False
     resumed_mode: Optional[str] = None
-    contextual_objective = ""
     next_mode = _next_mode_for_session(db_session)
     realtime_flags = get_realtime_feature_flags()
     if (
@@ -1440,6 +1445,7 @@ async def answer_session_question(
         and realtime_flags.mode_orchestrator_enabled
         and next_mode != SessionMode.COMPLETE.value
     ):
+        orchestrator = get_session_execution_orchestrator()
         objective_seed = (
             answer_text
             or str((db_session.mode_metadata or {}).get("pending_resume_objective") or "").strip()
@@ -1468,39 +1474,25 @@ async def answer_session_question(
                 objective_seed = last_user_message.message_text
 
         objective_seed = objective_seed or "Continue the current workflow."
-        contextual_objective = _build_objective_with_context(
-            db,
-            session=db_session,
-            objective=objective_seed,
-        )
         mode_metadata = db_session.mode_metadata or {}
         mode_metadata["pending_resume_objective"] = objective_seed
-        mode_metadata["objective_with_context"] = contextual_objective
         db_session.mode_metadata = mode_metadata
-        db_session.mode_status = SessionModeStatus.RUNNING.value
-        db_session.mode_updated_at = utc_now()
-        resumed = True
-        resumed_mode = next_mode
-
-    db.commit()
-
-    if resumed:
-        asyncio.create_task(
-            run_mode_pipeline_background(
-                session_public_id=session_id,
+        db.commit()
+        try:
+            execution_status = await orchestrator.resume_execution(
+                db,
+                session=db_session,
                 user_id=current_user.id,
-                objective=contextual_objective,
+                objective=objective_seed,
             )
-        )
-        await get_ws_hub().send_to_session(
-            session_id,
-            WSMessageType.MODE_EVENT,
-            {
-                "mode": resumed_mode,
-                "state": SessionModeStatus.RUNNING.value,
-                "detail": "Pipeline resumed after question answer",
-            },
-        )
+        except ExecutionConflictError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        except ExecutionNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        resumed = True
+        resumed_mode = str(execution_status.get("mode") or next_mode)
+    else:
+        db.commit()
 
     return AnswerQuestionResponse(
         question=_to_user_question_response(question, session_public_id=session_id),
@@ -1547,61 +1539,69 @@ async def execute_session_pipeline(
             ),
         )
 
-    objective_with_context = _build_objective_with_context(
-        db,
-        session=db_session,
-        objective=request.objective,
-    )
-
-    execution = AgentExecution(
-        id=f"exec_{uuid.uuid4().hex[:24]}",
-        session_id=db_session.id,
-        mode=next_mode,
-        status=SessionModeStatus.RUNNING.value,
-        execution_plan=_build_mode_plan(next_mode, objective_with_context),
-        execution_metadata={
-            "trigger": "execution_api",
-            "objective": request.objective,
-            "objective_with_context": objective_with_context,
-        },
-        started_at=utc_now(),
-    )
-    db.add(execution)
     db_session.mode_metadata = {
         **(db_session.mode_metadata or {}),
         "pending_resume_objective": request.objective,
-        "objective_with_context": objective_with_context,
     }
-    db_session.mode_status = SessionModeStatus.RUNNING.value
-    db_session.mode_updated_at = utc_now()
     db.commit()
 
-    asyncio.create_task(
-        run_mode_pipeline_background(
-            session_public_id=session_id,
+    try:
+        status_payload = await get_session_execution_orchestrator().start_execution(
+            db,
+            session=db_session,
             user_id=current_user.id,
-            objective=objective_with_context,
+            objective=request.objective,
+            force_mode=request.force_mode,
+        )
+    except ExecutionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return ExecutionResponse(**status_payload)
+
+
+@router.get(
+    "/sessions/{session_id}/execution",
+    response_model=ExecutionStatusResponse,
+)
+async def get_session_execution_status(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    return ExecutionStatusResponse(
+        **get_session_execution_orchestrator().get_execution_status(
+            db,
+            session=db_session,
         )
     )
 
-    await get_ws_hub().send_to_session(
-        session_id,
-        WSMessageType.MODE_EVENT,
-        {
-            "mode": next_mode,
-            "state": SessionModeStatus.RUNNING.value,
-            "execution_id": execution.id,
-            "detail": "Pipeline queued",
-        },
-    )
 
-    return ExecutionResponse(
-        execution_id=execution.id,
+@router.post(
+    "/sessions/{session_id}/execution/cancel",
+    response_model=CancelExecutionResponse,
+)
+async def cancel_session_execution(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    try:
+        payload = await get_session_execution_orchestrator().cancel_execution(
+            db,
+            session=db_session,
+        )
+    except ExecutionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    return CancelExecutionResponse(
+        execution_id=payload.get("execution_id"),
         session_id=session_id,
-        mode=next_mode,
-        status=SessionModeStatus.RUNNING.value,
-        plan=execution.execution_plan or [],
-        started_at=execution.started_at or utc_now(),
+        status=str(payload.get("status") or SessionModeStatus.CANCELLED.value),
+        message="Execution cancelled",
     )
 
 
