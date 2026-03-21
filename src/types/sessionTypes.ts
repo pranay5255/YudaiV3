@@ -22,7 +22,7 @@ export interface Session {
   total_messages: number;
   total_tokens: number;
   current_mode?: 'pending' | 'architect' | 'tester' | 'coder' | 'complete' | 'failed';
-  mode_status?: 'idle' | 'running' | 'waiting_for_input' | 'complete' | 'failed';
+  mode_status?: 'idle' | 'running' | 'waiting_for_input' | 'complete' | 'failed' | 'cancelled';
   mode_updated_at?: string;
   architect_issue_url?: string;
   architect_issue_number?: number;
@@ -419,6 +419,28 @@ export interface ExecutionRequest {
   force_mode?: 'architect' | 'tester' | 'coder';
 }
 
+export interface ExecutionArtifactResponse {
+  bundle_path?: string;
+  metadata_path?: string;
+  checksum_sha256?: string;
+  byte_size?: number;
+}
+
+export interface ExecutionStatusResponse {
+  execution_id?: string;
+  session_id: string;
+  mode: string;
+  status: string;
+  plan: string[];
+  started_at?: string;
+  completed_at?: string;
+  cancel_requested: boolean;
+  waiting_for_input: boolean;
+  current_mode_execution_id?: string;
+  artifact?: ExecutionArtifactResponse;
+  detail?: string;
+}
+
 export interface ExecutionResponse {
   execution_id: string;
   session_id: string;
@@ -426,6 +448,19 @@ export interface ExecutionResponse {
   status: string;
   plan: string[];
   started_at: string;
+  completed_at?: string;
+  cancel_requested: boolean;
+  waiting_for_input: boolean;
+  current_mode_execution_id?: string;
+  artifact?: ExecutionArtifactResponse;
+  detail?: string;
+}
+
+export interface CancelExecutionResponse {
+  execution_id?: string;
+  session_id: string;
+  status: string;
+  message: string;
 }
 
 export interface CreateContextCardRequest {
