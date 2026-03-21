@@ -1,6 +1,3 @@
-"""Lightweight stdout markers for controller-brokered solve streaming."""
+"""Backward-compat shim — stream protocol constants are now in agentScriptGen.py."""
 
-from __future__ import annotations
-
-TRAJECTORY_UPDATE_PREFIX = "__YUDAI_TRAJECTORY_UPDATE__"
-SOLVE_RESULT_PREFIX = "__YUDAI_SOLVE_RESULT__"
+from .agentScriptGen import SOLVE_RESULT_PREFIX, TRAJECTORY_UPDATE_PREFIX  # noqa: F401
