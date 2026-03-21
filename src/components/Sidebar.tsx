@@ -13,7 +13,7 @@ const tabs = [
   { id: 'chat' as TabType, label: 'Chat', icon: MessageCircle, color: 'amber' },
   { id: 'context' as TabType, label: 'Context for Issue', icon: CreditCard, color: 'cyan' },
   { id: 'ideas' as TabType, label: 'Trajectory Viewer', icon: FileText, color: 'success' },
-  { id: 'solve' as TabType, label: 'Solve Issues', icon: Zap, color: 'amber' },
+  { id: 'solve' as TabType, label: 'Execution', icon: Zap, color: 'amber' },
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({
