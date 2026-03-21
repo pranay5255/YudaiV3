@@ -173,7 +173,8 @@ function AppContent() {
     case 'ideas':
       tabContent = (
         <TrajectoryViewer
-          sessionId={activeSessionId || undefined}
+          isLive
+          sessionId={activeSessionId || ''}
         />
       );
       break;
