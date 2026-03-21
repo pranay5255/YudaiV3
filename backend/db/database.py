@@ -15,15 +15,12 @@ from sqlalchemy.orm import sessionmaker
 
 from utils import utc_now
 
-# Database URL from environment variables
-# Phase 1: sandbox server may point at controller-host PostgreSQL using
-# CONTROLLER_DATABASE_URL when DATABASE_URL is not explicitly provided.
-DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("CONTROLLER_DATABASE_URL")
+# Database URL from environment variables.
+# The controller must always provide an explicit DATABASE_URL. The sandbox
+# runtime must not inherit controller DB access.
+DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
-    raise ValueError(
-        "DATABASE_URL environment variable is required "
-        "(or CONTROLLER_DATABASE_URL for sandbox runtime)"
-    )
+    raise ValueError("DATABASE_URL environment variable is required")
 
 # Create engine with standard configuration
 engine = create_engine(
