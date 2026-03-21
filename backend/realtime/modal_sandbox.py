@@ -234,10 +234,25 @@ class RealtimeModalSandbox:
             workdir="/app/backend",
         )
 
-        tunnel_info = sandbox.tunnels()[8100]
-        tunnel_url = tunnel_info.url
+        try:
+            tunnels = await _call_modal_async(sandbox.tunnels)
+            tunnel_info = tunnels[8100]
+            tunnel_url = tunnel_info.url
+            modal_sandbox_id = str(sandbox.object_id)
+        except Exception as exc:
+            logger.warning(
+                "Sandbox provisioned but tunnel lookup failed for db_id=%s; terminating to avoid leak: %s",
+                sandbox_db_id,
+                exc,
+            )
+            try:
+                await _call_modal_async(sandbox.terminate)
+            except Exception as term_exc:
+                logger.warning("Failed to terminate sandbox after tunnel lookup failure: %s", term_exc)
+            raise RuntimeError(
+                f"Modal sandbox provisioned but tunnel for port 8100 was not available: {exc}"
+            ) from exc
 
-        modal_sandbox_id = str(sandbox.object_id)
         logger.info(
             "Unified sandbox created: modal_id=%s tunnel_url=%s",
             modal_sandbox_id,
@@ -267,3 +282,45 @@ class RealtimeModalSandbox:
 
     async def exec(self, command: str) -> Any:
         return await _call_modal_async(self._sandbox.exec, "bash", "-c", command)
+
+
+# ---------------------------------------------------------------------------
+# In-memory registry for active Modal sandbox instances
+# (consolidated from modal_registry.py)
+# ---------------------------------------------------------------------------
+
+
+class ModalSandboxRegistry:
+    """Thread-safe in-memory mapping from sandbox DB IDs to Modal instances."""
+
+    def __init__(self) -> None:
+        self._sandboxes: Dict[str, "RealtimeModalSandbox"] = {}
+        self._lock = asyncio.Lock()
+
+    async def register(self, sandbox_db_id: str, sandbox: "RealtimeModalSandbox") -> None:
+        async with self._lock:
+            self._sandboxes[sandbox_db_id] = sandbox
+            logger.info("Registered Modal sandbox: db_id=%s modal_id=%s", sandbox_db_id, sandbox.modal_sandbox_id)
+
+    async def get(self, sandbox_db_id: str) -> Optional["RealtimeModalSandbox"]:
+        async with self._lock:
+            return self._sandboxes.get(sandbox_db_id)
+
+    async def remove(self, sandbox_db_id: str) -> Optional["RealtimeModalSandbox"]:
+        async with self._lock:
+            return self._sandboxes.pop(sandbox_db_id, None)
+
+    async def terminate_and_remove(self, sandbox_db_id: str) -> None:
+        sandbox = await self.remove(sandbox_db_id)
+        if sandbox:
+            await sandbox.terminate()
+
+
+_registry_singleton: Optional[ModalSandboxRegistry] = None
+
+
+def get_modal_registry() -> ModalSandboxRegistry:
+    global _registry_singleton
+    if _registry_singleton is None:
+        _registry_singleton = ModalSandboxRegistry()
+    return _registry_singleton
