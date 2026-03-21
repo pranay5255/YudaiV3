@@ -154,6 +154,7 @@ class SessionModeStatus(str, Enum):
     WAITING_FOR_INPUT = "waiting_for_input"
     COMPLETE = "complete"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class UserQuestionStatus(str, Enum):
@@ -1923,13 +1924,38 @@ class ExecutionRequest(BaseModel):
     force_mode: Optional[Literal["architect", "tester", "coder"]] = None
 
 
-class ExecutionResponse(BaseModel):
-    execution_id: str
+class ExecutionArtifactResponse(BaseModel):
+    bundle_path: Optional[str] = None
+    metadata_path: Optional[str] = None
+    checksum_sha256: Optional[str] = None
+    byte_size: Optional[int] = None
+
+
+class ExecutionStatusResponse(BaseModel):
+    execution_id: Optional[str] = None
     session_id: str
     mode: str
     status: str
     plan: List[str] = Field(default_factory=list)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    cancel_requested: bool = False
+    waiting_for_input: bool = False
+    current_mode_execution_id: Optional[str] = None
+    artifact: Optional[ExecutionArtifactResponse] = None
+    detail: Optional[str] = None
+
+
+class ExecutionResponse(ExecutionStatusResponse):
+    execution_id: str
     started_at: datetime
+
+
+class CancelExecutionResponse(BaseModel):
+    execution_id: Optional[str] = None
+    session_id: str
+    status: str
+    message: str
 
 
 class ContextCardResponse(BaseModel):
