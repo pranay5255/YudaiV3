@@ -9,12 +9,15 @@ import { useAuthStore } from '../stores/authStore';
 import { useSessionStore } from '../stores/sessionStore';
 import type {
   AddContextCardMutationData,
-  CancelSolveResponse,
   ChatMessage,
+  CancelExecutionResponse,
   ContextCard,
   CreateIssueWithContextRequest,
   CreateSessionMutationData,
   CreateGitHubIssueResponse,
+  ExecutionRequest,
+  ExecutionResponse,
+  ExecutionStatusResponse,
   FileItem,
   GitHubBranch,
   GitHubRepository,
@@ -22,9 +25,6 @@ import type {
   RemoveContextCardMutationData,
   SelectedRepository,
   SessionContext,
-  SolveStatusResponse,
-  StartSolveRequest,
-  StartSolveResponse,
 } from '../types/sessionTypes';
 
 type MutationOptions<TResult> = {
@@ -327,16 +327,16 @@ export const useCreateGitHubIssueFromUserIssue = () => {
   );
 };
 
-export const useStartSolveSession = () => {
+export const useStartSessionExecution = () => {
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const sessionToken = useAuthStore((state) => state.sessionToken);
 
-  return useSimpleMutation(async (request: StartSolveRequest) => {
+  return useSimpleMutation(async (request: ExecutionRequest) => {
     if (!activeSessionId || !sessionToken) {
       throw new Error('No active session or session token available');
     }
 
-    const startUrl = buildSessionTargetUrl(API.SESSIONS.SOLVER.START, { sessionId: activeSessionId });
+    const startUrl = buildSessionTargetUrl(API.SESSIONS.EXECUTION, { sessionId: activeSessionId });
     const response = await fetch(startUrl, {
       method: 'POST',
       headers: getAuthHeaders(sessionToken),
@@ -348,25 +348,24 @@ export const useStartSolveSession = () => {
       throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
     }
 
-    return response.json() as Promise<StartSolveResponse>;
+    return response.json() as Promise<ExecutionResponse>;
   });
 };
 
-export const useGetSolveSession = (solveSessionId: string) => {
+export const useGetSessionExecution = () => {
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const sessionToken = useAuthStore((state) => state.sessionToken);
-  const [data, setData] = useState<SolveStatusResponse | null>(null);
+  const [data, setData] = useState<ExecutionStatusResponse | null>(null);
 
   const { isLoading, error, refetch } = useAsyncLoader(
-    Boolean(activeSessionId && sessionToken && solveSessionId),
+    Boolean(activeSessionId && sessionToken),
     async () => {
       if (!activeSessionId || !sessionToken) {
         throw new Error('No active session or session token available');
       }
 
-      const statusUrl = buildSessionTargetUrl(API.SESSIONS.SOLVER.STATUS, {
+      const statusUrl = buildSessionTargetUrl(API.SESSIONS.EXECUTION, {
         sessionId: activeSessionId,
-        solveSessionId,
       });
       const response = await fetch(statusUrl, {
         method: 'GET',
@@ -378,7 +377,7 @@ export const useGetSolveSession = (solveSessionId: string) => {
         throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
       }
 
-      const payload = await response.json() as SolveStatusResponse;
+      const payload = await response.json() as ExecutionStatusResponse;
       setData(payload);
       return payload;
     }
@@ -387,18 +386,17 @@ export const useGetSolveSession = (solveSessionId: string) => {
   return { data, isLoading, error, refetch };
 };
 
-export const useCancelSolveSession = () => {
+export const useCancelSessionExecution = () => {
   const activeSessionId = useSessionStore((state) => state.activeSessionId);
   const sessionToken = useAuthStore((state) => state.sessionToken);
 
-  return useSimpleMutation(async (solveSessionId: string) => {
+  return useSimpleMutation(async () => {
     if (!activeSessionId || !sessionToken) {
       throw new Error('No active session or session token available');
     }
 
-    const cancelUrl = buildSessionTargetUrl(API.SESSIONS.SOLVER.CANCEL, {
+    const cancelUrl = buildSessionTargetUrl(API.SESSIONS.EXECUTION_CANCEL, {
       sessionId: activeSessionId,
-      solveSessionId,
     });
     const response = await fetch(cancelUrl, {
       method: 'POST',
@@ -410,7 +408,7 @@ export const useCancelSolveSession = () => {
       throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
     }
 
-    return response.json() as Promise<CancelSolveResponse>;
+    return response.json() as Promise<CancelExecutionResponse>;
   });
 };
 
