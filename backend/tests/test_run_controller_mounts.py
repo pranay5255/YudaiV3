@@ -59,14 +59,12 @@ def test_run_controller_mounts_canonical_routes_only():
 
     # Canonical mounts
     assert "/daifu/sessions" in paths
-    assert "/daifu/sessions/{session_id}/solve/start" in paths
-    assert "/daifu/sessions/{session_id}/solve/status/{solve_id}" in paths
-    assert "/daifu/sessions/{session_id}/solve/cancel/{solve_id}" in paths
+    assert "/daifu/sessions/{session_id}/execution" in paths
+    assert "/daifu/sessions/{session_id}/execution/cancel" in paths
     assert "/auth/api/login" in paths
     assert "/controller/sessions/{session_id}/runtime" in paths
     assert "/controller/sessions/{session_id}/ws/unified" in paths
     assert "/health" in paths
-    assert "/daifu/sessions/{session_id}/solve/stream/{solve_id}/{run_id}" not in paths
 
     # No alias mounts
     assert "/api/daifu/sessions" not in paths
