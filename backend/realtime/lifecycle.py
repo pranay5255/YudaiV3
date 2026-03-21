@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from dataclasses import dataclass
 from datetime import timedelta
 import os
-from typing import Any, Dict, Iterable, Optional, Tuple
+from pathlib import Path
+import re
+import subprocess
+import time
+from typing import Any, Awaitable, Callable, Dict, Iterable, Optional, Set, Tuple
 import uuid
 
 from config.realtime_identity import build_sandbox_identity
@@ -30,11 +35,12 @@ from utils import utc_now
 
 from config.realtime_flags import get_realtime_feature_flags
 
+import httpx
+
 from .cache_store import SessionCacheStore
 from .errors import RealtimeErrorCode, as_http_exception
-from .modal_registry import get_modal_registry
-from .modal_sandbox import RealtimeModalSandbox
-from .sandbox_manager import SandboxManager
+from .modal_sandbox import RealtimeModalSandbox, get_modal_registry
+from .sandbox_transport import run_sandbox_command
 
 
 @dataclass
@@ -156,13 +162,10 @@ class RealtimeLifecycleService:
             lifecycle_metadata["modal_sandbox_id"] = modal_sb.modal_sandbox_id
         sandbox.lifecycle_metadata = lifecycle_metadata
 
-        git_bootstrap = await asyncio.to_thread(
-            self.sandbox_manager.ensure_git_bootstrap,
-            identity_key=identity.key,
-            repo_url=repo_url,
-            repo_branch=repo_branch,
-            github_token=github_token,
-        )
+        git_bootstrap = {
+            "status": "disabled",
+            "reason": "sandbox_workspace_bootstrap_only",
+        }
 
         runtime = self._get_latest_runtime(db, session_id=session.id)
         if runtime and runtime.status != SessionRuntimeStatus.TERMINATED.value:
@@ -207,7 +210,6 @@ class RealtimeLifecycleService:
                 "identity_key": sandbox.identity_key,
                 "tunnel_url": sandbox.tunnel_url,
                 "token_ttl_seconds": sandbox.tunnel_token_ttl_seconds,
-                "git_bootstrap": git_bootstrap,
                 "setup_context": setup_context,
             },
         )
@@ -221,7 +223,6 @@ class RealtimeLifecycleService:
             payload={
                 "tunnel_url": sandbox.tunnel_url,
                 "token_ttl_seconds": sandbox.tunnel_token_ttl_seconds,
-                "git_bootstrap": git_bootstrap,
                 "setup_context": setup_context,
             },
         )
@@ -433,8 +434,6 @@ class RealtimeLifecycleService:
             refs=github_refs,
         )
 
-        self._finalize_on_completion(db, runtime=runtime, session=session, sandbox=sandbox)
-
     def mark_pr_created(
         self,
         db: Session,
@@ -500,8 +499,6 @@ class RealtimeLifecycleService:
             refs=github_refs,
         )
 
-        self._finalize_on_completion(db, runtime=runtime, session=session, sandbox=sandbox)
-
     # ---------------------------------------------------------------------
     # Internal helpers
     # ---------------------------------------------------------------------
@@ -547,6 +544,109 @@ class RealtimeLifecycleService:
             query = query.filter(SessionRuntime.sandbox_id == sandbox_id)
         return query.order_by(SessionRuntime.id.desc()).first()
 
+    async def finalize_session_execution(
+        self,
+        db: Session,
+        *,
+        session: ChatSession,
+        reason: str,
+        execution_status: str,
+        execution_id: Optional[str] = None,
+        artifact_source_paths: Optional[Iterable[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        runtime, session_obj, sandbox = self._load_runtime_bundle(
+            db,
+            session_db_id=session.id,
+        )
+        if not runtime or not session_obj or not sandbox:
+            return None
+
+        runtime.completed_at = runtime.completed_at or utc_now()
+        runtime.completion_reason = reason
+        runtime.completion_detected = execution_status == "complete"
+
+        trajectory_refs = self._collect_trajectory_refs(db, session_id=session_obj.id)
+        if trajectory_refs:
+            self.cache_store.merge_trajectory_refs(
+                session_id=session_obj.session_id,
+                sandbox_id=sandbox.id,
+                runtime_id=runtime.runtime_id,
+                identity_key=sandbox.identity_key,
+                refs=trajectory_refs,
+            )
+
+        runtime_summary = {
+            "status": execution_status,
+            "execution_id": execution_id,
+            "issue_created": bool(runtime.completion_issue_created),
+            "pr_created": bool(runtime.completion_pr_created),
+            "started_at": runtime.started_at.isoformat() if runtime.started_at else None,
+            "completed_at": runtime.completed_at.isoformat() if runtime.completed_at else None,
+        }
+
+        export_info: Optional[Dict[str, Any]] = None
+        source_paths_list = [str(path).strip() for path in (artifact_source_paths or []) if str(path).strip()]
+        if (
+            sandbox.status != SandboxStatus.TERMINATED.value
+            and sandbox.tunnel_url
+            and source_paths_list
+        ):
+            try:
+                export_info = await self.cache_store.download_and_export_bundle(
+                    tunnel_url=sandbox.tunnel_url,
+                    session_public_id=session_obj.session_id,
+                    runtime_id=runtime.runtime_id,
+                    sandbox_id=sandbox.id,
+                    identity_key=sandbox.identity_key,
+                    workflow_name=execution_id or "mode-workflow",
+                    archive_name="sandbox-workflow.tar.gz",
+                    source_paths=source_paths_list,
+                    runtime_summary=runtime_summary,
+                    cwd=session.runtime_workspace_path,
+                    env={"WORKSPACE_PATH": session.runtime_workspace_path or "/workspace/repo"},
+                    object_store={
+                        "provider": "s3",
+                        "key": self._artifact_key(session=session_obj, sandbox=sandbox),
+                        "etag": None,
+                    },
+                )
+            except Exception as exc:
+                metadata = runtime.runtime_metadata or {}
+                metadata["artifact_export_error"] = str(exc)
+                runtime.runtime_metadata = metadata
+
+        if export_info:
+            artifact = SessionArtifact(
+                session_id=session_obj.id,
+                runtime_id=runtime.id,
+                artifact_key=self._artifact_key(session=session_obj, sandbox=sandbox),
+                artifact_type="sandbox_bundle",
+                cache_manifest_path=export_info["metadata"]["cache_manifest_path"],
+                bundle_path=export_info["bundle_path"],
+                checksum_sha256=export_info["bundle_sha256"],
+                object_etag=None,
+                byte_size=export_info["bundle_size"],
+                artifact_metadata=export_info["metadata"],
+                exported_at=utc_now(),
+            )
+            db.add(artifact)
+
+        self._terminate_sandbox_in_db(
+            db,
+            sandbox=sandbox,
+            reason=reason,
+        )
+
+        if not export_info:
+            return None
+
+        return {
+            "bundle_path": export_info["bundle_path"],
+            "metadata_path": export_info["metadata_path"],
+            "checksum_sha256": export_info["bundle_sha256"],
+            "byte_size": export_info["bundle_size"],
+        }
+
     def _finalize_on_completion(
         self,
         db: Session,
@@ -555,67 +655,10 @@ class RealtimeLifecycleService:
         session: ChatSession,
         sandbox: Sandbox,
     ) -> None:
-        if runtime.completion_detected:
-            return
-
-        if not runtime.completion_issue_created or not runtime.completion_pr_created:
-            return
-
-        runtime.completion_detected = True
-        runtime.completion_reason = "issue_and_pr_created"
-        runtime.completed_at = utc_now()
-
-        trajectory_refs = self._collect_trajectory_refs(db, session_id=session.id)
-        if trajectory_refs:
-            self.cache_store.merge_trajectory_refs(
-                session_id=session.session_id,
-                sandbox_id=sandbox.id,
-                runtime_id=runtime.runtime_id,
-                identity_key=sandbox.identity_key,
-                refs=trajectory_refs,
-            )
-
-        runtime_summary = {
-            "status": SessionRuntimeStatus.TERMINATED.value,
-            "issue_created": bool(runtime.completion_issue_created),
-            "pr_created": bool(runtime.completion_pr_created),
-            "started_at": runtime.started_at.isoformat() if runtime.started_at else None,
-            "completed_at": runtime.completed_at.isoformat() if runtime.completed_at else None,
-        }
-
-        export_info = self.cache_store.export_bundle(
-            session_id=session.session_id,
-            runtime_id=runtime.runtime_id,
-            sandbox_id=sandbox.id,
-            identity_key=sandbox.identity_key,
-            runtime_summary=runtime_summary,
-            object_store={
-                "provider": "s3",
-                "key": self._artifact_key(session=session, sandbox=sandbox),
-                "etag": None,
-            },
-        )
-
-        artifact = SessionArtifact(
-            session_id=session.id,
-            runtime_id=runtime.id,
-            artifact_key=self._artifact_key(session=session, sandbox=sandbox),
-            artifact_type="bundle_metadata",
-            cache_manifest_path=export_info["metadata"]["cache_manifest_path"],
-            bundle_path=export_info["metadata"]["bundle_path"],
-            checksum_sha256=export_info["bundle_sha256"],
-            object_etag=None,
-            byte_size=export_info["bundle_size"],
-            artifact_metadata=export_info["metadata"],
-            exported_at=utc_now(),
-        )
-        db.add(artifact)
-
-        self._terminate_sandbox_in_db(
-            db,
-            sandbox=sandbox,
-            reason="completion_detected",
-        )
+        if runtime.completion_issue_created and runtime.completion_pr_created:
+            runtime.completion_detected = True
+            runtime.completion_reason = "issue_and_pr_created"
+            runtime.completed_at = runtime.completed_at or utc_now()
 
     def _collect_trajectory_refs(self, db: Session, *, session_id: int) -> list[Dict[str, Any]]:
         refs: list[Dict[str, Any]] = []
@@ -800,3 +843,233 @@ def get_realtime_lifecycle_service() -> RealtimeLifecycleService:
     if _service_singleton is None:
         _service_singleton = RealtimeLifecycleService()
     return _service_singleton
+
+
+# ---------------------------------------------------------------------------
+# Sandbox tunnel probes and git bootstrap
+# (consolidated from sandbox_manager.py)
+# ---------------------------------------------------------------------------
+
+ProbeCallback = Callable[[str, bool, Optional[str]], Awaitable[None]]
+
+
+class SandboxManager:
+    """Manages tunnel probes plus git bootstrap for sandbox identities."""
+
+    def __init__(self):
+        self.probe_interval_seconds = int(os.getenv("SANDBOX_LIVENESS_INTERVAL_SECONDS", "10"))
+        self.probe_timeout_seconds = float(os.getenv("SANDBOX_LIVENESS_TIMEOUT_SECONDS", "3"))
+        self.git_fetch_interval_seconds = int(os.getenv("SANDBOX_GIT_FETCH_INTERVAL_SECONDS", "300"))
+
+        self.tunnel_template = os.getenv(
+            "SANDBOX_TUNNEL_TEMPLATE",
+            "http://localhost:8100/{sandbox_id}",
+        )
+
+        self.repo_root = Path(os.getenv("SANDBOX_GIT_ROOT", "/home/yudai/.cache/repos"))
+        self.repo_root.mkdir(parents=True, exist_ok=True)
+
+        self._probe_tasks: Dict[str, asyncio.Task] = {}
+
+    def build_tunnel_url(self, sandbox_id: str) -> str:
+        template = self.tunnel_template
+        if "{sandbox_id}" in template:
+            return template.format(sandbox_id=sandbox_id)
+        return template.rstrip("/")
+
+    def _identity_repo_dir(self, identity_key: str) -> Path:
+        safe = re.sub(r"[^a-zA-Z0-9._-]+", "-", identity_key).strip("-")
+        safe = safe or "sandbox"
+        return self.repo_root / safe
+
+    def _is_github_https_repo(self, repo_url: Optional[str]) -> bool:
+        return bool(repo_url and repo_url.startswith("https://github.com/"))
+
+    def _git_auth_args(
+        self,
+        *,
+        repo_url: Optional[str],
+        github_token: Optional[str],
+    ) -> list[str]:
+        if not github_token or not self._is_github_https_repo(repo_url):
+            return []
+
+        encoded = base64.b64encode(f"x-access-token:{github_token}".encode("utf-8")).decode("ascii")
+        return [
+            "-c",
+            f"http.https://github.com/.extraheader=AUTHORIZATION: basic {encoded}",
+        ]
+
+    def _describe_git_command(self, cmd: list[str]) -> str:
+        if "clone" in cmd:
+            return "git clone"
+        if "fetch" in cmd:
+            return "git fetch"
+        return "git command"
+
+    def ensure_git_bootstrap(
+        self,
+        *,
+        identity_key: str,
+        repo_url: Optional[str],
+        repo_branch: Optional[str],
+        github_token: Optional[str] = None,
+    ) -> Dict[str, object]:
+        """Clone repository once for this sandbox identity and fetch periodically."""
+        if not repo_url:
+            return {"status": "skipped", "reason": "repo_url_missing"}
+
+        repo_dir = self._identity_repo_dir(identity_key)
+        marker_file = repo_dir / ".last_fetch"
+        branch = (repo_branch or "main").strip() or "main"
+
+        if not repo_dir.exists():
+            repo_dir.parent.mkdir(parents=True, exist_ok=True)
+            cmd = [
+                "git",
+                *self._git_auth_args(repo_url=repo_url, github_token=github_token),
+                "clone", "--branch", branch, "--single-branch", repo_url, str(repo_dir),
+            ]
+            self._run_git_command(cmd)
+            marker_file.write_text(str(int(time.time())), encoding="utf-8")
+            return {"status": "cloned", "path": str(repo_dir), "branch": branch}
+
+        now = int(time.time())
+        last_fetch = 0
+        if marker_file.exists():
+            try:
+                last_fetch = int(marker_file.read_text(encoding="utf-8").strip() or "0")
+            except ValueError:
+                last_fetch = 0
+
+        elapsed = now - last_fetch
+        if elapsed >= self.git_fetch_interval_seconds:
+            self._run_git_command([
+                "git",
+                *self._git_auth_args(repo_url=repo_url, github_token=github_token),
+                "-C", str(repo_dir), "fetch", "--all", "--prune",
+            ])
+            marker_file.write_text(str(now), encoding="utf-8")
+            return {"status": "fetched", "path": str(repo_dir), "branch": branch, "elapsed_seconds": elapsed}
+
+        return {"status": "reused", "path": str(repo_dir), "branch": branch, "elapsed_seconds": elapsed}
+
+    def _run_git_command(self, cmd: list[str]) -> None:
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            stderr_tail = (result.stderr or "")[-2000:]
+            raise RuntimeError(f"{self._describe_git_command(cmd)} failed: {stderr_tail}")
+
+    async def start_probe(
+        self,
+        *,
+        sandbox_id: str,
+        tunnel_url: str,
+        callback: ProbeCallback,
+    ) -> None:
+        """Start a recurring liveness probe against the sandbox tunnel."""
+        existing = self._probe_tasks.get(sandbox_id)
+        if existing and not existing.done():
+            return
+
+        async def _probe_loop() -> None:
+            health_url = f"{tunnel_url.rstrip('/')}/healthz"
+            while True:
+                healthy = False
+                error_text: Optional[str] = None
+                try:
+                    async with httpx.AsyncClient(timeout=self.probe_timeout_seconds) as client:
+                        response = await client.get(health_url)
+                    healthy = response.status_code == 200
+                    if not healthy:
+                        error_text = f"probe_status_{response.status_code}"
+                except Exception as exc:  # pragma: no cover - defensive
+                    healthy = False
+                    error_text = str(exc)
+
+                try:
+                    await callback(sandbox_id, healthy, error_text)
+                except Exception as callback_error:  # pragma: no cover
+                    logger.warning("Probe callback failed for sandbox %s: %s", sandbox_id, callback_error)
+
+                await asyncio.sleep(self.probe_interval_seconds)
+
+        task = asyncio.create_task(_probe_loop(), name=f"sandbox-probe-{sandbox_id}")
+        self._probe_tasks[sandbox_id] = task
+
+    async def stop_probe(self, sandbox_id: str) -> None:
+        task = self._probe_tasks.pop(sandbox_id, None)
+        if not task:
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Controller-side exec broker
+# (consolidated from sandbox_exec_broker.py)
+# ---------------------------------------------------------------------------
+
+SandboxEventCallback = Callable[[Dict[str, Any]], Awaitable[None]]
+
+
+class SandboxExecBroker:
+    """Sends exec.start/stdin/cancel to sandbox internal WS and streams events back."""
+
+    def __init__(self, lifecycle: Optional[RealtimeLifecycleService] = None) -> None:
+        self.lifecycle = lifecycle or get_realtime_lifecycle_service()
+
+    def _resolve_runtime(self, db: Session, session: ChatSession) -> tuple[Sandbox, str]:
+        runtime = self.lifecycle._get_latest_runtime(db, session_id=session.id)
+        if not runtime or not runtime.sandbox_id:
+            raise as_http_exception(RealtimeErrorCode.TUNNEL_UNAVAILABLE)
+
+        sandbox = self.lifecycle.get_sandbox_or_404(db, runtime.sandbox_id)
+        if sandbox.status == SandboxStatus.TERMINATED.value:
+            raise as_http_exception(RealtimeErrorCode.TUNNEL_TERMINATED)
+        if not sandbox.tunnel_url:
+            raise as_http_exception(RealtimeErrorCode.TUNNEL_UNAVAILABLE)
+
+        return sandbox, sandbox.tunnel_url
+
+    async def run_command(
+        self,
+        db: Session,
+        *,
+        session: ChatSession,
+        command: str,
+        cwd: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
+        timeout_seconds: int = 1800,
+        on_event: Optional[SandboxEventCallback] = None,
+    ) -> Dict[str, Any]:
+        sandbox, tunnel_url = self._resolve_runtime(db, session)
+        result = await run_sandbox_command(
+            tunnel_url=tunnel_url,
+            session_public_id=session.session_id,
+            command=command,
+            cwd=cwd,
+            env=env,
+            timeout_seconds=timeout_seconds,
+            on_event=on_event,
+        )
+        return {
+            "sandbox_id": sandbox.id,
+            "exit_code": result.exit_code,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "duration_ms": result.duration_ms,
+        }
+
+
+_exec_broker_singleton: Optional[SandboxExecBroker] = None
+
+
+def get_sandbox_exec_broker() -> SandboxExecBroker:
+    global _exec_broker_singleton
+    if _exec_broker_singleton is None:
+        _exec_broker_singleton = SandboxExecBroker()
+    return _exec_broker_singleton
