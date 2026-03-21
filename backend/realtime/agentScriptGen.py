@@ -19,7 +19,10 @@ import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
-from .solve_stream_protocol import SOLVE_RESULT_PREFIX, TRAJECTORY_UPDATE_PREFIX
+# Stdout markers for controller-brokered solve streaming
+# (consolidated from solve_stream_protocol.py)
+TRAJECTORY_UPDATE_PREFIX = "__YUDAI_TRAJECTORY_UPDATE__"
+SOLVE_RESULT_PREFIX = "__YUDAI_SOLVE_RESULT__"
 
 
 def _safe_bool(value: Any, default: bool = False) -> bool:
