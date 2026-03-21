@@ -94,7 +94,7 @@ async def _run(args: argparse.Namespace) -> int:
         wait_for_sandbox_healthcheck,
     )
     from realtime.modal_sandbox import RealtimeModalSandbox
-    from realtime.sandbox_artifacts import SandboxArtifactStore, download_sandbox_artifact_bundle
+    from realtime.cache_store import SandboxArtifactStore, download_sandbox_artifact_bundle
     from realtime.sandbox_transport import run_sandbox_command
 
     print(f"[workflow] env_file={args.env_file}")
