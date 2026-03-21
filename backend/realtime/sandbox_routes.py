@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import dataclass
 import json
 import logging
 import os
@@ -17,6 +18,16 @@ from .ws_protocol import WSMessageType, build_envelope
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["realtime-sandbox"])
+
+
+@dataclass
+class _SessionExecutionState:
+    process: asyncio.subprocess.Process
+    owner_connection_id: int
+
+
+_SESSION_EXECUTIONS: dict[str, _SessionExecutionState] = {}
+_SESSION_EXECUTION_LOCK = asyncio.Lock()
 
 
 @router.get("/healthz", response_model=HealthzResponse)
@@ -62,6 +73,8 @@ async def websocket_internal_exec(
     process: Optional[asyncio.subprocess.Process] = None
     stream_tasks: list[asyncio.Task[Any]] = []
     wait_task: Optional[asyncio.Task[Any]] = None
+    connection_id = id(websocket)
+    owns_process = False
 
     async def _safe_send(msg_type: WSMessageType, payload: Dict[str, Any]) -> None:
         try:
@@ -104,7 +117,7 @@ async def websocket_internal_exec(
         wait_task = None
 
     async def _terminate_process() -> None:
-        nonlocal process
+        nonlocal process, owns_process
         if process is None:
             return
         if process.returncode is None:
@@ -116,11 +129,28 @@ async def websocket_internal_exec(
                 with contextlib.suppress(Exception):
                     await process.wait()
         process = None
+        async with _SESSION_EXECUTION_LOCK:
+            current = _SESSION_EXECUTIONS.get(session_id)
+            if current and current.owner_connection_id == connection_id:
+                _SESSION_EXECUTIONS.pop(session_id, None)
+        owns_process = False
         await _clear_tasks()
 
     async def _launch_process(command: str, cwd: Optional[str], env: Dict[str, Any]) -> None:
-        nonlocal process, stream_tasks, wait_task
+        nonlocal process, stream_tasks, wait_task, owns_process
         await _terminate_process()
+
+        async with _SESSION_EXECUTION_LOCK:
+            existing = _SESSION_EXECUTIONS.get(session_id)
+            if existing and existing.process.returncode is None:
+                await _safe_send(
+                    WSMessageType.ERROR,
+                    {
+                        "message": "A sandbox command is already running for this session",
+                        "code": "EXEC_ALREADY_RUNNING",
+                    },
+                )
+                return
 
         resolved_cwd = cwd or os.getenv("WORKSPACE_PATH") or "/workspace/repo"
         if resolved_cwd and not os.path.isdir(resolved_cwd):
@@ -141,6 +171,12 @@ async def websocket_internal_exec(
             cwd=resolved_cwd,
             env=merged_env,
         )
+        async with _SESSION_EXECUTION_LOCK:
+            _SESSION_EXECUTIONS[session_id] = _SessionExecutionState(
+                process=process,
+                owner_connection_id=connection_id,
+            )
+        owns_process = True
 
         await _safe_send(
             WSMessageType.SANDBOX_STREAM,
@@ -160,6 +196,14 @@ async def websocket_internal_exec(
         async def _wait_for_exit() -> None:
             assert process is not None
             exit_code = await process.wait()
+            async with _SESSION_EXECUTION_LOCK:
+                current = _SESSION_EXECUTIONS.get(session_id)
+                if (
+                    current
+                    and current.owner_connection_id == connection_id
+                    and current.process is process
+                ):
+                    _SESSION_EXECUTIONS.pop(session_id, None)
             await _safe_send(
                 WSMessageType.SANDBOX_STREAM,
                 {
@@ -219,7 +263,31 @@ async def websocket_internal_exec(
                 continue
 
             if msg_type == WSMessageType.EXEC_CANCEL.value:
-                await _terminate_process()
+                active_state: Optional[_SessionExecutionState] = None
+                async with _SESSION_EXECUTION_LOCK:
+                    current = _SESSION_EXECUTIONS.get(session_id)
+                    if current and current.process.returncode is None:
+                        active_state = current
+
+                if active_state is None:
+                    await _safe_send(
+                        WSMessageType.ERROR,
+                        {"message": "No active process to cancel", "code": "EXEC_NOT_RUNNING"},
+                    )
+                    continue
+
+                if active_state.owner_connection_id == connection_id:
+                    await _terminate_process()
+                else:
+                    active_process = active_state.process
+                    active_process.terminate()
+                    try:
+                        await asyncio.wait_for(active_process.wait(), timeout=5)
+                    except asyncio.TimeoutError:
+                        active_process.kill()
+                        with contextlib.suppress(Exception):
+                            await active_process.wait()
+
                 await _safe_send(
                     WSMessageType.SANDBOX_STREAM,
                     {"stream": "sandbox", "event": "cancelled"},
@@ -233,6 +301,7 @@ async def websocket_internal_exec(
     except WebSocketDisconnect:
         pass
     finally:
-        await _terminate_process()
+        if owns_process:
+            await _terminate_process()
         with contextlib.suppress(Exception):
             await websocket.close()
