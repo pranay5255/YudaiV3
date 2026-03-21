@@ -25,8 +25,7 @@ from .schemas import (
     SandboxResponse,
     TunnelResolveResponse,
 )
-from .ws_hub import get_ws_hub
-from .ws_protocol import WSMessageType, build_envelope
+from .ws_protocol import WSMessageType, build_envelope, get_ws_hub
 
 logger = logging.getLogger(__name__)
 
