@@ -533,17 +533,20 @@ export const Chat: React.FC<ChatProps> = ({
         data: null,
       });
 
-      // Call the solver endpoint using unified API
-      const response = await fetch(buildApiUrl(API.SESSIONS.SOLVER.START, { sessionId: activeSessionId }), {
+      const executionObjective = [
+        `Resolve GitHub issue #${issueId}: ${issuePreviewModal.data.title}`,
+        issuePreviewModal.data.body ? `Issue details:\n${issuePreviewModal.data.body}` : '',
+        `Repository: ${selectedRepository.repository.full_name}@${selectedRepository.branch || 'main'}`,
+      ].filter(Boolean).join('\n\n');
+
+      const response = await fetch(buildApiUrl(API.SESSIONS.EXECUTION, { sessionId: activeSessionId }), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}),
         },
         body: JSON.stringify({
-          issue_id: issueId,
-          repo_url: `https://github.com/${selectedRepository.repository.full_name}`,
-          branch_name: selectedRepository.branch || 'main',
+          objective: executionObjective,
         }),
       });
 
@@ -553,11 +556,11 @@ export const Chat: React.FC<ChatProps> = ({
           typeof errorData?.detail === 'object' && errorData.detail !== null
             ? errorData.detail.message || errorData.detail.detail || response.statusText
             : errorData?.detail || errorData?.message || response.statusText;
-        throw new Error(`Solver request failed: ${errorMessage}`);
+        throw new Error(`Execution request failed: ${errorMessage}`);
       }
 
       const result = await response.json();
-      console.log('[Chat] Solver started successfully:', result);
+      console.log('[Chat] Execution started successfully:', result);
 
       void syncRuntimeState(activeSessionId).catch((runtimeError) => {
         console.warn('[Chat] Failed to refresh runtime state after solver start:', runtimeError);
@@ -571,14 +574,14 @@ export const Chat: React.FC<ChatProps> = ({
       }
 
       // Show success message
-      showError(`🚀 AI Solver started! Session ID: ${result.solve_session_id}. Watch the chat for progress updates.`);
+      showError(`Execution started. ID: ${result.execution_id}. Watch the chat for mode updates.`);
 
     } catch (error) {
       void syncRuntimeState(activeSessionId).catch((runtimeError) => {
         console.warn('[Chat] Failed to refresh runtime state after solver error:', runtimeError);
       });
-      console.error('[Chat] Failed to start solver:', error);
-      showError(`Failed to start solver: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('[Chat] Failed to start execution:', error);
+      showError(`Failed to start execution: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }, [
     selectedRepository,
