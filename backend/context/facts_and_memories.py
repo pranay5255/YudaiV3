@@ -338,12 +338,69 @@ class FactsAndMemoriesService:
         lines = _walk(dir_dict)
         return "\n".join(lines[:50])  # Limit to 50 lines
 
+    async def generate_facts(
+        self,
+        snapshot: RepositorySnapshot,
+    ) -> FactsAndMemoriesResult:
+        """Generate semantic repository facts and highlights after indexing."""
+
+        repo_analysis = self.build_yudai_grep_analysis(snapshot)
+        prompt = self._build_facts_prompt(snapshot, repo_analysis=repo_analysis)
+        response = await LLMService.generate_response(
+            prompt,
+            model=self.model,
+            temperature=0.2,
+            max_tokens=1200,
+        )
+        result = self._parse_response(response)
+        return FactsAndMemoriesResult(
+            facts=result.facts,
+            memories=[],
+            highlights=result.highlights,
+            raw_response=result.raw_response,
+        )
+
+    async def generate_memories(
+        self,
+        conversation: Optional[Sequence[Dict[str, Any]]] = None,
+        *,
+        existing_memories: Optional[Sequence[str]] = None,
+        repo_facts: Optional[Sequence[str]] = None,
+        repo_highlights: Optional[Sequence[str]] = None,
+        max_messages: int = 12,
+    ) -> FactsAndMemoriesResult:
+        """Generate append-only episodic memories from the chat transcript."""
+
+        prompt = self._build_memories_prompt(
+            conversation=conversation,
+            existing_memories=existing_memories,
+            repo_facts=repo_facts,
+            repo_highlights=repo_highlights,
+            max_messages=max_messages,
+        )
+        response = await LLMService.generate_response(
+            prompt,
+            model=self.model,
+            temperature=0.2,
+            max_tokens=900,
+        )
+        result = self._parse_response(response)
+        return FactsAndMemoriesResult(
+            facts=[],
+            memories=result.memories,
+            highlights=[],
+            raw_response=result.raw_response,
+        )
+
     async def generate(
         self,
         snapshot: RepositorySnapshot,
         conversation: Optional[Sequence[Dict[str, Any]]] = None,
         max_messages: int = 10,
+        existing_memories: Optional[Dict[str, Any]] = None,
     ) -> FactsAndMemoriesResult:
+        """Backward-compatible combined generation path."""
+
         repo_analysis = self.build_yudai_grep_analysis(
             snapshot,
             conversation,
@@ -355,6 +412,7 @@ class FactsAndMemoriesService:
             conversation,
             max_messages=max_messages,
             repo_analysis=repo_analysis,
+            existing_memories=existing_memories,
         )
         response = await LLMService.generate_response(
             prompt,
@@ -364,12 +422,118 @@ class FactsAndMemoriesService:
         )
         return self._parse_response(response)
 
+    def _build_facts_prompt(
+        self,
+        snapshot: RepositorySnapshot,
+        *,
+        repo_analysis: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        summary = snapshot.raw_response.get("raw_response", {}).get(
+            "summary", "No summary available."
+        )
+        tree = snapshot.raw_response.get("raw_response", {}).get("tree", "")
+        files_preview = self._render_top_files(snapshot.files)
+        grep_analysis = self._build_repo_analysis_block(repo_analysis)
+
+        prompt = f"""
+You are generating semantic repository memory immediately after repository indexing.
+
+Return valid JSON with keys "facts", "memories", and "highlights".
+- "facts" must contain stable, file-backed truths about the repository.
+- "highlights" must contain the key files and folders worth loading into future sessions.
+- "memories" must be an empty array because episodic chat memories are not generated at indexing time.
+
+## Repository Summary
+{summary}
+
+## Repository Structure Snippet
+{tree[:1200]}
+
+## Key Files
+{files_preview}
+{grep_analysis}
+
+## Instructions
+- Facts MUST cite specific files when possible.
+- Prefer durable architecture facts, stack details, entry points, workflows, and major modules.
+- Do NOT include user goals, transient chat details, or unresolved tasks.
+- Respond ONLY with JSON.
+"""
+        return prompt.strip()
+
+    def _build_memories_prompt(
+        self,
+        *,
+        conversation: Optional[Sequence[Dict[str, Any]]],
+        existing_memories: Optional[Sequence[str]],
+        repo_facts: Optional[Sequence[str]],
+        repo_highlights: Optional[Sequence[str]],
+        max_messages: int,
+    ) -> str:
+        convo_preview = self._render_conversation(
+            conversation, max_messages=max_messages
+        )
+        repo_context_parts: List[str] = []
+        if repo_facts:
+            repo_context_parts.append(
+                "### Known Repository Facts\n"
+                + "\n".join(f"- {fact}" for fact in list(repo_facts)[:12])
+            )
+        if repo_highlights:
+            repo_context_parts.append(
+                "### Key Files / Highlights\n"
+                + "\n".join(f"- {item}" for item in list(repo_highlights)[:12])
+            )
+
+        existing_block = ""
+        if existing_memories:
+            existing_items = [
+                str(item).strip() for item in existing_memories if str(item).strip()
+            ]
+            if existing_items:
+                existing_block = (
+                    "## Existing Episodic Memories\n"
+                    + "\n".join(f"- {item}" for item in existing_items[-30:])
+                )
+
+        repo_context_block = ""
+        if repo_context_parts:
+            repo_context_block = "## Repository Context\n" + "\n\n".join(
+                repo_context_parts
+            )
+
+        prompt = f"""
+You are writing append-only episodic memory entries for a coding assistant.
+
+Return valid JSON with keys "facts", "memories", and "highlights".
+- "memories" must contain only NEW episodic memories worth loading into the next session.
+- "facts" must be an empty array because semantic repository facts are generated only during indexing.
+- "highlights" must be an empty array because key files are generated only during indexing.
+
+{repo_context_block}
+{existing_block}
+
+## Recent Conversation
+{convo_preview}
+
+## Instructions
+- Extract durable conversational takeaways: goals, decisions, unresolved threads, implementation intent, and explicit "remember this" requests.
+- Do NOT restate repository facts, file structure, or code snippets as memories.
+- Do NOT rewrite, merge, or replace existing memories; this store is append-only.
+- Avoid emitting duplicates of the existing memories block.
+- Use short bullet-style sentences.
+- If there is nothing new worth storing, return an empty "memories" array.
+- Respond ONLY with JSON.
+"""
+        return prompt.strip()
+
     def _build_prompt(
         self,
         snapshot: RepositorySnapshot,
         conversation: Optional[Sequence[Dict[str, Any]]],
         max_messages: int,
         repo_analysis: Optional[Dict[str, Any]] = None,
+        existing_memories: Optional[Dict[str, Any]] = None,
     ) -> str:
         summary = snapshot.raw_response.get("raw_response", {}).get(
             "summary", "No summary available."
@@ -379,29 +543,33 @@ class FactsAndMemoriesService:
         convo_preview = self._render_conversation(
             conversation, max_messages=max_messages
         )
+        grep_analysis = self._build_repo_analysis_block(repo_analysis)
 
-        # Add yudai-grep analysis if available
-        grep_analysis = ""
-        if repo_analysis:
-            key_files = repo_analysis.get("key_files", [])
-            key_folders = repo_analysis.get("key_folders", [])
-            predictions = repo_analysis.get("predictions", [])
-            dir_structure = repo_analysis.get("directory_structure", "")
-
-            grep_analysis = f"""
-## Yudai-Grep Analysis (Intelligent File/Folder Detection)
-### Key Files Identified:
-{chr(10).join(f"- {f}" for f in key_files[:10]) if key_files else "- No key files identified"}
-
-### Key Folders Identified:
-{chr(10).join(f"- {f}" for f in key_folders[:10]) if key_folders else "- No key folders identified"}
-
-### Query-Based Predictions:
-{chr(10).join(f"- Query: {p['query']} → {p['tool']}:{p['path']}" for p in predictions[:5]) if predictions else "- No predictions available"}
-
-### Directory Structure:
-{dir_structure[:800] if dir_structure else "Not available"}
-"""
+        existing_block = ""
+        if existing_memories:
+            existing_facts = existing_memories.get("facts", [])
+            existing_memories_list = existing_memories.get("memories", [])
+            existing_highlights = existing_memories.get("highlights", [])
+            existing_lines: List[str] = []
+            if existing_facts:
+                existing_lines.append(
+                    "Existing Facts:\n"
+                    + "\n".join(f"- {item}" for item in existing_facts[:10])
+                )
+            if existing_memories_list:
+                existing_lines.append(
+                    "Existing Memories:\n"
+                    + "\n".join(f"- {item}" for item in existing_memories_list[-10:])
+                )
+            if existing_highlights:
+                existing_lines.append(
+                    "Existing Highlights:\n"
+                    + "\n".join(f"- {item}" for item in existing_highlights[:10])
+                )
+            if existing_lines:
+                existing_block = "## Existing Memory Store\n" + "\n\n".join(
+                    existing_lines
+                )
 
         prompt = f"""
 You are an analytical assistant. Convert the repository information and recent chat into two buckets: FACTS (grounded, file-backed statements) and MEMORIES (useful conversation takeaways). Output valid JSON with keys "facts", "memories", and "highlights".
@@ -416,17 +584,44 @@ You are an analytical assistant. Convert the repository information and recent c
 {files_preview}
 {grep_analysis}
 
+{existing_block}
+
 ## Recent Conversation
 {convo_preview}
 
 ## Instructions
 - Use bullet-point style sentences.
-- Facts MUST cite specific files when possible (prioritize files identified by yudai-grep analysis).
+- Facts MUST cite specific files when possible.
 - Memories should capture goals or unresolved threads from the chat.
 - Highlights should focus on key files and folders identified by yudai-grep.
 - Respond ONLY with JSON.
 """
         return prompt.strip()
+
+    @staticmethod
+    def _build_repo_analysis_block(repo_analysis: Optional[Dict[str, Any]]) -> str:
+        if not repo_analysis:
+            return ""
+
+        key_files = repo_analysis.get("key_files", [])
+        key_folders = repo_analysis.get("key_folders", [])
+        predictions = repo_analysis.get("predictions", [])
+        dir_structure = repo_analysis.get("directory_structure", "")
+
+        return f"""
+## Yudai-Grep Analysis (Intelligent File/Folder Detection)
+### Key Files Identified:
+{chr(10).join(f"- {f}" for f in key_files[:10]) if key_files else "- No key files identified"}
+
+### Key Folders Identified:
+{chr(10).join(f"- {f}" for f in key_folders[:10]) if key_folders else "- No key folders identified"}
+
+### Query-Based Predictions:
+{chr(10).join(f"- Query: {p['query']} → {p['tool']}:{p['path']}" for p in predictions[:5]) if predictions else "- No predictions available"}
+
+### Directory Structure:
+{dir_structure[:800] if dir_structure else "Not available"}
+"""
 
     @staticmethod
     def _render_top_files(files: Iterable[RepositoryFile], limit: int = 10) -> str:
