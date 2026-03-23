@@ -88,33 +88,17 @@ class RealtimeLifecycleService:
             environment=environment or repo_branch or "main",
         )
 
-        sandbox = (
-            db.query(Sandbox)
-            .filter(Sandbox.identity_key == identity.key)
-            .order_by(Sandbox.created_at.desc())
-            .first()
+        sandbox, reused_existing_sandbox = self._resolve_sandbox_for_identity(
+            db,
+            identity_key=identity.key,
+            user_id=user_id,
+            session_id=session.id,
+            org_slug=identity.org,
+            repo_owner=identity.repo_owner,
+            repo_name=identity.repo_name,
+            environment=identity.environment,
+            repo_branch=repo_branch or "main",
         )
-
-        if sandbox and sandbox.status != SandboxStatus.TERMINATED.value:
-            if sandbox.active_session_id and sandbox.active_session_id != session.id:
-                raise as_http_exception(RealtimeErrorCode.SINGLE_ACTIVE_EDITOR_CONFLICT)
-        else:
-            sandbox = Sandbox(
-                id=self._next_id("sbx"),
-                identity_key=identity.key,
-                org_slug=identity.org,
-                repo_owner=identity.repo_owner,
-                repo_name=identity.repo_name,
-                environment=identity.environment,
-                repo_branch=repo_branch or "main",
-                status=SandboxStatus.PROVISIONING.value,
-                created_by_user_id=user_id,
-                active_session_id=session.id,
-                lifecycle_metadata={},
-            )
-            db.add(sandbox)
-            db.flush()
-
         sandbox.active_session_id = session.id
         sandbox.status = SandboxStatus.RUNNING.value
         workspace_path = os.getenv("REALTIME_WORKSPACE_PATH", "/workspace/repo")
@@ -128,19 +112,28 @@ class RealtimeLifecycleService:
 
         flags = get_realtime_feature_flags()
         if flags.modal_provisioning_enabled:
-            controller_base_url = os.getenv("CONTROLLER_BASE_URL", "http://localhost:8000")
-            modal_sb = await RealtimeModalSandbox.create(
-                sandbox_db_id=sandbox.id,
-                controller_base_url=controller_base_url,
-                github_token=github_token,
-                session_public_id=session.session_id,
-                repo_url=repo_url,
-                repo_branch=repo_branch or "main",
-                workspace_path=workspace_path,
-                env_inputs=env_inputs or {},
+            lifecycle_metadata = sandbox.lifecycle_metadata or {}
+            existing_modal_sandbox_id = lifecycle_metadata.get("modal_sandbox_id")
+            needs_modal_provision = (
+                not reused_existing_sandbox
+                or not existing_modal_sandbox_id
+                or not sandbox.tunnel_url
             )
-            sandbox.tunnel_url = modal_sb.tunnel_url
-            await get_modal_registry().register(sandbox.id, modal_sb)
+            if needs_modal_provision:
+                controller_base_url = os.getenv("CONTROLLER_BASE_URL", "http://localhost:8000")
+                modal_sb = await RealtimeModalSandbox.create(
+                    sandbox_db_id=sandbox.id,
+                    controller_base_url=controller_base_url,
+                    github_token=github_token,
+                    session_public_id=session.session_id,
+                    repo_url=repo_url,
+                    repo_branch=repo_branch or "main",
+                    workspace_path=workspace_path,
+                    env_inputs=env_inputs or {},
+                )
+                sandbox.tunnel_url = modal_sb.tunnel_url
+                await get_modal_registry().register(sandbox.id, modal_sb)
+                lifecycle_metadata["modal_sandbox_id"] = modal_sb.modal_sandbox_id
         else:
             sandbox.tunnel_url = sandbox.tunnel_url or self.sandbox_manager.build_tunnel_url(sandbox.id)
 
@@ -156,9 +149,10 @@ class RealtimeLifecycleService:
                 "repo_name": identity.repo_name,
                 "environment": identity.environment,
                 "setup_context": setup_context,
+                "reused_existing_sandbox": reused_existing_sandbox,
             }
         )
-        if flags.modal_provisioning_enabled:
+        if flags.modal_provisioning_enabled and "modal_sb" in locals():
             lifecycle_metadata["modal_sandbox_id"] = modal_sb.modal_sandbox_id
         sandbox.lifecycle_metadata = lifecycle_metadata
 
@@ -211,6 +205,7 @@ class RealtimeLifecycleService:
                 "tunnel_url": sandbox.tunnel_url,
                 "token_ttl_seconds": sandbox.tunnel_token_ttl_seconds,
                 "setup_context": setup_context,
+                "reused_existing_sandbox": reused_existing_sandbox,
             },
         )
 
@@ -224,12 +219,64 @@ class RealtimeLifecycleService:
                 "tunnel_url": sandbox.tunnel_url,
                 "token_ttl_seconds": sandbox.tunnel_token_ttl_seconds,
                 "setup_context": setup_context,
+                "reused_existing_sandbox": reused_existing_sandbox,
             },
         )
 
         self._start_probe_if_possible(sandbox_id=sandbox.id, tunnel_url=sandbox.tunnel_url)
 
         return RuntimeEnvelope(sandbox=sandbox, runtime=runtime)
+
+    def _resolve_sandbox_for_identity(
+        self,
+        db: Session,
+        *,
+        identity_key: str,
+        user_id: int,
+        session_id: int,
+        org_slug: str,
+        repo_owner: str,
+        repo_name: str,
+        environment: str,
+        repo_branch: str,
+    ) -> Tuple[Sandbox, bool]:
+        """Reuse or reactivate the sandbox row for a repo identity instead of inserting duplicates."""
+
+        sandbox = (
+            db.query(Sandbox)
+            .filter(Sandbox.identity_key == identity_key)
+            .order_by(Sandbox.created_at.desc())
+            .first()
+        )
+        if sandbox is None:
+            sandbox = Sandbox(
+                id=self._next_id("sbx"),
+                identity_key=identity_key,
+                org_slug=org_slug,
+                repo_owner=repo_owner,
+                repo_name=repo_name,
+                environment=environment,
+                repo_branch=repo_branch,
+                status=SandboxStatus.PROVISIONING.value,
+                created_by_user_id=user_id,
+                active_session_id=session_id,
+                lifecycle_metadata={},
+            )
+            db.add(sandbox)
+            db.flush()
+            return sandbox, False
+
+        sandbox.org_slug = org_slug
+        sandbox.repo_owner = repo_owner
+        sandbox.repo_name = repo_name
+        sandbox.environment = environment
+        sandbox.repo_branch = repo_branch
+        sandbox.created_by_user_id = sandbox.created_by_user_id or user_id
+        sandbox.active_session_id = session_id
+        if sandbox.status == SandboxStatus.TERMINATED.value:
+            sandbox.status = SandboxStatus.PROVISIONING.value
+            sandbox.terminated_at = None
+        return sandbox, True
 
     # ---------------------------------------------------------------------
     # Controller lifecycle endpoint operations
