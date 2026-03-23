@@ -213,7 +213,8 @@ function App() {
   const { isAuthenticated, sessionToken, initializeAuth } = useAuth();
   const clearSession = useSessionStore((state) => state.clearSession);
   const setSelectedRepository = useSessionStore((state) => state.setSelectedRepository);
-  const previousTokenRef = useRef<string | null>(null);
+  const setActiveTab = useSessionStore((state) => state.setActiveTab);
+  const previousTokenRef = useRef<string | null | undefined>(undefined);
 
   // Initialize authentication on app mount.
   useEffect(() => {
@@ -223,7 +224,7 @@ function App() {
 
   // Reset session state when the auth token changes to avoid stale data across logins or tabs.
   useEffect(() => {
-    if (previousTokenRef.current === null) {
+    if (previousTokenRef.current === undefined) {
       previousTokenRef.current = sessionToken;
       return;
     }
@@ -231,9 +232,10 @@ function App() {
     if (previousTokenRef.current !== sessionToken) {
       clearSession();
       setSelectedRepository(null);
+      setActiveTab('chat');
       previousTokenRef.current = sessionToken;
     }
-  }, [clearSession, sessionToken, setSelectedRepository]);
+  }, [clearSession, sessionToken, setSelectedRepository, setActiveTab]);
 
   // Auto-clear session store after 10 minutes of auth.
   useEffect(() => {
