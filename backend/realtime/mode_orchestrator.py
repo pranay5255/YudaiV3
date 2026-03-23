@@ -106,19 +106,31 @@ class SessionExecutionOrchestrator:
             session=session,
             objective=objective,
         )
-        execution_id = f"execp_{uuid.uuid4().hex[:24]}"
-        started_at = utc_now()
+        execution = AgentExecution(
+            id=f"exec_{uuid.uuid4().hex[:24]}",
+            session_id=session.id,
+            mode=next_mode,
+            status=SessionModeStatus.RUNNING.value,
+            execution_plan=self._build_mode_plan(next_mode, contextual_objective),
+            execution_metadata={
+                "trigger": "execution_api",
+                "objective": objective,
+                "objective_with_context": contextual_objective,
+            },
+            started_at=utc_now(),
+        )
+        db.add(execution)
 
         self._set_active_execution(
             session,
             {
-                "execution_id": execution_id,
+                "execution_id": execution.id,
                 "objective": objective,
                 "objective_with_context": contextual_objective,
                 "status": SessionModeStatus.RUNNING.value,
                 "mode": next_mode,
-                "plan": self._build_mode_plan(next_mode, contextual_objective),
-                "started_at": started_at.isoformat(),
+                "plan": execution.execution_plan or [],
+                "started_at": (execution.started_at or utc_now()).isoformat(),
                 "completed_at": None,
                 "cancel_requested": False,
                 "current_mode_execution_id": None,
@@ -135,7 +147,7 @@ class SessionExecutionOrchestrator:
         self._schedule_execution_task(
             session_public_id=session.session_id,
             user_id=user_id,
-            execution_id=execution_id,
+            execution_id=execution.id,
             objective=contextual_objective,
         )
 
@@ -145,7 +157,7 @@ class SessionExecutionOrchestrator:
             {
                 "mode": next_mode,
                 "state": SessionModeStatus.RUNNING.value,
-                "execution_id": execution_id,
+                "execution_id": execution.id,
                 "detail": "Pipeline queued",
             },
         )
@@ -1228,6 +1240,14 @@ class SessionExecutionOrchestrator:
             },
         )
 
+        from daifuUserAgent.session_service import MemoryService
+
+        MemoryService.save_session_snapshot(
+            db,
+            session,
+            trigger="architect_issue_created",
+        )
+
         self.lifecycle.mark_issue_created(
             db,
             session_public_id=session.session_id,
@@ -1348,6 +1368,14 @@ class SessionExecutionOrchestrator:
                 "coder_test_branch": test_branch,
                 "coder_config_path": result.get("config_path"),
             },
+        )
+
+        from daifuUserAgent.session_service import MemoryService
+
+        MemoryService.save_session_snapshot(
+            db,
+            session,
+            trigger="pull_request_created",
         )
 
         self.lifecycle.mark_pr_created(
