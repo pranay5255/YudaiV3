@@ -5,7 +5,6 @@ from pathlib import Path
 import sys
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -105,7 +104,7 @@ def _create_session(
     return session
 
 
-def test_single_active_editor_conflict(db_session, lifecycle_service):
+def test_same_identity_reuses_running_sandbox_for_second_session(db_session, lifecycle_service):
     db = db_session
 
     user_a = _create_user(db, "alice", "1001")
@@ -128,7 +127,7 @@ def test_single_active_editor_conflict(db_session, lifecycle_service):
         repo_branch="main",
     )
 
-    asyncio.run(
+    envelope_a = asyncio.run(
         lifecycle_service.create_runtime_for_session(
             db,
             session=session_a,
@@ -143,22 +142,103 @@ def test_single_active_editor_conflict(db_session, lifecycle_service):
     )
     db.commit()
 
-    with pytest.raises(HTTPException) as exc:
-        asyncio.run(
-            lifecycle_service.create_runtime_for_session(
-                db,
-                session=session_b,
-                user_id=user_b.id,
-                org="yudai",
-                repo_owner="octocat",
-                repo_name="yudaiv3",
-                environment="main",
-                repo_branch="main",
-                repo_url=None,
-            )
+    envelope_b = asyncio.run(
+        lifecycle_service.create_runtime_for_session(
+            db,
+            session=session_b,
+            user_id=user_b.id,
+            org="yudai",
+            repo_owner="octocat",
+            repo_name="yudaiv3",
+            environment="main",
+            repo_branch="main",
+            repo_url=None,
         )
+    )
+    db.commit()
 
-    assert exc.value.status_code == 409
+    sandbox = db.query(Sandbox).filter(Sandbox.id == envelope_a.sandbox.id).one()
+    runtimes = db.query(SessionRuntime).order_by(SessionRuntime.id.asc()).all()
+
+    assert envelope_a.sandbox.id == envelope_b.sandbox.id
+    assert sandbox.active_session_id == session_b.id
+    assert db.query(Sandbox).count() == 1
+    assert len(runtimes) == 2
+
+
+def test_terminated_identity_reuses_same_sandbox_row(db_session, lifecycle_service):
+    db = db_session
+
+    user = _create_user(db, "dora", "3001")
+    session_a = _create_session(
+        db,
+        user,
+        session_id="session_reuse_a",
+        repo_owner="octocat",
+        repo_name="yudaiv3",
+        repo_branch="main",
+    )
+    session_b = _create_session(
+        db,
+        user,
+        session_id="session_reuse_b",
+        repo_owner="octocat",
+        repo_name="yudaiv3",
+        repo_branch="main",
+    )
+
+    envelope_a = asyncio.run(
+        lifecycle_service.create_runtime_for_session(
+            db,
+            session=session_a,
+            user_id=user.id,
+            org="yudai",
+            repo_owner="octocat",
+            repo_name="yudaiv3",
+            environment="main",
+            repo_branch="main",
+            repo_url=None,
+        )
+    )
+    db.commit()
+
+    sandbox = db.query(Sandbox).filter(Sandbox.id == envelope_a.sandbox.id).one()
+    sandbox.status = SandboxStatus.TERMINATED.value
+    sandbox.terminated_at = sandbox.created_at
+    sandbox.active_session_id = None
+
+    runtime = (
+        db.query(SessionRuntime)
+        .filter(SessionRuntime.session_id == session_a.id)
+        .order_by(SessionRuntime.id.desc())
+        .first()
+    )
+    assert runtime is not None
+    runtime.status = SessionRuntimeStatus.TERMINATED.value
+    db.commit()
+
+    envelope_b = asyncio.run(
+        lifecycle_service.create_runtime_for_session(
+            db,
+            session=session_b,
+            user_id=user.id,
+            org="yudai",
+            repo_owner="octocat",
+            repo_name="yudaiv3",
+            environment="main",
+            repo_branch="main",
+            repo_url=None,
+        )
+    )
+    db.commit()
+
+    sandbox = db.query(Sandbox).filter(Sandbox.identity_key == envelope_a.sandbox.identity_key).one()
+
+    assert envelope_b.sandbox.id == envelope_a.sandbox.id
+    assert sandbox.status == SandboxStatus.RUNNING.value
+    assert sandbox.active_session_id == session_b.id
+    assert sandbox.terminated_at is None
+    assert db.query(Sandbox).count() == 1
 
 
 def test_finalize_session_execution_exports_artifact_and_terminates(db_session, lifecycle_service, tmp_path):
