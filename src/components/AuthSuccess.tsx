@@ -11,6 +11,7 @@ export const AuthSuccess: React.FC = () => {
   const navigate = useNavigate();
   const { setAuthFromCallback, clearAuth } = useAuth();
   const clearSession = useSessionStore((state) => state.clearSession);
+  const setActiveTab = useSessionStore((state) => state.setActiveTab);
   const hasProcessed = useRef(false);
 
   useEffect(() => {
@@ -58,6 +59,7 @@ export const AuthSuccess: React.FC = () => {
         // Ensure any prior auth/session data is cleared before applying the new token.
         clearAuth();
         clearSession();
+        setActiveTab('chat');
 
         // Set up the session using the session store
         setAuthFromCallback({
@@ -77,7 +79,7 @@ export const AuthSuccess: React.FC = () => {
     };
 
     handleAuthSuccess();
-  }, [navigate, setAuthFromCallback, clearSession, clearAuth]);
+  }, [navigate, setAuthFromCallback, clearSession, clearAuth, setActiveTab]);
 
   return (
     <div className="min-h-screen bg-zinc-900 flex items-center justify-center">
