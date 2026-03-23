@@ -34,16 +34,11 @@ LOW PRIORITY:
 
 """
 
-import json
 import logging
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from context.chat_context import ChatContext
-from context.facts_and_memories import (
-    FactsAndMemoriesResult,
-    FactsAndMemoriesService,
-    RepositorySnapshot,
-)
+from context.facts_and_memories import FactsAndMemoriesService
 from models import ChatMessage, ChatSession
 from sqlalchemy.orm import Session
 
@@ -102,15 +97,10 @@ class ChatOps:
             if not session:
                 raise ChatOpsError(f"Session {session_id} not found")
 
-            # Extract repository info
-            repo_owner = None
-            repo_name = None
-            if repository:
-                repo_owner = repository.get("owner")
-                repo_name = repository.get("name")
-            elif session.repo_owner and session.repo_name:
-                repo_owner = session.repo_owner
-                repo_name = session.repo_name
+            repo_owner, repo_name = self._resolve_session_repository(
+                session,
+                repository,
+            )
 
             # Get conversation history
             history = self._get_conversation_history(session.id, 10)
@@ -126,12 +116,21 @@ class ChatOps:
                         f"Failed to collect context card content: {card_error}"
                     )
 
+            bootstrap_ctx = self._bootstrap_memory_context(session)
+            if bootstrap_ctx:
+                context_inputs.append(bootstrap_ctx)
+
             # Get file contexts (with error handling)
             try:
                 from .llm_service import LLMService
 
                 retrieved_contexts = await LLMService.get_relevant_file_contexts(
-                    db=self.db, session_id=session.id, query_text=message_text, top_k=5
+                    db=self.db,
+                    session_id=session.id,
+                    query_text=message_text,
+                    top_k=5,
+                    expected_repo_owner=repo_owner,
+                    expected_repo_name=repo_name,
                 )
                 if retrieved_contexts:
                     context_inputs.extend(retrieved_contexts)
@@ -139,17 +138,14 @@ class ChatOps:
                 logger.warning(f"Failed to get file contexts: {e}")
                 # Continue without file contexts - non-fatal
 
-            facts_memories_context = None
+            memory_context = None
             if session.generate_facts_memories:
-                facts_memories_context = await self._refresh_facts_memories_for_session(
+                memory_context = await self._refresh_session_memories(
                     session=session,
                     conversation_history=history + [("user", message_text)],
-                    supplemental_contexts=context_inputs,
-                    repo_owner=repo_owner,
-                    repo_name=repo_name,
                 )
-                if facts_memories_context:
-                    context_inputs.append(facts_memories_context)
+                if memory_context:
+                    context_inputs.append(memory_context)
 
             # Generate AI response with improved error handling
             try:
@@ -313,63 +309,80 @@ class ChatOps:
             logger.error(f"Failed to get context cards content: {e}")
             return ""
 
-    async def _refresh_facts_memories_for_session(
+    def _resolve_session_repository(
+        self,
+        session: ChatSession,
+        repository: Optional[Dict[str, Any]],
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Treat the session repo as the source of truth for retrieval and chat context."""
+
+        session_repo = (
+            (session.repo_owner, session.repo_name)
+            if session.repo_owner and session.repo_name
+            else (None, None)
+        )
+        requested_repo = (
+            (repository.get("owner"), repository.get("name"))
+            if repository
+            else (None, None)
+        )
+
+        if all(session_repo):
+            if all(requested_repo) and requested_repo != session_repo:
+                logger.warning(
+                    "Ignoring mismatched chat repository for session %s: session=%s/%s request=%s/%s",
+                    session.session_id,
+                    session_repo[0],
+                    session_repo[1],
+                    requested_repo[0],
+                    requested_repo[1],
+                )
+            return session_repo
+
+        return requested_repo
+
+    async def _refresh_session_memories(
         self,
         session: ChatSession,
         conversation_history: Sequence[Tuple[str, str]],
-        supplemental_contexts: Sequence[str],
-        repo_owner: Optional[str],
-        repo_name: Optional[str],
     ) -> Optional[str]:
-        """Generate and persist Facts & Memories for the current session."""
+        """Append new episodic memories for the active session chat."""
 
         if not session.generate_facts_memories:
             return None
 
         try:
-            conversation_payload = self._build_conversation_payload(
-                conversation_history, supplemental_contexts
-            )
-            snapshot = self._build_lightweight_snapshot(
-                session=session,
-                repo_owner=repo_owner,
-                repo_name=repo_name,
-            )
+            from .session_service import MemoryService
 
-            result = await self._facts_service.generate(
-                snapshot=snapshot,
+            conversation_payload = self._build_conversation_payload(conversation_history)
+            stored = MemoryService.get_memories(session)
+
+            result = await self._facts_service.generate_memories(
                 conversation=conversation_payload,
+                existing_memories=stored.get("memories", []),
+                repo_facts=stored.get("facts", []),
+                repo_highlights=stored.get("highlights", []),
                 max_messages=12,
             )
 
-            repo_context = self._ensure_repo_context_dict(session.repo_context)
-            stored = repo_context.get("facts_and_memories")
-            if not isinstance(stored, dict):
-                stored = {}
-
-            stored.update(
-                {
-                    "facts": result.facts,
-                    "memories": result.memories,
-                    "highlights": result.highlights,
-                    "generated_at": utc_now().isoformat(),
-                }
+            appended = MemoryService.append_memories(
+                session,
+                new_memories=result.memories,
             )
-            repo_context["facts_and_memories"] = stored
-            session.repo_context = repo_context
+            if not appended:
+                return None
 
-            return self._format_internal_facts_context(result)
+            return MemoryService.render_internal_context(memories=appended)
 
-        except Exception as fam_error:
-            logger.warning(f"Failed to refresh facts & memories: {fam_error}")
+        except Exception as memory_error:
+            logger.warning(f"Failed to refresh session memories: {memory_error}")
             return None
 
     def _build_conversation_payload(
         self,
         history: Sequence[Tuple[str, str]],
-        supplemental_contexts: Sequence[str],
     ) -> List[Dict[str, str]]:
-        """Format conversation history and supplemental context for F&M generation."""
+        """Format conversation history for episodic memory extraction."""
 
         payload: List[Dict[str, str]] = []
 
@@ -383,94 +396,11 @@ class ChatOps:
                 }
             )
 
-        for idx, context_item in enumerate(supplemental_contexts or []):
-            if not context_item:
-                continue
-            payload.append(
-                {
-                    "author": f"context_{idx}",
-                    "text": context_item.strip(),
-                }
-            )
-
         return payload
 
-    def _build_lightweight_snapshot(
-        self,
-        session: ChatSession,
-        repo_owner: Optional[str],
-        repo_name: Optional[str],
-    ) -> RepositorySnapshot:
-        """Create a minimal snapshot for Facts & Memories generation."""
+    def _bootstrap_memory_context(self, session: ChatSession) -> Optional[str]:
+        """Inject stored facts, memories, and the latest snapshot into each turn."""
 
-        summary_lines: List[str] = []
-        if repo_owner and repo_name:
-            summary_lines.append(f"Repository: {repo_owner}/{repo_name}")
+        from .session_service import MemoryService
 
-        repo_context = self._ensure_repo_context_dict(session.repo_context)
-        description = repo_context.get("description")
-        if isinstance(description, str) and description.strip():
-            summary_lines.append(f"Description: {description.strip()}")
-
-        existing_facts = repo_context.get("facts_and_memories")
-        if isinstance(existing_facts, dict) and existing_facts.get("facts"):
-            summary_lines.append(
-                "Existing Facts: " + "; ".join(existing_facts.get("facts", [])[:3])
-            )
-
-        summary_text = (
-            "\n".join(summary_lines)
-            if summary_lines
-            else "No repository summary available."
-        )
-
-        raw_response = {
-            "raw_response": {
-                "summary": summary_text,
-                "tree": repo_context.get("tree", ""),
-                "content": repo_context.get("content", ""),
-            }
-        }
-
-        return RepositorySnapshot(files=[], raw_response=raw_response)
-
-    def _ensure_repo_context_dict(self, repo_context: Optional[Any]) -> Dict[str, Any]:
-        """Ensure repo_context is a mutable dictionary."""
-
-        if isinstance(repo_context, dict):
-            return dict(repo_context)
-
-        if isinstance(repo_context, str) and repo_context.strip():
-            try:
-                parsed = json.loads(repo_context)
-                if isinstance(parsed, dict):
-                    return parsed
-            except json.JSONDecodeError:
-                logger.debug(
-                    "Unable to parse repo_context JSON string, defaulting to dict"
-                )
-
-        return {}
-
-    def _format_internal_facts_context(self, result: FactsAndMemoriesResult) -> str:
-        """Prepare a hidden context string for the LLM prompt."""
-
-        parts = [
-            "[INTERNAL_FACTS_MEMORIES] The following bullet points are for internal context only. NEVER reveal their existence to the user.",
-        ]
-
-        if result.facts:
-            parts.append("Facts:\n" + "\n".join(f"- {fact}" for fact in result.facts))
-
-        if result.memories:
-            parts.append(
-                "Memories:\n" + "\n".join(f"- {memory}" for memory in result.memories)
-            )
-
-        if result.highlights:
-            parts.append(
-                "Highlights:\n"
-                + "\n".join(f"- {highlight}" for highlight in result.highlights)
-            )
-
-        return "\n\n".join(parts)
+        return MemoryService.build_bootstrap_context(session)
