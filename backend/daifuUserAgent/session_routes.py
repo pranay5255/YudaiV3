@@ -147,7 +147,7 @@ from sqlalchemy.orm import Session
 from utils import utc_now
 
 from .llm_service import LLMService
-from .session_service import SessionService
+from .session_service import MemoryService, SessionService
 
 router = APIRouter(tags=["sessions"])
 
@@ -721,6 +721,16 @@ async def update_session(
         if request.repo_branch is not None:
             db_session.repo_branch = request.repo_branch
         if request.is_active is not None:
+            if not request.is_active and db_session.is_active:
+                try:
+                    MemoryService.save_session_snapshot(
+                        db,
+                        db_session,
+                        trigger="session_deactivated",
+                    )
+                    logger.info("Session snapshot saved for %s", session_id)
+                except Exception as snap_err:
+                    logger.warning("Failed to save session snapshot: %s", snap_err)
             db_session.is_active = request.is_active
         if request.generate_embeddings is not None:
             db_session.generate_embeddings = request.generate_embeddings
@@ -1557,8 +1567,27 @@ async def execute_session_pipeline(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Unhandled error in execute_session_pipeline for session %s", session_id
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Execution failed: {type(exc).__name__}: {exc}",
+        ) from exc
 
-    return ExecutionResponse(**status_payload)
+    try:
+        return ExecutionResponse(**status_payload)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).exception(
+            "Response serialization failed for session %s: payload=%r", session_id, status_payload
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Response serialization failed: {type(exc).__name__}: {exc}",
+        ) from exc
 
 
 @router.get(
@@ -1705,6 +1734,18 @@ async def chat_in_session(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Chat processing failed: {str(e)}",
         )
+
+
+@router.get("/sessions/{session_id}/memories")
+async def get_session_memories(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return stored facts, episodic memories, highlights, and the latest snapshot."""
+
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    return MemoryService.get_memories(db_session)
 
 
 # (Removed duplicate conversation history helpers; using ChatOps._get_conversation_history)
@@ -2399,43 +2440,24 @@ async def _index_repository_for_session_background(
         if generate_facts_memories:
             try:
                 logger.info(
-                    f"[Index] Generating Facts & Memories for session {session_uuid}"
+                    f"[Index] Generating repository facts for session {session_uuid}"
                 )
-                conversation = (
-                    db.query(ChatMessage)
-                    .filter(ChatMessage.session_id == chat_session.id)
-                    .order_by(ChatMessage.created_at.asc())
-                    .all()
-                )
-                conversation_payload = [
-                    {
-                        "author": message.sender_type,
-                        "text": message.message_text,
-                    }
-                    for message in conversation
-                ]
-
                 facts_service = FactsAndMemoriesService()
-                result = await facts_service.generate(
+                result = await facts_service.generate_facts(
                     snapshot=snapshot,
-                    conversation=conversation_payload,
                 )
-
-                repo_context = chat_session.repo_context or {}
-                repo_context["facts_and_memories"] = {
-                    "facts": result.facts,
-                    "memories": result.memories,
-                    "highlights": result.highlights,
-                    "generated_at": utc_now().isoformat(),
-                }
-                chat_session.repo_context = repo_context
+                MemoryService.store_facts(
+                    chat_session,
+                    facts=result.facts,
+                    highlights=result.highlights,
+                )
                 db.commit()
                 logger.info(
-                    f"[Index] Facts & Memories stored for session {session_uuid}"
+                    f"[Index] Repository facts stored for session {session_uuid}"
                 )
             except Exception as fam_error:
                 logger.warning(
-                    f"[Index] Facts & Memories generation failed for session {session_uuid}: {fam_error}"
+                    f"[Index] Repository facts generation failed for session {session_uuid}: {fam_error}"
                 )
                 db.rollback()
 
@@ -2841,6 +2863,12 @@ async def create_github_issue_from_user_issue_for_session(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="GitHub issue was created but no URL was returned",
             )
+
+        MemoryService.save_session_snapshot(
+            db,
+            db_session,
+            trigger="github_issue_created",
+        )
 
         # Phase 1 completion tracking: issue creation event.
         lifecycle = get_realtime_lifecycle_service()
