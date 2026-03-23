@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { API, buildApiUrl } from '../config/api';
 import { useRepository } from '../hooks/useRepository';
 import { useAuthStore } from '../stores/authStore';
@@ -166,13 +167,15 @@ export function SolveIssues() {
     setRuntimeState,
     syncRuntimeState,
     setActiveTab,
-  } = useSessionStore((state) => ({
-    activeSessionId: state.activeSessionId,
-    runtimeStatus: state.runtimeStatus,
-    setRuntimeState: state.setRuntimeState,
-    syncRuntimeState: state.syncRuntimeState,
-    setActiveTab: state.setActiveTab,
-  }));
+  } = useSessionStore(
+    useShallow((state) => ({
+      activeSessionId: state.activeSessionId,
+      runtimeStatus: state.runtimeStatus,
+      setRuntimeState: state.setRuntimeState,
+      syncRuntimeState: state.syncRuntimeState,
+      setActiveTab: state.setActiveTab,
+    }))
+  );
 
   const [issues, setIssues] = useState<GitHubIssue[]>([]);
   const [selectedIssue, setSelectedIssue] = useState<GitHubIssue | null>(null);
