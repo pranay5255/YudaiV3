@@ -37,6 +37,17 @@ export const useAuthStore = create<AuthState>()(
       initializeAuth: async () => {
         const existingToken = get().sessionToken;
 
+        if (!existingToken) {
+          set({
+            user: null,
+            sessionToken: null,
+            isAuthenticated: false,
+            isLoading: false,
+            error: null,
+          });
+          return;
+        }
+
         set({ isLoading: true, error: null });
 
         try {
