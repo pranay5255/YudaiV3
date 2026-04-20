@@ -9,11 +9,11 @@ import logging
 import os
 import re
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 import httpx
-from context import CacheMetadata
 from fastapi import HTTPException, status
 from models import ChatSession, FileEmbedding
 from sentence_transformers import SentenceTransformer
@@ -23,6 +23,14 @@ from sqlalchemy.orm import Session
 from utils import utc_now
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DaifuParsedResponse:
+    text: str
+    actions: List[Dict[str, Any]]
+    questions: List[Dict[str, Any]]
+    probes: List[Dict[str, Any]]
 
 
 class LLMService:
@@ -43,6 +51,14 @@ class LLMService:
 
     BUTTON_ACTION_PATTERN = re.compile(
         r'Button\{\s*"(?P<label>[^"]+)"\s*\}', re.IGNORECASE
+    )
+    QUESTION_DIRECTIVE_PATTERN = re.compile(
+        r'Question\{\s*"(?P<text>[^"]+)"(?:\s+options=\[(?P<options>[^\]]*)\])?\s*\}',
+        re.IGNORECASE,
+    )
+    PROBE_DIRECTIVE_PATTERN = re.compile(
+        r'Probe\{\s*"(?P<query>[^"]+)"\s*\}',
+        re.IGNORECASE,
     )
 
     @staticmethod
@@ -71,8 +87,13 @@ class LLMService:
 
     @staticmethod
     def format_chat_response(message_text: str) -> Tuple[str, List[Dict[str, Any]]]:
+        parsed = LLMService.format_chat_response_v2(message_text)
+        return parsed.text, parsed.actions
+
+    @staticmethod
+    def format_chat_response_v2(message_text: str) -> DaifuParsedResponse:
         if not message_text:
-            return "", []
+            return DaifuParsedResponse(text="", actions=[], questions=[], probes=[])
 
         matches = list(LLMService.BUTTON_ACTION_PATTERN.finditer(message_text))
         suggested_titles = LLMService._extract_suggested_task_titles(message_text)
@@ -90,9 +111,71 @@ class LLMService:
                 }
             )
 
-        cleaned_text = LLMService.BUTTON_ACTION_PATTERN.sub("", message_text).strip()
+        questions: List[Dict[str, Any]] = []
+        for match in LLMService.QUESTION_DIRECTIVE_PATTERN.finditer(message_text):
+            text = match.group("text").strip()
+            if not text:
+                continue
+            questions.append(
+                {
+                    "text": text,
+                    "options": LLMService._parse_question_options(
+                        match.group("options")
+                    ),
+                }
+            )
+
+        probes: List[Dict[str, Any]] = []
+        for match in LLMService.PROBE_DIRECTIVE_PATTERN.finditer(message_text):
+            query = match.group("query").strip()
+            if query:
+                probes.append({"query": query})
+
+        cleaned_text = LLMService.BUTTON_ACTION_PATTERN.sub("", message_text)
+        cleaned_text = LLMService.QUESTION_DIRECTIVE_PATTERN.sub("", cleaned_text)
+        cleaned_text = LLMService.PROBE_DIRECTIVE_PATTERN.sub("", cleaned_text).strip()
         cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text).strip()
-        return cleaned_text, actions
+        return DaifuParsedResponse(
+            text=cleaned_text,
+            actions=actions,
+            questions=questions,
+            probes=probes,
+        )
+
+    @staticmethod
+    def _parse_question_options(options_raw: Optional[str]) -> List[Dict[str, str]]:
+        if not options_raw:
+            return []
+
+        labels: List[str] = []
+        try:
+            parsed = json.loads(f"[{options_raw}]")
+            if isinstance(parsed, list):
+                labels = [str(item).strip() for item in parsed if str(item).strip()]
+        except json.JSONDecodeError:
+            labels = [
+                item.strip().strip("'\"")
+                for item in options_raw.split(",")
+                if item.strip().strip("'\"")
+            ]
+
+        options: List[Dict[str, str]] = []
+        seen: set[str] = set()
+        for index, label in enumerate(labels):
+            option_id = LLMService._slugify_option_id(label) or f"option-{index + 1}"
+            base_id = option_id
+            suffix = 2
+            while option_id in seen:
+                option_id = f"{base_id}-{suffix}"
+                suffix += 1
+            seen.add(option_id)
+            options.append({"id": option_id, "label": label})
+        return options
+
+    @staticmethod
+    def _slugify_option_id(label: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+        return slug[:64]
 
     @staticmethod
     def get_api_key() -> str:
@@ -252,6 +335,109 @@ class LLMService:
             )
 
     @staticmethod
+    async def stream_response(
+        prompt: str,
+        model: str = None,
+        temperature: float = None,
+        max_tokens: int = None,
+        timeout: int = None,
+    ) -> AsyncIterator[str]:
+        """
+        Stream response deltas from the configured OpenRouter-compatible chat endpoint.
+
+        The public websocket layer consumes these deltas directly, so callers get
+        first-token latency instead of post-processing a completed response.
+        """
+        model = model or LLMService.DEFAULT_MODEL
+        temperature = temperature or LLMService.DEFAULT_TEMPERATURE
+        max_tokens = max_tokens or LLMService.DEFAULT_MAX_TOKENS
+        timeout = timeout or LLMService.DEFAULT_TIMEOUT
+        request_start: float = 0.0
+
+        try:
+            api_key = LLMService.get_api_key()
+            url = LLMService.get_api_url()
+
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+            }
+            body = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "stream": True,
+            }
+            httpx_timeout = httpx.Timeout(
+                connect=10.0,
+                read=float(timeout),
+                write=30.0,
+                pool=5.0,
+            )
+
+            request_start = time.time()
+            async with httpx.AsyncClient(timeout=httpx_timeout) as client:
+                async with client.stream("POST", url, headers=headers, json=body) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        line = line.strip()
+                        if not line or line.startswith(":"):
+                            continue
+                        if not line.startswith("data:"):
+                            continue
+
+                        data = line[len("data:") :].strip()
+                        if data == "[DONE]":
+                            break
+
+                        try:
+                            payload = json.loads(data)
+                        except json.JSONDecodeError:
+                            logger.debug("Skipping malformed LLM stream payload: %s", data[:200])
+                            continue
+
+                        choices = payload.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta") or {}
+                        chunk = delta.get("content")
+                        if isinstance(chunk, str) and chunk:
+                            yield chunk
+
+            processing_time = (time.time() - request_start) * 1000
+            logger.info("LLM response streamed in %.2fms", processing_time)
+
+        except httpx.TimeoutException as e:
+            processing_time = (time.time() - request_start) * 1000
+            logger.error("LLM stream timeout after %.2fms: %s", processing_time, e)
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="LLM request timed out",
+            )
+        except httpx.HTTPStatusError as e:
+            processing_time = (time.time() - request_start) * 1000
+            content = e.response.text if e.response is not None else str(e)
+            logger.error(
+                "LLM stream HTTP error after %.2fms: %s %s",
+                processing_time,
+                e.response.status_code if e.response else "unknown",
+                content,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"LLM HTTP error: {content}",
+            )
+        except Exception as e:
+            processing_time = (time.time() - request_start) * 1000
+            logger.exception("LLM streaming failed after %.2fms: %s", processing_time, e)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"LLM stream failed: {str(e)}",
+            )
+
+    @staticmethod
     async def get_relevant_file_contexts(
         db: Session,
         session_id: int,
@@ -326,6 +512,7 @@ class LLMService:
         github_context: dict = None,
         conversation_history: List[Tuple[str, str]] = None,
         file_contexts: List[str] = None,
+        probe_context: Optional[str] = None,
         fallback_repo_summary: Optional[str] = None,
         model: str = None,
         temperature: float = None,
@@ -341,6 +528,7 @@ class LLMService:
             github_context: Rich repository context pulled from GitHub APIs
             conversation_history: Recent conversation turns
             file_contexts: Supplemental repository snippets
+            probe_context: Code exploration results returned by sandbox probes.
             fallback_repo_summary: Cached textual summary when GitHub context retrieval fails.
                 Expected to be sourced from ``ChatContext.build_combined_summary`` so it
                 reflects the JSON cache stored in ``/tmp/github_context_cache``.
@@ -356,6 +544,7 @@ class LLMService:
                     github_context=github_context,
                     conversation=conversation_history or [],
                     file_contexts=file_contexts,
+                    probe_context=probe_context,
                     fallback_repo_summary=fallback_repo_summary,
                 )
             except Exception as prompt_error:
@@ -372,10 +561,12 @@ class LLMService:
                     max_tokens=max_tokens,
                     timeout=timeout,
                 )
-                formatted_text, actions = LLMService.format_chat_response(raw_response)
+                parsed = LLMService.format_chat_response_v2(raw_response)
                 return {
-                    "text": formatted_text,
-                    "actions": actions,
+                    "text": parsed.text,
+                    "actions": parsed.actions,
+                    "questions": parsed.questions,
+                    "probes": parsed.probes,
                     "raw_response": raw_response,
                 }
             except Exception as generation_error:
@@ -385,7 +576,13 @@ class LLMService:
                     "I'm having trouble processing your request right now. "
                     "Please try again in a moment."
                 )
-                return {"text": fallback_text, "actions": [], "raw_response": fallback_text}
+                return {
+                    "text": fallback_text,
+                    "actions": [],
+                    "questions": [],
+                    "probes": [],
+                    "raw_response": fallback_text,
+                }
 
         except Exception as e:
             logger.error(f"Failed to generate response with stored context: {e}")
@@ -394,13 +591,20 @@ class LLMService:
                 "I understand you're asking about something, but I'm currently "
                 "experiencing technical difficulties. Please try again in a moment."
             )
-            return {"text": fallback_text, "actions": [], "raw_response": fallback_text}
+            return {
+                "text": fallback_text,
+                "actions": [],
+                "questions": [],
+                "probes": [],
+                "raw_response": fallback_text,
+            }
 
     @staticmethod
     def _build_daifu_prompt_from_context(
         github_context: dict = None,
         conversation: List[Tuple[str, str]] = None,
         file_contexts: List[str] = None,
+        probe_context: Optional[str] = None,
         fallback_repo_summary: Optional[str] = None,
     ) -> str:
         """
@@ -410,6 +614,7 @@ class LLMService:
             github_context: Pre-fetched comprehensive GitHub context dictionary
             conversation: List of (speaker, message) tuples
             file_contexts: Optional list of file context strings
+            probe_context: Optional code exploration context produced by probes.
             fallback_repo_summary: Optional textual summary when GitHub context is unavailable.
                 This should come from :class:`ChatContext` which reads the cached
                 JSON stored in ``/tmp/github_context_cache``.
@@ -476,6 +681,24 @@ You can break down the request into "bugs", "features", or "tasks" in your expla
 IMPORTANT: If the request is complex or involves multiple issues, ask and confirm with the USER which aspects to prioritize.
 If authentication or additional permissions are needed, ask the USER to provide them.
 </issue_analysis>
+
+<clarifying_questions>
+When you need more information from the user, emit:
+  Question{"your question text" options=["option1", "option2"]}
+Rules: Max 2 questions per response. Options are optional for open-ended questions.
+</clarifying_questions>
+
+<code_exploration>
+When you want the system to explore the codebase for context, emit:
+  Probe{"natural language description of what you need to know"}
+Examples:
+  Probe{"how does the authentication middleware connect to the database models?"}
+  Probe{"what test files exist for the payment processing module?"}
+  Probe{"find the route handlers that serve the /api/sessions endpoints"}
+Rules: Max 3 probes per response. Describe WHAT you need, not HOW to find it.
+Results appear automatically in your next turn's context.
+You can combine Questions and Probes; probes run while the user answers.
+</code_exploration>
 
 [Final Instructions]
 Answer the USER's request using the relevant tool(s), if they are available. Check that all the required parameters for each tool call are provided or can reasonably be inferred from context. IF there are no relevant tools or there are missing values for required parameters, ask the USER to supply these values; otherwise proceed with the tool calls. If the USER provides a specific value for a parameter (for example provided in quotes), make sure to use that value EXACTLY. DO NOT make up values for or ask about optional parameters. Carefully analyze descriptive terms in the request as they may indicate required parameter values that should be included even if not explicitly quoted. USER-provided contexts (e.g., conversations, files) are incorporated directly into the prompt.
@@ -627,6 +850,14 @@ parameters: object,
                 # Continue with default values
 
             # Format support contexts if provided
+            probe_section = ""
+            if probe_context:
+                probe_section = (
+                    "\n<CODE_EXPLORATION_BEGIN>\n"
+                    f"{probe_context.strip()}\n"
+                    "</CODE_EXPLORATION_END>\n"
+                )
+
             file_contexts_str = ""
             if file_contexts:
                 file_contexts_str = "Session Support Context:\n" + "\n".join(
@@ -658,6 +889,7 @@ parameters: object,
 {issues_str}
 {branches_str}
 </GITHUB_CONTEXT_END>
+{probe_section}
 
 <SUPPORT_CONTEXT_BEGIN>
 {file_contexts_str}
@@ -684,7 +916,9 @@ parameters: object,
         if metadata is None:
             return None
 
-        cache_meta: Optional[CacheMetadata]
+        from context.cache_metadata import CacheMetadata
+
+        cache_meta: Optional[Any]
         if isinstance(metadata, CacheMetadata):
             cache_meta = metadata
         elif isinstance(metadata, dict):
@@ -725,6 +959,8 @@ parameters: object,
 
         if payload is None:
             raise ValueError("Cache payload must not be None")
+
+        from context.cache_metadata import CacheMetadata
 
         if isinstance(metadata, CacheMetadata):
             cache_meta = metadata

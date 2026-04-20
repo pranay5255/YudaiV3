@@ -152,6 +152,11 @@ export interface CreateGitHubIssueResponse {
   success: boolean;
   github_url: string;
   message: string;
+  github_issue_number?: number;
+  execution_started?: boolean;
+  execution_id?: string;
+  execution_status?: string;
+  execution_error?: string;
 }
 
 // ============================================================================

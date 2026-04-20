@@ -487,8 +487,64 @@ class ChatContext:
 
         summary = cached.get("summary")
         parts: List[str] = []
+        repository = cached.get("repository")
+        if isinstance(repository, dict):
+            full_name = repository.get("full_name") or (
+                f"{self.repo_owner}/{self.repo_name}"
+                if self.repo_owner and self.repo_name
+                else None
+            )
+            if isinstance(full_name, str) and full_name.strip():
+                parts.append(f"Repository: {full_name.strip()}")
+
+            description = repository.get("description")
+            if isinstance(description, str) and description.strip():
+                parts.append(f"Description: {description.strip()}")
+
+            language = repository.get("language")
+            if isinstance(language, str) and language.strip():
+                parts.append(f"Language: {language.strip()}")
+
         if isinstance(summary, str) and summary.strip():
             parts.append(f"GitIngest Summary:\n{summary.strip()}")
+
+        issues = cached.get("recent_issues")
+        if isinstance(issues, list) and issues:
+            issue_lines: List[str] = []
+            for issue in issues[:5]:
+                if not isinstance(issue, dict):
+                    continue
+                number = issue.get("number", "?")
+                title = str(issue.get("title") or "").strip()
+                if title:
+                    issue_lines.append(f"- #{number}: {title}")
+            if issue_lines:
+                parts.append("Recent Open Issues:\n" + "\n".join(issue_lines))
+
+        commits = cached.get("recent_commits")
+        if isinstance(commits, list) and commits:
+            commit_lines: List[str] = []
+            for commit in commits[:5]:
+                if not isinstance(commit, dict):
+                    continue
+                commit_payload = commit.get("commit")
+                if isinstance(commit_payload, dict):
+                    message = str(commit_payload.get("message") or "").strip()
+                    author_payload = commit_payload.get("author")
+                    author = (
+                        str(author_payload.get("name") or "").strip()
+                        if isinstance(author_payload, dict)
+                        else ""
+                    )
+                else:
+                    message = str(commit.get("message") or "").strip()
+                    author = str(commit.get("author") or "").strip()
+                if message:
+                    commit_lines.append(
+                        f"- {message}" + (f" ({author})" if author else "")
+                    )
+            if commit_lines:
+                parts.append("Recent Commits:\n" + "\n".join(commit_lines))
 
         chunks = cached.get("context_chunks")
         if isinstance(chunks, list) and chunks:
@@ -601,9 +657,7 @@ class ChatContext:
                 cached_summary = self._format_cached_context(cached)
 
         if not cached_summary:
-            latest_context = await self.ensure_github_context()
-            if latest_context:
-                cached_summary = self._format_cached_context(latest_context)
+            cached_summary = await self.gitingest_fallback()
 
         if not cached_summary:
             if self.repo_owner and self.repo_name:

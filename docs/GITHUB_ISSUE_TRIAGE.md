@@ -14,12 +14,31 @@ Scope: open GitHub issues only, excluding pull requests.
 
 ## Recommended Execution Order
 
-1. Quick wins / low risk: `#138`, `#180`, `#181`, `#184`
-2. Frontend UX batch: `#186`, `#183`, `#185`, `#182`
-3. Backend agent-framework epic: `#162` -> `#163/#164/#165/#167` -> `#166/#168/#169/#170` -> `#171/#177/#178/#172` -> `#173/#174/#175/#176` -> `#179`
-4. GitHub automation: `#60`, `#63`, then `#16`
-5. Auth/org epic: decide `#139` vs `#135` architecture first; do not start both independently.
-6. Needs product design first: `#143`
+1. Close/verify solved drift: `#138`
+2. Finish immediate 3-mode MSWEA pipeline: reframe `#173`, `#174`, `#175` around mode configs/contracts, then add end-to-end controller tests.
+3. Frontend execution visibility: keep `#182` open only for remaining loading/progress polish after chat streaming and controller-proxied sandbox streams.
+4. Quick frontend wins / low risk: `#180`, `#181`, `#184`
+5. Frontend UX batch: `#186`, `#183`, `#185`
+6. Backend agent-framework epic after current MSWEA path is stable: `#162` -> `#163/#164/#165/#167` -> `#166/#168/#169/#170` -> `#171/#177/#178/#172` -> `#176` -> `#179`
+7. GitHub automation: `#60`, `#63`, then `#16`
+8. Auth/org epic: decide `#139` vs `#135` architecture first; do not start both independently.
+9. Needs product design first: `#143`
+
+## 2026-04-20 Drift Resolution Flags
+
+| Issue | Flag | Action |
+| --- | --- | --- |
+| `#138` | Solved pending merge/close | Modal image now installs `pgvector`; `uv run modal` preflight and workflow probes verified sandbox creation, healthcheck, exec, artifacts, and termination. Close after this branch lands or after one production preflight. |
+| `#182` | Partially solved, scope reduced | Frontend chat token streaming works; sandbox stdout/stderr is now proxied through the unified controller WebSocket and grouped in `TrajectoryViewer`. Keep open for UX polish: loading states, mode progress summaries, cancel/retry affordances. |
+| `#173` | Reframe | Do not build a duplicate `ArchitectSubagent` now. Treat this as Architect MSWEA config/contract: consume an existing GitHub issue, ask clarifying questions when needed, search repo context, and append `.yudai/context.md`. |
+| `#174` | Reframe | Do not build a duplicate `TesterSubagent` now. Treat this as Tester MSWEA config/contract: only write tests/test fixtures, commit a tester branch, and append `.yudai/context.md`. |
+| `#175` | Reframe | Do not build a duplicate `CoderSubagent` now. Treat this as Coder MSWEA config/contract plus PR creation: consume tester branch/context, implement, test, push, and emit PR metadata. |
+| `#166` | Coalesce/rename | `sandbox_exec_broker`, `sandbox_manager`, and artifact shims were dead compatibility surfaces. Future work should wire the provider into canonical `lifecycle.py`, `sandbox_transport.py`, and `cache_store.py` only. |
+| `#167`, `#168`, `#169`, `#170` | Keep as staged provider epic | Still valid after dead-code cleanup. Implement ABCs only after the current Modal runtime path is protected by tests. |
+| `#171`, `#172`, `#176`, `#177`, `#178`, `#179` | Defer | Keep for a later first-class Yudai agent framework. They should not block the immediate mini-swe-agent 3-mode pipeline. |
+| New issue needed | Add | "Auto-start 3-mode execution after GitHub issue creation and verify DB state through Architect -> Tester -> Coder." |
+| New issue needed | Add | "Add structured MSWEA result artifacts and parse them instead of relying only on stdout JSON." |
+| New issue needed | Add | "Canonicalize realtime docs around unified controller WebSocket and remove stale SSE/direct tunnel references." |
 
 ## Issue Categorization
 

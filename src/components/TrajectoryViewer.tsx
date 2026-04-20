@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { FileText, ChevronRight, ChevronDown, DollarSign, MessageSquare, Clock, CheckCircle, XCircle, AlertCircle, Radio, Wrench } from 'lucide-react';
 import { useSessionWebSocket } from '../hooks/useSessionWebSocket';
 import type { TrajectoryData, ToolCallInfo, AgentQuestionInfo } from '../types/sessionTypes';
-import trajectoryData from '../data/last_mini_run.traj.json';
 import { UserQuestionPrompt } from './UserQuestionPrompt';
 
 interface TrajectoryViewerProps {
@@ -40,7 +39,6 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({
   const toolCalls: ToolCallInfo[] = wsStream.toolCalls;
   const agentQuestion: AgentQuestionInfo | null = wsStream.agentQuestion;
 
-  // Static fallback data
   const [staticState, setStaticState] = useState<{
     trajectory: TrajectoryData | null;
     loading: boolean;
@@ -51,25 +49,14 @@ export const TrajectoryViewer: React.FC<TrajectoryViewerProps> = ({
     error: null,
   });
 
-  // Load static data if not in live mode
   useEffect(() => {
     if (isLive) return;
 
-    try {
-      const resolvedTrajectory = staticData ?? (trajectoryData as TrajectoryData);
-      setStaticState({
-        trajectory: resolvedTrajectory,
-        loading: false,
-        error: null,
-      });
-    } catch (err) {
-      console.error('Failed to load trajectory:', err);
-      setStaticState({
-        trajectory: null,
-        loading: false,
-        error: err instanceof Error ? err.message : 'Failed to load trajectory',
-      });
-    }
+    setStaticState({
+      trajectory: staticData ?? null,
+      loading: false,
+      error: null,
+    });
   }, [isLive, staticData]);
 
   // Auto-scroll to latest message in live mode

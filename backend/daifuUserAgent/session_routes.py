@@ -91,14 +91,13 @@ from context import (
 from daifuUserAgent.githubOps import GitHubOps
 from db.database import SessionLocal, get_db
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from realtime.errors import RealtimeErrorCode, error_payload
 from realtime.lifecycle import get_realtime_lifecycle_service
 from realtime.mode_orchestrator import (
     ExecutionConflictError,
     ExecutionNotFoundError,
     get_session_execution_orchestrator,
 )
-from realtime.ws_hub import get_ws_hub
+from realtime.ws_protocol import get_ws_hub
 from realtime.ws_protocol import WSMessageType
 
 # Import from filedeps.py
@@ -142,6 +141,7 @@ from models import (
     UserIssueResponse,
 )
 from pgvector.sqlalchemy import Vector
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Session
 
 from utils import utc_now
@@ -1355,7 +1355,7 @@ async def ask_question_for_session(
     )
     db.add(question)
 
-    mode_metadata = db_session.mode_metadata or {}
+    mode_metadata = dict(db_session.mode_metadata or {})
     if request.objective:
         mode_metadata["pending_resume_objective"] = request.objective.strip()
     mode_metadata["last_question_id"] = question.question_id
@@ -1436,14 +1436,30 @@ async def answer_session_question(
     question.answer_text = answer_text or None
     question.status = UserQuestionStatus.ANSWERED.value
     question.answered_at = utc_now()
-    db_session.mode_status = SessionModeStatus.IDLE.value
-    db_session.mode_updated_at = utc_now()
     db_session.last_activity = utc_now()
 
     mode_metadata = db_session.mode_metadata or {}
     mode_metadata["last_answered_question_id"] = question.question_id
     mode_metadata["last_answered_question_at"] = utc_now().isoformat()
+    pending_question_ids = [
+        str(item)
+        for item in (mode_metadata.get("pending_question_ids") or [])
+        if str(item).strip() and str(item).strip() != question_id
+    ]
+    if pending_question_ids:
+        mode_metadata["pending_question_ids"] = pending_question_ids
+        db_session.mode_status = SessionModeStatus.WAITING_FOR_INPUT.value
+    else:
+        mode_metadata["pending_question_ids"] = []
+        if (
+            mode_metadata.get("gathering_state") in {"probes_done", "complete"}
+            or not mode_metadata.get("pending_probe_ids")
+        ):
+            mode_metadata["gathering_state"] = "complete"
+        db_session.mode_status = SessionModeStatus.IDLE.value
+    db_session.mode_updated_at = utc_now()
     db_session.mode_metadata = mode_metadata
+    flag_modified(db_session, "mode_metadata")
 
     resumed = False
     resumed_mode: Optional[str] = None
@@ -1452,6 +1468,7 @@ async def answer_session_question(
     if (
         request.resume_execution
         and was_waiting_for_input
+        and not pending_question_ids
         and realtime_flags.mode_orchestrator_enabled
         and next_mode != SessionMode.COMPLETE.value
     ):
@@ -1484,9 +1501,10 @@ async def answer_session_question(
                 objective_seed = last_user_message.message_text
 
         objective_seed = objective_seed or "Continue the current workflow."
-        mode_metadata = db_session.mode_metadata or {}
+        mode_metadata = dict(db_session.mode_metadata or {})
         mode_metadata["pending_resume_objective"] = objective_seed
         db_session.mode_metadata = mode_metadata
+        flag_modified(db_session, "mode_metadata")
         db.commit()
         try:
             execution_status = await orchestrator.resume_execution(
@@ -2842,7 +2860,7 @@ async def create_github_issue_from_user_issue_for_session(
         from .session_service import SessionService
 
         # Ensure session exists and belongs to user
-        _ = SessionService.ensure_owned_session(db, current_user.id, session_id)
+        db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
 
         # Create GitHub issue using consolidated IssueOps (context assembled internally)
         issue_service = IssueOpsService(db)
@@ -2870,6 +2888,32 @@ async def create_github_issue_from_user_issue_for_session(
             trigger="github_issue_created",
         )
 
+        db_session.architect_issue_url = result.github_issue_url
+        db_session.architect_issue_number = result.github_issue_number
+
+        issue_ref = (
+            f"#{result.github_issue_number}"
+            if result.github_issue_number is not None
+            else result.github_issue_url
+        )
+        execution_objective = "\n\n".join(
+            part
+            for part in [
+                f"Resolve GitHub issue {issue_ref}: {result.title}",
+                f"GitHub issue URL: {result.github_issue_url}",
+                f"Repository: {result.repo_owner}/{result.repo_name}@{db_session.repo_branch or 'main'}",
+                f"Issue details:\n{result.issue_text_raw or result.description or ''}",
+            ]
+            if part and part.strip()
+        )
+        db_session.mode_metadata = {
+            **(db_session.mode_metadata or {}),
+            "pending_resume_objective": execution_objective,
+            "seed_github_issue_url": result.github_issue_url,
+            "seed_github_issue_number": result.github_issue_number,
+            "seed_user_issue_id": result.issue_id,
+        }
+
         # Phase 1 completion tracking: issue creation event.
         lifecycle = get_realtime_lifecycle_service()
         lifecycle.mark_issue_created(
@@ -2881,10 +2925,56 @@ async def create_github_issue_from_user_issue_for_session(
         )
         db.commit()
 
+        execution_started = False
+        execution_id = None
+        execution_status = None
+        execution_error = None
+
+        realtime_flags = get_realtime_feature_flags()
+        if realtime_flags.mode_orchestrator_enabled:
+            try:
+                status_payload = await get_session_execution_orchestrator().start_execution(
+                    db,
+                    session=db_session,
+                    user_id=current_user.id,
+                    objective=execution_objective,
+                )
+                execution_started = True
+                execution_id = str(status_payload.get("execution_id") or "")
+                execution_status = str(status_payload.get("status") or "")
+            except ExecutionConflictError as exc:
+                execution_error = str(exc)
+                execution_status = db_session.mode_status
+                logger.info(
+                    "GitHub issue %s created, but execution was not started for session %s: %s",
+                    result.github_issue_url,
+                    session_id,
+                    exc,
+                )
+            except Exception as exc:
+                execution_error = str(exc)
+                execution_status = db_session.mode_status
+                logger.exception(
+                    "GitHub issue %s created, but execution auto-start failed for session %s",
+                    result.github_issue_url,
+                    session_id,
+                )
+
+        message = f"GitHub issue created successfully: {result.github_issue_url}"
+        if execution_started and execution_id:
+            message = f"{message}. 3-mode execution started: {execution_id}"
+        elif execution_error:
+            message = f"{message}. Execution was not started: {execution_error}"
+
         return CreateGitHubIssueResponse(
             success=True,
             github_url=result.github_issue_url,
-            message=f"GitHub issue created successfully: {result.github_issue_url}",
+            github_issue_number=result.github_issue_number,
+            message=message,
+            execution_started=execution_started,
+            execution_id=execution_id,
+            execution_status=execution_status,
+            execution_error=execution_error,
         )
 
     except HTTPException:

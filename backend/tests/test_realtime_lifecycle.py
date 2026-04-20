@@ -104,7 +104,7 @@ def _create_session(
     return session
 
 
-def test_same_identity_reuses_running_sandbox_for_second_session(db_session, lifecycle_service):
+def test_same_repo_different_users_get_isolated_sandboxes(db_session, lifecycle_service):
     db = db_session
 
     user_a = _create_user(db, "alice", "1001")
@@ -157,12 +157,11 @@ def test_same_identity_reuses_running_sandbox_for_second_session(db_session, lif
     )
     db.commit()
 
-    sandbox = db.query(Sandbox).filter(Sandbox.id == envelope_a.sandbox.id).one()
     runtimes = db.query(SessionRuntime).order_by(SessionRuntime.id.asc()).all()
 
-    assert envelope_a.sandbox.id == envelope_b.sandbox.id
-    assert sandbox.active_session_id == session_b.id
-    assert db.query(Sandbox).count() == 1
+    assert envelope_a.sandbox.id != envelope_b.sandbox.id
+    assert envelope_a.sandbox.identity_key != envelope_b.sandbox.identity_key
+    assert db.query(Sandbox).count() == 2
     assert len(runtimes) == 2
 
 

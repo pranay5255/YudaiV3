@@ -44,13 +44,6 @@ def _normalize_context_cards(raw: Any) -> list[str]:
     return values
 
 
-def _chunk_text(text: str, chunk_size: int) -> list[str]:
-    if chunk_size <= 0:
-        return [text]
-    if not text:
-        return [""]
-    return [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
-
 def _to_sandbox_response(sandbox) -> SandboxResponse:
     return SandboxResponse(
         sandbox_id=sandbox.id,
@@ -403,8 +396,6 @@ async def unified_session_websocket(
     )
 
     shutdown = asyncio.Event()
-    ws_chat_chunk_size = int(os.getenv("REALTIME_WS_CHAT_CHUNK_SIZE", "120"))
-
     async def heartbeat_loop() -> None:
         while not shutdown.is_set():
             await asyncio.sleep(5)
@@ -416,18 +407,17 @@ async def unified_session_websocket(
                 shutdown.set()
                 return
 
-    async def stream_llm_chunks(*, text: str, message_id: Optional[str]) -> None:
-        chunks = _chunk_text(text, ws_chat_chunk_size)
-        for index, chunk in enumerate(chunks):
-            is_final = index == len(chunks) - 1
-            payload: Dict[str, Any] = {
-                "stream": "llm",
-                "text": chunk,
-                "final": is_final,
-            }
-            if is_final and message_id:
-                payload["message_id"] = message_id
-            await websocket.send_text(build_envelope(WSMessageType.LLM_STREAM, payload))
+    async def send_llm_delta(chunk: str) -> None:
+        await websocket.send_text(
+            build_envelope(
+                WSMessageType.LLM_STREAM,
+                {
+                    "stream": "llm",
+                    "text": chunk,
+                    "final": False,
+                },
+            )
+        )
 
     async def receive_loop() -> None:
         while not shutdown.is_set():
@@ -475,10 +465,11 @@ async def unified_session_websocket(
 
                 try:
                     chat_ops = ChatOps(db)
-                    result = await chat_ops.process_chat_message(
+                    result = await chat_ops.process_chat_message_stream(
                         session_id=session_id,
                         user_id=user.id,
                         message_text=content,
+                        on_chunk=send_llm_delta,
                         context_cards=context_cards or None,
                         repository=repository,
                     )
@@ -498,7 +489,17 @@ async def unified_session_websocket(
                     )
                     continue
 
-                await stream_llm_chunks(text=reply_text, message_id=message_id)
+                final_payload: Dict[str, Any] = {
+                    "stream": "llm",
+                    "text": "",
+                    "final": True,
+                    "final_text": reply_text,
+                }
+                if message_id:
+                    final_payload["message_id"] = message_id
+                await websocket.send_text(
+                    build_envelope(WSMessageType.LLM_STREAM, final_payload)
+                )
                 await websocket.send_text(
                     build_envelope(
                         WSMessageType.STATUS,

@@ -237,6 +237,8 @@ export const Chat: React.FC<ChatProps> = ({
     isLoadingMessages,
     messageError,
     runtimeStatus,
+    isExploringCodebase,
+    explorationDetail,
     sendChatMessage,
     createContextCard,
     createIssueWithContext,
@@ -244,6 +246,7 @@ export const Chat: React.FC<ChatProps> = ({
     loadMessages,
     setRuntimeState,
     syncRuntimeState,
+    setActiveTab,
   } = useSessionStore(
     useShallow((state) => ({
       activeSessionId: state.activeSessionId,
@@ -255,6 +258,8 @@ export const Chat: React.FC<ChatProps> = ({
       isLoadingMessages: state.isLoadingMessages,
       messageError: state.messageError,
       runtimeStatus: state.runtimeStatus,
+      isExploringCodebase: state.isExploringCodebase,
+      explorationDetail: state.explorationDetail,
       sendChatMessage: state.sendChatMessage,
       createContextCard: state.createContextCard,
       createIssueWithContext: state.createIssueWithContext,
@@ -262,6 +267,7 @@ export const Chat: React.FC<ChatProps> = ({
       loadMessages: state.loadMessages,
       setRuntimeState: state.setRuntimeState,
       syncRuntimeState: state.syncRuntimeState,
+      setActiveTab: state.setActiveTab,
     }))
   );
 
@@ -487,7 +493,18 @@ export const Chat: React.FC<ChatProps> = ({
             isOpen: false,
             data: null,
           });
-          showError(`✓ GitHub issue created successfully! ${result.github_url}`);
+          if (result.execution_started) {
+            setActiveTab('ideas');
+            if (activeSessionId) {
+              void syncRuntimeState(activeSessionId).catch((runtimeError) => {
+                console.warn('[Chat] Failed to refresh runtime state after execution auto-start:', runtimeError);
+              });
+              void loadMessages(activeSessionId).catch((refreshError) => {
+                console.warn('[Chat] Failed to refresh messages after execution auto-start:', refreshError);
+              });
+            }
+          }
+          showError(result.message || `GitHub issue created successfully: ${result.github_url}`);
         } else {
           showError(result?.message || 'Failed to create GitHub issue');
         }
@@ -496,7 +513,15 @@ export const Chat: React.FC<ChatProps> = ({
       console.error('[Chat] Failed to create GitHub issue:', error);
       showError(`Failed to create GitHub issue: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [issuePreviewModal.data, showError, createGitHubIssueFromUserIssue]);
+  }, [
+    activeSessionId,
+    issuePreviewModal.data,
+    showError,
+    createGitHubIssueFromUserIssue,
+    loadMessages,
+    setActiveTab,
+    syncRuntimeState,
+  ]);
 
   const handleRegenerateIssue = useCallback(async () => {
     // Close the preview and regenerate
@@ -663,6 +688,17 @@ export const Chat: React.FC<ChatProps> = ({
           <p className="text-error/90 text-sm font-mono">
             {sessionError || messageError || 'A session error occurred. Re-select the repository to create a new session.'}
           </p>
+        </div>
+      )}
+
+      {isExploringCodebase && (
+        <div className="bg-cyan/10 border border-cyan/30 rounded-lg px-4 py-3 mx-4 mt-4 animate-fade-in">
+          <div className="flex items-center gap-3">
+            <span className="w-2 h-2 rounded-full bg-cyan animate-pulse" />
+            <span className="text-cyan font-mono text-sm">
+              {explorationDetail || 'Exploring codebase...'}
+            </span>
+          </div>
         </div>
       )}
 

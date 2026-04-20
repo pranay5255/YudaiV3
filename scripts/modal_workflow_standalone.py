@@ -11,11 +11,15 @@ from pathlib import Path
 import sys
 import uuid
 
+import modal
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = PROJECT_ROOT / "backend"
 
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
+
+app = modal.App("yudai-modal-workflow-standalone")
 
 
 def _load_env_file(env_file: Path) -> None:
@@ -270,14 +274,33 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         return asyncio.run(_run(args))
     except Exception as exc:
         print(f"[workflow] failed: {exc}", file=sys.stderr)
         return 1
+
+
+@app.local_entrypoint()
+def modal_main(
+    env_file: str = str(BACKEND_ROOT / ".env.prod"),
+    controller_base_url: str = "",
+    artifact_root: str = "",
+    keep_sandbox: bool = False,
+) -> None:
+    argv = ["--env-file", env_file]
+    if controller_base_url:
+        argv.extend(["--controller-base-url", controller_base_url])
+    if artifact_root:
+        argv.extend(["--artifact-root", artifact_root])
+    if keep_sandbox:
+        argv.append("--keep-sandbox")
+    exit_code = main(argv)
+    if exit_code:
+        raise SystemExit(exit_code)
 
 
 if __name__ == "__main__":

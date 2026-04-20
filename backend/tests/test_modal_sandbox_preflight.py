@@ -24,6 +24,7 @@ def test_build_modal_exec_smoke_command_checks_import_and_bash():
     command = modal_preflight.build_modal_exec_smoke_command()
 
     assert "import minisweagent" in command
+    assert "command -v mini >/dev/null" in command
     assert modal_preflight.MODAL_PREFLIGHT_IMPORT_MARKER in command
     assert modal_preflight.MODAL_PREFLIGHT_BASH_MARKER in command
     assert "command -v bash >/dev/null" in command

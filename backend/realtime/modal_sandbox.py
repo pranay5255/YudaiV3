@@ -43,6 +43,17 @@ SANDBOX_SOLVER_PIP_PACKAGES = (
     "mini-swe-agent",
 )
 
+SANDBOX_ENV_PASSTHROUGH_KEYS = (
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_API_URL",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "MISTRAL_API_KEY",
+    "MSWEA_MODEL_NAME",
+    "OPENROUTER_MODEL",
+)
+
 _unified_sandbox_image: Optional[modal.Image] = None
 
 _modal_app: Optional[modal.App] = None
@@ -92,9 +103,25 @@ def _get_unified_sandbox_image() -> modal.Image:
     image = (
         modal.Image.debian_slim(python_version="3.11")
         # ── System packages ──
-        .apt_install("git", "curl", "libpq-dev", "gcc", "gnupg")
+        .apt_install(
+            "git",
+            "curl",
+            "ca-certificates",
+            "libpq-dev",
+            "gcc",
+            "g++",
+            "make",
+            "build-essential",
+            "gnupg",
+            "nodejs",
+            "npm",
+            "ripgrep",
+            "jq",
+        )
         # ── GitHub CLI (gh) ──
         .run_commands(_GH_CLI_INSTALL)
+        # ── Common JS package managers for frontend repositories ──
+        .run_commands("npm install -g pnpm yarn")
         # ── Server Python deps ──
         .pip_install(*SANDBOX_SERVER_PIP_PACKAGES)
         # ── Solver Python deps (mini-swe-agent) ──
@@ -203,6 +230,11 @@ class RealtimeModalSandbox:
             sandbox_env["REPO_URL"] = repo_url
         if repo_branch:
             sandbox_env["REPO_BRANCH"] = repo_branch
+
+        for key in SANDBOX_ENV_PASSTHROUGH_KEYS:
+            value = os.getenv(key)
+            if value:
+                sandbox_env[key] = value
 
         if env_inputs:
             for key, value in env_inputs.items():

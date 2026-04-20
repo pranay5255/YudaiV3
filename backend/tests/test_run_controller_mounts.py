@@ -1,10 +1,10 @@
+import asyncio
 import os
 from pathlib import Path
 import sys
 import types
 
 from fastapi import APIRouter
-from fastapi.testclient import TestClient
 
 # Ensure backend imports resolve in tests.
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -97,6 +97,44 @@ def test_parse_allow_origins_trims_and_drops_empty_values():
     assert parsed == ["https://app.example.com", "http://localhost:3000"]
 
 
+async def _asgi_get(app, path: str, origin: str) -> tuple[list[dict], RuntimeError | None]:
+    messages = []
+    request_sent = False
+
+    async def receive():
+        nonlocal request_sent
+        if request_sent:
+            return {"type": "http.disconnect"}
+        request_sent = True
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        messages.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": [
+            (b"host", b"testserver"),
+            (b"origin", origin.encode()),
+        ],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+    }
+
+    try:
+        await app(scope, receive, send)
+    except RuntimeError as exc:
+        return messages, exc
+    return messages, None
+
+
 def test_run_controller_adds_cors_headers_on_unhandled_500():
     _install_import_stubs()
     import importlib
@@ -109,14 +147,23 @@ def test_run_controller_adds_cors_headers_on_unhandled_500():
     ):
 
         @run_controller.fastapi_app.get("/__tests__/boom")
-        def boom():  # pragma: no cover - exercised via TestClient
+        async def boom():  # pragma: no cover - exercised via direct ASGI call
             raise RuntimeError("boom")
 
-    client = TestClient(run_controller.app, raise_server_exceptions=False)
-    response = client.get(
-        "/__tests__/boom",
-        headers={"Origin": "https://www.yudai.app"},
+    messages, raised = asyncio.run(
+        _asgi_get(
+            run_controller.app,
+            "/__tests__/boom",
+            origin="https://www.yudai.app",
+        )
     )
+    assert isinstance(raised, RuntimeError)
+    assert str(raised) == "boom"
 
-    assert response.status_code == 500
-    assert response.headers["access-control-allow-origin"] == "https://www.yudai.app"
+    response_start = next(
+        message for message in messages if message["type"] == "http.response.start"
+    )
+    headers = dict(response_start["headers"])
+
+    assert response_start["status"] == 500
+    assert headers[b"access-control-allow-origin"] == b"https://www.yudai.app"

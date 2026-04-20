@@ -56,19 +56,19 @@ P1-1. ✅ Controller entrypoint — `backend/run_controller.py` mounts `auth_rou
 P1-2. ✅ Sandbox server entrypoint — Modal sandbox runs `uvicorn run_sandbox_server:app` on port 8100 inside the container.
 P1-3. ✅ Logic moved into sandbox — solver runs as subprocess inside sandbox via exec broker WS (`sandbox_transport.py`). Session/chat APIs remain on controller.
 P1-4. ✅ Controller sandbox lifecycle endpoints — `POST /controller/sandboxes`, `GET /controller/sandboxes/{id}`, `DELETE /controller/sandboxes/{id}`, `POST /controller/sandboxes/{id}/resolve-tunnel`, `POST /controller/sandboxes/{id}/heartbeat`, `POST /controller/sandboxes/cleanup`.
-P1-5. ✅ Sandbox manager — `SandboxManager` in `backend/realtime/sandbox_manager.py` with 10s liveness probe via `start_probe()`/`stop_probe()`.
+P1-5. ✅ Sandbox manager — `SandboxManager` now lives in canonical `backend/realtime/lifecycle.py` with 10s liveness probe via `start_probe()`/`stop_probe()`.
 P1-6. ✅ Session-create flow — `POST /controller/sessions/{id}/runtime` provisions sandbox via `RealtimeLifecycleService.create_runtime_for_session()` and returns `tunnel_url`.
 P1-7. ✅ Direct tunnel auth — session JWT validated via `validate_session_token` on WS connect; internal exec WS uses `CONTROLLER_INTERNAL_WS_SECRET`.
 P1-8. ✅ CORS policy — configured in `run_controller.py` FastAPI app for `https://yudai.app`.
 P1-9. ✅ No-proxy-fallback — `RealtimeErrorCode.TUNNEL_UNAVAILABLE`, `TUNNEL_TERMINATED`, `TUNNEL_RESOLVE_FAILED` raise hard HTTP errors via `as_http_exception`.
-P1-10. ✅ Git bootstrap — `SandboxManager.ensure_git_bootstrap()`: clone once per identity key, `git fetch --all --prune` every 300s (configurable `SANDBOX_GIT_FETCH_INTERVAL_SECONDS`).
-P1-11. ✅ Single active editor — `SINGLE_ACTIVE_EDITOR_CONFLICT` error raised if sandbox identity has an active session that differs.
-P1-12. ✅ Completion detector — `_finalize_on_completion()` triggers when both `completion_issue_created=True` AND `completion_pr_created=True` on `SessionRuntime`.
-P1-13. ✅ On completion: export artifact bundle via `cache_store.export_bundle()`, persist `SessionArtifact` row, terminate sandbox immediately.
+P1-10. ✅ Git bootstrap — `SandboxManager.ensure_git_bootstrap()` in `lifecycle.py`: clone once per identity key, `git fetch --all --prune` every 300s (configurable `SANDBOX_GIT_FETCH_INTERVAL_SECONDS`).
+P1-11. ✅ Per-user sandbox identity — current MVP provisions per user/session ownership; future shared-sandbox policy remains a separate design issue.
+P1-12. ✅ Completion detector — `SessionExecutionOrchestrator._finalize_runtime()` exports artifacts and terminates the sandbox after workflow completion/failure/cancel.
+P1-13. ✅ On completion: export artifact bundle via `cache_store.download_sandbox_artifact_bundle()`, persist `SessionArtifact` row, terminate sandbox immediately.
 
 **New infrastructure added (not in original plan):**
 - `backend/realtime/sandbox_transport.py` — Shared WebSocket transport layer for internal sandbox exec WS (`/internal/sessions/{id}/ws/exec`).
-- `backend/realtime/sandbox_artifacts.py` — Download artifact tarballs from sandbox to controller persistent storage with streaming base64 protocol.
+- `backend/realtime/cache_store.py` — Download artifact tarballs from sandbox to controller persistent storage with streaming base64 protocol.
 - `backend/realtime/modal_preflight.py` — Deploy-time preflight: spins up a throw-away sandbox, waits for healthcheck, runs `minisweagent` import smoke test.
 - `scripts/modal_preflight_standalone.py` — Standalone Modal preflight runner for CI/deploy scripts.
 - `scripts/modal_workflow_standalone.py` — Standalone Modal workflow runner for manual testing.
@@ -171,15 +171,15 @@ P2-B3. Temporarily break checkpoint path in staging and verify hard-fail UX appe
 
 ---
 
-## Phase 3: Real-Time Streaming (SSE + WebSocket split)
+## Phase 3: Real-Time Streaming (Unified Controller WebSocket)
 
-### SSE Tasks (solver trajectory)
-P3-1. ⬜ Move/implement solver SSE stream endpoint inside sandbox server.
-P3-2. ⬜ Define new SSE event schema (compatibility not required) and document event contract.
-P3-3. ⬜ Set heartbeat every 3s.
-P3-4. ⬜ Enforce stream max duration 10s then controlled reconnect behavior.
-P3-5. ⬜ Ensure stream authentication via JWT query token per your accepted model.
-P3-6. ⬜ Emit explicit terminal events for completed/failed/cancelled runs.
+### Unified WS Tasks (chat, mode progress, sandbox trajectory)
+P3-1. ✅ Route solver/mode trajectory through `/controller/sessions/{id}/ws/unified`.
+P3-2. ✅ Use controller-proxied `llm_stream`, `sandbox_stream`, `mode_event`, and `state_event` envelopes; no SSE compatibility path is required.
+P3-3. ✅ Use WS heartbeat/reconnect in `useSessionWebSocket.ts`.
+P3-4. ⬜ Add controlled reconnect UI for long-running execution streams.
+P3-5. ✅ Ensure stream authentication via session token on unified WS connect.
+P3-6. ✅ Emit explicit terminal events for completed/failed/cancelled runs.
 
 **Note:** Trajectory data currently streams via WS `TRAJECTORY_UPDATE` messages from solver stdout accumulation in `solve_manager.py`. Phase 3 replaces this with direct SSE from sandbox server.
 
@@ -192,22 +192,22 @@ P3-11. ⬜ Implement backpressure policy for MVP (buffer + bounded queue + drop 
 P3-12. ⬜ No chat history replay on reconnect (as specified).
 
 ### Frontend Tasks
-P3-13. ⬜ Replace REST chat send path with WS chat client and state handlers.
-P3-14. ⬜ Update `useTrajectoryStream`/`TrajectoryViewer` to consume new SSE schema.
-P3-15. ⬜ Add reconnect management UI for WS and SSE states.
+P3-13. ✅ Chat token streaming over unified controller WebSocket for live chat responses.
+P3-14. ✅ `TrajectoryViewer` consumes controller-proxied `sandbox_stream` and `mode_event` messages. No frontend direct tunnel or SSE path is required for the current architecture.
+P3-15. ⬜ Add reconnect management UI for unified WS states.
 P3-16. ⬜ On tunnel drop, show hard error (no polling fallback).
 P3-17. ⬜ Keep single active solve trajectory view (no multi-run tabs).
 
 ### Testing Tasks
 P3-18. ⬜ Unit tests for WS client state machine and reconnect attempts (10 retries).
-P3-19. ⬜ Integration tests for SSE event parsing and lifecycle transitions.
+P3-19. ⬜ Integration tests for unified WS event parsing and lifecycle transitions.
 P3-20. ⬜ Load tests for stream stability under long token and message bursts.
 P3-21. ⬜ Failure injection tests: dropped tunnel, expired token, sandbox termination mid-stream.
 
 ### Browser Validation Gate (must pass before Phase 4)
 P3-B1. Chat over WS works end-to-end with visible token/tool/status updates.
-P3-B2. Solver trajectory appears in `TrajectoryViewer` via SSE with <=1s perceived update cadence.
-P3-B3. SSE reconnect behavior works under forced reconnect every 10s.
+P3-B2. Solver trajectory appears in `TrajectoryViewer` via unified controller WebSocket with <=1s perceived update cadence.
+P3-B3. Unified WS reconnect behavior works under forced reconnect every 10s.
 P3-B4. WS reconnect attempts stop at 10 retries and final hard error is shown.
 P3-B5. Tunnel interruption shows explicit hard error and user can re-enter session cleanly.
 

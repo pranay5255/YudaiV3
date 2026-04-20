@@ -62,14 +62,12 @@ Controller → SandboxExecBroker → sandbox_transport.run_sandbox_command()
 | File | Purpose |
 |---|---|
 | `backend/run_controller.py` | Controller entrypoint (FastAPI) |
-| `backend/realtime/lifecycle.py` | `RealtimeLifecycleService` — create/terminate runtime, completion detector |
+| `backend/realtime/lifecycle.py` | `RealtimeLifecycleService`, `SandboxManager`, and `SandboxExecBroker` — create/terminate runtime, git/bootstrap probes, command broker |
 | `backend/realtime/modal_sandbox.py` | `RealtimeModalSandbox` — unified image + Modal.Sandbox.create() |
-| `backend/realtime/sandbox_manager.py` | Liveness probes (10s), git bootstrap (clone+fetch) |
 | `backend/realtime/controller_routes.py` | Controller HTTP + WS endpoints |
-| `backend/realtime/sandbox_exec_broker.py` | Routes solve commands to sandbox internal WS |
 | `backend/realtime/sandbox_transport.py` | Shared WS transport layer for exec protocol |
-| `backend/realtime/solve_manager.py` | Orchestrates solve sessions, trajectory streaming, PR creation |
-| `backend/realtime/sandbox_artifacts.py` | Downloads artifact tarballs from sandbox |
+| `backend/realtime/mode_orchestrator.py` | Orchestrates fixed Architect -> Tester -> Coder pipeline and PR metadata parsing |
+| `backend/realtime/cache_store.py` | Downloads artifact tarballs from sandbox |
 | `backend/realtime/modal_preflight.py` | Deploy-time preflight (healthcheck + minisweagent smoke test) |
 | `src/utils/realtimeRouting.ts` | Frontend URL builders for controller WS |
 | `src/hooks/useSessionWebSocket.ts` | WS hook (10 reconnect attempts, heartbeat) |
@@ -170,7 +168,7 @@ async def create(cls, sandbox_db_id, controller_base_url, github_token=None,
 
 #### Exec Broker + Transport
 
-**Implemented in `backend/realtime/sandbox_exec_broker.py` + `sandbox_transport.py`**:
+**Implemented in `backend/realtime/lifecycle.py` + `sandbox_transport.py`**:
 ```python
 # Controller side:
 await broker.run_command(db, session=session, command=script, env=env, on_event=cb)
@@ -412,6 +410,6 @@ MODAL_SANDBOX_PREFLIGHT_SANDBOX_TIMEOUT_SECONDS=900
 
 - Exec infrastructure is **complete** — `SandboxExecBroker` + `sandbox_transport.py` provide the plumbing. Mode orchestration just needs to call `broker.run_command()` with the right script per mode.
 - Modal tunnel URL is returned at provisioning; frontend does not need direct sandbox access for exec — controller proxies all commands.
-- WS hub (`ws_hub.py`) handles broadcasting to all connected frontend clients for a session — `ModeOrchestrator.send_ws_progress()` just needs to call `ws_hub.send_to_session()`.
+- WS hub lives in `ws_protocol.py` and handles broadcasting to all connected frontend clients for a session. The old `ws_hub.py` compatibility shim was removed.
 - Consider adding pause/resume functionality for debugging mode transitions.
 - Consider mode-specific log/artifact export per phase (architect issue JSON, tester coverage report, coder diff).

@@ -131,6 +131,7 @@ type UnifiedWsChatSendParams = {
   contextCards?: string[];
   repository?: ChatRepositoryPayload;
   onChunk?: (text: string) => void;
+  onStatus?: (status: string, detail?: string | null) => void;
 };
 
 type UnifiedWsChatSendResult = {
@@ -259,6 +260,7 @@ const sendChatMessageViaUnifiedWs = ({
   contextCards,
   repository,
   onChunk,
+  onStatus,
 }: UnifiedWsChatSendParams): Promise<UnifiedWsChatSendResult> => {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
@@ -346,8 +348,16 @@ const sendChatMessageViaUnifiedWs = ({
       const payload = envelope.payload || {};
       if (envelope.type === 'llm_stream') {
         const chunk = typeof payload.text === 'string' ? payload.text : '';
+        const finalText = typeof payload.final_text === 'string' ? payload.final_text : '';
         if (chunk) {
           reply += chunk;
+          if (onChunk) {
+            onChunk(reply);
+          }
+        }
+
+        if (finalText) {
+          reply = finalText;
           if (onChunk) {
             onChunk(reply);
           }
@@ -359,6 +369,15 @@ const sendChatMessageViaUnifiedWs = ({
 
         if (payload.final === true) {
           resolveOnce();
+        }
+        return;
+      }
+
+      if (envelope.type === 'status') {
+        const statusValue = typeof payload.status === 'string' ? payload.status : '';
+        const detailValue = typeof payload.detail === 'string' ? payload.detail : null;
+        if (statusValue && onStatus) {
+          onStatus(statusValue, detailValue);
         }
         return;
       }
@@ -434,6 +453,8 @@ interface SessionState {
   messages: ChatMessage[];
   isLoadingMessages: boolean;
   messageError: string | null;
+  isExploringCodebase: boolean;
+  explorationDetail: string | null;
 
   // ============================================================================
   // CONTEXT MANAGEMENT STATE (matches ContextCard model)
@@ -507,6 +528,7 @@ interface SessionState {
   setMessages: (messages: ChatMessage[]) => void;
   setMessageLoading: (loading: boolean) => void;
   setMessageError: (error: string | null) => void;
+  setCodeExplorationState: (isExploring: boolean, detail?: string | null) => void;
 
   // ============================================================================
   // CONTEXT CARD ACTIONS (matches ContextCard APIs)
@@ -632,6 +654,8 @@ export const useSessionStore = create<SessionState>()(
         messages: [],
         isLoadingMessages: false,
         messageError: null,
+        isExploringCodebase: false,
+        explorationDetail: null,
 
         // Context management state
         contextCards: [],
@@ -999,6 +1023,11 @@ export const useSessionStore = create<SessionState>()(
 
         setMessageLoading: (loading: boolean) => set({ isLoadingMessages: loading }),
         setMessageError: (error: string | null) => set({ messageError: error }),
+        setCodeExplorationState: (isExploring: boolean, detail: string | null = null) =>
+          set({
+            isExploringCodebase: isExploring,
+            explorationDetail: detail,
+          }),
 
         // ============================================================================
         // CONTEXT CARD ACTIONS (matches ContextCard APIs)
@@ -1325,6 +1354,8 @@ export const useSessionStore = create<SessionState>()(
             runtimeStatus: 'not_provisioned',
             runtimeError: null,
             messages: [],
+            isExploringCodebase: false,
+            explorationDetail: null,
             contextCards: [],
             fileContext: [],
             userIssues: [],
@@ -1421,7 +1452,13 @@ export const useSessionStore = create<SessionState>()(
           let optimisticAssistantMessageId: string | null = null;
 
           try {
-            set({ isLoadingMessages: true, messageError: null, sessionStatus: 'sending' });
+            set({
+              isLoadingMessages: true,
+              messageError: null,
+              sessionStatus: 'sending',
+              isExploringCodebase: false,
+              explorationDetail: null,
+            });
 
             if (wsChatEnabled) {
               const localBaseId = Date.now();
@@ -1480,6 +1517,24 @@ export const useSessionStore = create<SessionState>()(
                     lastActivity: new Date(),
                   }));
                 },
+                onStatus: (statusValue: string, detailValue?: string | null) => {
+                  if (statusValue === 'exploring_codebase') {
+                    set({
+                      isExploringCodebase: true,
+                      explorationDetail: detailValue || 'Exploring codebase...',
+                    });
+                  }
+                  if (
+                    statusValue === 'exploration_complete'
+                    || statusValue === 'exploration_failed'
+                    || statusValue === 'exploration_skipped'
+                  ) {
+                    set({
+                      isExploringCodebase: false,
+                      explorationDetail: detailValue || null,
+                    });
+                  }
+                },
               });
 
               const reply = wsResponse.reply || '';
@@ -1514,6 +1569,18 @@ export const useSessionStore = create<SessionState>()(
               void get().loadMessages(activeSessionId).catch((reconcileError) => {
                 console.warn('[SessionStore] Message reconciliation failed:', reconcileError);
               });
+
+              if (typeof window !== 'undefined' && get().isExploringCodebase) {
+                window.setTimeout(() => {
+                  const state = get();
+                  if (state.activeSessionId === activeSessionId && state.isExploringCodebase) {
+                    set({
+                      isExploringCodebase: false,
+                      explorationDetail: null,
+                    });
+                  }
+                }, 65_000);
+              }
 
               return response;
             }
@@ -1595,6 +1662,8 @@ export const useSessionStore = create<SessionState>()(
               isLoadingMessages: false,
               messageError: appError.message,
               sessionStatus: 'error',
+              isExploringCodebase: false,
+              explorationDetail: null,
             });
             throw appError;
           }
