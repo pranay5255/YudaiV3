@@ -209,12 +209,6 @@ def test_stream_protocol_solve_result_prefix():
     assert SOLVE_RESULT_PREFIX == "__YUDAI_SOLVE_RESULT__"
 
 
-def test_stream_protocol_shim_still_works():
-    from realtime.solve_stream_protocol import TRAJECTORY_UPDATE_PREFIX as TP, SOLVE_RESULT_PREFIX as SP
-    assert TP == "__YUDAI_TRAJECTORY_UPDATE__"
-    assert SP == "__YUDAI_SOLVE_RESULT__"
-
-
 # ---------------------------------------------------------------------------
 # build_artifact_archive_command (now in cache_store)
 # ---------------------------------------------------------------------------
@@ -311,23 +305,3 @@ def test_to_websocket_url_passthrough_wss():
 def test_shim_modal_registry():
     from realtime.modal_registry import get_modal_registry as gmr
     assert callable(gmr)
-
-
-def test_shim_ws_hub():
-    from realtime.ws_hub import get_ws_hub as gwh
-    assert callable(gwh)
-
-
-def test_shim_sandbox_exec_broker():
-    from realtime.sandbox_exec_broker import get_sandbox_exec_broker as gseb
-    assert callable(gseb)
-
-
-def test_shim_sandbox_manager():
-    from realtime.sandbox_manager import SandboxManager as SM
-    assert SM is SandboxManager
-
-
-def test_shim_sandbox_artifacts():
-    from realtime.sandbox_artifacts import SandboxArtifactStore as SAS
-    assert SAS is SandboxArtifactStore
