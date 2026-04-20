@@ -25,6 +25,8 @@ interface UseSessionWebSocketResult {
   messageCount: number;
   toolCalls: ToolCallInfo[];
   agentQuestion: AgentQuestionInfo | null;
+  isExploringCodebase: boolean;
+  explorationDetail: string | null;
   sendChatMessage: (content: string) => void;
   sendUserResponse: (questionId: string, selectedOptionIds: string[], answerText?: string) => Promise<void>;
   disconnect: () => void;
@@ -50,12 +52,22 @@ export function useSessionWebSocket({
   const [messageCount, setMessageCount] = useState(0);
   const [toolCalls, setToolCalls] = useState<ToolCallInfo[]>([]);
   const [agentQuestion, setAgentQuestion] = useState<AgentQuestionInfo | null>(null);
+  const [isExploringCodebase, setIsExploringCodebase] = useState(false);
+  const [explorationDetail, setExplorationDetail] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const statusRef = useRef<WSStatus>('idle');
+  const shouldReconnectRef = useRef(false);
+  const activeLlmMessageIdRef = useRef<string | null>(null);
+  const activeSandboxMessageIdsRef = useRef<Record<string, string>>({});
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionToken = useAuthStore((state) => state.sessionToken);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   const matchesSolveTarget = useCallback(
     (payload: Record<string, unknown>, requireScopedPayload: boolean = false) => {
@@ -106,6 +118,7 @@ export function useSessionWebSocket({
   }, []);
 
   const cleanup = useCallback(() => {
+    shouldReconnectRef.current = false;
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
@@ -132,11 +145,16 @@ export function useSessionWebSocket({
     setError(null);
     setToolCalls([]);
     setAgentQuestion(null);
+    setIsExploringCodebase(false);
+    setExplorationDetail(null);
+    activeLlmMessageIdRef.current = null;
+    activeSandboxMessageIdsRef.current = {};
   }, [runId, sessionId, solveId]);
 
   const connect = useCallback(() => {
     if (!sessionToken || !sessionId) return;
 
+    shouldReconnectRef.current = true;
     setStatus('connecting');
     setError(null);
 
@@ -185,6 +203,19 @@ export function useSessionWebSocket({
           const s = typeof payload.status === 'string' ? payload.status : undefined;
           if (!s) {
             break;
+          }
+          const detail = typeof payload.detail === 'string' ? payload.detail : null;
+          if (s === 'exploring_codebase') {
+            setIsExploringCodebase(true);
+            setExplorationDetail(detail);
+          }
+          if (
+            s === 'exploration_complete' ||
+            s === 'exploration_failed' ||
+            s === 'exploration_skipped'
+          ) {
+            setIsExploringCodebase(false);
+            setExplorationDetail(detail);
           }
           const isSolveScopedStatus = ['running', 'completed', 'failed', 'cancelled'].includes(s);
           if (isSolveScopedStatus && !matchesSolveTarget(payload, true)) {
@@ -249,17 +280,70 @@ export function useSessionWebSocket({
             break;
           }
           setStatus('streaming');
-          const payload = envelope.payload as { text?: string };
-          const text = payload.text || '';
-          if (text) {
-            setTrajectory((prev) => ({
-              info: prev?.info || {},
-              messages: [
-                ...(prev?.messages || []),
-                { role: 'assistant', content: text },
-              ],
-            }));
-            setMessageCount((count) => count + 1);
+          const payload = envelope.payload as {
+            text?: string;
+            final?: boolean;
+            final_text?: string;
+            message_id?: string;
+          };
+          const hasFinalText = typeof payload.final_text === 'string';
+          const text = hasFinalText ? payload.final_text || '' : payload.text || '';
+          const isNewMessage = !activeLlmMessageIdRef.current;
+
+          if (text || payload.final) {
+            const streamMessageId =
+              activeLlmMessageIdRef.current ||
+              payload.message_id ||
+              `llm_stream_${Date.now()}`;
+            activeLlmMessageIdRef.current = streamMessageId;
+
+            setTrajectory((prev) => {
+              const messages = [...(prev?.messages || [])];
+              const existingIndex = messages.findIndex((message) => {
+                const extra = message.extra || {};
+                return (
+                  extra.stream_id === streamMessageId ||
+                  (payload.message_id && extra.message_id === payload.message_id)
+                );
+              });
+
+              if (existingIndex >= 0) {
+                const existing = messages[existingIndex];
+                messages[existingIndex] = {
+                  ...existing,
+                  content: hasFinalText ? text : `${existing.content}${text}`,
+                  extra: {
+                    ...(existing.extra || {}),
+                    stream_id: streamMessageId,
+                    message_id: payload.message_id || existing.extra?.message_id,
+                    final: Boolean(payload.final),
+                  },
+                };
+              } else if (text) {
+                messages.push({
+                  role: 'assistant',
+                  content: text,
+                  extra: {
+                    stream_id: streamMessageId,
+                    message_id: payload.message_id,
+                    final: Boolean(payload.final),
+                  },
+                });
+              }
+
+              return {
+                info: prev?.info || {},
+                messages,
+              };
+            });
+
+            if (isNewMessage && text) {
+              setMessageCount((count) => count + 1);
+            }
+          }
+
+          if (payload.final) {
+            activeLlmMessageIdRef.current = null;
           }
           break;
         }
@@ -269,19 +353,89 @@ export function useSessionWebSocket({
             break;
           }
           setStatus('streaming');
-          const payload = envelope.payload as { event?: string; data?: string; exit_code?: number };
-          const content =
-            payload.event === 'exit'
-              ? `[sandbox] process exited (${payload.exit_code ?? 'unknown'})`
-              : `[sandbox:${payload.event || 'event'}] ${payload.data || ''}`;
-          setTrajectory((prev) => ({
-            info: prev?.info || {},
-            messages: [
-              ...(prev?.messages || []),
-              { role: 'system', content },
-            ],
-          }));
-          setMessageCount((count) => count + 1);
+          const payload = envelope.payload as {
+            event?: string;
+            stream?: string;
+            data?: string;
+            exit_code?: number;
+            mode?: string;
+            execution_id?: string;
+            pipeline_execution_id?: string;
+          };
+          const eventName = payload.event || 'event';
+          const modeName = payload.mode || 'sandbox';
+          const streamName = payload.stream || eventName;
+          const streamKey = [
+            payload.pipeline_execution_id || 'pipeline',
+            payload.execution_id || 'execution',
+            modeName,
+            streamName,
+          ].join(':');
+          const isNewSandboxMessage = !activeSandboxMessageIdsRef.current[streamKey];
+          const existingStreamMessageId =
+            activeSandboxMessageIdsRef.current[streamKey] ||
+            `sandbox_stream_${streamKey}_${Date.now()}`;
+          activeSandboxMessageIdsRef.current[streamKey] = existingStreamMessageId;
+
+          const chunk =
+            eventName === 'exit'
+              ? `[${modeName}] sandbox process exited (${payload.exit_code ?? 'unknown'})`
+              : `[${modeName}:${streamName}] ${payload.data || ''}`.trimEnd();
+
+          setTrajectory((prev) => {
+            const messages = [...(prev?.messages || [])];
+            const existingIndex = messages.findIndex((message) => {
+              const extra = message.extra || {};
+              return extra.stream_id === existingStreamMessageId;
+            });
+
+            if (existingIndex >= 0) {
+              const existing = messages[existingIndex];
+              const separator =
+                existing.content.endsWith('\n') || chunk.startsWith('\n') ? '' : '\n';
+              messages[existingIndex] = {
+                ...existing,
+                content: `${existing.content}${separator}${chunk}`,
+                extra: {
+                  ...(existing.extra || {}),
+                  stream_id: existingStreamMessageId,
+                  mode: modeName,
+                  stream: streamName,
+                  final: eventName === 'exit',
+                  exit_code: payload.exit_code,
+                },
+              };
+              return {
+                info: prev?.info || {},
+                messages,
+              };
+            }
+
+            messages.push({
+              role: 'system',
+              content: chunk,
+              extra: {
+                id: existingStreamMessageId,
+                stream_id: existingStreamMessageId,
+                mode: modeName,
+                stream: streamName,
+                final: eventName === 'exit',
+                exit_code: payload.exit_code,
+              },
+            });
+
+            return {
+              info: prev?.info || {},
+              messages,
+            };
+          });
+
+          if (eventName === 'exit') {
+            delete activeSandboxMessageIdsRef.current[streamKey];
+          }
+          if (isNewSandboxMessage) {
+            setMessageCount((count) => count + 1);
+          }
           break;
         }
 
@@ -290,9 +444,45 @@ export function useSessionWebSocket({
           if (solveId || runId) {
             break;
           }
-          const payload = envelope.payload as { state?: string; mode?: string };
+          const payload = envelope.payload as {
+            state?: string;
+            mode?: string;
+            execution_id?: string;
+            mode_execution_id?: string;
+            detail?: string;
+          };
           if (payload.state === 'workflow_complete' || payload.mode === 'complete') {
             setStatus('completed');
+          }
+          if (payload.mode || payload.state || payload.detail) {
+            const modeName = payload.mode || 'workflow';
+            const stateName = payload.state || 'event';
+            const content = payload.detail || `[mode:${modeName}] ${stateName}`;
+            setTrajectory((prev) => ({
+              info: {
+                ...(prev?.info || {}),
+                exit_status:
+                  stateName === 'failed'
+                    ? 'failed'
+                    : stateName === 'workflow_complete' || modeName === 'complete'
+                      ? 'complete'
+                      : prev?.info?.exit_status,
+              },
+              messages: [
+                ...(prev?.messages || []),
+                {
+                  role: 'system',
+                  content,
+                  extra: {
+                    id: `mode_event_${payload.execution_id || 'exec'}_${modeName}_${stateName}_${Date.now()}`,
+                    mode: modeName,
+                    state: stateName,
+                    mode_execution_id: payload.mode_execution_id,
+                  },
+                },
+              ],
+            }));
+            setMessageCount((count) => count + 1);
           }
           break;
         }
@@ -365,8 +555,9 @@ export function useSessionWebSocket({
       }
 
       if (
+        shouldReconnectRef.current &&
         reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS &&
-        status !== 'completed'
+        statusRef.current !== 'completed'
       ) {
         const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30_000);
         reconnectAttemptsRef.current += 1;
@@ -389,7 +580,6 @@ export function useSessionWebSocket({
     sessionId,
     sessionToken,
     solveId,
-    status,
   ]);
 
   useEffect(() => {
@@ -469,6 +659,8 @@ export function useSessionWebSocket({
     messageCount,
     toolCalls,
     agentQuestion,
+    isExploringCodebase,
+    explorationDetail,
     sendChatMessage,
     sendUserResponse,
     disconnect,
