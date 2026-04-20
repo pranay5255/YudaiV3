@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 import json
+import os
 import re
 import uuid
 from typing import Any, Dict, List, Optional
 
+from config.realtime_flags import get_realtime_feature_flags
 from db.database import SessionLocal
 from models import (
     AgentExecution,
@@ -33,7 +35,11 @@ from .lifecycle import (
     get_sandbox_exec_broker,
 )
 from .modal_preflight import wait_for_sandbox_healthcheck
-from .modal_sandbox import SANDBOX_MSWEA_CONFIG_ROOT, SANDBOX_WORKSPACE_PATH
+from .modal_sandbox import (
+    SANDBOX_ENV_PASSTHROUGH_KEYS,
+    SANDBOX_MSWEA_CONFIG_ROOT,
+    SANDBOX_WORKSPACE_PATH,
+)
 from .ws_protocol import SessionWebSocketHub, WSMessageType, get_ws_hub
 
 MODE_ORDER: tuple[str, str, str] = (
@@ -769,9 +775,9 @@ class SessionExecutionOrchestrator:
     def _build_mode_plan(self, mode: str, objective: str) -> List[str]:
         if mode == SessionMode.ARCHITECT.value:
             return [
-                "Run MSWEA architect mode inside sandbox.",
+                "Run MSWEA architect mode inside sandbox against the existing GitHub issue.",
                 f"Objective: {objective}",
-                "Persist issue metadata and stream sandbox events.",
+                "Append repo-grounded handoff context and stream sandbox events.",
             ]
         if mode == SessionMode.TESTER.value:
             return [
@@ -909,7 +915,7 @@ class SessionExecutionOrchestrator:
         )
         tunnel_url = sandbox.tunnel_url if sandbox and sandbox.tunnel_url else None
 
-        if not tunnel_url:
+        async def provision_runtime() -> str:
             repo_owner = session.repo_owner or self._repo_owner_from_url(session.repo_url)
             repo_name = session.repo_name or self._repo_name_from_url(session.repo_url)
             if not repo_owner or not repo_name:
@@ -932,10 +938,28 @@ class SessionExecutionOrchestrator:
                     "WORKSPACE_PATH": session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH,
                 },
             )
-            tunnel_url = envelope.sandbox.tunnel_url
+            db.commit()
+            return envelope.sandbox.tunnel_url
+
+        if not tunnel_url:
+            tunnel_url = await provision_runtime()
+
+        try:
+            await wait_for_sandbox_healthcheck(tunnel_url, timeout_seconds=60.0)
+        except Exception:
+            if not get_realtime_feature_flags().modal_provisioning_enabled or not sandbox:
+                raise
+
+            lifecycle_metadata = sandbox.lifecycle_metadata or {}
+            lifecycle_metadata.pop("modal_sandbox_id", None)
+            sandbox.lifecycle_metadata = lifecycle_metadata
+            sandbox.tunnel_url = None
+            sandbox.status = "terminated"
+            sandbox.terminated_at = utc_now()
             db.commit()
 
-        await wait_for_sandbox_healthcheck(tunnel_url, timeout_seconds=60.0)
+            tunnel_url = await provision_runtime()
+            await wait_for_sandbox_healthcheck(tunnel_url, timeout_seconds=60.0)
 
     @staticmethod
     def _get_user_github_token(db: Session, user_id: int) -> Optional[str]:
@@ -978,15 +1002,22 @@ class SessionExecutionOrchestrator:
         command_lines = [
             "set -euo pipefail",
             f'workspace="${{WORKSPACE_PATH:-{SANDBOX_WORKSPACE_PATH}}}"',
+            'HOME="${HOME:-/root}"',
             'repo_branch="${REPO_BRANCH:-main}"',
             'repo_url="${REPO_URL:-}"',
             'pipeline_execution_id="${PIPELINE_EXECUTION_ID:-manual}"',
             f'mode_name="{mode}"',
             f"execution_dir={execution_dir_expr}",
-            'mkdir -p "$execution_dir"',
-            'printf "%s\\n" "$mode_name" > "$execution_dir/mode.txt"',
-            'printf "%s\\n" "$repo_branch" > "$execution_dir/repo_branch.txt"',
-            'printf "%s\\n" "${MSWEA_OBJECTIVE:-}" > "$execution_dir/objective.txt"',
+            'context_file="${YUDAI_CONTEXT_FILE:-$workspace/.yudai/context.md}"',
+            'case "$context_file" in /*) ;; *) context_file="$workspace/$context_file" ;; esac',
+            'if [ -n "${GITHUB_TOKEN:-}" ]; then',
+            '  mkdir -p "$HOME"',
+            '  umask 077',
+            '  printf "machine github.com\\nlogin x-access-token\\npassword %s\\n" "$GITHUB_TOKEN" > "$HOME/.netrc"',
+            'fi',
+            'if [ "${repo_url#git@github.com:}" != "$repo_url" ]; then',
+            '  repo_url="https://github.com/${repo_url#git@github.com:}"',
+            'fi',
             'if [ -d "$workspace/.git" ]; then',
             '  cd "$workspace"',
             '  git fetch --all --prune 2>/dev/null || true',
@@ -1001,44 +1032,93 @@ class SessionExecutionOrchestrator:
             '  mkdir -p "$workspace"',
             '  cd "$workspace"',
             'fi',
-            'help_text="$(python -m mswea.solve --help 2>&1 || true)"',
-            f'config_path="{config_path}"',
-            'cmd=(python -m mswea.solve --config "$config_path" --yolo-mode)',
-            'if printf "%s" "$help_text" | grep -q -- "--workspace"; then',
-            '  cmd+=(--workspace "$workspace")',
+            'mkdir -p "$execution_dir" "$(dirname "$context_file")"',
+            'export YUDAI_CONTEXT_FILE="$context_file"',
+            'if [ ! -f "$context_file" ]; then',
+            '  {',
+            '    printf "# Yudai Mode Context\\n\\n"',
+            '    printf -- "- Pipeline execution: %s\\n" "$pipeline_execution_id"',
+            '    printf -- "- Repository: %s\\n" "${repo_url:-unknown}"',
+            '    printf -- "- Branch: %s\\n" "$repo_branch"',
+            '    printf "\\n"',
+            '  } > "$context_file"',
             'fi',
-            'if [ -n "${MSWEA_OBJECTIVE:-}" ]; then',
-            '  if printf "%s" "$help_text" | grep -q -- "--task"; then',
-            '    cmd+=(--task "$MSWEA_OBJECTIVE")',
-            '  elif printf "%s" "$help_text" | grep -q -- "--prompt"; then',
-            '    cmd+=(--prompt "$MSWEA_OBJECTIVE")',
-            '  elif printf "%s" "$help_text" | grep -q -- "--objective"; then',
-            '    cmd+=(--objective "$MSWEA_OBJECTIVE")',
+            'printf "%s\\n" "$mode_name" > "$execution_dir/mode.txt"',
+            'printf "%s\\n" "$repo_branch" > "$execution_dir/repo_branch.txt"',
+            'printf "%s\\n" "${MSWEA_OBJECTIVE:-}" > "$execution_dir/objective.txt"',
+            'printf "%s\\n" "$context_file" > "$execution_dir/context_file.txt"',
+            '{',
+            '  printf "\\n## Mode Input: %s\\n\\n" "$mode_name"',
+            '  printf -- "- Pipeline execution: %s\\n" "$pipeline_execution_id"',
+            '  printf -- "- Repository branch: %s\\n" "$repo_branch"',
+            '  if [ -n "${MSWEA_ISSUE_NUMBER:-}" ]; then printf -- "- GitHub issue number: #%s\\n" "$MSWEA_ISSUE_NUMBER"; fi',
+            '  if [ -n "${MSWEA_ISSUE_URL:-}" ]; then printf -- "- GitHub issue URL: %s\\n" "$MSWEA_ISSUE_URL"; fi',
+            '  if [ -n "${MSWEA_TEST_BRANCH:-}" ]; then printf -- "- Tester branch: %s\\n" "$MSWEA_TEST_BRANCH"; fi',
+            '  printf "\\n"',
+            '} >> "$context_file"',
+            f'config_path="{config_path}"',
+            'if ! command -v mini >/dev/null 2>&1; then',
+            '  echo "mini-swe-agent CLI not found: expected executable named mini" >&2',
+            '  exit 127',
+            'fi',
+            'python_bin="${PYTHON:-}"',
+            'if [ -z "$python_bin" ]; then',
+            '  if command -v python3 >/dev/null 2>&1; then',
+            '    python_bin="python3"',
+            '  elif command -v python >/dev/null 2>&1; then',
+            '    python_bin="python"',
+            '  else',
+            '    echo "python interpreter not found: expected python3 or python" >&2',
+            '    exit 127',
             '  fi',
             'fi',
+            'model_name="${MSWEA_MODEL_NAME:-${OPENROUTER_MODEL:-openrouter/x-ai/grok-4-fast}}"',
+            'task_text="${MSWEA_OBJECTIVE:-}"',
+            'task_text="$(printf "%s\\n\\nShared context file: %s" "$task_text" "$context_file")"',
+            'if [ -n "${MSWEA_ISSUE_NUMBER:-}" ]; then',
+            '  task_text="$(printf "%s\\n\\nGitHub issue number: #%s" "$task_text" "$MSWEA_ISSUE_NUMBER")"',
+            'fi',
+            'if [ -n "${MSWEA_ISSUE_URL:-}" ]; then',
+            '  task_text="$(printf "%s\\nGitHub issue URL: %s" "$task_text" "$MSWEA_ISSUE_URL")"',
+            'fi',
+            'if [ -n "${MSWEA_TEST_BRANCH:-}" ]; then',
+            '  task_text="$(printf "%s\\n\\nUse or compare against test branch: %s" "$task_text" "$MSWEA_TEST_BRANCH")"',
+            'fi',
+            'printf "%s\\n" "$model_name" > "$execution_dir/model.txt"',
+            'cmd=(mini -c "$config_path" -y -m "$model_name" -t "$task_text")',
         ]
-
-        if include_issue_number:
-            command_lines.extend(
-                [
-                    'if [ -n "${MSWEA_ISSUE_NUMBER:-}" ] && printf "%s" "$help_text" | grep -q -- "--issue-number"; then',
-                    '  cmd+=(--issue-number "$MSWEA_ISSUE_NUMBER")',
-                    'fi',
-                ]
-            )
-
-        if include_test_branch:
-            command_lines.extend(
-                [
-                    'if [ -n "${MSWEA_TEST_BRANCH:-}" ] && printf "%s" "$help_text" | grep -q -- "--test-branch"; then',
-                    '  cmd+=(--test-branch "$MSWEA_TEST_BRANCH")',
-                    'fi',
-                ]
-            )
 
         command_lines.extend(
             [
                 'printf "%q " "${cmd[@]}" > "$execution_dir/command.txt"',
+                'if [ "${YUDAI_MSWEA_COMMAND_PROBE:-0}" = "1" ]; then',
+                '  export mode_name config_path model_name',
+                '  "$python_bin" - "$execution_dir/command_probe.json" "${cmd[@]}" <<\'PY\'',
+                'import json',
+                'import os',
+                'import sys',
+                'payload = {',
+                '    "mode": os.environ.get("mode_name", ""),',
+                '    "workspace": os.environ.get("WORKSPACE_PATH", ""),',
+                '    "repo_url": os.environ.get("REPO_URL", ""),',
+                '    "repo_branch": os.environ.get("REPO_BRANCH", "main"),',
+                '    "config_path": os.environ.get("config_path", ""),',
+                '    "model_name": os.environ.get("model_name", ""),',
+                '    "objective": os.environ.get("MSWEA_OBJECTIVE", ""),',
+                '    "issue_number": os.environ.get("MSWEA_ISSUE_NUMBER", ""),',
+                '    "issue_url": os.environ.get("MSWEA_ISSUE_URL", ""),',
+                '    "test_branch": os.environ.get("MSWEA_TEST_BRANCH", ""),',
+                '    "context_file": os.environ.get("YUDAI_CONTEXT_FILE", ""),',
+                '    "argv": sys.argv[2:],',
+                '}',
+                'path = sys.argv[1]',
+                'with open(path, "w", encoding="utf-8") as fh:',
+                '    json.dump(payload, fh, ensure_ascii=True, indent=2)',
+                '    fh.write("\\n")',
+                'print(json.dumps(payload, ensure_ascii=True))',
+                'PY',
+                '  exit 0',
+                'fi',
                 f"printf '[{mode}] running:'",
                 'printf " %q" "${cmd[@]}"',
                 'printf "\\n"',
@@ -1066,7 +1146,18 @@ class SessionExecutionOrchestrator:
         return "\n".join(
             [
                 "set -euo pipefail",
-                "python - <<'PY'",
+                'python_bin="${PYTHON:-}"',
+                'if [ -z "$python_bin" ]; then',
+                '  if command -v python3 >/dev/null 2>&1; then',
+                '    python_bin="python3"',
+                '  elif command -v python >/dev/null 2>&1; then',
+                '    python_bin="python"',
+                '  else',
+                '    echo "python interpreter not found: expected python3 or python" >&2',
+                '    exit 127',
+                '  fi',
+                'fi',
+                '"$python_bin" - <<\'PY\'',
                 "import json",
                 "import os",
                 "from pathlib import Path",
@@ -1115,6 +1206,7 @@ class SessionExecutionOrchestrator:
         timeout_seconds: int,
         pipeline_execution_id: str,
         issue_number: Optional[int] = None,
+        issue_url: Optional[str] = None,
         test_branch: Optional[str] = None,
     ) -> Dict[str, Any]:
         async def _relay_event(event: Dict[str, Any]) -> None:
@@ -1135,9 +1227,27 @@ class SessionExecutionOrchestrator:
             "MSWEA_CONFIG_ROOT": MSWEA_CONFIG_ROOT,
             "PIPELINE_EXECUTION_ID": pipeline_execution_id,
             "WORKSPACE_PATH": session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH,
+            "REPO_BRANCH": session.repo_branch or "main",
         }
+        repo_url = session.repo_url
+        if not repo_url and session.repo_owner and session.repo_name:
+            repo_url = f"https://github.com/{session.repo_owner}/{session.repo_name}.git"
+        if repo_url:
+            env["REPO_URL"] = repo_url
+
+        github_token = self._get_user_github_token(db, session.user_id)
+        if github_token:
+            env["GITHUB_TOKEN"] = github_token
+
+        for key in SANDBOX_ENV_PASSTHROUGH_KEYS:
+            value = os.getenv(key)
+            if value:
+                env[key] = value
+
         if issue_number is not None:
             env["MSWEA_ISSUE_NUMBER"] = str(issue_number)
+        if issue_url:
+            env["MSWEA_ISSUE_URL"] = issue_url
         if test_branch:
             env["MSWEA_TEST_BRANCH"] = test_branch
 
@@ -1164,6 +1274,7 @@ class SessionExecutionOrchestrator:
         parsed = self.parse_mswea_output(output_text)
         result.update(parsed)
         result["config_path"] = MSWEA_CONFIG_PATHS[mode]
+        result["context_file"] = f"{session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH}/.yudai/context.md"
 
         await self._write_mode_summary(
             db,
@@ -1189,7 +1300,7 @@ class SessionExecutionOrchestrator:
             WSMessageType.LLM_STREAM,
             {
                 "stream": "llm",
-                "text": "Architect mode is running MSWEA to create a GitHub issue...",
+                "text": "Architect mode is running MSWEA to enrich the existing GitHub issue context...",
                 "final": False,
             },
         )
@@ -1200,12 +1311,18 @@ class SessionExecutionOrchestrator:
             execution=execution,
             mode=SessionMode.ARCHITECT.value,
             objective=objective,
+            issue_number=session.architect_issue_number,
+            issue_url=session.architect_issue_url,
             timeout_seconds=1200,
             pipeline_execution_id=pipeline_execution_id,
         )
 
-        issue_number = self._to_int(result.get("issue_number"))
-        issue_url = result.get("issue_url") if isinstance(result.get("issue_url"), str) else None
+        issue_number = self._to_int(result.get("issue_number")) or session.architect_issue_number
+        issue_url = (
+            result.get("issue_url")
+            if isinstance(result.get("issue_url"), str) and result.get("issue_url")
+            else session.architect_issue_url
+        )
 
         if issue_number is None and issue_url:
             match = ISSUE_URL_PATTERN.search(issue_url)
@@ -1216,32 +1333,43 @@ class SessionExecutionOrchestrator:
             issue_url = self._infer_issue_url(session, issue_number)
 
         if issue_number is None or not issue_url:
-            raise RuntimeError("Architect mode completed without parsable issue metadata from MSWEA output")
+            raise RuntimeError("Architect mode requires existing GitHub issue metadata before execution")
 
         title = objective.strip().split("\n")[0][:180] or "Implementation task"
-        issue = UserIssue(
-            user_id=user_id,
-            issue_id=f"issue_{uuid.uuid4().hex[:12]}",
-            title=title,
-            description=objective,
-            issue_text_raw=objective,
-            issue_steps=[
-                "Analyze the existing implementation",
-                "Add or update tests",
-                "Implement changes",
-                "Validate all tests pass",
-            ],
-            session_id=session.session_id,
-            repo_owner=session.repo_owner,
-            repo_name=session.repo_name,
-            priority="medium",
-            status="completed",
-            tokens_used=max(1, len(objective) // 4),
-            processed_at=utc_now(),
+        issue = (
+            db.query(UserIssue)
+            .filter(
+                UserIssue.user_id == user_id,
+                UserIssue.session_id == session.session_id,
+                UserIssue.github_issue_number == issue_number,
+            )
+            .first()
         )
+        if issue is None:
+            issue = UserIssue(
+                user_id=user_id,
+                issue_id=f"issue_{uuid.uuid4().hex[:12]}",
+                title=title,
+                description=objective,
+                issue_text_raw=objective,
+                issue_steps=[
+                    "Analyze the existing implementation",
+                    "Add or update tests",
+                    "Implement changes",
+                    "Validate all tests pass",
+                ],
+                session_id=session.session_id,
+                repo_owner=session.repo_owner,
+                repo_name=session.repo_name,
+                priority="medium",
+                status="completed",
+                tokens_used=max(1, len(objective) // 4),
+                processed_at=utc_now(),
+            )
+            db.add(issue)
         issue.github_issue_number = issue_number
         issue.github_issue_url = issue_url
-        db.add(issue)
+        issue.status = "completed"
         db.flush()
 
         session.architect_issue_number = issue_number
@@ -1254,6 +1382,8 @@ class SessionExecutionOrchestrator:
                 "architect_execution_id": execution.id,
                 "issue_id": issue.issue_id,
                 "issue_number": issue_number,
+                "issue_url": issue_url,
+                "architect_context_file": result.get("context_file"),
                 "architect_config_path": result.get("config_path"),
             },
         )
@@ -1263,7 +1393,7 @@ class SessionExecutionOrchestrator:
         MemoryService.save_session_snapshot(
             db,
             session,
-            trigger="architect_issue_created",
+            trigger="architect_context_enriched",
         )
 
         self.lifecycle.mark_issue_created(
@@ -1279,7 +1409,7 @@ class SessionExecutionOrchestrator:
             WSMessageType.LLM_STREAM,
             {
                 "stream": "llm",
-                "text": f"Architect mode created issue #{issue_number}.",
+                "text": f"Architect mode enriched issue #{issue_number} and handed context to Tester mode.",
                 "final": True,
             },
         )
@@ -1313,6 +1443,7 @@ class SessionExecutionOrchestrator:
             mode=SessionMode.TESTER.value,
             objective=objective,
             issue_number=issue_number,
+            issue_url=session.architect_issue_url,
             timeout_seconds=1200,
             pipeline_execution_id=pipeline_execution_id,
         )
@@ -1356,6 +1487,7 @@ class SessionExecutionOrchestrator:
             mode=SessionMode.CODER.value,
             objective=objective,
             issue_number=issue_number,
+            issue_url=session.architect_issue_url,
             test_branch=test_branch,
             timeout_seconds=1800,
             pipeline_execution_id=pipeline_execution_id,
