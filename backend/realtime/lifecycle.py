@@ -82,7 +82,7 @@ class RealtimeLifecycleService:
         env_inputs: Optional[Dict[str, str]] = None,
     ) -> RuntimeEnvelope:
         identity = build_sandbox_identity(
-            org=org or self.default_org,
+            org=f"{org or self.default_org}-user-{user_id}",
             repo_owner=repo_owner,
             repo_name=repo_name,
             environment=environment or repo_branch or "main",
@@ -99,6 +99,7 @@ class RealtimeLifecycleService:
             environment=identity.environment,
             repo_branch=repo_branch or "main",
         )
+        sandbox_status_before_start = sandbox.status
         sandbox.active_session_id = session.id
         sandbox.status = SandboxStatus.RUNNING.value
         workspace_path = os.getenv("REALTIME_WORKSPACE_PATH", "/workspace/repo")
@@ -118,6 +119,7 @@ class RealtimeLifecycleService:
                 not reused_existing_sandbox
                 or not existing_modal_sandbox_id
                 or not sandbox.tunnel_url
+                or sandbox_status_before_start != SandboxStatus.RUNNING.value
             )
             if needs_modal_provision:
                 controller_base_url = os.getenv("CONTROLLER_BASE_URL", "http://localhost:8000")
