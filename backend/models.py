@@ -1823,6 +1823,11 @@ class CreateGitHubIssueResponse(BaseModel):
     success: bool
     github_url: str
     message: str
+    github_issue_number: Optional[int] = None
+    execution_started: bool = False
+    execution_id: Optional[str] = None
+    execution_status: Optional[str] = None
+    execution_error: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
