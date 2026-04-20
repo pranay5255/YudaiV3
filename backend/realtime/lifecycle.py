@@ -6,12 +6,13 @@ import asyncio
 import base64
 from dataclasses import dataclass
 from datetime import timedelta
+import logging
 import os
 from pathlib import Path
 import re
 import subprocess
 import time
-from typing import Any, Awaitable, Callable, Dict, Iterable, Optional, Set, Tuple
+from typing import Any, Awaitable, Callable, Dict, Iterable, Optional, Tuple
 import uuid
 
 from config.realtime_identity import build_sandbox_identity
@@ -41,6 +42,8 @@ from .cache_store import SessionCacheStore
 from .errors import RealtimeErrorCode, as_http_exception
 from .modal_sandbox import RealtimeModalSandbox, get_modal_registry
 from .sandbox_transport import run_sandbox_command
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

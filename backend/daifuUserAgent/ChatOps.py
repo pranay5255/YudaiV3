@@ -38,7 +38,17 @@ import asyncio
 from dataclasses import asdict
 import logging
 import uuid
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from context.chat_context import ChatContext
 from context.facts_and_memories import FactsAndMemoriesService
@@ -54,6 +64,9 @@ from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Session
 
 from utils import utc_now
+
+if TYPE_CHECKING:
+    from .context_probe import ProbeRequest
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -581,7 +594,6 @@ class ChatOps:
         """Persist user questions and start background code probes."""
 
         from .context_probe import ContextProbeService, ProbeRequest
-        from realtime.lifecycle import get_sandbox_exec_broker
         from realtime.ws_protocol import WSMessageType, get_ws_hub
 
         ws_hub = get_ws_hub()

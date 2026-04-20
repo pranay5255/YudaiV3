@@ -14,13 +14,10 @@ Covers functionality that moved between files:
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 from pathlib import Path
 import sys
-import tarfile
-import tempfile
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
