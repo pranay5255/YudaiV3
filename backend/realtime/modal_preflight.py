@@ -72,6 +72,7 @@ def build_modal_exec_smoke_command() -> str:
                 "python -c "
                 f"\"import minisweagent; print('{MODAL_PREFLIGHT_IMPORT_MARKER}')\""
             ),
+            "command -v mini >/dev/null",
             f"printf '{MODAL_PREFLIGHT_BASH_MARKER}\\n'",
             "command -v bash >/dev/null",
         ]
