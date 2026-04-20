@@ -106,31 +106,36 @@ class SessionExecutionOrchestrator:
             session=session,
             objective=objective,
         )
+        execution_id = f"exec_{uuid.uuid4().hex[:24]}"
+        execution_plan = self._build_mode_plan(next_mode, contextual_objective)
+        execution_started_at = utc_now()
+        session_public_id = session.session_id
+
         execution = AgentExecution(
-            id=f"exec_{uuid.uuid4().hex[:24]}",
+            id=execution_id,
             session_id=session.id,
             mode=next_mode,
             status=SessionModeStatus.RUNNING.value,
-            execution_plan=self._build_mode_plan(next_mode, contextual_objective),
+            execution_plan=execution_plan,
             execution_metadata={
                 "trigger": "execution_api",
                 "objective": objective,
                 "objective_with_context": contextual_objective,
             },
-            started_at=utc_now(),
+            started_at=execution_started_at,
         )
         db.add(execution)
 
         self._set_active_execution(
             session,
             {
-                "execution_id": execution.id,
+                "execution_id": execution_id,
                 "objective": objective,
                 "objective_with_context": contextual_objective,
                 "status": SessionModeStatus.RUNNING.value,
                 "mode": next_mode,
-                "plan": execution.execution_plan or [],
-                "started_at": (execution.started_at or utc_now()).isoformat(),
+                "plan": execution_plan,
+                "started_at": execution_started_at.isoformat(),
                 "completed_at": None,
                 "cancel_requested": False,
                 "current_mode_execution_id": None,
@@ -145,23 +150,36 @@ class SessionExecutionOrchestrator:
         db.commit()
 
         self._schedule_execution_task(
-            session_public_id=session.session_id,
+            session_public_id=session_public_id,
             user_id=user_id,
-            execution_id=execution.id,
+            execution_id=execution_id,
             objective=contextual_objective,
         )
 
         await self.ws_hub.send_to_session(
-            session.session_id,
+            session_public_id,
             WSMessageType.MODE_EVENT,
             {
                 "mode": next_mode,
                 "state": SessionModeStatus.RUNNING.value,
-                "execution_id": execution.id,
+                "execution_id": execution_id,
                 "detail": "Pipeline queued",
             },
         )
-        return self.get_execution_status(db, session=session)
+        return {
+            "execution_id": execution_id,
+            "session_id": session_public_id,
+            "mode": next_mode,
+            "status": SessionModeStatus.RUNNING.value,
+            "plan": execution_plan,
+            "started_at": execution_started_at,
+            "completed_at": None,
+            "cancel_requested": False,
+            "waiting_for_input": False,
+            "current_mode_execution_id": None,
+            "artifact": None,
+            "detail": "Pipeline queued",
+        }
 
     async def resume_execution(
         self,

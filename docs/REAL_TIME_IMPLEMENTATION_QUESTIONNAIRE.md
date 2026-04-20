@@ -321,3 +321,139 @@ Answer: deep testing and manual testing in browser.
 94. Which items are hard blockers vs nice-to-have?  
 Answer: whichever is a blocker for now should be ignored
 
+----------------------------------------------------------------------------------------
+
+3 MODE IMPLEMENTATION Questions
+
+Block 1 — How the User Triggers Execution
+
+  Q1. What does the user currently do in the UI to start the 3-mode pipeline? Is it:
+  - (a) They type a natural language message in chat and the pipeline auto-fires
+  - (b) There's a dedicated "Run" button (the SolveIssues.tsx component)
+  - (c) They paste a GitHub issue URL and hit run
+  - (d) Something else
+
+  A1 - the 3 mode pipeline is a sequential pipeline to create reliable code in codebases. After the user connects their repo in the chat window, They are automatically in the 1st mode which is ARCHITECT. The architect mode is supposed create a github issue for the user's requirement. To acheive this task the architect is the only mode which inetrfaces with the user and answers the questions the user has. It in turn asks MCQ questions to the user to get detailed context from the user about the problem they are trying to solve. 
+
+  Q2. The execution endpoint receives an objective: str. Where does that string come from in the UI — is
+  it the last chat message, a separate text field, a selected GitHub issue, or all three depending on
+  context?
+
+  A2 - Execution endpoint gets a mini-swe-agent command with a custom config. There will be three custom configs for each mode. We will brainstorm on how these configs will differ from each other on the user's repo after cloning to establish what is the objective we are trying to achieve for the user. The strng comes from a separate python file which includes the config file and the prompt required and the final bash command to run in the sandbox.  
+
+  Q3. Right now the user flow goes: select repo → create session → (chat?) → click execute. Is the chat
+  step mandatory before execution, or can the user skip straight to execution after session creation?
+
+  A3 - Chat is the interface where the user interacts to provide context or answer questions also for addtional context required. Going from 1 mode to the next mode requires the user to answer some questions or provide enough context. Execution happens on the sandbox and questions and interactivity and context is supposed to be happen using the chat.
+
+  ---
+  Block 2 — What Happens Inside Each Mode (Your Mental Model)
+
+  Q4. For Architect mode: the MSWEA agent runs, explores the repo, and creates a real GitHub issue. After
+  it finishes, the pipeline auto-moves to Tester. Is that correct, or do you want the user to
+  review/approve the created issue before Tester starts?
+
+  A4 - The architect mode is a two sided module. On one side it explores the repo in the sandbox and creates a set of releevant questions that it does not have answer to or needs addtional context from the user.The questions are gathered from the architect and given to the frontend to gather context from the user. Once the user answers questions, we let the user create an issue from the /create-issue endpoint. Then we move onto the Tester mode.
+
+  Q5. For Tester mode: the agent writes tests and commits them to a branch like yudai/issue-123-tests. The
+   branch name is parsed from stdout. Two sub-questions:
+  - (a) Should the agent always commit tests to a deterministic branch (yudai/issue-{number}-tests) so the
+   backend can predict it, or should it be parsed from output?
+  - (b) Should tester run against the base branch, or does it need the issue to exist first in GitHub?
+
+  A5 - Tester or Architect or Coder works in a separate branch on the repo. We must create a separate branch when we lone the repo. Once that is done, we must make sure that the github issue has been created by the ARchitect mode. This is important as the architect mode has the context and the acceptance criteria from the user which lets the tester write the tests for that github issue. We make sure that these tests written by the tester are exclusive and only concern the github issue at hand. These tests must pass after the Implementation is done by the Coder.
+
+  Q6. For Coder mode: the agent implements the fix, runs the test branch, and opens a PR. Does the PR need
+   to pass tests before the pipeline considers it complete, or is "PR opened" sufficient for the session
+  to end?
+
+  A6 - yes, read above A5.
+
+  ---
+  Block 3 — GitHub Token & Credentials in Sandbox
+
+  Q7. When the sandbox runs, the MSWEA agent needs to call gh issue create and gh pr create. Looking at
+  the code, the GitHub token is fetched from AuthToken and passed into _ensure_runtime_ready as an env
+  var. Do you know if GITHUB_TOKEN is actually being passed into the Modal sandbox environment when it's
+  provisioned? This is critical — without it, issue/PR creation silently fails.
+
+  A7 - Issue creation is ahndled by the controller endpoints to create the github issue. But the github token must be apssed into the sansdbox so it can create a Pull request for the corresponding github isse. The tester mode is usually just commits the tests required in the branch created.
+
+  Q8. The MSWEA config has mode: confirm — this may cause the agent to pause and ask for human
+  confirmation mid-run, which would hang the pipeline. Did you intend it to be fully automated
+  (--yolo-mode is already in the command, which should override this)? Do you know if --yolo-mode disables
+   the mode: confirm behavior in your version of minisweagent?
+  A8 -Some modes are fully automated like tester, some modes are defined in the config which are like architect which ask for feedback from the user before proceeding. Coder is also automated.  
+
+  ---
+  Block 4 — What the User Sees While Running (Streaming UX)
+
+  Q9. The backend sends SANDBOX_STREAM WS events for every stdout/stderr line from the agent. On the
+  frontend, where does this output go? Is it:
+  - (a) The existing TrajectoryViewer component
+  - (b) Shown inline in the chat as a progress stream
+  - (c) A separate panel/drawer
+  - (d) Not yet wired — it's sent but not displayed
+  A9 - This goes into TrajectoryViewer component. There are two tabs the trajectory is where is the execution displayed.
+
+  Q10. While a mode is running, what should the user see for mode-level progress? For example:
+  - A stepper showing [Architect ✓] [Tester ⟳] [Coder ○]
+  - A progress bar per mode
+  - Just the raw agent output stream
+  - A combination
+   A10 - A progress bar per mode in the header of the app. This should look nice as a progress bar.
+
+  Q11. The backend sends MODE_EVENT WS messages when each mode starts (mode: "architect", state:
+  "running") and when it completes. Is the frontend currently listening for MODE_EVENT and doing anything
+  with it, or is that handler not built yet?
+  A11 - No it is not. HElp me decide how to solve this and what are your suggestions for this. 
+  ---
+  Block 5 — Error Handling & Recovery
+
+  Q12. If Architect mode fails (agent exits non-zero, or can't parse issue URL from output), what should
+  happen?
+  - (a) Whole pipeline fails, user sees error, can retry from scratch
+  - (b) User can retry just Architect
+  - (c) User can override with a manually-provided issue URL and resume from Tester
+  - (d) Not decided yet
+  A12 - Architect mode restarts to help user create the github issue. 
+
+  Q13. If the sandbox goes away mid-pipeline (Modal timeout, network drop), _ensure_runtime_ready will
+  re-provision a new sandbox. Does the new sandbox have the repo already cloned, or does it start from
+  scratch? Does the pipeline retry from the failed mode or from the beginning?
+
+  A13 - It starts from scratch and restarts from github issue creation. If issue already created then we ask the user to select the github issue. And restart from Tester. 
+
+  Q14. The coder mode currently raises RuntimeError if it can't parse a PR URL from stdout. If the agent
+  creates the PR but the output parsing fails (e.g. the agent doesn't print the URL), the pipeline crashes
+   even though GitHub has the PR. Is strict parsing acceptable, or do you want a fallback (e.g. call the
+  GitHub API to find the latest PR)?
+  A14 - HElp me with what is the right direction. Here the coder mode is supposed to create a PR after the patch iimplemented by the agent and test suite run. If tests pass then we create a PR using execution endpoint. OR the agent can also create the PR from within the sandbox execution. 
+  ---
+  Block 6 — The MSWEA Agent & Config
+
+  Q15. The three config files all use identical workflow steps ("analyze codebase → create script → edit
+  source → verify fix"). Only the system_template role description differs. Is this intentional for now,
+  or do you want mode-specific instructions? For example:
+  - Architect: "do NOT edit code, only create a GitHub issue"
+  - Tester: "write tests only, commit to branch yudai/issue-{number}-tests, do NOT implement the fix"
+  - Coder: "implement the fix, run the tests from branch, open PR"
+
+  A15 - Yes, help me brainstorm things that need to change in the config files for each mode. And what execution orders need to be handled whenintermediate transitioning steps from  one mode to another using the execution endpoint. HElp me with suggestions.
+
+  Q16. The command uses python -m mswea.solve but the docs say python -m minisweagent.solve. Which module
+  name is correct in your installed version of the agent?
+
+ A16 - i think minisweagent is correct. Help me figure this out from the docs for mswea https://mini-swe-agent.com/latest/. Go through the docs deeply.
+
+  Q17. step_limit: 0 in the configs — does 0 mean unlimited steps, or does it mean 0 steps allowed (which
+  would immediately exit)? What step limit do you want per mode?
+
+  A17 - Step_limit must be 15 for now. 
+
+
+
+
+
+
+

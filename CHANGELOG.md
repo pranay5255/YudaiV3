@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased] — Execution Pipeline Fixes & Mode Orchestrator Stabilization
+
+### Bug Fixes
+- **Fixed 500 on `POST /daifu/sessions/{id}/execution`** — `start_execution` in `mode_orchestrator.py` called `get_execution_status(db, session=session)` after `db.commit()`, which expired all ORM attributes. On reload, SQLAlchemy's plain `PG_JSON` column did not reliably detect the in-memory `mode_metadata` mutation, so `active_execution` was absent from the refreshed session — causing `ExecutionResponse` (which overrides `execution_id: str` and `started_at: datetime` as non-optional) to fail Pydantic validation. Fixed by capturing `execution_id`, `execution_plan`, `execution_started_at`, and `session_public_id` as local variables before `db.commit()`, and returning the status dict directly from those locals instead of calling `get_execution_status`.
+- **Fixed cascading 409 on execution retry** — The 500 above caused the frontend to retry the `POST /execution`, which hit `ExecutionConflictError` (the asyncio task was already scheduled before the serialization error). Resolved as a side-effect of the 500 fix: the first call now succeeds and no retry is needed.
+- **Identified root of WS reconnect storm** — "WebSocket is closed before the connection is established" in browser was a client-side cascade from the 500/409 errors putting the frontend error state into a reconnect loop. The backend was correctly accepting WS connections throughout. Resolved by fixing the upstream 500.
+
+---
+
 ## [Unreleased] — Unified Sandbox Architecture (v2)
 
 ### Architecture
