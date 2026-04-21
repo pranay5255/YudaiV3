@@ -53,6 +53,7 @@ from models import (  # noqa: E402
     Base,
     ChatMessage,
     ChatSession,
+    CreateGitHubIssueToolRequest,
     User,
     UserIssue,
     UserQuestion,
@@ -297,7 +298,7 @@ def test_answer_question_keeps_gathering_open_for_pending_questions(db_and_user)
     assert (session.mode_metadata or {}).get("gathering_state") == "active"
 
 
-def test_create_github_issue_seeds_existing_issue_and_autostarts_pipeline(
+def test_create_github_issue_seeds_existing_issue_and_asks_before_execution(
     db_and_user,
     monkeypatch,
 ):
@@ -362,29 +363,6 @@ def test_create_github_issue_seeds_existing_issue_and_autostarts_pipeline(
 
     monkeypatch.setattr(session_routes, "get_realtime_lifecycle_service", lambda: DummyLifecycle())
 
-    captured: dict[str, object] = {}
-
-    class DummyOrchestrator:
-        async def start_execution(self, db, *, session, user_id, objective, force_mode=None):
-            captured["start_execution"] = {
-                "session_id": session.session_id,
-                "user_id": user_id,
-                "objective": objective,
-                "force_mode": force_mode,
-                "architect_issue_number": session.architect_issue_number,
-                "architect_issue_url": session.architect_issue_url,
-            }
-            return {
-                "execution_id": "exec_auto_start",
-                "status": "running",
-            }
-
-    monkeypatch.setattr(
-        session_routes,
-        "get_session_execution_orchestrator",
-        lambda: DummyOrchestrator(),
-    )
-
     response = asyncio.run(
         session_routes.create_github_issue_from_user_issue_for_session(
             session_id=session.session_id,
@@ -398,10 +376,220 @@ def test_create_github_issue_seeds_existing_issue_and_autostarts_pipeline(
 
     assert response.success is True
     assert response.github_issue_number == 77
-    assert response.execution_started is True
-    assert response.execution_id == "exec_auto_start"
+    assert response.execution_started is False
+    assert response.requires_confirmation is True
+    assert response.pending_tool == "run_architect_mode"
+    assert response.confirmation_question_id
     assert session.architect_issue_number == 77
     assert session.architect_issue_url == "https://github.com/octocat/yudaiv3/issues/77"
-    assert "GitHub issue URL: https://github.com/octocat/yudaiv3/issues/77" in captured["start_execution"]["objective"]
-    assert captured["start_execution"]["architect_issue_number"] == 77
+    assert session.mode_status == "waiting_for_input"
+    assert (session.mode_metadata or {}).get("pending_daifu_tool") == "run_architect_mode"
+    assert "GitHub issue URL: https://github.com/octocat/yudaiv3/issues/77" in (
+        session.mode_metadata or {}
+    ).get("pending_stage_tool_objective", "")
+    question = (
+        db.query(UserQuestion)
+        .filter(UserQuestion.question_id == response.confirmation_question_id)
+        .one()
+    )
+    assert question.question_metadata["origin"] == "github_issue_created_confirmation"
     assert lifecycle_calls[0]["issue_number"] == 77
+
+
+def test_create_github_issue_tool_wraps_issue_ops_and_emits_tool_call(
+    db_and_user,
+    monkeypatch,
+):
+    db, user, session = db_and_user
+
+    issue = UserIssue(
+        user_id=user.id,
+        issue_id="issue_tool_publish",
+        title="Publish via Daifu tool",
+        description="The tool should call the backend issue publisher.",
+        issue_text_raw="Publish this issue to GitHub through the native tool endpoint.",
+        issue_steps=["Publish issue", "Ask before workflow"],
+        session_id=session.session_id,
+        repo_owner="octocat",
+        repo_name="yudaiv3",
+        priority="medium",
+        status="pending",
+        tokens_used=1,
+    )
+    db.add(issue)
+    db.commit()
+
+    fake_issue_ops = types.ModuleType("daifuUserAgent.IssueOps")
+    calls: list[dict[str, object]] = []
+
+    class FakeIssueService:
+        def __init__(self, db):
+            self.db = db
+
+        async def create_github_issue_from_user_issue(self, user_id, issue_id, context_bundle=None):
+            calls.append(
+                {
+                    "user_id": user_id,
+                    "issue_id": issue_id,
+                    "context_bundle": context_bundle,
+                }
+            )
+            row = (
+                self.db.query(UserIssue)
+                .filter(UserIssue.user_id == user_id, UserIssue.issue_id == issue_id)
+                .one()
+            )
+            row.github_issue_url = "https://github.com/octocat/yudaiv3/issues/88"
+            row.github_issue_number = 88
+            row.status = "completed"
+            self.db.commit()
+            return row
+
+    fake_issue_ops.IssueService = FakeIssueService
+    monkeypatch.setitem(sys.modules, "daifuUserAgent.IssueOps", fake_issue_ops)
+    monkeypatch.setattr(
+        session_routes.MemoryService,
+        "save_session_snapshot",
+        lambda *_args, **_kwargs: None,
+    )
+
+    lifecycle_calls: list[dict[str, object]] = []
+
+    class DummyLifecycle:
+        def mark_issue_created(self, db, *, session_public_id, user_id, issue_url, issue_number):
+            lifecycle_calls.append(
+                {
+                    "session_public_id": session_public_id,
+                    "user_id": user_id,
+                    "issue_url": issue_url,
+                    "issue_number": issue_number,
+                }
+            )
+
+    ws_events: list[dict[str, object]] = []
+
+    class DummyHub:
+        async def send_to_session(self, session_id, msg_type, payload):
+            ws_events.append(
+                {
+                    "session_id": session_id,
+                    "msg_type": msg_type,
+                    "payload": payload,
+                }
+            )
+            return 1
+
+    monkeypatch.setattr(session_routes, "get_realtime_lifecycle_service", lambda: DummyLifecycle())
+    monkeypatch.setattr(session_routes, "get_ws_hub", lambda: DummyHub())
+
+    response = asyncio.run(
+        session_routes.execute_create_github_issue_tool(
+            session_id=session.session_id,
+            request=CreateGitHubIssueToolRequest(issue_id=issue.issue_id),
+            db=db,
+            current_user=user,
+        )
+    )
+
+    db.refresh(session)
+
+    assert response.success is True
+    assert response.github_issue_number == 88
+    assert response.requires_confirmation is True
+    assert calls == [
+        {
+            "user_id": user.id,
+            "issue_id": "issue_tool_publish",
+            "context_bundle": None,
+        }
+    ]
+    assert ws_events[0]["msg_type"] == session_routes.WSMessageType.TOOL_CALL
+    assert ws_events[0]["payload"]["tool_name"] == "create_github_issue"
+    assert ws_events[0]["payload"]["tool_input"] == {
+        "session_id": session.session_id,
+        "issue_id": "issue_tool_publish",
+    }
+    assert ws_events[1]["msg_type"] == session_routes.WSMessageType.AGENT_QUESTION
+    assert session.architect_issue_number == 88
+    assert (session.mode_metadata or {}).get("pending_daifu_tool") == "run_architect_mode"
+    assert lifecycle_calls[0]["issue_number"] == 88
+
+
+def test_answer_issue_confirmation_starts_daifu_stage_tool_sequence(db_and_user, monkeypatch):
+    db, user, session = db_and_user
+    objective = "Resolve GitHub issue #77 with the 3-mode workflow."
+    question = UserQuestion(
+        question_id="q_start_workflow",
+        session_id=session.id,
+        user_id=user.id,
+        mode="architect",
+        question_text="Start workflow?",
+        options=[
+            {"id": "start_workflow", "label": "Start workflow"},
+            {"id": "not_now", "label": "Not now"},
+        ],
+        multi_select=False,
+        status=UserQuestionStatus.PENDING.value,
+        question_metadata={
+            "origin": "github_issue_created_confirmation",
+            "pending_tool": "run_architect_mode",
+        },
+    )
+    session.mode_status = "waiting_for_input"
+    session.architect_issue_number = 77
+    session.architect_issue_url = "https://github.com/octocat/yudaiv3/issues/77"
+    session.mode_metadata = {
+        "pending_question_ids": [question.question_id],
+        "pending_daifu_tool": "run_architect_mode",
+        "pending_stage_tool_objective": objective,
+    }
+    db.add(question)
+    db.commit()
+
+    monkeypatch.setattr(
+        session_routes,
+        "get_realtime_feature_flags",
+        lambda: _flags(orchestrator_enabled=True),
+    )
+
+    captured: dict[str, object] = {}
+
+    class DummyModeToolService:
+        async def run_all_stage_tools(self, db, *, session, user_id, objective):
+            session.mode_status = "running"
+            captured["run_all_stage_tools"] = {
+                "session_id": session.session_id,
+                "user_id": user_id,
+                "objective": objective,
+            }
+            return {
+                "execution_id": "exec_stage_tools",
+                "mode": "architect",
+                "status": "running",
+            }
+
+    monkeypatch.setattr(
+        session_routes,
+        "get_daifu_mode_tool_service",
+        lambda: DummyModeToolService(),
+    )
+
+    response = asyncio.run(
+        session_routes.answer_session_question(
+            session_id=session.session_id,
+            question_id=question.question_id,
+            request=AnswerQuestionRequest(
+                selected_option_ids=["start_workflow"],
+                resume_execution=True,
+            ),
+            db=db,
+            current_user=user,
+        )
+    )
+
+    db.refresh(question)
+    assert response.resumed is True
+    assert response.resumed_mode == "architect"
+    assert response.mode_status == "running"
+    assert question.status == UserQuestionStatus.ANSWERED.value
+    assert captured["run_all_stage_tools"]["objective"] == objective
