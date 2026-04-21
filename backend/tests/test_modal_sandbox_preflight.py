@@ -17,6 +17,7 @@ from yudai.realtime import modal_preflight, modal_sandbox  # noqa: E402
 
 def test_solver_distribution_uses_published_package_name():
     assert "mini-swe-agent" in modal_sandbox.SANDBOX_SOLVER_PIP_PACKAGES
+    assert "playwright" in modal_sandbox.SANDBOX_SOLVER_PIP_PACKAGES
     assert "minisweagent" not in modal_sandbox.SANDBOX_SOLVER_PIP_PACKAGES
 
 
