@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -15,8 +16,26 @@ if str(BACKEND_ROOT) not in sys.path:
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///tmp/mode-orchestrator-tests.db")
 
-from yudai.models import AgentExecution, Base, ChatSession, User  # noqa: E402
-from yudai.realtime.mode_orchestrator import SessionExecutionOrchestrator  # noqa: E402
+from yudai.models import (  # noqa: E402
+    AgentExecution,
+    Base,
+    ChatSession,
+    ContextCard,
+    Sandbox,
+    SessionArtifact,
+    SessionRuntime,
+    User,
+)
+from yudai.realtime import mode_orchestrator as mode_orchestrator_module  # noqa: E402
+from yudai.realtime.mode_orchestrator import (  # noqa: E402
+    BROWSER_CHECK_MODE,
+    BROWSER_CHECK_REPORT_END,
+    BROWSER_CHECK_REPORT_START,
+    BROWSER_CHECK_SUMMARY_END,
+    BROWSER_CHECK_SUMMARY_START,
+    ExecutionConflictError,
+    SessionExecutionOrchestrator,
+)
 
 
 class DummyHub:
@@ -210,3 +229,421 @@ def test_build_mswea_command_uses_official_mini_cli_probe(tmp_path, monkeypatch)
     assert payload["context_file"] in task_text
     assert (workspace / ".yudai" / "executions" / "probe_exec" / "coder" / "command_probe.json").is_file()
     assert (workspace / ".yudai" / "context.md").is_file()
+
+
+def test_build_browser_check_command_probe_preserves_existing_workspace(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    mini = bin_dir / "mini"
+    mini.write_text("#!/usr/bin/env bash\nprintf 'fake mini\\n'\n", encoding="utf-8")
+    mini.chmod(0o755)
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    (workspace / "package.json").write_text('{"scripts":{"dev":"vite"}}\n', encoding="utf-8")
+    orchestrator = SessionExecutionOrchestrator(
+        broker=object(),
+        lifecycle=object(),
+        ws_hub=DummyHub(),
+    )
+    command = orchestrator._build_browser_check_command()
+
+    assert "git reset" not in command
+    assert "git clean" not in command
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+            "WORKSPACE_PATH": str(workspace),
+            "PIPELINE_EXECUTION_ID": "browser_probe_exec",
+            "YUDAI_BROWSER_CHECK_COMMAND_PROBE": "1",
+            "BROWSER_CHECK_OBJECTIVE": "Verify the dashboard visually",
+            "MSWEA_MODEL_NAME": "openrouter/x-ai/grok-4-fast",
+            "REPO_BRANCH": "main",
+        }
+    )
+
+    completed = subprocess.run(
+        ["bash", "-lc", command],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout.strip().splitlines()[-1])
+    argv = payload["argv"]
+
+    assert payload["mode"] == "browser_check"
+    assert payload["config_path"] == "/app/mswea_mode_configs/browser/config.yaml"
+    assert payload["screenshot_path"].endswith(
+        ".yudai/executions/browser_probe_exec/browser_check/screenshot.png"
+    )
+    assert payload["report_path"].endswith(
+        ".yudai/executions/browser_probe_exec/browser_check/visual_report.md"
+    )
+    assert payload["summary_path"].endswith(
+        ".yudai/executions/browser_probe_exec/browser_check/summary.json"
+    )
+    assert argv[0] == "mini"
+    assert argv[1:3] == ["-c", "/app/mswea_mode_configs/browser/config.yaml"]
+    task_text = argv[argv.index("-t") + 1]
+    assert "Verify the dashboard visually" in task_text
+    assert payload["screenshot_path"] in task_text
+    assert (workspace / ".yudai" / "executions" / "browser_probe_exec" / "browser_check" / "command_probe.json").is_file()
+
+
+def test_start_browser_check_rejects_active_execution_task():
+    engine = create_engine("sqlite:///:memory:")
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(engine)
+
+    db = SessionLocal()
+    try:
+        user = User(
+            github_username="browser-conflict",
+            github_user_id="8103",
+            email="browser-conflict@example.com",
+            display_name="Browser Conflict",
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        session = ChatSession(
+            user_id=user.id,
+            session_id="session_browser_conflict",
+            title="Browser Conflict Session",
+            repo_owner="octocat",
+            repo_name="yudaiv3",
+            repo_branch="main",
+            is_active=True,
+            total_messages=0,
+            total_tokens=0,
+            mode_metadata={},
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+
+        orchestrator = SessionExecutionOrchestrator(
+            broker=object(),
+            lifecycle=object(),
+            ws_hub=DummyHub(),
+        )
+
+        async def _run():
+            task = asyncio.create_task(asyncio.sleep(60))
+            orchestrator._browser_check_tasks[session.session_id] = task
+            try:
+                with pytest.raises(ExecutionConflictError):
+                    await orchestrator.start_browser_check(
+                        db,
+                        session=session,
+                        user_id=user.id,
+                        objective="Verify UI",
+                    )
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(_run())
+    finally:
+        db.close()
+
+
+def test_browser_check_mocked_broker_success_persists_artifact_and_context(tmp_path, monkeypatch):
+    db_path = tmp_path / "browser-success.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(mode_orchestrator_module, "SessionLocal", SessionLocal)
+
+    class DummyCacheStore:
+        async def download_and_export_bundle(self, **kwargs):
+            return {
+                "metadata": {
+                    "cache_manifest_path": str(tmp_path / "manifest.json"),
+                    "sandbox_bundle": {
+                        "metadata_path": str(tmp_path / "browser-check.metadata.json"),
+                    },
+                    "source_paths": kwargs["source_paths"],
+                },
+                "metadata_path": str(tmp_path / "browser-check.metadata.json"),
+                "bundle_path": str(tmp_path / "browser-check.tar.gz"),
+                "bundle_sha256": "sha256-browser",
+                "bundle_size": 128,
+            }
+
+    class DummyLifecycle:
+        def __init__(self):
+            self.cache_store = DummyCacheStore()
+
+        async def create_runtime_for_session(self, *args, **kwargs):  # pragma: no cover
+            raise AssertionError("runtime should already exist")
+
+        def _get_latest_runtime(self, db, *, session_id=None, sandbox_id=None):
+            query = db.query(SessionRuntime)
+            if session_id is not None:
+                query = query.filter(SessionRuntime.session_id == session_id)
+            if sandbox_id is not None:
+                query = query.filter(SessionRuntime.sandbox_id == sandbox_id)
+            return query.order_by(SessionRuntime.id.desc()).first()
+
+        def get_sandbox_or_404(self, db, sandbox_id):
+            return db.query(Sandbox).filter(Sandbox.id == sandbox_id).one()
+
+    class DummyBroker:
+        async def run_command(self, db, *, session, command, cwd=None, env=None, timeout_seconds=1800, on_event=None):
+            if on_event:
+                await on_event(
+                    {
+                        "type": "sandbox_stream",
+                        "payload": {"event": "stdout", "data": "browser output"},
+                    }
+                )
+            summary = {
+                "mode": "browser_check",
+                "status": "complete",
+                "route": "http://127.0.0.1:5173/",
+                "dev_server_command": "npm run dev",
+                "screenshot_path": env["BROWSER_CHECK_SCREENSHOT_PATH"],
+                "report_path": env["BROWSER_CHECK_REPORT_PATH"],
+                "console_warning_count": 1,
+                "failed_request_count": 0,
+                "warnings": ["one console warning"],
+                "critical_failures": [],
+                "changed_file_summary": {"newly_changed": [".yudai/browser-check.py"]},
+            }
+            stdout = (
+                f"{BROWSER_CHECK_SUMMARY_START}\n"
+                f"{json.dumps(summary)}\n"
+                f"{BROWSER_CHECK_SUMMARY_END}\n"
+                f"{BROWSER_CHECK_REPORT_START}\n"
+                "Visual report: page rendered with one warning.\n"
+                f"{BROWSER_CHECK_REPORT_END}\n"
+            )
+            return {"sandbox_id": "sbx_browser", "exit_code": 0, "stdout": stdout, "stderr": "", "duration_ms": 42}
+
+    class CapturingHub:
+        def __init__(self):
+            self.events = []
+
+        async def send_to_session(self, session_id, msg_type, payload):
+            self.events.append({"session_id": session_id, "msg_type": msg_type, "payload": payload})
+
+    async def _healthy(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(mode_orchestrator_module, "wait_for_sandbox_healthcheck", _healthy)
+    db = SessionLocal()
+    try:
+        user = User(
+            github_username="browser-success",
+            github_user_id="8104",
+            email="browser-success@example.com",
+            display_name="Browser Success",
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        session = ChatSession(
+            user_id=user.id,
+            session_id="session_browser_success",
+            title="Browser Success Session",
+            repo_owner="octocat",
+            repo_name="yudaiv3",
+            repo_branch="main",
+            repo_url="https://github.com/octocat/yudaiv3.git",
+            runtime_workspace_path="/workspace/repo",
+            is_active=True,
+            total_messages=0,
+            total_tokens=0,
+            mode_metadata={},
+        )
+        db.add(session)
+        db.flush()
+        sandbox = Sandbox(
+            id="sbx_browser",
+            identity_key="identity-browser",
+            org_slug="org",
+            repo_owner="octocat",
+            repo_name="yudaiv3",
+            environment="main",
+            repo_branch="main",
+            status="running",
+            active_session_id=session.id,
+            tunnel_url="http://sandbox.local/sbx_browser",
+            lifecycle_metadata={},
+        )
+        db.add(sandbox)
+        db.flush()
+        db.add(
+            SessionRuntime(
+                runtime_id="rt_browser",
+                session_id=session.id,
+                sandbox_id=sandbox.id,
+                status="running",
+                tunnel_url=sandbox.tunnel_url,
+            )
+        )
+        db.commit()
+        db.refresh(session)
+
+        hub = CapturingHub()
+        orchestrator = SessionExecutionOrchestrator(
+            broker=DummyBroker(),
+            lifecycle=DummyLifecycle(),
+            ws_hub=hub,
+        )
+
+        async def _run():
+            payload = await orchestrator.start_browser_check(
+                db,
+                session=session,
+                user_id=user.id,
+                objective="Verify the frontend",
+            )
+            task = orchestrator._browser_check_tasks[session.session_id]
+            await task
+            return payload
+
+        payload = asyncio.run(_run())
+        db.expire_all()
+        execution = db.query(AgentExecution).filter(AgentExecution.id == payload["execution_id"]).one()
+        artifact = db.query(SessionArtifact).filter(SessionArtifact.session_id == session.id).one()
+        card = db.query(ContextCard).filter(ContextCard.session_id == session.id).one()
+        session_row = db.query(ChatSession).filter(ChatSession.id == session.id).one()
+
+        assert payload["mode"] == BROWSER_CHECK_MODE
+        assert execution.mode == BROWSER_CHECK_MODE
+        assert execution.status == "complete"
+        assert execution.output_summary["screenshot_path"].endswith("/screenshot.png")
+        assert execution.output_summary["console_warning_count"] == 1
+        assert artifact.artifact_type == "browser_check"
+        assert artifact.bundle_path.endswith("browser-check.tar.gz")
+        assert "Visual report: page rendered" in card.content
+        assert (session_row.mode_metadata or {})["browser_check"]["status"] == "complete"
+        assert any(event["msg_type"].value == "tool_call" for event in hub.events)
+    finally:
+        db.close()
+
+
+def test_browser_check_mocked_broker_failure_does_not_terminate_sandbox(tmp_path, monkeypatch):
+    db_path = tmp_path / "browser-failure.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(mode_orchestrator_module, "SessionLocal", SessionLocal)
+
+    class DummyLifecycle:
+        def _get_latest_runtime(self, db, *, session_id=None, sandbox_id=None):
+            query = db.query(SessionRuntime)
+            if session_id is not None:
+                query = query.filter(SessionRuntime.session_id == session_id)
+            if sandbox_id is not None:
+                query = query.filter(SessionRuntime.sandbox_id == sandbox_id)
+            return query.order_by(SessionRuntime.id.desc()).first()
+
+        def get_sandbox_or_404(self, db, sandbox_id):
+            return db.query(Sandbox).filter(Sandbox.id == sandbox_id).one()
+
+    class DummyBroker:
+        async def run_command(self, db, *, session, command, cwd=None, env=None, timeout_seconds=1800, on_event=None):
+            return {
+                "sandbox_id": "sbx_browser_failure",
+                "exit_code": 7,
+                "stdout": "dev server failed",
+                "stderr": "cannot start server",
+                "duration_ms": 11,
+            }
+
+    async def _healthy(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(mode_orchestrator_module, "wait_for_sandbox_healthcheck", _healthy)
+    db = SessionLocal()
+    try:
+        user = User(
+            github_username="browser-failure",
+            github_user_id="8105",
+            email="browser-failure@example.com",
+            display_name="Browser Failure",
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        session = ChatSession(
+            user_id=user.id,
+            session_id="session_browser_failure",
+            title="Browser Failure Session",
+            repo_owner="octocat",
+            repo_name="yudaiv3",
+            repo_branch="main",
+            repo_url="https://github.com/octocat/yudaiv3.git",
+            runtime_workspace_path="/workspace/repo",
+            is_active=True,
+            total_messages=0,
+            total_tokens=0,
+            mode_metadata={},
+        )
+        db.add(session)
+        db.flush()
+        sandbox = Sandbox(
+            id="sbx_browser_failure",
+            identity_key="identity-browser-failure",
+            org_slug="org",
+            repo_owner="octocat",
+            repo_name="yudaiv3",
+            environment="main",
+            repo_branch="main",
+            status="running",
+            active_session_id=session.id,
+            tunnel_url="http://sandbox.local/sbx_browser_failure",
+            lifecycle_metadata={},
+        )
+        db.add(sandbox)
+        db.flush()
+        db.add(
+            SessionRuntime(
+                runtime_id="rt_browser_failure",
+                session_id=session.id,
+                sandbox_id=sandbox.id,
+                status="running",
+                tunnel_url=sandbox.tunnel_url,
+            )
+        )
+        db.commit()
+        db.refresh(session)
+
+        orchestrator = SessionExecutionOrchestrator(
+            broker=DummyBroker(),
+            lifecycle=DummyLifecycle(),
+            ws_hub=DummyHub(),
+        )
+
+        async def _run():
+            payload = await orchestrator.start_browser_check(
+                db,
+                session=session,
+                user_id=user.id,
+                objective="Verify the frontend",
+            )
+            task = orchestrator._browser_check_tasks[session.session_id]
+            await task
+            return payload
+
+        payload = asyncio.run(_run())
+        db.expire_all()
+        execution = db.query(AgentExecution).filter(AgentExecution.id == payload["execution_id"]).one()
+        sandbox_row = db.query(Sandbox).filter(Sandbox.id == sandbox.id).one()
+
+        assert execution.status == "failed"
+        assert "exit_code=7" in execution.error_message
+        assert db.query(SessionArtifact).filter(SessionArtifact.session_id == session.id).count() == 0
+        assert sandbox_row.status == "running"
+    finally:
+        db.close()
