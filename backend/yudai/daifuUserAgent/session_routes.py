@@ -119,6 +119,7 @@ from yudai.types import (
     ExecutionRequest,
     ExecutionResponse,
     ExecutionStatusResponse,
+    FrontendBrowserCheckToolRequest,
     GitHubBranchResponse,
     GitHubIssueResponse,
     GitHubRepositoryResponse,
@@ -1887,6 +1888,42 @@ async def execute_session_stage_tool(
             session=db_session,
             user_id=current_user.id,
             tool_name=request.tool_name,
+            objective=request.objective,
+        )
+    except ExecutionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return ExecutionResponse(**status_payload)
+
+
+@router.post(
+    "/sessions/{session_id}/tools/run-frontend-browser-check",
+    response_model=ExecutionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def execute_frontend_browser_check_tool(
+    session_id: str,
+    request: FrontendBrowserCheckToolRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Run the manual Daifu frontend browser verifier sidecar."""
+    realtime_flags = get_realtime_feature_flags()
+    if not realtime_flags.mode_orchestrator_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Mode orchestrator is disabled by feature flags",
+        )
+
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+
+    try:
+        status_payload = await get_daifu_mode_tool_service().run_frontend_browser_check(
+            db,
+            session=db_session,
+            user_id=current_user.id,
             objective=request.objective,
         )
     except ExecutionConflictError as exc:
