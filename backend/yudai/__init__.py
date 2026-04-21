@@ -1,0 +1,2 @@
+"""Yudai backend application package."""
+
