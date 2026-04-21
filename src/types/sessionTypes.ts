@@ -419,6 +419,15 @@ export interface ExecutionRequest {
   force_mode?: 'architect' | 'tester' | 'coder';
 }
 
+export interface StageToolRequest {
+  tool_name: 'run_architect_mode' | 'run_tester_mode' | 'run_coder_mode';
+  objective: string;
+}
+
+export interface CreateGitHubIssueToolRequest {
+  issue_id: string;
+}
+
 export interface ExecutionArtifactResponse {
   bundle_path?: string;
   metadata_path?: string;
@@ -746,6 +755,9 @@ export interface CreateGitHubIssueResponse {
   execution_id?: string;
   execution_status?: string;
   execution_error?: string;
+  requires_confirmation?: boolean;
+  confirmation_question_id?: string;
+  pending_tool?: string;
 }
 
 // ============================================================================
