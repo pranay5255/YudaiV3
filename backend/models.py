@@ -1828,6 +1828,9 @@ class CreateGitHubIssueResponse(BaseModel):
     execution_id: Optional[str] = None
     execution_status: Optional[str] = None
     execution_error: Optional[str] = None
+    requires_confirmation: bool = False
+    confirmation_question_id: Optional[str] = None
+    pending_tool: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
@@ -1927,6 +1930,15 @@ class AnswerQuestionResponse(BaseModel):
 class ExecutionRequest(BaseModel):
     objective: str = Field(..., min_length=1, max_length=10000)
     force_mode: Optional[Literal["architect", "tester", "coder"]] = None
+
+
+class StageToolRequest(BaseModel):
+    tool_name: Literal["run_architect_mode", "run_tester_mode", "run_coder_mode"]
+    objective: str = Field(..., min_length=1, max_length=10000)
+
+
+class CreateGitHubIssueToolRequest(BaseModel):
+    issue_id: str = Field(..., min_length=1, max_length=255)
 
 
 class ExecutionArtifactResponse(BaseModel):
