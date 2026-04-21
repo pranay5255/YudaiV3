@@ -3,7 +3,6 @@ import { useShallow } from 'zustand/react/shallow';
 import {
   Bot,
   CreditCard,
-  Database,
   MessageCircle,
   Route,
   User,
@@ -69,8 +68,6 @@ const runtimeStatusTone: Record<string, string> = {
 export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
   const { user, login, isLoading } = useAuth();
   const {
-    indexCodebaseEnabled,
-    setIndexCodebaseEnabled,
     selectedRepository,
     sessionStatus,
     runtimeStatus,
@@ -79,8 +76,6 @@ export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
     contextCards,
   } = useSessionStore(
     useShallow((state) => ({
-      indexCodebaseEnabled: state.indexCodebaseEnabled,
-      setIndexCodebaseEnabled: state.setIndexCodebaseEnabled,
       selectedRepository: state.selectedRepository,
       sessionStatus: state.sessionStatus,
       runtimeStatus: state.runtimeStatus,
@@ -133,21 +128,6 @@ export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange }) => {
           >
             Runtime {runtimeText}
           </span>
-
-          <button
-            type="button"
-            onClick={() => setIndexCodebaseEnabled(!indexCodebaseEnabled)}
-            className={`
-              flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-mono border transition-colors
-              ${indexCodebaseEnabled
-                ? 'bg-cyan/10 text-cyan border-cyan/30 hover:bg-cyan/15'
-                : 'bg-bg-tertiary text-fg-secondary border-border hover:text-fg'}
-            `}
-            aria-pressed={indexCodebaseEnabled}
-          >
-            <Database className="w-3.5 h-3.5" />
-            Indexing
-          </button>
 
           {user ? (
             <UserProfile />

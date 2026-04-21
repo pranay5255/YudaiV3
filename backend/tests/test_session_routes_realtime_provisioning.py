@@ -24,32 +24,27 @@ def _install_import_stubs() -> None:
     fake_solver.solver_manager = type("DummySolverManager", (), {})()
     sys.modules["solver.solver"] = fake_solver
 
-    fake_context = types.ModuleType("context")
-    for name in (
-        "EmbeddingPipeline",
-        "FactsAndMemoriesService",
-        "RepositoryFile",
-        "RepositorySnapshotService",
-    ):
-        setattr(fake_context, name, type(name, (), {}))
-    sys.modules["context"] = fake_context
+    fake_context = types.ModuleType("yudai.context")
+    fake_context.__path__ = []
+    sys.modules["yudai.context"] = fake_context
 
-    fake_githubops = types.ModuleType("daifuUserAgent.githubOps")
+    fake_githubops = types.ModuleType("yudai.daifuUserAgent.githubOps")
     fake_githubops.GitHubOps = type("GitHubOps", (), {})
-    sys.modules["daifuUserAgent.githubOps"] = fake_githubops
+    sys.modules["yudai.daifuUserAgent.githubOps"] = fake_githubops
 
-    fake_llm_service = types.ModuleType("daifuUserAgent.llm_service")
+    fake_llm_service = types.ModuleType("yudai.daifuUserAgent.llm_service")
     fake_llm_service.LLMService = type("LLMService", (), {})
-    sys.modules["daifuUserAgent.llm_service"] = fake_llm_service
+    sys.modules["yudai.daifuUserAgent.llm_service"] = fake_llm_service
 
 
 _install_import_stubs()
 
-from config.realtime_flags import RealtimeFeatureFlags  # noqa: E402
-from daifuUserAgent import session_routes  # noqa: E402
-from models import Base, ChatSession, CreateSessionRequest, Sandbox, SessionRuntime, User  # noqa: E402
-from realtime.cache_store import SessionCacheStore  # noqa: E402
-from realtime.lifecycle import RealtimeLifecycleService  # noqa: E402
+from yudai.config.realtime_flags import RealtimeFeatureFlags  # noqa: E402
+from yudai.daifuUserAgent import session_routes  # noqa: E402
+from yudai.models import Base, ChatSession, Sandbox, SessionRuntime, User  # noqa: E402
+from yudai.realtime.cache_store import SessionCacheStore  # noqa: E402
+from yudai.realtime.lifecycle import RealtimeLifecycleService  # noqa: E402
+from yudai.types import CreateSessionRequest  # noqa: E402
 
 
 @pytest.fixture
@@ -115,9 +110,6 @@ def test_create_session_skips_runtime_when_realtime_enabled(db_and_user, monkeyp
                 repo_owner="octocat",
                 repo_name="yudaiv3",
                 repo_branch="main",
-                index_codebase=False,
-                generate_embeddings=False,
-                generate_facts_memories=False,
             ),
             current_user=user,
             db=db,
@@ -148,9 +140,6 @@ def test_create_session_skips_runtime_when_realtime_disabled(db_and_user, monkey
                 repo_owner="octocat",
                 repo_name="yudaiv3",
                 repo_branch="main",
-                index_codebase=False,
-                generate_embeddings=False,
-                generate_facts_memories=False,
             ),
             current_user=user,
             db=db,
@@ -195,9 +184,6 @@ def test_create_session_succeeds_when_runtime_provisioning_would_fail(db_and_use
                 repo_owner="octocat",
                 repo_name="yudaiv3",
                 repo_branch="main",
-                index_codebase=False,
-                generate_embeddings=False,
-                generate_facts_memories=False,
             ),
             current_user=user,
             db=db,

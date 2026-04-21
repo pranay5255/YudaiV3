@@ -341,7 +341,7 @@ Ruthless cleanup candidates, with 2026-04-20 status:
    - Static old trajectory sample imported by `TrajectoryViewer`.
    - Status: deleted from production UI.
 
-10. `backend/context/yudai-grep/build/lib/*`
+10. `backend/context/legacy-repo-helper/build/lib/*`
     - Generated build output appears tracked.
     - Delete from source control unless it is intentionally vendored.
 
@@ -363,7 +363,7 @@ Current open issues fetched by `gh api` match `docs/GITHUB_ISSUE_TRIAGE.md`.
 
 ### Should Close Or Reclassify
 
-- `#138`: likely fixed by current Modal image, because `pgvector` is now installed in `SANDBOX_SERVER_PIP_PACKAGES` and Modal preflight verifies import/runtime smoke. Keep open only until a CI/prod Modal preflight confirms after merge.
+- `#138`: reclassify after the legacy indexing dependency path removal; keep open only if a fresh CI/prod Modal preflight exposes a current runtime import failure.
 - `#182`: partially completed for chat token streaming. Keep open, but narrow it to remaining loading feedback, mode progress, and trajectory UI.
 
 ### Keep As-Is

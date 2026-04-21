@@ -11,7 +11,7 @@ How to answer:
 
 ## Cross-Phase Decisions
 
-1. Confirm your six decisions are final for implementation (sandbox per org+repo+env, direct tunnel, SSE+WS split, PG on controller + sandbox cache, manual yudai-grep training script, persistence ends after issue+PR flow).  
+1. Confirm your six decisions are final for implementation (sandbox per org+repo+env, direct tunnel, SSE+WS split, PG on controller + sandbox cache, manual repo-helper training script, persistence ends after issue+PR flow).
 Answer: yes keep all six decisions
 
 2. How do you define `organization` in the system: GitHub org only, GitHub user namespaces too, or internal org entity?  
@@ -128,7 +128,7 @@ Answer:not for now
 
 ---
 
-## Phase 2: yudai-grep Activation
+## Phase 2: Legacy Repo-Helper Activation
 
 38. Where should the manual training script live (controller codebase, sandbox image, separate tooling dir)?  
 Answer:controller codebase, here, this codebase
@@ -160,7 +160,7 @@ Answer:hard failure with error message
 47. What accuracy/quality gate is required before promoting a new model?  
 Answer:not required for now. 
 
-48. What latency budget for yudai-grep inference per query?  
+48. What latency budget for legacy repo-helper inference per query?
 Answer:not required for now. Will be handled by the myself
 
 49. Do you want A/B comparison between old/new checkpoints before rollout?  
@@ -234,8 +234,8 @@ Answer:1 only for now
 69. Should parallel solves share one repo working tree or isolated workdirs?  
 Answer:parallel solves should share one repo working tree but are only available when multiple users connect to session
 
-70. Persistent embeddings: store in sandbox FS, PostgreSQL/pgvector, or hybrid?  
-Answer:pgvector
+70. Persistent embeddings: store in sandbox FS, relational DB, or hybrid?
+Answer: legacy answer removed with the indexing path
 
 71. IDE integration scope: in-repo extension now or API-only foundation?  
 Answer:not required for now will be implemented later
@@ -450,8 +450,6 @@ Block 1 — How the User Triggers Execution
   would immediately exit)? What step limit do you want per mode?
 
   A17 - Step_limit must be 15 for now. 
-
-
 
 
 

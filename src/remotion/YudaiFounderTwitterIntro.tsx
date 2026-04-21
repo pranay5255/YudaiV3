@@ -63,6 +63,7 @@ const IntroScene: React.FC<YudaiFounderTwitterIntroProps & { duration: number }>
     frame,
     config: { damping: 18, stiffness: 130, mass: 0.7 },
   });
+  const headlineMotion = enterUp(frame, 6, 20, 24);
 
   return (
     <AbsoluteFill
@@ -88,13 +89,13 @@ const IntroScene: React.FC<YudaiFounderTwitterIntroProps & { duration: number }>
       <div
         style={{
           marginTop: 22,
+          ...headlineMotion,
           fontFamily: fontHeading,
           color: '#f8fafc',
           fontWeight: 700,
           fontSize: 78,
           lineHeight: 1.06,
-          transform: `scale(${0.97 + scaleIn * 0.03})`,
-          ...enterUp(frame, 6, 20, 24),
+          transform: `${headlineMotion.transform} scale(${0.97 + scaleIn * 0.03})`,
         }}
       >
         {productName}

@@ -2,7 +2,7 @@
 set -uo pipefail
 
 # Backend E2E suite for deployed docker-compose backend.
-# Focus: auth, repo fetch, sessions/chat, controller sandbox runtime, embeddings + pgvector.
+# Focus: auth, repo fetch, sessions/chat, and controller sandbox runtime.
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.backend-only.yml}"
 BASE_URL="${BASE_URL:-http://localhost:8000}"
@@ -15,11 +15,6 @@ RUN_LLM_CHAT="${RUN_LLM_CHAT:-0}" # Set to 1 to include /daifu/sessions/{id}/cha
 REPO_OWNER="${REPO_OWNER:-pranay5255}"
 REPO_NAME="${REPO_NAME:-TrustlessLocalAgents}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
-
-# Embedding scenario repo (index + pgvector checks)
-EMBED_REPO_OWNER="${EMBED_REPO_OWNER:-pranay5255}"
-EMBED_REPO_NAME="${EMBED_REPO_NAME:-picoclaw}"
-EMBED_REPO_BRANCH="${EMBED_REPO_BRANCH:-main}"
 
 REPORT_DIR="${REPORT_DIR:-logs/e2e}"
 mkdir -p "$REPORT_DIR"
@@ -41,10 +36,6 @@ SESSION_ID=""
 SESSION_DB_ID=""
 SANDBOX_ID=""
 RUNTIME_ID=""
-EMBED_SESSION_ID=""
-EMBED_SESSION_DB_ID=""
-EMBED_SANDBOX_ID=""
-
 GH_TOKEN=""
 GH_USERNAME="${GH_USERNAME:-}"
 AUTH_USER_ID=""
@@ -268,9 +259,9 @@ seed_auth_token() {
 from datetime import timedelta
 import os
 
-from db.database import SessionLocal
-from models import AuthToken, User
-from utils import utc_now
+from yudai.db.database import SessionLocal
+from yudai.models import AuthToken, User
+from yudai.utils import utc_now
 
 db = SessionLocal()
 try:
@@ -495,10 +486,7 @@ create_payload="$(jq -nc \
   '{
     repo_owner: $owner,
     repo_name: $name,
-    repo_branch: $branch,
-    index_codebase: false,
-    generate_embeddings: false,
-    generate_facts_memories: false
+    repo_branch: $branch
   }'
 )"
 
@@ -530,7 +518,7 @@ if code="$(api_request POST "/daifu/sessions" "$create_payload")"; then
         --arg owner "$REPO_OWNER" \
         --arg name "$REPO_NAME" \
         --arg branch "$REPO_BRANCH" \
-        '{repo_owner:$owner,repo_name:$name,repo_branch:$branch,index_codebase:false,generate_embeddings:false,generate_facts_memories:false}'
+        '{repo_owner:$owner,repo_name:$name,repo_branch:$branch}'
       )"
       code="$(api_request POST "/daifu/sessions" "$create_payload")" || code="000"
     else
@@ -637,32 +625,6 @@ if [[ -n "$SESSION_ID" ]]; then
     record_result "CHAT-003" "FAIL" "List session messages" "$(cat "$TMP_DIR/api_err.log")"
   fi
 
-  context_payload="$(jq -nc '{title:"E2E Card",description:"Context for tests",content:"This is context content",source:"chat",tokens:8}')"
-  if code="$(api_request POST "/daifu/sessions/$SESSION_ID/context-cards" "$context_payload")"; then
-    if [[ "$code" == "200" ]]; then
-      record_result "CHAT-004" "PASS" "Create context card" "$(cat "$TMP_DIR/response.json")"
-    else
-      record_result "CHAT-004" "FAIL" "Create context card" "HTTP=$code body=$(cat "$TMP_DIR/response.json")"
-    fi
-  else
-    record_result "CHAT-004" "FAIL" "Create context card" "$(cat "$TMP_DIR/api_err.log")"
-  fi
-
-  if code="$(api_request GET "/daifu/sessions/$SESSION_ID/context-cards")"; then
-    if [[ "$code" == "200" ]]; then
-      card_count="$(jq 'if type=="array" then length else 0 end' "$TMP_DIR/response.json")"
-      if (( card_count >= 1 )); then
-        record_result "CHAT-005" "PASS" "List context cards" "context_card_count=$card_count"
-      else
-        record_result "CHAT-005" "FAIL" "List context cards" "context_card_count=0"
-      fi
-    else
-      record_result "CHAT-005" "FAIL" "List context cards" "HTTP=$code body=$(cat "$TMP_DIR/response.json")"
-    fi
-  else
-    record_result "CHAT-005" "FAIL" "List context cards" "$(cat "$TMP_DIR/api_err.log")"
-  fi
-
   conv_payload="$(jq -nc '{message:"Please focus on test coverage first"}')"
   if code="$(api_request POST "/daifu/sessions/$SESSION_ID/conversation" "$conv_payload")"; then
     if [[ "$code" == "200" ]]; then
@@ -676,7 +638,7 @@ if [[ -n "$SESSION_ID" ]]; then
   fi
 
   if [[ "$RUN_LLM_CHAT" == "1" ]]; then
-    chat_payload="$(jq -nc --arg sid "$SESSION_ID" --arg owner "$REPO_OWNER" --arg repo "$REPO_NAME" --arg branch "$REPO_BRANCH" '{session_id:$sid,message:{message_text:"Say OK for backend e2e",is_code:false},context_cards:[],repository:{owner:$owner,name:$repo,branch:$branch}}')"
+    chat_payload="$(jq -nc --arg sid "$SESSION_ID" --arg owner "$REPO_OWNER" --arg repo "$REPO_NAME" --arg branch "$REPO_BRANCH" '{session_id:$sid,message:{message_text:"Say OK for backend e2e",is_code:false},repository:{owner:$owner,name:$repo,branch:$branch}}')"
     if code="$(api_request POST "/daifu/sessions/$SESSION_ID/chat" "$chat_payload")"; then
       if [[ "$code" == "200" ]]; then
         reply="$(json_get '.reply')"
@@ -708,163 +670,6 @@ else
   done
 fi
 
-print_step "Embedding + pgvector Validation"
-
-EMBED_REPO_BRANCH="$(choose_branch "$EMBED_REPO_OWNER" "$EMBED_REPO_NAME" "$EMBED_REPO_BRANCH")"
-embed_create_payload="$(jq -nc \
-  --arg owner "$EMBED_REPO_OWNER" \
-  --arg name "$EMBED_REPO_NAME" \
-  --arg branch "$EMBED_REPO_BRANCH" \
-  '{
-    repo_owner: $owner,
-    repo_name: $name,
-    repo_branch: $branch,
-    index_codebase: true,
-    generate_embeddings: true,
-    generate_facts_memories: false
-  }'
-)"
-
-if code="$(api_request POST "/daifu/sessions" "$embed_create_payload")"; then
-  embed_create_body="$(cat "$TMP_DIR/response.json")"
-  if [[ "$code" != "200" ]] && grep -q "SINGLE_ACTIVE_EDITOR_CONFLICT" <<<"$embed_create_body"; then
-    embed_conflicting_sandbox="$(lookup_active_sandbox_for_identity "$EMBED_REPO_OWNER" "$EMBED_REPO_NAME" "$EMBED_REPO_BRANCH" | tr -d '[:space:]')"
-    if [[ -n "$embed_conflicting_sandbox" ]]; then
-      embed_conflict_delete_code="$(api_request DELETE "/controller/sandboxes/$embed_conflicting_sandbox")" || embed_conflict_delete_code="000"
-      if [[ "$embed_conflict_delete_code" == "204" ]]; then
-        record_result "EMB-000" "PASS" "Pre-clean conflicting embedding sandbox identity before retry" "sandbox_id=$embed_conflicting_sandbox"
-      else
-        record_result "EMB-000" "FAIL" "Pre-clean conflicting embedding sandbox identity before retry" "sandbox_id=$embed_conflicting_sandbox HTTP=$embed_conflict_delete_code body=$(cat "$TMP_DIR/response.json")"
-      fi
-      code="$(api_request POST "/daifu/sessions" "$embed_create_payload")" || code="000"
-    else
-      record_result "EMB-000" "FAIL" "Pre-clean conflicting embedding sandbox identity before retry" "Could not resolve conflicting sandbox_id for identity"
-    fi
-  fi
-
-  if [[ "$code" != "200" ]] && grep -q 'sandboxes_identity_key_key' "$TMP_DIR/response.json"; then
-    if embed_fallback="$(find_unused_public_repo_identity "$EMBED_REPO_BRANCH")"; then
-      EMBED_REPO_OWNER="${embed_fallback%%|*}"
-      embed_rest="${embed_fallback#*|}"
-      EMBED_REPO_NAME="${embed_rest%%|*}"
-      EMBED_REPO_BRANCH="${embed_rest##*|}"
-      record_result "EMB-010" "PASS" "Fallback to unused public embedding repo identity after unique-key conflict" "repo=$EMBED_REPO_OWNER/$EMBED_REPO_NAME branch=$EMBED_REPO_BRANCH"
-      embed_create_payload="$(jq -nc \
-        --arg owner "$EMBED_REPO_OWNER" \
-        --arg name "$EMBED_REPO_NAME" \
-        --arg branch "$EMBED_REPO_BRANCH" \
-        '{repo_owner:$owner,repo_name:$name,repo_branch:$branch,index_codebase:true,generate_embeddings:true,generate_facts_memories:false}'
-      )"
-      code="$(api_request POST "/daifu/sessions" "$embed_create_payload")" || code="000"
-    else
-      record_result "EMB-010" "FAIL" "Fallback to unused public embedding repo identity after unique-key conflict" "Could not find unused public repo identity"
-    fi
-  fi
-
-  if [[ "$code" == "200" ]]; then
-    EMBED_SESSION_ID="$(json_get '.session_id')"
-    EMBED_SANDBOX_ID="$(json_get '.sandbox_id')"
-    if [[ -n "$EMBED_SESSION_ID" ]]; then
-      record_result "EMB-001" "PASS" "Create embedding-enabled session (index_codebase=true)" "$(cat "$TMP_DIR/response.json")"
-      EMBED_SESSION_DB_ID="$(db_query "SELECT id FROM chat_sessions WHERE session_id='${EMBED_SESSION_ID}' ORDER BY id DESC LIMIT 1;")"
-    else
-      record_result "EMB-001" "FAIL" "Create embedding-enabled session (index_codebase=true)" "session_id missing body=$(cat "$TMP_DIR/response.json")"
-    fi
-  else
-    record_result "EMB-001" "FAIL" "Create embedding-enabled session (index_codebase=true)" "HTTP=$code body=$(cat "$TMP_DIR/response.json")"
-  fi
-else
-  record_result "EMB-001" "FAIL" "Create embedding-enabled session (index_codebase=true)" "$(cat "$TMP_DIR/api_err.log")"
-fi
-
-if [[ -n "$EMBED_SESSION_DB_ID" ]]; then
-  # Poll file_items
-  file_item_count="0"
-  deadline=$((SECONDS + POLL_TIMEOUT_SECONDS))
-  while (( SECONDS < deadline )); do
-    file_item_count="$(db_query "SELECT COUNT(*) FROM file_items WHERE session_id=${EMBED_SESSION_DB_ID};" | tr -d '[:space:]')"
-    if [[ "$file_item_count" =~ ^[0-9]+$ ]] && (( file_item_count > 0 )); then
-      break
-    fi
-    sleep "$POLL_INTERVAL_SECONDS"
-  done
-
-  if [[ "$file_item_count" =~ ^[0-9]+$ ]] && (( file_item_count > 0 )); then
-    record_result "EMB-002" "PASS" "Repository files indexed into file_items" "file_item_count=$file_item_count"
-  else
-    record_result "EMB-002" "FAIL" "Repository files indexed into file_items" "file_item_count=$file_item_count after ${POLL_TIMEOUT_SECONDS}s"
-  fi
-
-  # Poll file_embeddings
-  embedding_count="0"
-  deadline=$((SECONDS + POLL_TIMEOUT_SECONDS))
-  while (( SECONDS < deadline )); do
-    embedding_count="$(db_query "SELECT COUNT(*) FROM file_embeddings WHERE session_id=${EMBED_SESSION_DB_ID};" | tr -d '[:space:]')"
-    if [[ "$embedding_count" =~ ^[0-9]+$ ]] && (( embedding_count > 0 )); then
-      break
-    fi
-    sleep "$POLL_INTERVAL_SECONDS"
-  done
-
-  if [[ "$embedding_count" =~ ^[0-9]+$ ]] && (( embedding_count > 0 )); then
-    record_result "EMB-003" "PASS" "Embeddings persisted into file_embeddings" "embedding_count=$embedding_count"
-  else
-    record_result "EMB-003" "FAIL" "Embeddings persisted into file_embeddings" "embedding_count=$embedding_count after ${POLL_TIMEOUT_SECONDS}s"
-  fi
-else
-  record_result "EMB-002" "SKIP" "Repository files indexed into file_items" "embedding session creation failed"
-  record_result "EMB-003" "SKIP" "Embeddings persisted into file_embeddings" "embedding session creation failed"
-fi
-
-vector_ext="$(db_query "SELECT extname FROM pg_extension WHERE extname='vector';" | tr -d '[:space:]')"
-if [[ "$vector_ext" == "vector" ]]; then
-  record_result "EMB-004" "PASS" "pgvector extension installed" "extname=vector"
-else
-  record_result "EMB-004" "FAIL" "pgvector extension installed" "extname=$vector_ext"
-fi
-
-embedding_type="$(db_query "SELECT udt_name FROM information_schema.columns WHERE table_name='file_embeddings' AND column_name='embedding';" | tr -d '[:space:]')"
-if [[ "$embedding_type" == "vector" ]]; then
-  record_result "EMB-005" "PASS" "file_embeddings.embedding column uses vector type" "udt_name=vector"
-else
-  record_result "EMB-005" "FAIL" "file_embeddings.embedding column uses vector type" "udt_name=$embedding_type"
-fi
-
-if [[ -n "$EMBED_SESSION_DB_ID" ]]; then
-  vector_dims="$(db_query "SELECT vector_dims(embedding) FROM file_embeddings WHERE session_id=${EMBED_SESSION_DB_ID} AND embedding IS NOT NULL LIMIT 1;" | tr -d '[:space:]')"
-  if [[ "$vector_dims" =~ ^[0-9]+$ ]] && (( vector_dims > 0 )); then
-    record_result "EMB-006" "PASS" "Stored embeddings have valid dimensions" "vector_dims=$vector_dims"
-  else
-    record_result "EMB-006" "FAIL" "Stored embeddings have valid dimensions" "vector_dims=$vector_dims"
-  fi
-
-  self_distance="$(db_query "SELECT (embedding <-> embedding) FROM file_embeddings WHERE session_id=${EMBED_SESSION_DB_ID} AND embedding IS NOT NULL LIMIT 1;" | tr -d '[:space:]')"
-  if [[ "$self_distance" == "0" || "$self_distance" == "0.0" ]]; then
-    record_result "EMB-007" "PASS" "pgvector distance operator (<->) is functional" "self_distance=$self_distance"
-  else
-    record_result "EMB-007" "PASS" "pgvector distance operator (<->) is functional" "self_distance=$self_distance (non-zero formatting may vary)"
-  fi
-
-  if code="$(api_request GET "/daifu/sessions/$EMBED_SESSION_ID/file-deps/session")"; then
-    if [[ "$code" == "200" ]]; then
-      deps_count="$(jq 'if type=="array" then length else 0 end' "$TMP_DIR/response.json")"
-      if (( deps_count > 0 )); then
-        record_result "EMB-008" "PASS" "File dependency endpoint returns indexed files" "file_dep_count=$deps_count"
-      else
-        record_result "EMB-008" "FAIL" "File dependency endpoint returns indexed files" "file_dep_count=0"
-      fi
-    else
-      record_result "EMB-008" "FAIL" "File dependency endpoint returns indexed files" "HTTP=$code body=$(cat "$TMP_DIR/response.json")"
-    fi
-  else
-    record_result "EMB-008" "FAIL" "File dependency endpoint returns indexed files" "$(cat "$TMP_DIR/api_err.log")"
-  fi
-else
-  record_result "EMB-006" "SKIP" "Stored embeddings have valid dimensions" "embedding session creation failed"
-  record_result "EMB-007" "SKIP" "pgvector distance operator (<->) is functional" "embedding session creation failed"
-  record_result "EMB-008" "SKIP" "File dependency endpoint returns indexed files" "embedding session creation failed"
-fi
-
 print_step "Optional Cleanup"
 
 if [[ -n "$SANDBOX_ID" ]]; then
@@ -878,17 +683,6 @@ else
   record_result "CLN-001" "SKIP" "Cleanup sandbox for primary session" "No sandbox_id captured"
 fi
 
-if [[ -n "$EMBED_SANDBOX_ID" ]]; then
-  code="$(api_request DELETE "/controller/sandboxes/$EMBED_SANDBOX_ID")" || code="000"
-  if [[ "$code" == "204" ]]; then
-    record_result "CLN-002" "PASS" "Cleanup sandbox for embedding session" "sandbox_id=$EMBED_SANDBOX_ID deleted"
-  else
-    record_result "CLN-002" "FAIL" "Cleanup sandbox for embedding session" "HTTP=$code body=$(cat "$TMP_DIR/response.json")"
-  fi
-else
-  record_result "CLN-002" "SKIP" "Cleanup sandbox for embedding session" "No embedding sandbox_id captured"
-fi
-
 {
   echo "# Backend E2E Checklist Report"
   echo
@@ -896,7 +690,6 @@ fi
   echo "- Compose file: \`$COMPOSE_FILE\`"
   echo "- Base URL (in-container): \`$BASE_URL\`"
   echo "- Primary repo: \`$REPO_OWNER/$REPO_NAME@$REPO_BRANCH\`"
-  echo "- Embedding repo: \`$EMBED_REPO_OWNER/$EMBED_REPO_NAME@$EMBED_REPO_BRANCH\`"
   echo "- RUN_LLM_CHAT: \`$RUN_LLM_CHAT\`"
   echo
   echo "## Summary"

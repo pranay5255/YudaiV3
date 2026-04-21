@@ -1,5 +1,4 @@
 import sys
-import types
 from pathlib import Path
 
 
@@ -7,16 +6,11 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-
-fake_sentence_transformers = types.ModuleType("sentence_transformers")
-fake_sentence_transformers.SentenceTransformer = type("SentenceTransformer", (), {})
-sys.modules.setdefault("sentence_transformers", fake_sentence_transformers)
-
-stubbed_llm_service = sys.modules.get("daifuUserAgent.llm_service")
+stubbed_llm_service = sys.modules.get("yudai.daifuUserAgent.llm_service")
 if stubbed_llm_service is not None and not hasattr(stubbed_llm_service, "DaifuParsedResponse"):
-    sys.modules.pop("daifuUserAgent.llm_service", None)
+    sys.modules.pop("yudai.daifuUserAgent.llm_service", None)
 
-from daifuUserAgent.llm_service import LLMService  # noqa: E402
+from yudai.daifuUserAgent.llm_service import LLMService  # noqa: E402
 
 
 def test_format_chat_response_v2_parses_questions_probes_and_buttons():

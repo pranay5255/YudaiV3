@@ -4,7 +4,6 @@
 
 import type {
   ContextCard,
-  FileItem,
   User,
   GitHubRepository,
   GitHubBranch,
@@ -16,11 +15,6 @@ import type {
   TabType,
   AgentStatus,
   CreateSessionMutationData,
-  AddContextCardMutationData,
-  RemoveContextCardMutationData,
-  AddFileDependencyMutationData,
-  ContextCardMutationContext,
-  FileDependencyMutationContext,
   // New types from backend integration
   CreateUserIssueRequest,
   IssueGenerationRequest,
@@ -52,7 +46,6 @@ export interface IdeaItem {
 export interface IssuePreviewData extends GitHubIssuePreview {
   userIssue?: UserIssueResponse;
   conversationContext: import('./types/sessionTypes').ChatContextMessage[];
-  fileContext: import('./types/sessionTypes').FileContextItem[];
   canCreateGitHubIssue: boolean;
   repositoryInfo?: {
     owner: string;
@@ -96,7 +89,6 @@ export interface IssueOpsContext {
   title: string;
   description: string;
   chat_messages: import('./types/sessionTypes').ChatContextMessage[];
-  file_context: import('./types/sessionTypes').FileContextItem[];
   repo_owner: string;
   repo_name: string;
   priority: string;
@@ -105,7 +97,6 @@ export interface IssueOpsContext {
 // Re-export types from sessionTypes for backward compatibility
 export type {
   ContextCard,
-  FileItem,
   User,
   GitHubRepository,
   GitHubBranch,
@@ -117,11 +108,6 @@ export type {
   TabType,
   AgentStatus,
   CreateSessionMutationData,
-  AddContextCardMutationData,
-  RemoveContextCardMutationData,
-  AddFileDependencyMutationData,
-  ContextCardMutationContext,
-  FileDependencyMutationContext,
   // New backend integration types
   CreateUserIssueRequest,
   IssueGenerationRequest,
@@ -208,9 +194,8 @@ export interface SessionState {
   isLoadingMessages: boolean;
   messageRefreshKey: number;
   
-  // Context management
+  // Context data
   contextCards: ContextCard[];
-  fileContext: FileItem[];
   totalTokens: number;
   
   // Issue management
@@ -235,7 +220,4 @@ export interface SessionState {
   lastUpdated: Date;
   connectionStatus: 'connected' | 'disconnected' | 'reconnecting';
 }
-
-
-
 

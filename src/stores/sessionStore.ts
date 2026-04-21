@@ -3,17 +3,15 @@ import { devtools, persist } from 'zustand/middleware';
 import {
   SelectedRepository,
   TabType,
-  ContextCard,
-  FileItem,
   ChatMessage,
   GitHubRepository,
   UserIssue,
   Session,
   SessionContext,
   UpdateSessionRequest,
-  CreateContextCardRequest,
-  CreateFileEmbeddingRequest,
   ChatRequest,
+  ContextCard,
+  CreateContextCardRequest,
   CreateIssueWithContextRequest,
   IssueCreationResponse,
   AgentStatus,
@@ -128,7 +126,6 @@ type UnifiedWsChatSendParams = {
   sessionId: string;
   sessionToken: string;
   content: string;
-  contextCards?: string[];
   repository?: ChatRepositoryPayload;
   onChunk?: (text: string) => void;
   onStatus?: (status: string, detail?: string | null) => void;
@@ -257,7 +254,6 @@ const sendChatMessageViaUnifiedWs = ({
   sessionId,
   sessionToken,
   content,
-  contextCards,
   repository,
   onChunk,
   onStatus,
@@ -319,9 +315,6 @@ const sendChatMessageViaUnifiedWs = ({
 
     ws.onopen = () => {
       const payload: Record<string, unknown> = { content };
-      if (contextCards && contextCards.length > 0) {
-        payload.context_cards = contextCards;
-      }
       if (repository) {
         payload.repository = repository;
       }
@@ -457,18 +450,11 @@ interface SessionState {
   explorationDetail: string | null;
 
   // ============================================================================
-  // CONTEXT MANAGEMENT STATE (matches ContextCard model)
+  // CONTEXT CARD STATE
   // ============================================================================
   contextCards: ContextCard[];
   isLoadingContextCards: boolean;
   contextCardError: string | null;
-
-  // ============================================================================
-  // FILE DEPENDENCIES STATE (matches FileEmbedding model)
-  // ============================================================================
-  fileContext: FileItem[];
-  isLoadingFileContext: boolean;
-  fileContextError: string | null;
 
   // ============================================================================
   // USER ISSUES STATE (matches UserIssue model)
@@ -490,7 +476,6 @@ interface SessionState {
   activeTab: TabType;
   sidebarCollapsed: boolean;
   sessionLoadingEnabled: boolean;
-  indexCodebaseEnabled: boolean;
 
   // ============================================================================
   // SESSION STATISTICS & METADATA
@@ -507,7 +492,6 @@ interface SessionState {
   updateSession: (sessionId: string, updates: UpdateSessionRequest) => Promise<boolean>;
   deleteSession: (sessionId: string) => Promise<boolean>;
   ensureSessionExists: (sessionId: string) => Promise<void>;
-  setIndexCodebaseEnabled: (enabled: boolean) => void;
 
   // ============================================================================
   // REPOSITORY ACTIONS
@@ -531,7 +515,7 @@ interface SessionState {
   setCodeExplorationState: (isExploring: boolean, detail?: string | null) => void;
 
   // ============================================================================
-  // CONTEXT CARD ACTIONS (matches ContextCard APIs)
+  // CONTEXT CARD ACTIONS
   // ============================================================================
   createContextCard: (card: CreateContextCardRequest) => Promise<ContextCard>;
   updateContextCard: (cardId: string, updates: Partial<CreateContextCardRequest>) => Promise<boolean>;
@@ -540,17 +524,6 @@ interface SessionState {
   setContextCards: (cards: ContextCard[]) => void;
   setContextCardLoading: (loading: boolean) => void;
   setContextCardError: (error: string | null) => void;
-
-  // ============================================================================
-  // FILE DEPENDENCY ACTIONS (matches FileEmbedding APIs)
-  // ============================================================================
-  createFileEmbedding: (embedding: CreateFileEmbeddingRequest) => Promise<boolean>;
-  updateFileEmbedding: (fileId: string, updates: Partial<CreateFileEmbeddingRequest>) => Promise<boolean>;
-  deleteFileEmbedding: (fileId: string) => Promise<boolean>;
-  loadFileDependencies: (sessionId: string) => Promise<FileItem[]>;
-  setFileContext: (files: FileItem[]) => void;
-  setFileContextLoading: (loading: boolean) => void;
-  setFileContextError: (error: string | null) => void;
 
   // ============================================================================
   // USER ISSUE ACTIONS (matches UserIssue APIs)
@@ -596,19 +569,13 @@ interface SessionState {
   // CHAT MESSAGE SENDING (for sending messages through backend chat endpoint)
   // ============================================================================
 
-  sendChatMessage: (message: string, contextCards?: string[], repository?: SelectedRepository) => Promise<ChatResponse>;
+  sendChatMessage: (message: string, repository?: SelectedRepository) => Promise<ChatResponse>;
 
   // ============================================================================
   // USER ISSUE CREATION (for creating issues with context)
   // ============================================================================
 
   createIssueWithContext: (request: CreateIssueWithContextRequest) => Promise<IssueCreationResponse>;
-
-  // ============================================================================
-  // FILE DEPENDENCY EXTRACTION (for extracting file dependencies for session)
-  // ============================================================================
-
-  extractFileDependenciesForSession: (sessionId: string, repoUrl: string) => Promise<boolean>;
 
   // ============================================================================
   // REPOSITORY BRANCH LOADING (for loading repository branches)
@@ -657,15 +624,10 @@ export const useSessionStore = create<SessionState>()(
         isExploringCodebase: false,
         explorationDetail: null,
 
-        // Context management state
+        // Context card state
         contextCards: [],
         isLoadingContextCards: false,
         contextCardError: null,
-
-        // File dependencies state
-        fileContext: [],
-        isLoadingFileContext: false,
-        fileContextError: null,
 
         // User issues state
         userIssues: [],
@@ -681,7 +643,6 @@ export const useSessionStore = create<SessionState>()(
         activeTab: 'chat',
         sidebarCollapsed: false,
         sessionLoadingEnabled: false,
-        indexCodebaseEnabled: true,
 
         // Session statistics
         totalTokens: 0,
@@ -693,7 +654,6 @@ export const useSessionStore = create<SessionState>()(
         // ============================================================================
 
         createSessionForRepository: async (repository: SelectedRepository) => {
-          const { indexCodebaseEnabled } = get();
           const sessionToken = useAuthStore.getState().sessionToken;
 
           if (!sessionToken) {
@@ -715,8 +675,6 @@ export const useSessionStore = create<SessionState>()(
                   repo_name: repoName,
                   repo_branch: repository.branch,
                   title: `Chat - ${repoOwner}/${repoName}`,
-                  // Trigger background indexing on session creation
-                  index_codebase: indexCodebaseEnabled,
                 }),
               })
             );
@@ -731,6 +689,7 @@ export const useSessionStore = create<SessionState>()(
               runtimeStatus: runtimeState.runtimeStatus,
               runtimeError: runtimeState.runtimeError,
               selectedRepository: repository,
+              contextCards: [],
               sessionInitialized: true,
               isLoading: false,
               error: null,
@@ -786,8 +745,7 @@ export const useSessionStore = create<SessionState>()(
               runtimeError: runtimeState.runtimeError,
               sessionContext: context,
               messages: context.messages || [],
-              contextCards: [],
-              fileContext: context.file_embeddings || [],
+              contextCards: context.context_cards || [],
               userIssues: context.user_issues || [],
               totalTokens: context.statistics?.total_tokens || 0,
               sessionInitialized: true,
@@ -848,6 +806,7 @@ export const useSessionStore = create<SessionState>()(
               activeSessionId: sessionId,
               currentSession: mergedSession,
               sessionContext: context,
+              contextCards: context.context_cards || [],
               sessionInitialized: true,
               error: null,
               sessionStatus: 'ready',
@@ -880,10 +839,6 @@ export const useSessionStore = create<SessionState>()(
               throw appError;
             }
           }
-        },
-
-        setIndexCodebaseEnabled: (enabled: boolean) => {
-          set({ indexCodebaseEnabled: enabled });
         },
 
         // ============================================================================
@@ -1030,7 +985,7 @@ export const useSessionStore = create<SessionState>()(
           }),
 
         // ============================================================================
-        // CONTEXT CARD ACTIONS (matches ContextCard APIs)
+        // CONTEXT CARD ACTIONS
         // ============================================================================
 
         createContextCard: async (card: CreateContextCardRequest) => {
@@ -1043,7 +998,6 @@ export const useSessionStore = create<SessionState>()(
 
           try {
             set({ isLoadingContextCards: true, contextCardError: null });
-
             const createCardUrl = buildSessionTargetUrl(API.SESSIONS.CONTEXT_CARDS, {
               sessionId: activeSessionId,
             });
@@ -1057,40 +1011,24 @@ export const useSessionStore = create<SessionState>()(
             );
 
             set((state) => ({
-              contextCards: [...state.contextCards, {
-                id: newCard.id.toString(),
-                title: newCard.title,
-                description: newCard.description,
-                tokens: newCard.tokens,
-                source: newCard.source as 'chat' | 'file-deps' | 'upload',
-                content: newCard.content,
-              }],
+              contextCards: [...state.contextCards, newCard],
               isLoadingContextCards: false,
-              totalTokens: state.totalTokens + newCard.tokens,
+              totalTokens: state.totalTokens + (newCard.tokens || 0),
               lastActivity: new Date(),
             }));
-
-            return {
-              id: newCard.id.toString(),
-              title: newCard.title,
-              description: newCard.description,
-              tokens: newCard.tokens,
-              source: newCard.source as 'chat' | 'file-deps' | 'upload',
-              content: newCard.content,
-            };
+            return newCard;
           } catch (error) {
             const appError = toAppError(error, 'CONTEXT_CARD_CREATE_FAILED', 'Failed to create context card');
             console.error('Failed to create context card:', appError);
             set({
               isLoadingContextCards: false,
-              contextCardError: appError.message
+              contextCardError: appError.message,
             });
             throw appError;
           }
         },
 
         updateContextCard: async (cardId: string, updates: Partial<CreateContextCardRequest>) => {
-          // TODO: Implement when backend API is available
           console.log('Update context card not yet implemented:', cardId, updates);
           return false;
         },
@@ -1105,11 +1043,10 @@ export const useSessionStore = create<SessionState>()(
 
           try {
             set({ isLoadingContextCards: true, contextCardError: null });
-
-            const deleteCardUrl = buildSessionTargetUrl(
-              API.SESSIONS.CONTEXT_CARD_DETAIL,
-              { sessionId: activeSessionId, cardId }
-            );
+            const deleteCardUrl = buildSessionTargetUrl(API.SESSIONS.CONTEXT_CARD_DETAIL, {
+              sessionId: activeSessionId,
+              cardId,
+            });
 
             await handleApiResponse<{ success: boolean; message: string }>(
               await fetch(deleteCardUrl, {
@@ -1119,11 +1056,11 @@ export const useSessionStore = create<SessionState>()(
             );
 
             set((state) => {
-              const cardToRemove = state.contextCards.find(c => c.id === cardId);
+              const removedCard = state.contextCards.find((entry) => String(entry.id) === cardId);
               return {
-                contextCards: state.contextCards.filter(c => c.id !== cardId),
+                contextCards: state.contextCards.filter((entry) => String(entry.id) !== cardId),
                 isLoadingContextCards: false,
-                totalTokens: state.totalTokens - (cardToRemove?.tokens || 0),
+                totalTokens: state.totalTokens - (removedCard?.tokens || 0),
                 lastActivity: new Date(),
               };
             });
@@ -1132,7 +1069,7 @@ export const useSessionStore = create<SessionState>()(
             console.error('Failed to delete context card:', appError);
             set({
               isLoadingContextCards: false,
-              contextCardError: appError.message
+              contextCardError: appError.message,
             });
             throw appError;
           }
@@ -1145,19 +1082,16 @@ export const useSessionStore = create<SessionState>()(
             const authError = new AppError('AUTH_MISSING_TOKEN', 'No session token available');
             set({
               isLoadingContextCards: false,
-              contextCardError: authError.message
+              contextCardError: authError.message,
             });
             throw authError;
           }
 
           try {
             set({ isLoadingContextCards: true, contextCardError: null });
-
-            const contextCardsUrl = buildSessionTargetUrl(
-              API.SESSIONS.CONTEXT_CARDS,
-              { sessionId }
-            );
-
+            const contextCardsUrl = buildSessionTargetUrl(API.SESSIONS.CONTEXT_CARDS, {
+              sessionId,
+            });
             const cards = await handleApiResponse<ContextCard[]>(
               await fetch(contextCardsUrl, {
                 method: 'GET',
@@ -1165,125 +1099,26 @@ export const useSessionStore = create<SessionState>()(
               })
             );
 
-            const transformedCards: ContextCard[] = cards.map(card => ({
-              id: card.id.toString(),
-              title: card.title,
-              description: card.description,
-              tokens: card.tokens,
-              source: card.source as 'chat' | 'file-deps' | 'upload',
-            }));
-
             set({
-              contextCards: transformedCards,
+              contextCards: cards,
               isLoadingContextCards: false,
               contextCardError: null,
             });
-            return transformedCards;
+            return cards;
           } catch (error) {
             const appError = toAppError(error, 'CONTEXT_CARDS_LOAD_FAILED', 'Failed to load context cards');
             console.error('Failed to load context cards:', appError);
             set({
               isLoadingContextCards: false,
-              contextCardError: appError.message
+              contextCardError: appError.message,
             });
             throw appError;
           }
         },
 
-        setContextCards: (cards: ContextCard[]) => {
-          const totalTokens = cards.reduce((sum, card) => sum + card.tokens, 0);
-          set((state) => ({
-            contextCards: cards,
-            totalTokens: state.messages.reduce((sum, msg) => sum + (msg.tokens || 0), 0) + totalTokens,
-            lastActivity: new Date(),
-          }));
-        },
-
+        setContextCards: (cards: ContextCard[]) => set({ contextCards: cards }),
         setContextCardLoading: (loading: boolean) => set({ isLoadingContextCards: loading }),
         setContextCardError: (error: string | null) => set({ contextCardError: error }),
-
-        // ============================================================================
-        // FILE DEPENDENCY ACTIONS (matches FileEmbedding APIs)
-        // ============================================================================
-
-        createFileEmbedding: async (embedding: CreateFileEmbeddingRequest) => {
-          // TODO: Implement when backend API is available
-          console.log('Create file embedding not yet implemented:', embedding);
-          return false;
-        },
-
-        updateFileEmbedding: async (fileId: string, updates: Partial<CreateFileEmbeddingRequest>) => {
-          // TODO: Implement when backend API is available
-          console.log('Update file embedding not yet implemented:', fileId, updates);
-          return false;
-        },
-
-        deleteFileEmbedding: async (fileId: string) => {
-          // TODO: Implement when backend API is available
-          console.log('Delete file embedding not yet implemented:', fileId);
-          return false;
-        },
-
-        loadFileDependencies: async (sessionId: string) => {
-          const sessionToken = useAuthStore.getState().sessionToken;
-
-          if (!sessionToken) {
-            const authError = new AppError('AUTH_MISSING_TOKEN', 'No session token available');
-            set({
-              isLoadingFileContext: false,
-              fileContextError: authError.message
-            });
-            throw authError;
-          }
-
-          try {
-            set({ isLoadingFileContext: true, fileContextError: null });
-
-            const fileDepsUrl = buildSessionTargetUrl(
-              API.SESSIONS.FILE_DEPS_SESSION,
-              { sessionId }
-            );
-
-            const deps = await handleApiResponse<FileItem[]>(
-              await fetch(fileDepsUrl, {
-                method: 'GET',
-                headers: getAuthHeaders(sessionToken),
-              })
-            );
-
-            const transformedFiles: FileItem[] = deps.map(dep => ({
-              id: dep.id.toString(),
-              name: dep.file_name || 'Unknown',
-              path: dep.file_path,
-              type: 'INTERNAL' as const,
-              tokens: dep.tokens,
-              category: dep.category || dep.file_type || 'unknown',
-              created_at: dep.created_at,
-            }));
-
-            set({
-              fileContext: transformedFiles,
-              isLoadingFileContext: false,
-              fileContextError: null,
-            });
-            return transformedFiles;
-          } catch (error) {
-            const appError = toAppError(error, 'FILE_DEPS_LOAD_FAILED', 'Failed to load file dependencies');
-            console.error('Failed to load file dependencies:', appError);
-            set({
-              isLoadingFileContext: false,
-              fileContextError: appError.message
-            });
-            throw appError;
-          }
-        },
-
-        setFileContext: (files: FileItem[]) => {
-          set({ fileContext: files, lastActivity: new Date() });
-        },
-
-        setFileContextLoading: (loading: boolean) => set({ isLoadingFileContext: loading }),
-        setFileContextError: (error: string | null) => set({ fileContextError: error }),
 
         // ============================================================================
         // USER ISSUE ACTIONS (matches UserIssue APIs)
@@ -1354,10 +1189,9 @@ export const useSessionStore = create<SessionState>()(
             runtimeStatus: 'not_provisioned',
             runtimeError: null,
             messages: [],
+            contextCards: [],
             isExploringCodebase: false,
             explorationDetail: null,
-            contextCards: [],
-            fileContext: [],
             userIssues: [],
             currentIssue: null,
             totalTokens: 0,
@@ -1428,7 +1262,7 @@ export const useSessionStore = create<SessionState>()(
         // CHAT MESSAGE SENDING IMPLEMENTATION
         // ============================================================================
 
-        sendChatMessage: async (message: string, contextCards?: string[], repository?: SelectedRepository) => {
+        sendChatMessage: async (message: string, repository?: SelectedRepository) => {
           const { activeSessionId } = get();
           const sessionToken = useAuthStore.getState().sessionToken;
 
@@ -1496,7 +1330,6 @@ export const useSessionStore = create<SessionState>()(
                 sessionId: activeSessionId,
                 sessionToken,
                 content: message,
-                contextCards,
                 repository: normalizedRepository,
                 onChunk: (replyText: string) => {
                   if (!optimisticAssistantMessageId) {
@@ -1590,7 +1423,6 @@ export const useSessionStore = create<SessionState>()(
               message: {
                 message_text: message,
               },
-              context_cards: contextCards,
               repository: normalizedRepository,
             };
 
@@ -1739,27 +1571,6 @@ export const useSessionStore = create<SessionState>()(
         },
 
         // ============================================================================
-        // FILE DEPENDENCY EXTRACTION IMPLEMENTATION
-        // ============================================================================
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        extractFileDependenciesForSession: async (_sessionId: string, _repoUrl: string) => {
-          
-
-          try {
-            // Deprecated: extraction now starts automatically after session creation.
-            console.info('[SessionStore] extractFileDependenciesForSession is deprecated. Indexing happens automatically.');
-            return true; // treat as success/no-op
-          } catch (error) {
-            console.error('Failed to extract file dependencies:', error);
-            set({
-              isLoadingFileContext: false,
-              fileContextError: error instanceof Error ? error.message : 'Failed to extract file dependencies'
-            });
-            return false;
-          }
-        },
-
-        // ============================================================================
         // REPOSITORY BRANCH LOADING IMPLEMENTATION
         // ============================================================================
 
@@ -1823,7 +1634,6 @@ export const useSessionStore = create<SessionState>()(
           activeTab: state.activeTab,
           sidebarCollapsed: state.sidebarCollapsed,
           sessionLoadingEnabled: state.sessionLoadingEnabled,
-          indexCodebaseEnabled: state.indexCodebaseEnabled,
 
           // Connection status
           connectionStatus: state.connectionStatus,

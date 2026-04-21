@@ -11,7 +11,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///tmp/context-probe-tests.db")
 
-from daifuUserAgent.context_probe import (  # noqa: E402
+from yudai.daifuUserAgent.context_probe import (  # noqa: E402
     ContextProbeService,
     ProbeRequest,
     ProbeResult,

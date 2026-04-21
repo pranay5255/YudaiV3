@@ -8,7 +8,6 @@ import { buildControllerSessionTargetUrl } from '../utils/realtimeRouting';
 import { useAuthStore } from '../stores/authStore';
 import { useSessionStore } from '../stores/sessionStore';
 import type {
-  AddContextCardMutationData,
   ChatMessage,
   CancelExecutionResponse,
   ContextCard,
@@ -18,11 +17,9 @@ import type {
   ExecutionRequest,
   ExecutionResponse,
   ExecutionStatusResponse,
-  FileItem,
   GitHubBranch,
   GitHubRepository,
   IssueCreationResponse,
-  RemoveContextCardMutationData,
   SelectedRepository,
   SessionContext,
 } from '../types/sessionTypes';
@@ -141,7 +138,6 @@ export const QueryKeys = {
   session: (sessionId: string) => ['session', sessionId] as const,
   messages: (sessionId: string) => ['messages', sessionId] as const,
   contextCards: (sessionId: string) => ['context-cards', sessionId] as const,
-  fileDependencies: (sessionId: string) => ['file-deps', sessionId] as const,
   repositories: ['repositories'] as const,
 };
 
@@ -204,40 +200,6 @@ export const useContextCards = (sessionId: string) => {
     error,
     refetch,
   };
-};
-
-export const useFileDependencies = (sessionId: string) => {
-  const sessionToken = useAuthStore((state) => state.sessionToken);
-  const loadFileDependencies = useSessionStore((state) => state.loadFileDependencies);
-  const fileContext = useSessionStore((state) => state.fileContext);
-
-  const { isLoading, error, refetch } = useAsyncLoader(
-    Boolean(sessionId && sessionToken),
-    async () => loadFileDependencies(sessionId)
-  );
-
-  return {
-    data: fileContext as FileItem[],
-    isLoading,
-    error,
-    refetch,
-  };
-};
-
-export const useAddContextCard = () => {
-  const createContextCard = useSessionStore((state) => state.createContextCard);
-  return useSimpleMutation(async ({ card }: AddContextCardMutationData) => {
-    await createContextCard(card);
-    return true;
-  });
-};
-
-export const useRemoveContextCard = () => {
-  const deleteContextCard = useSessionStore((state) => state.deleteContextCard);
-  return useSimpleMutation(async ({ cardId }: RemoveContextCardMutationData) => {
-    await deleteContextCard(cardId);
-    return true;
-  });
 };
 
 export const useCreateSession = () => {
@@ -415,7 +377,6 @@ export const useCancelSessionExecution = () => {
 // Backward-compatible aliases.
 export type {
   ContextCard,
-  FileItem,
   GitHubBranch,
   GitHubRepository,
   SessionContext,

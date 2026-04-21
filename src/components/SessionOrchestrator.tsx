@@ -26,7 +26,6 @@ export const SessionOrchestrator = () => {
     ensureSessionExists,
     loadMessages,
     loadContextCards,
-    loadFileDependencies,
     clearSession,
     setError,
   } = useSessionStore(
@@ -40,7 +39,6 @@ export const SessionOrchestrator = () => {
       ensureSessionExists: state.ensureSessionExists,
       loadMessages: state.loadMessages,
       loadContextCards: state.loadContextCards,
-      loadFileDependencies: state.loadFileDependencies,
       clearSession: state.clearSession,
       setError: state.setError,
     }))
@@ -132,7 +130,6 @@ export const SessionOrchestrator = () => {
     void Promise.allSettled([
       loadMessages(activeSessionId),
       loadContextCards(activeSessionId),
-      loadFileDependencies(activeSessionId),
     ]).then((results) => {
       const rejected = results.find((result) => result.status === 'rejected');
       if (rejected && rejected.status === 'rejected') {
@@ -146,7 +143,6 @@ export const SessionOrchestrator = () => {
     user,
     loadMessages,
     loadContextCards,
-    loadFileDependencies,
     setError,
   ]);
 

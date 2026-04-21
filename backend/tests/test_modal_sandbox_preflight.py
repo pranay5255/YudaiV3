@@ -11,8 +11,8 @@ if str(BACKEND_ROOT) not in sys.path:
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///tmp/modal-preflight-tests.db")
 
-from config.realtime_flags import RealtimeFeatureFlags  # noqa: E402
-from realtime import modal_preflight, modal_sandbox  # noqa: E402
+from yudai.config.realtime_flags import RealtimeFeatureFlags  # noqa: E402
+from yudai.realtime import modal_preflight, modal_sandbox  # noqa: E402
 
 
 def test_solver_distribution_uses_published_package_name():
