@@ -96,10 +96,14 @@ class SessionExecutionOrchestrator:
         user_id: int,
         objective: str,
         force_mode: Optional[str] = None,
+        max_modes: Optional[int] = None,
+        trigger: str = "execution_api",
     ) -> Dict[str, Any]:
         next_mode = self._next_mode_for_session(session)
         if next_mode == SessionMode.COMPLETE.value:
             raise ExecutionConflictError("Session workflow already complete")
+        if max_modes is not None and max_modes < 1:
+            raise ValueError("max_modes must be at least 1 when provided")
         if force_mode and force_mode != next_mode:
             raise ValueError(
                 f"Mode switching is server-controlled. Expected '{next_mode}', got '{force_mode}'."
@@ -124,13 +128,15 @@ class SessionExecutionOrchestrator:
             status=SessionModeStatus.RUNNING.value,
             execution_plan=execution_plan,
             execution_metadata={
-                "trigger": "execution_api",
+                "trigger": trigger,
                 "objective": objective,
                 "objective_with_context": contextual_objective,
+                "max_modes": max_modes,
             },
             started_at=execution_started_at,
         )
         db.add(execution)
+        queued_detail = "Stage queued" if max_modes == 1 else "Pipeline queued"
 
         self._set_active_execution(
             session,
@@ -146,7 +152,9 @@ class SessionExecutionOrchestrator:
                 "cancel_requested": False,
                 "current_mode_execution_id": None,
                 "artifact": None,
-                "detail": "Pipeline queued",
+                "detail": queued_detail,
+                "trigger": trigger,
+                "max_modes": max_modes,
             },
         )
         session.current_mode = next_mode
@@ -160,6 +168,7 @@ class SessionExecutionOrchestrator:
             user_id=user_id,
             execution_id=execution_id,
             objective=contextual_objective,
+            max_modes=max_modes,
         )
 
         await self.ws_hub.send_to_session(
@@ -169,7 +178,7 @@ class SessionExecutionOrchestrator:
                 "mode": next_mode,
                 "state": SessionModeStatus.RUNNING.value,
                 "execution_id": execution_id,
-                "detail": "Pipeline queued",
+                "detail": queued_detail,
             },
         )
         return {
@@ -184,8 +193,28 @@ class SessionExecutionOrchestrator:
             "waiting_for_input": False,
             "current_mode_execution_id": None,
             "artifact": None,
-            "detail": "Pipeline queued",
+            "detail": queued_detail,
         }
+
+    async def start_stage_execution(
+        self,
+        db: Session,
+        *,
+        session: ChatSession,
+        user_id: int,
+        objective: str,
+        mode: str,
+        trigger: str = "daifu_stage_tool",
+    ) -> Dict[str, Any]:
+        return await self.start_execution(
+            db,
+            session=session,
+            user_id=user_id,
+            objective=objective,
+            force_mode=mode,
+            max_modes=1,
+            trigger=trigger,
+        )
 
     async def resume_execution(
         self,
@@ -351,6 +380,7 @@ class SessionExecutionOrchestrator:
         user_id: int,
         execution_id: str,
         objective: str,
+        max_modes: Optional[int] = None,
     ) -> None:
         lock = self._session_locks.setdefault(session_public_id, asyncio.Lock())
         async with lock:
@@ -371,6 +401,8 @@ class SessionExecutionOrchestrator:
 
                 await self._ensure_runtime_ready(db, session=session, user_id=user_id)
                 modes_to_run = self._remaining_modes(session)
+                if max_modes is not None:
+                    modes_to_run = modes_to_run[:max_modes]
                 if not modes_to_run:
                     self._set_mode_state(
                         session,
@@ -413,6 +445,21 @@ class SessionExecutionOrchestrator:
                         detail=f"{mode.capitalize()} mode running",
                     )
                     db.commit()
+
+                    await self.ws_hub.send_to_session(
+                        session_public_id,
+                        WSMessageType.TOOL_CALL,
+                        {
+                            "tool_name": f"run_{mode}_mode",
+                            "tool_input": {
+                                "session_id": session_public_id,
+                                "mode": mode,
+                                "issue_number": session.architect_issue_number,
+                                "issue_url": session.architect_issue_url,
+                            },
+                            "call_id": current_mode_execution.id,
+                        },
+                    )
 
                     await self.ws_hub.send_to_session(
                         session_public_id,
@@ -480,6 +527,37 @@ class SessionExecutionOrchestrator:
                             "mode_execution_id": current_mode_execution.id,
                         },
                     )
+
+                remaining_after_run = self._remaining_modes(session)
+                if remaining_after_run:
+                    next_mode = remaining_after_run[0]
+                    self._set_mode_state(
+                        session,
+                        mode=next_mode,
+                        mode_status=SessionModeStatus.IDLE.value,
+                    )
+                    self._update_active_execution(
+                        session,
+                        execution_id=execution_id,
+                        mode=next_mode,
+                        status=SessionModeStatus.COMPLETE.value,
+                        completed_at=utc_now().isoformat(),
+                        current_mode_execution_id=None,
+                        detail=f"{modes_to_run[-1].capitalize()} mode complete; {next_mode.capitalize()} mode is next.",
+                    )
+                    db.commit()
+
+                    await self.ws_hub.send_to_session(
+                        session_public_id,
+                        WSMessageType.STATE_EVENT,
+                        {
+                            "state": "stage_complete",
+                            "session_id": session_public_id,
+                            "current_mode": next_mode,
+                            "execution_id": execution_id,
+                        },
+                    )
+                    return
 
                 self._set_mode_state(
                     session,
@@ -618,6 +696,7 @@ class SessionExecutionOrchestrator:
         user_id: int,
         execution_id: str,
         objective: str,
+        max_modes: Optional[int] = None,
     ) -> None:
         task = asyncio.create_task(
             self.run_full_pipeline(
@@ -625,6 +704,7 @@ class SessionExecutionOrchestrator:
                 user_id=user_id,
                 execution_id=execution_id,
                 objective=objective,
+                max_modes=max_modes,
             ),
             name=f"session-execution-{session_public_id}",
         )
