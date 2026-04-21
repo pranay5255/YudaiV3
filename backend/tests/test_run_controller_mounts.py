@@ -50,6 +50,7 @@ def test_run_controller_mounts_canonical_routes_only():
     assert "/daifu/sessions" in paths
     assert "/daifu/sessions/{session_id}/execution" in paths
     assert "/daifu/sessions/{session_id}/execution/cancel" in paths
+    assert "/daifu/sessions/{session_id}/tools/run-frontend-browser-check" in paths
     assert "/auth/api/login" in paths
     assert "/controller/sessions/{session_id}/runtime" in paths
     assert "/controller/sessions/{session_id}/ws/unified" in paths
