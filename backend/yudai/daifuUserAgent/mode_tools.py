@@ -65,6 +65,24 @@ class DaifuModeToolService:
             trigger="daifu_tool_sequence",
         )
 
+    async def run_frontend_browser_check(
+        self,
+        db: Session,
+        *,
+        session: ChatSession,
+        user_id: int,
+        objective: str,
+    ) -> Dict[str, Any]:
+        """Run the manual browser verifier sidecar in the existing sandbox."""
+
+        return await self.orchestrator.start_browser_check(
+            db,
+            session=session,
+            user_id=user_id,
+            objective=objective,
+            trigger="daifu_tool:run_frontend_browser_check",
+        )
+
 
 class DaifuIssueToolService:
     """Thin Daifu tool wrapper around the backend GitHub issue creation flow."""
