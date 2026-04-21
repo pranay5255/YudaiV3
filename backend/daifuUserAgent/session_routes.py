@@ -120,6 +120,7 @@ from models import (
     ContextCardResponse,
     CreateContextCardRequest,
     CreateGitHubIssueResponse,
+    CreateGitHubIssueToolRequest,
     CreateSessionRequest,
     ExecutionRequest,
     ExecutionResponse,
@@ -132,6 +133,7 @@ from models import (
     SessionModeStatus,
     SessionContextResponse,
     SessionResponse,
+    StageToolRequest,
     UpdateSessionRequest,
     User,
     UserQuestion,
@@ -147,12 +149,228 @@ from sqlalchemy.orm import Session
 from utils import utc_now
 
 from .llm_service import LLMService
+from .mode_tools import get_daifu_issue_tool_service, get_daifu_mode_tool_service
 from .session_service import MemoryService, SessionService
 
 router = APIRouter(tags=["sessions"])
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+DAIFU_STAGE_CONFIRMATION_ORIGIN = "github_issue_created_confirmation"
+DAIFU_STAGE_START_OPTION_ID = "start_workflow"
+DAIFU_STAGE_DECLINE_OPTION_ID = "not_now"
+DAIFU_STAGE_SEQUENCE_TOOL = "run_architect_mode"
+
+
+def _is_stage_confirmation_question(question: UserQuestion) -> bool:
+    metadata = question.question_metadata if isinstance(question.question_metadata, dict) else {}
+    return metadata.get("origin") == DAIFU_STAGE_CONFIRMATION_ORIGIN
+
+
+def _wants_stage_execution(request: AnswerQuestionRequest) -> bool:
+    selected = {str(item).strip().lower() for item in request.selected_option_ids or []}
+    if DAIFU_STAGE_START_OPTION_ID in selected or "start" in selected:
+        return True
+    answer_text = (request.answer_text or "").strip().lower()
+    return answer_text in {"yes", "y", "start", "start workflow", "run it", "go ahead"}
+
+
+def _build_github_issue_execution_objective(
+    db_session: ChatSession,
+    result: Any,
+) -> str:
+    issue_ref = (
+        f"#{result.github_issue_number}"
+        if result.github_issue_number is not None
+        else result.github_issue_url
+    )
+    return "\n\n".join(
+        part
+        for part in [
+            f"Resolve GitHub issue {issue_ref}: {result.title}",
+            f"GitHub issue URL: {result.github_issue_url}",
+            f"Repository: {result.repo_owner}/{result.repo_name}@{db_session.repo_branch or 'main'}",
+            f"Issue details:\n{result.issue_text_raw or result.description or ''}",
+        ]
+        if part and part.strip()
+    )
+
+
+def _raise_create_github_issue_http_error(exc: Exception) -> None:
+    error_str = str(exc).lower()
+    if any(
+        keyword in error_str
+        for keyword in ["403", "forbidden", "permission", "access denied", "not authorized"]
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    if "404" in error_str or "not found" in error_str:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+async def _prepare_github_issue_created_response(
+    db: Session,
+    *,
+    session_id: str,
+    db_session: ChatSession,
+    current_user: User,
+    result: Any,
+) -> CreateGitHubIssueResponse:
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Issue not found or missing repository information",
+        )
+
+    if not result.github_issue_url:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="GitHub issue was created but no URL was returned",
+        )
+
+    MemoryService.save_session_snapshot(
+        db,
+        db_session,
+        trigger="github_issue_created",
+    )
+
+    db_session.architect_issue_url = result.github_issue_url
+    db_session.architect_issue_number = result.github_issue_number
+
+    execution_objective = _build_github_issue_execution_objective(db_session, result)
+    db_session.mode_metadata = {
+        **(db_session.mode_metadata or {}),
+        "pending_resume_objective": execution_objective,
+        "seed_github_issue_url": result.github_issue_url,
+        "seed_github_issue_number": result.github_issue_number,
+        "seed_user_issue_id": result.issue_id,
+    }
+
+    lifecycle = get_realtime_lifecycle_service()
+    lifecycle.mark_issue_created(
+        db,
+        session_public_id=session_id,
+        user_id=current_user.id,
+        issue_url=result.github_issue_url,
+        issue_number=result.github_issue_number,
+    )
+
+    confirmation_question_id = f"q_{uuid.uuid4().hex[:10]}"
+    issue_label = (
+        f"#{result.github_issue_number}"
+        if result.github_issue_number is not None
+        else result.github_issue_url
+    )
+    confirmation_question = UserQuestion(
+        question_id=confirmation_question_id,
+        session_id=db_session.id,
+        user_id=current_user.id,
+        mode=SessionMode.ARCHITECT.value,
+        question_text=(
+            f"Start the Architect -> Tester -> Coder workflow for GitHub issue {issue_label}?"
+        ),
+        options=[
+            {"id": DAIFU_STAGE_START_OPTION_ID, "label": "Start workflow"},
+            {"id": DAIFU_STAGE_DECLINE_OPTION_ID, "label": "Not now"},
+        ],
+        multi_select=False,
+        status=UserQuestionStatus.PENDING.value,
+        question_metadata={
+            "origin": DAIFU_STAGE_CONFIRMATION_ORIGIN,
+            "pending_tool": DAIFU_STAGE_SEQUENCE_TOOL,
+            "issue_number": result.github_issue_number,
+            "issue_url": result.github_issue_url,
+        },
+    )
+    db.add(confirmation_question)
+
+    mode_metadata = dict(db_session.mode_metadata or {})
+    pending_question_ids = [
+        str(item)
+        for item in (mode_metadata.get("pending_question_ids") or [])
+        if str(item).strip()
+    ]
+    pending_question_ids.append(confirmation_question_id)
+    mode_metadata.update(
+        {
+            "pending_question_ids": pending_question_ids,
+            "pending_daifu_tool": DAIFU_STAGE_SEQUENCE_TOOL,
+            "pending_stage_tool_objective": execution_objective,
+            "pending_stage_tool_issue_url": result.github_issue_url,
+            "pending_stage_tool_issue_number": result.github_issue_number,
+        }
+    )
+    db_session.mode_metadata = mode_metadata
+    db_session.mode_status = SessionModeStatus.WAITING_FOR_INPUT.value
+    db_session.mode_updated_at = utc_now()
+    db_session.last_activity = utc_now()
+    flag_modified(db_session, "mode_metadata")
+    db.commit()
+
+    await get_ws_hub().send_to_session(
+        session_id,
+        WSMessageType.AGENT_QUESTION,
+        {
+            "question_id": confirmation_question_id,
+            "question_text": confirmation_question.question_text,
+            "multi_select": False,
+            "options": confirmation_question.options,
+        },
+    )
+
+    message = (
+        f"GitHub issue created successfully: {result.github_issue_url}. "
+        "Confirm when you want Daifu to start the 3-mode workflow."
+    )
+
+    return CreateGitHubIssueResponse(
+        success=True,
+        github_url=result.github_issue_url,
+        github_issue_number=result.github_issue_number,
+        message=message,
+        execution_started=False,
+        execution_status=db_session.mode_status,
+        requires_confirmation=True,
+        confirmation_question_id=confirmation_question_id,
+        pending_tool=DAIFU_STAGE_SEQUENCE_TOOL,
+    )
+
+
+async def _run_create_github_issue_tool(
+    db: Session,
+    *,
+    session_id: str,
+    db_session: ChatSession,
+    current_user: User,
+    issue_id: str,
+) -> CreateGitHubIssueResponse:
+    call_id = f"tool_{uuid.uuid4().hex[:10]}"
+    await get_ws_hub().send_to_session(
+        session_id,
+        WSMessageType.TOOL_CALL,
+        {
+            "tool_name": "create_github_issue",
+            "tool_input": {
+                "session_id": session_id,
+                "issue_id": issue_id,
+            },
+            "call_id": call_id,
+        },
+    )
+    result = await get_daifu_issue_tool_service().create_github_issue(
+        db,
+        session=db_session,
+        user_id=current_user.id,
+        issue_id=issue_id,
+    )
+    return await _prepare_github_issue_created_response(
+        db,
+        session_id=session_id,
+        db_session=db_session,
+        current_user=current_user,
+        result=result,
+    )
 
 
 def create_standardized_error(
@@ -1438,7 +1656,7 @@ async def answer_session_question(
     question.answered_at = utc_now()
     db_session.last_activity = utc_now()
 
-    mode_metadata = db_session.mode_metadata or {}
+    mode_metadata = dict(db_session.mode_metadata or {})
     mode_metadata["last_answered_question_id"] = question.question_id
     mode_metadata["last_answered_question_at"] = utc_now().isoformat()
     pending_question_ids = [
@@ -1465,7 +1683,46 @@ async def answer_session_question(
     resumed_mode: Optional[str] = None
     next_mode = _next_mode_for_session(db_session)
     realtime_flags = get_realtime_feature_flags()
-    if (
+    is_stage_confirmation = _is_stage_confirmation_question(question)
+    if is_stage_confirmation and not pending_question_ids:
+        if request.resume_execution and _wants_stage_execution(request):
+            if not realtime_flags.mode_orchestrator_enabled:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Mode orchestrator is disabled by feature flags",
+                )
+            objective_seed = (
+                str(mode_metadata.get("pending_stage_tool_objective") or "").strip()
+                or str(mode_metadata.get("pending_resume_objective") or "").strip()
+                or "Continue the current GitHub issue workflow."
+            )
+            mode_metadata["pending_resume_objective"] = objective_seed
+            mode_metadata["pending_daifu_tool"] = DAIFU_STAGE_SEQUENCE_TOOL
+            db_session.mode_metadata = mode_metadata
+            flag_modified(db_session, "mode_metadata")
+            db.commit()
+            try:
+                execution_status = await get_daifu_mode_tool_service().run_all_stage_tools(
+                    db,
+                    session=db_session,
+                    user_id=current_user.id,
+                    objective=objective_seed,
+                )
+            except ExecutionConflictError as exc:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            resumed = True
+            resumed_mode = str(execution_status.get("mode") or next_mode)
+        else:
+            mode_metadata.pop("pending_daifu_tool", None)
+            mode_metadata.pop("pending_stage_tool_objective", None)
+            mode_metadata.pop("pending_stage_tool_issue_url", None)
+            mode_metadata.pop("pending_stage_tool_issue_number", None)
+            db_session.mode_metadata = mode_metadata
+            flag_modified(db_session, "mode_metadata")
+            db.commit()
+    elif (
         request.resume_execution
         and was_waiting_for_input
         and not pending_question_ids
@@ -1606,6 +1863,49 @@ async def execute_session_pipeline(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Response serialization failed: {type(exc).__name__}: {exc}",
         ) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/execution/stage-tool",
+    response_model=ExecutionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def execute_session_stage_tool(
+    session_id: str,
+    request: StageToolRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Start exactly one legal Daifu stage tool: Architect, Tester, or Coder."""
+    realtime_flags = get_realtime_feature_flags()
+    if not realtime_flags.mode_orchestrator_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Mode orchestrator is disabled by feature flags",
+        )
+
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    mode_metadata = dict(db_session.mode_metadata or {})
+    mode_metadata["pending_resume_objective"] = request.objective
+    mode_metadata["pending_daifu_tool"] = request.tool_name
+    db_session.mode_metadata = mode_metadata
+    flag_modified(db_session, "mode_metadata")
+    db.commit()
+
+    try:
+        status_payload = await get_daifu_mode_tool_service().run_stage_tool(
+            db,
+            session=db_session,
+            user_id=current_user.id,
+            tool_name=request.tool_name,
+            objective=request.objective,
+        )
+    except ExecutionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return ExecutionResponse(**status_payload)
 
 
 @router.get(
@@ -2855,157 +3155,44 @@ async def create_github_issue_from_user_issue_for_session(
     Create GitHub issue from user issue for a session - Consolidated from issue_service.py
     """
     try:
-        # Use the consolidated IssueOps service directly to avoid wrapper arg mismatch
-        from .IssueOps import IssueService as IssueOpsService
-        from .session_service import SessionService
-
-        # Ensure session exists and belongs to user
         db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
-
-        # Create GitHub issue using consolidated IssueOps (context assembled internally)
-        issue_service = IssueOpsService(db)
-        result = await issue_service.create_github_issue_from_user_issue(
-            current_user.id,
-            issue_id,
-            context_bundle=None,
-        )
-
-        if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Issue not found or missing repository information",
-            )
-
-        if not result.github_issue_url:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="GitHub issue was created but no URL was returned",
-            )
-
-        MemoryService.save_session_snapshot(
+        return await _run_create_github_issue_tool(
             db,
-            db_session,
-            trigger="github_issue_created",
+            session_id=session_id,
+            db_session=db_session,
+            current_user=current_user,
+            issue_id=issue_id,
         )
-
-        db_session.architect_issue_url = result.github_issue_url
-        db_session.architect_issue_number = result.github_issue_number
-
-        issue_ref = (
-            f"#{result.github_issue_number}"
-            if result.github_issue_number is not None
-            else result.github_issue_url
-        )
-        execution_objective = "\n\n".join(
-            part
-            for part in [
-                f"Resolve GitHub issue {issue_ref}: {result.title}",
-                f"GitHub issue URL: {result.github_issue_url}",
-                f"Repository: {result.repo_owner}/{result.repo_name}@{db_session.repo_branch or 'main'}",
-                f"Issue details:\n{result.issue_text_raw or result.description or ''}",
-            ]
-            if part and part.strip()
-        )
-        db_session.mode_metadata = {
-            **(db_session.mode_metadata or {}),
-            "pending_resume_objective": execution_objective,
-            "seed_github_issue_url": result.github_issue_url,
-            "seed_github_issue_number": result.github_issue_number,
-            "seed_user_issue_id": result.issue_id,
-        }
-
-        # Phase 1 completion tracking: issue creation event.
-        lifecycle = get_realtime_lifecycle_service()
-        lifecycle.mark_issue_created(
-            db,
-            session_public_id=session_id,
-            user_id=current_user.id,
-            issue_url=result.github_issue_url,
-            issue_number=result.github_issue_number,
-        )
-        db.commit()
-
-        execution_started = False
-        execution_id = None
-        execution_status = None
-        execution_error = None
-
-        realtime_flags = get_realtime_feature_flags()
-        if realtime_flags.mode_orchestrator_enabled:
-            try:
-                status_payload = await get_session_execution_orchestrator().start_execution(
-                    db,
-                    session=db_session,
-                    user_id=current_user.id,
-                    objective=execution_objective,
-                )
-                execution_started = True
-                execution_id = str(status_payload.get("execution_id") or "")
-                execution_status = str(status_payload.get("status") or "")
-            except ExecutionConflictError as exc:
-                execution_error = str(exc)
-                execution_status = db_session.mode_status
-                logger.info(
-                    "GitHub issue %s created, but execution was not started for session %s: %s",
-                    result.github_issue_url,
-                    session_id,
-                    exc,
-                )
-            except Exception as exc:
-                execution_error = str(exc)
-                execution_status = db_session.mode_status
-                logger.exception(
-                    "GitHub issue %s created, but execution auto-start failed for session %s",
-                    result.github_issue_url,
-                    session_id,
-                )
-
-        message = f"GitHub issue created successfully: {result.github_issue_url}"
-        if execution_started and execution_id:
-            message = f"{message}. 3-mode execution started: {execution_id}"
-        elif execution_error:
-            message = f"{message}. Execution was not started: {execution_error}"
-
-        return CreateGitHubIssueResponse(
-            success=True,
-            github_url=result.github_issue_url,
-            github_issue_number=result.github_issue_number,
-            message=message,
-            execution_started=execution_started,
-            execution_id=execution_id,
-            execution_status=execution_status,
-            execution_error=execution_error,
-        )
-
     except HTTPException:
         raise
     except Exception as e:
-        # Handle specific IssueOps errors with appropriate HTTP status codes
-        error_str = str(e).lower()
-        if any(
-            keyword in error_str
-            for keyword in [
-                "403",
-                "forbidden",
-                "permission",
-                "access denied",
-                "not authorized",
-            ]
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=str(e),
-            )
-        elif "404" in error_str or "not found" in error_str:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=str(e),
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e),
-            )
+        _raise_create_github_issue_http_error(e)
+
+
+@router.post(
+    "/sessions/{session_id}/tools/create-github-issue",
+    response_model=CreateGitHubIssueResponse,
+)
+async def execute_create_github_issue_tool(
+    session_id: str,
+    request: CreateGitHubIssueToolRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Run the Daifu create_github_issue tool for an existing drafted issue."""
+    try:
+        db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+        return await _run_create_github_issue_tool(
+            db,
+            session_id=session_id,
+            db_session=db_session,
+            current_user=current_user,
+            issue_id=request.issue_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_create_github_issue_http_error(exc)
 
 
 # ============================================================================
