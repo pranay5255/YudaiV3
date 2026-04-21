@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useAuthStore } from '../stores/authStore';
 
@@ -33,20 +32,6 @@ export const useAuth = () => {
       clearAuth: state.clearAuth,
     }))
   );
-
-  // Debug logging for auth state changes
-  useEffect(() => {
-    console.log('[useAuth] Auth state from auth store:', {
-      isAuthenticated,
-      isLoading,
-      hasUser: !!user,
-      hasSessionToken: !!sessionToken,
-      authError,
-      timestamp: new Date().toISOString()
-    });
-  }, [isAuthenticated, isLoading, user, sessionToken, authError]);
-
-  // Note: /auth/success route is now handled by the AuthSuccess component with React Router
 
   return {
     user,
