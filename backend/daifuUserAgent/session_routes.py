@@ -3,7 +3,7 @@
 Session Management Routes for DAifu Agent
 
 This module provides FastAPI routes for session management,
-including session creation, context management, messages, and file dependencies.
+including session creation, context management, messages, and issue workflows.
 
 TODO: Complete Implementation Tasks
 ========================================
@@ -27,13 +27,7 @@ CRITICAL ISSUES:
    - Add session export/import functionality
    - Implement session collaboration features
 
-4. File Dependencies Integration
-   - Complete the file extraction endpoint integration
-   - Add support for large repository processing
-   - Implement file dependency caching
-   - Add file content preview and search capabilities
-
-5. Database Optimization
+4. Database Optimization
    - Add proper indexing for all query operations
    - Implement database connection pooling
    - Add query result caching (Redis)
@@ -67,7 +61,6 @@ CRITICAL ISSUES:
 
 """
 
-# Import file dependencies functionality
 import asyncio
 import json
 import logging
@@ -77,19 +70,11 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional
 
 from auth.github_oauth import get_current_user
 from config.realtime_flags import get_realtime_feature_flags
-from context import (
-    EmbeddingPipeline,
-    FactsAndMemoriesService,
-    RepositoryFile,
-    RepositorySnapshotService,
-)
-from daifuUserAgent.githubOps import GitHubOps
-from db.database import SessionLocal, get_db
+from db.database import get_db
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from realtime.lifecycle import get_realtime_lifecycle_service
 from realtime.mode_orchestrator import (
@@ -124,9 +109,6 @@ from models import (
     ExecutionRequest,
     ExecutionResponse,
     ExecutionStatusResponse,
-    FileEmbedding,
-    FileItem,
-    FileItemResponse,
     Repository,
     SessionMode,
     SessionModeStatus,
@@ -140,7 +122,6 @@ from models import (
     UserQuestionStatus,
     UserIssueResponse,
 )
-from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Session
 
@@ -580,8 +561,6 @@ async def create_session(
             repo_url=f"https://github.com/{request.repo_owner}/{request.repo_name}.git",
             repo_context=None,
             runtime_workspace_path="/workspace/repo",
-            generate_embeddings=request.generate_embeddings,
-            generate_facts_memories=request.generate_facts_memories,
             is_active=True,
             total_messages=0,
             total_tokens=0,
@@ -598,46 +577,6 @@ async def create_session(
         runtime_id: Optional[str] = None
         sandbox_id: Optional[str] = None
         tunnel_url: Optional[str] = None
-
-        # Kick off background indexing of the repository if requested
-        if getattr(request, "index_codebase", True):
-            try:
-                repo_owner = request.repo_owner
-                repo_name = request.repo_name
-                repo_branch = request.repo_branch or "main"
-                max_file_size = getattr(request, "index_max_file_size", None)
-
-                logger.info(
-                    f"[Session] Triggering background indexing for session {session_id}: {repo_owner}/{repo_name}"
-                )
-
-                async def _run_index():
-                    logger.info(
-                        f"[Session] Starting background indexing task for session {session_id}"
-                    )
-                    await _index_repository_for_session_background(
-                        session_uuid=db_session.session_id,
-                        user_id=current_user.id,
-                        repo_owner=repo_owner,
-                        repo_name=repo_name,
-                        repo_branch=repo_branch,
-                        max_file_size=max_file_size,
-                        generate_embeddings=request.generate_embeddings,
-                        generate_facts_memories=request.generate_facts_memories,
-                    )
-                    logger.info(
-                        f"[Session] Background indexing completed for session {session_id}"
-                    )
-
-                try:
-                    # If inside event loop, schedule directly
-                    asyncio.get_running_loop()
-                    asyncio.create_task(_run_index())
-                except RuntimeError:
-                    # Fallback when no loop is active
-                    background_tasks.add_task(lambda: asyncio.run(_run_index()))
-            except Exception as e_bg:
-                logger.error(f"Failed to schedule repository indexing: {e_bg}")
 
         return SessionResponse(
             id=db_session.id,
@@ -669,8 +608,6 @@ async def create_session(
             created_at=db_session.created_at,
             updated_at=db_session.updated_at,
             last_activity=db_session.last_activity,
-            generate_embeddings=db_session.generate_embeddings,
-            generate_facts_memories=db_session.generate_facts_memories,
             runtime_id=runtime_id,
             sandbox_id=sandbox_id,
             tunnel_url=tunnel_url,
@@ -732,10 +669,6 @@ async def update_session(
                 except Exception as snap_err:
                     logger.warning("Failed to save session snapshot: %s", snap_err)
             db_session.is_active = request.is_active
-        if request.generate_embeddings is not None:
-            db_session.generate_embeddings = request.generate_embeddings
-        if request.generate_facts_memories is not None:
-            db_session.generate_facts_memories = request.generate_facts_memories
 
         # Update last activity
         db_session.last_activity = utc_now()
@@ -774,8 +707,6 @@ async def update_session(
             created_at=db_session.created_at,
             updated_at=db_session.updated_at,
             last_activity=db_session.last_activity,
-            generate_embeddings=db_session.generate_embeddings,
-            generate_facts_memories=db_session.generate_facts_memories,
         )
 
     except Exception as e:
@@ -881,7 +812,6 @@ async def add_chat_message(
             tokens=message.tokens,
             model_used=message.model_used,
             processing_time=message.processing_time,
-            context_cards=message.context_cards,
             referenced_files=message.referenced_files,
             error_message=message.error_message,
             actions=message.actions,
@@ -975,7 +905,6 @@ async def add_bulk_chat_messages(
                 tokens=msg.tokens,
                 model_used=msg.model_used,
                 processing_time=msg.processing_time,
-                context_cards=msg.context_cards,
                 referenced_files=msg.referenced_files,
                 error_message=msg.error_message,
                 actions=msg.actions,
@@ -1029,27 +958,11 @@ async def add_context_card(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Add a context card to a session.
-    This is a HIGH priority endpoint for context management.
-    """
+    """Add a chat/upload context card to a session."""
     try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
+        db_session = SessionService.ensure_owned_session(
+            db, current_user.id, session_id
         )
-
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
-
-        # Create new context card
         context_card = ContextCard(
             user_id=current_user.id,
             session_id=db_session.id,
@@ -1064,20 +977,10 @@ async def add_context_card(
         db.add(context_card)
         db.commit()
         db.refresh(context_card)
+        return ContextCardResponse.model_validate(context_card)
 
-        return ContextCardResponse(
-            id=context_card.id,
-            session_id=context_card.session_id,
-            title=context_card.title,
-            description=context_card.description,
-            content=context_card.content,
-            source=context_card.source,
-            tokens=context_card.tokens,
-            is_active=context_card.is_active,
-            created_at=context_card.created_at,
-            updated_at=context_card.updated_at,
-        )
-
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -1094,50 +997,21 @@ async def get_context_cards(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Get context cards for a session.
-    This is a HIGH priority endpoint for context display.
-    """
+    """Get active context cards for a session."""
     try:
-        # Verify session exists and belongs to user
-        db_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_id,
-                ChatSession.user_id == current_user.id,
-            )
-            .first()
+        db_session = SessionService.ensure_owned_session(
+            db, current_user.id, session_id
         )
-
-        if not db_session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-            )
-
-        # Get active context cards for this session
-        context_cards = (
+        cards = (
             db.query(ContextCard)
             .filter(ContextCard.session_id == db_session.id, ContextCard.is_active)
             .order_by(ContextCard.created_at.desc())
             .all()
         )
+        return [ContextCardResponse.model_validate(card) for card in cards]
 
-        return [
-            ContextCardResponse(
-                id=card.id,
-                session_id=card.session_id,
-                title=card.title,
-                description=card.description,
-                content=card.content,
-                source=card.source,
-                tokens=card.tokens,
-                is_active=card.is_active,
-                created_at=card.created_at,
-                updated_at=card.updated_at,
-            )
-            for card in context_cards
-        ]
-
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1145,71 +1019,46 @@ async def get_context_cards(
         )
 
 
-# MEDIUM PRIORITY ENDPOINTS
-
-
-@router.get(
-    "/sessions/{session_id}/file-deps/session",
-    response_model=List[FileItemResponse],
-)
-async def get_file_dependencies_for_session(
+@router.delete("/sessions/{session_id}/context-cards/{card_id}")
+async def delete_context_card(
     session_id: str,
+    card_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get file items for a session (matches frontend FileItem interface)"""
+    """Soft-delete a context card from a session."""
     try:
-        # Ensure session exists and belongs to user
         db_session = SessionService.ensure_owned_session(
             db, current_user.id, session_id
         )
-
-        # Get file items for this session
-        file_items = (
-            db.query(FileItem)
-            .filter(FileItem.session_id == db_session.id)
-            .order_by(FileItem.created_at.desc())
-            .all()
-        )
-
-        logger.info(
-            f"[FileDeps] Found {len(file_items)} file items for session {session_id}"
-        )
-
-        # Convert to response format
-        response_items = []
-        for item in file_items:
-            response_item = FileItemResponse(
-                id=str(item.id),
-                name=item.name,
-                path=item.path,
-                type=item.type,
-                tokens=item.tokens,
-                category=item.category,
-                isDirectory=item.is_directory,
-                content_size=item.content_size,
-                created_at=item.created_at.isoformat() if item.created_at else None,
-                file_name=item.file_name,
-                file_path=item.file_path,
-                file_type=item.file_type,
-                content_summary=item.content_summary,
+        context_card = (
+            db.query(ContextCard)
+            .filter(
+                ContextCard.id == card_id,
+                ContextCard.session_id == db_session.id,
+                ContextCard.user_id == current_user.id,
             )
-            response_items.append(response_item)
-
-        logger.info(
-            f"[FileDeps] Returning {len(response_items)} file items for session {session_id}"
+            .first()
         )
-        return response_items
+        if not context_card:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Context card not found",
+            )
 
+        context_card.is_active = False
+        context_card.updated_at = utc_now()
+        db.commit()
+        return {"success": True, "message": "Context card removed"}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(
-            f"[FileDeps] Failed to get file dependencies for session {session_id}: {str(e)}"
-        )
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get file dependencies: {str(e)}",
+            detail=f"Failed to delete context card: {str(e)}",
         )
-
 
 # CHAT ENDPOINTS - Consolidated from chat_api.py
 # =================================================================================
@@ -1721,7 +1570,6 @@ async def chat_in_session(
             session_id=session_id,
             user_id=current_user.id,
             message_text=request.message.message_text,
-            context_cards=request.context_cards or [],
             repository=repository_info,
         )
 
@@ -1769,727 +1617,6 @@ async def get_session_memories(
 # (Removed duplicate conversation history helpers; using ChatOps._get_conversation_history)
 
 
-# FILE DEPENDENCIES ENDPOINTS - Consolidated from filedeps.py
-# =================================================================================
-
-
-def _estimate_tokens_for_file(file_path: str, content_size: int) -> int:
-    """Estimate tokens for a file based on its size and type."""
-    # Get file extension
-    ext = Path(file_path).suffix.lower()
-
-    # Different ratios for different file types
-    token_ratios = {
-        ".py": 4,  # Python: ~4 chars per token
-        ".js": 4,  # JavaScript: ~4 chars per token
-        ".ts": 4,  # TypeScript: ~4 chars per token
-        ".jsx": 4,  # React JSX: ~4 chars per token
-        ".tsx": 4,  # React TSX: ~4 chars per token
-        ".md": 3,  # Markdown: ~3 chars per token
-        ".json": 5,  # JSON: ~5 chars per token
-        ".yaml": 3,  # YAML: ~3 chars per token
-        ".yml": 3,  # YAML: ~3 chars per token
-        ".txt": 3,  # Text: ~3 chars per token
-        ".html": 4,  # HTML: ~4 chars per token
-        ".css": 4,  # CSS: ~4 chars per token
-        ".sql": 4,  # SQL: ~4 chars per token
-        ".sh": 4,  # Shell: ~4 chars per token
-    }
-
-    ratio = token_ratios.get(ext, 4)  # Default to 4 chars per token
-    return max(1, content_size // ratio)
-
-
-def _extract_repo_info_from_url(repo_url: str) -> tuple[str, str]:
-    """Extract repository name and owner from GitHub URL."""
-    parsed = urlparse(repo_url)
-    path_parts = parsed.path.strip("/").split("/")
-
-    if len(path_parts) >= 2:
-        owner = path_parts[0]
-        repo_name = path_parts[1].replace(".git", "")
-        return repo_name, owner
-    else:
-        return "unknown", "unknown"
-
-
-def _get_or_create_repository(
-    db: Session,
-    repo_url: str,
-    repo_name: str,
-    repo_owner: str,
-    user_id: int,
-    html_url: Optional[str] = None,
-    clone_url: Optional[str] = None,
-    description: Optional[str] = None,
-    language: Optional[str] = None,
-    stargazers_count: Optional[int] = 0,
-    forks_count: Optional[int] = 0,
-    open_issues_count: Optional[int] = 0,
-    default_branch: Optional[str] = None,
-    github_created_at: Optional[datetime] = None,
-    github_updated_at: Optional[datetime] = None,
-    pushed_at: Optional[datetime] = None,
-) -> Repository:
-    """Retrieve existing repository metadata or create a new record."""
-    # First try to find existing repository by URL and user
-    repository = (
-        db.query(Repository)
-        .filter(Repository.repo_url == repo_url, Repository.user_id == user_id)
-        .first()
-    )
-
-    if repository:
-        # Update existing repository with latest data if provided
-        if html_url is not None:
-            repository.html_url = html_url
-        if clone_url is not None:
-            repository.clone_url = clone_url
-        if description is not None:
-            repository.description = description
-        if language is not None:
-            repository.language = language
-        if stargazers_count is not None:
-            repository.stargazers_count = stargazers_count
-        if forks_count is not None:
-            repository.forks_count = forks_count
-        if open_issues_count is not None:
-            repository.open_issues_count = open_issues_count
-        if default_branch is not None:
-            repository.default_branch = default_branch
-        if github_created_at is not None:
-            repository.github_created_at = github_created_at
-        if github_updated_at is not None:
-            repository.github_updated_at = github_updated_at
-        if pushed_at is not None:
-            repository.pushed_at = pushed_at
-        db.commit()
-        return repository
-
-    # Create new repository record
-    repository = Repository(
-        user_id=user_id,
-        name=repo_name,
-        owner=repo_owner,
-        full_name=f"{repo_owner}/{repo_name}",
-        repo_url=repo_url,
-        html_url=html_url or repo_url,  # Default to repo_url if html_url is None
-        clone_url=clone_url or repo_url,  # Default to repo_url if clone_url is None
-        description=description,
-        language=language,
-        stargazers_count=stargazers_count or 0,
-        forks_count=forks_count or 0,
-        open_issues_count=open_issues_count or 0,
-        default_branch=default_branch,
-        github_created_at=github_created_at,
-        github_updated_at=github_updated_at,
-        pushed_at=pushed_at,
-    )
-    db.add(repository)
-    db.flush()
-    return repository
-
-
-def _build_file_tree(files_data: Any, repo_name: str) -> List[Dict[str, Any]]:
-    """Build hierarchical file tree from GitIngest data.
-
-    The helper accepts the normalised snapshot payload returned by
-    :class:`RepositorySnapshotService` (``RepositoryFile`` instances) or the
-    legacy dict structure containing a ``"files"`` key.  The output is a list
-    of dictionaries compatible with the frontend tree component.
-    """
-
-    def _normalise_entry(entry: Any) -> Optional[Dict[str, Any]]:
-        if isinstance(entry, RepositoryFile):
-            return {
-                "path": entry.path,
-                "type": entry.category or "INTERNAL",
-                "Category": entry.category or "INTERNAL",
-                "content_size": entry.content_size or entry.size,
-                "file_name": entry.file_name,
-            }
-
-        if isinstance(entry, dict):
-            path = entry.get("path") or ""
-            category = (
-                entry.get("type")
-                or entry.get("Category")
-                or entry.get("category")
-                or "INTERNAL"
-            )
-            content_size = entry.get("content_size") or entry.get("size") or 0
-            try:
-                content_size = int(content_size)
-            except (TypeError, ValueError):
-                content_size = 0
-
-            return {
-                "path": path,
-                "type": category,
-                "Category": category,
-                "content_size": content_size,
-                "file_name": entry.get("file_name")
-                or (path.split("/")[-1] if path else ""),
-            }
-
-        return None
-
-    file_tree: List[Dict[str, Any]] = []
-
-    if not files_data:
-        return file_tree
-
-    if isinstance(files_data, dict):
-        raw_files = files_data.get("files", [])
-    else:
-        raw_files = files_data
-
-    # Group files by directory
-    dir_structure: Dict[str, Any] = {}
-
-    for raw_entry in raw_files:
-        file_info = _normalise_entry(raw_entry)
-        if not file_info:
-            continue
-
-        path = file_info.get("path") or ""
-        if not path:
-            continue
-
-        path_parts = [part for part in path.split("/") if part]
-        if not path_parts:
-            continue
-
-        current_dir = dir_structure
-
-        for part in path_parts[:-1]:  # All parts except the filename
-            if part not in current_dir:
-                current_dir[part] = {"__files__": []}
-            current_dir = current_dir[part]
-
-        # Add file to the appropriate directory
-        current_dir.setdefault("__files__", [])
-
-        file_name = path_parts[-1]
-        content_size = file_info.get("content_size") or 0
-        file_item = {
-            "id": path,
-            "name": file_name,
-            "type": file_info.get("type", "INTERNAL"),
-            "Category": file_info.get("Category", "INTERNAL"),
-            "tokens": _estimate_tokens_for_file(path, content_size),
-            "isDirectory": False,
-            "path": path,
-        }
-        current_dir["__files__"].append(file_item)
-
-    # Convert directory structure to FileItem format
-    def convert_to_file_items(
-        dir_dict: Dict[str, Any], current_path: str = ""
-    ) -> List[Dict[str, Any]]:
-        items: List[Dict[str, Any]] = []
-
-        for name, content in dir_dict.items():
-            if name == "__files__":
-                items.extend(content)
-            else:
-                full_path = f"{current_path}/{name}" if current_path else name
-                children = convert_to_file_items(content, full_path)
-
-                # Calculate total tokens for directory
-                total_tokens = sum(
-                    child.get("tokens", 0)
-                    for child in children
-                    if not child.get("isDirectory", False)
-                )
-
-                dir_item = {
-                    "id": full_path,
-                    "name": name,
-                    "type": "INTERNAL",
-                    "Category": "Directory",
-                    "tokens": total_tokens,
-                    "isDirectory": True,
-                    "children": children,
-                    "expanded": False,
-                }
-                items.append(dir_item)
-
-        return items
-
-    return convert_to_file_items(dir_structure)
-
-
-def _save_file_analysis_to_db(
-    db: Session,
-    repository_id: int,
-    raw_data: Dict[str, Any],
-    processed_data: Dict[str, Any],
-    total_files: int,
-    total_tokens: int,
-    max_file_size: int,
-):
-    """Log file analysis results instead of storing in database."""
-    print(f"Repository analysis completed for repository {repository_id}:")
-    print(f"  - Total files processed: {total_files}")
-    print(f"  - Total tokens: {total_tokens}")
-    print(f"  - Max file size: {max_file_size}")
-    print(f"  - Files saved as embeddings: {len(processed_data.get('files', []))}")
-
-    # No database storage - just logging
-    return None
-
-
-def _save_file_items_and_embeddings(
-    db: Session,
-    repository_id: int,
-    file_tree: List[Dict[str, Any]],
-    session_id: int,
-    content_lookup: Optional[Dict[str, str]] = None,
-    generate_embeddings: bool = True,
-    embedding_pipeline: Optional[EmbeddingPipeline] = None,
-) -> Tuple[List[FileItem], List[FileEmbedding]]:
-    """Save file items and their embeddings separately.
-
-    content_lookup maps file paths to full file contents for embedding creation.
-    """
-
-    saved_file_items = []
-    saved_embeddings = []
-
-    if generate_embeddings and embedding_pipeline is None:
-        embedding_pipeline = EmbeddingPipeline()
-
-    def process_recursive(items: List[Dict[str, Any]]):
-        for item_data in items:
-            # Create FileItem record
-            file_item = FileItem(
-                session_id=session_id,
-                repository_id=repository_id,
-                name=item_data.get("name", ""),
-                path=item_data.get("path"),
-                type=item_data.get("type", "INTERNAL"),
-                tokens=item_data.get("tokens", 0),
-                category=item_data.get("Category", "unknown"),
-                is_directory=item_data.get("isDirectory", False),
-                content_size=item_data.get("content_size"),
-                file_name=item_data.get("file_name"),
-                file_path=item_data.get("file_path"),
-                file_type=item_data.get("file_type"),
-                content_summary=item_data.get("content_summary"),
-            )
-            db.add(file_item)
-            db.flush()  # Get the ID
-
-            saved_file_items.append(file_item)
-
-            # If it's a file (not a directory), create embeddings using content map
-            if (
-                generate_embeddings
-                and not item_data.get("isDirectory", False)
-                and embedding_pipeline
-            ):
-                fpath = item_data.get("path") or item_data.get("file_path")
-                if content_lookup and fpath:
-                    content = content_lookup.get(fpath)
-                else:
-                    content = None
-
-                if content:
-                    repo_file = RepositoryFile(
-                        path=fpath,
-                        content=content,
-                        size=len(content),
-                        content_size=len(content),
-                        category=item_data.get("Category"),
-                    )
-                    try:
-                        chunks = embedding_pipeline.process_file(repo_file)
-                        for chunk in chunks:
-                            embedding = FileEmbedding(
-                                session_id=session_id,
-                                repository_id=repository_id,
-                                file_item_id=file_item.id,
-                                file_path=chunk.file_path,
-                                file_name=chunk.file_name,
-                                chunk_index=chunk.chunk_index,
-                                chunk_text=chunk.chunk_text,
-                                embedding=Vector(chunk.embedding),
-                                tokens=chunk.tokens,
-                                file_metadata=chunk.metadata,
-                            )
-                            db.add(embedding)
-                            saved_embeddings.append(embedding)
-                    except Exception as embed_error:
-                        logger.warning(
-                            f"Failed to create embeddings for {fpath}: {embed_error}"
-                        )
-
-            # Process children recursively
-            if item_data.get("isDirectory", False) and "children" in item_data:
-                process_recursive(item_data["children"])
-
-    process_recursive(file_tree)
-    return saved_file_items, saved_embeddings
-
-
-def _collect_issue_context(db: Session, chat_session: ChatSession) -> Dict[str, Any]:
-    """Build repository and conversation context for GitHub issue creation."""
-
-    context: Dict[str, Any] = {}
-
-    if chat_session.repo_owner or chat_session.repo_name:
-        context["repository_info"] = {
-            "owner": chat_session.repo_owner,
-            "name": chat_session.repo_name,
-            "branch": chat_session.repo_branch,
-            "url": f"https://github.com/{chat_session.repo_owner}/{chat_session.repo_name}"
-            if chat_session.repo_owner and chat_session.repo_name
-            else None,
-        }
-
-    if isinstance(chat_session.repo_context, dict):
-        fam = chat_session.repo_context.get("facts_and_memories")
-        if fam:
-            context["facts_memories"] = fam
-
-    messages = (
-        db.query(ChatMessage)
-        .filter(ChatMessage.session_id == chat_session.id)
-        .order_by(ChatMessage.created_at.desc())
-        .limit(8)
-        .all()
-    )
-    if messages:
-        context["conversation"] = [
-            {
-                "author": message.sender_type or message.role or "user",
-                "text": message.message_text,
-            }
-            for message in reversed(messages)
-        ]
-
-    files = (
-        db.query(FileItem)
-        .filter(
-            FileItem.session_id == chat_session.id, FileItem.is_directory.is_(False)
-        )
-        .order_by(FileItem.tokens.desc())
-        .limit(5)
-        .all()
-    )
-    if files:
-        context["files"] = [
-            {
-                "path": file.path,
-                "tokens": file.tokens,
-            }
-            for file in files
-            if file.path
-        ]
-
-    return context
-
-
-async def _index_repository_for_session_background(
-    session_uuid: str,
-    user_id: int,
-    repo_owner: str,
-    repo_name: str,
-    repo_branch: str = "main",
-    max_file_size: Optional[int] = None,
-    generate_embeddings: bool = True,
-    generate_facts_memories: bool = False,
-) -> None:
-    """Background task: extract the repository, chunk files, create embeddings and persist.
-
-    This runs after session creation when index_codebase=True.
-    """
-    db = SessionLocal()
-    try:
-        logger.info(
-            f"[Index] Starting indexing for session={session_uuid} repo={repo_owner}/{repo_name}"
-        )
-
-        # Validate repository parameters
-        if not repo_owner or not repo_owner.strip():
-            logger.error(f"[Index] Invalid repo_owner: '{repo_owner}'")
-            return
-
-        if not repo_name or not repo_name.strip():
-            logger.error(f"[Index] Invalid repo_name: '{repo_name}'")
-            return
-
-        # Sanitize repository parameters (remove any leading/trailing whitespace)
-        repo_owner = repo_owner.strip()
-        repo_name = repo_name.strip()
-
-        logger.info(
-            f"[Index] Sanitized repo_owner='{repo_owner}', repo_name='{repo_name}'"
-        )
-
-        # Verify the session exists and is owned by the user
-        chat_session = (
-            db.query(ChatSession)
-            .filter(
-                ChatSession.session_id == session_uuid, ChatSession.user_id == user_id
-            )
-            .first()
-        )
-        if not chat_session:
-            logger.warning(
-                f"[Index] Session not found or not owned by user: {session_uuid}"
-            )
-            return
-
-        # Construct repository URL with validation
-        repo_url = f"https://github.com/{repo_owner}/{repo_name}"
-        logger.info(f"[Index] Constructed repo URL: {repo_url}")
-
-        # Validate URL format
-        if not repo_url.startswith("https://github.com/"):
-            logger.error(f"[Index] Invalid repo URL format: {repo_url}")
-            return
-
-        # Extract repository content via GitIngest
-        logger.info(f"[Index] Starting GitIngest extraction for: {repo_url}")
-        try:
-            snapshot = await RepositorySnapshotService.fetch(
-                repo_url=repo_url, max_file_size=max_file_size
-            )
-            # raw_repo not used; snapshot retains raw_response if needed later
-            files_data = snapshot.files
-            logger.info(
-                f"[Index] GitIngest extraction completed, {len(files_data)} files returned"
-            )
-        except Exception as extract_error:
-            logger.error(
-                f"[Index] GitIngest extraction failed with exception: {extract_error}"
-            )
-            return
-
-        # Fetch repo metadata (best effort)
-        try:
-            gh = GitHubOps(db)
-            meta = await gh.fetch_repository_info_detailed(
-                repo_owner, repo_name, user_id
-            )
-        except Exception as e:
-            logger.warning(f"[Index] Failed to fetch repo metadata: {e}")
-            meta = {}
-
-        repository = _get_or_create_repository(
-            db,
-            repo_url,
-            repo_name,
-            repo_owner,
-            user_id,
-            html_url=meta.get("html_url"),
-            clone_url=meta.get("clone_url"),
-            description=meta.get("description"),
-            language=meta.get("language"),
-            stargazers_count=meta.get("stargazers_count", 0),
-            forks_count=meta.get("forks_count", 0),
-            open_issues_count=meta.get("open_issues_count", 0),
-            default_branch=meta.get("default_branch", repo_branch),
-            github_created_at=meta.get("created_at"),
-            github_updated_at=meta.get("updated_at"),
-            pushed_at=meta.get("pushed_at"),
-        )
-
-        # Build and persist file tree context for session and repository caches
-        file_tree = _build_file_tree(files_data, repo_name)
-        file_tree_payload = {
-            "tree": file_tree,
-            "repo": f"{repo_owner}/{repo_name}",
-            "file_count": len(files_data),
-            "source": "gitingest",
-            "generated_at": utc_now().isoformat(),
-        }
-
-        # Update per-session repository context with the tree
-        session_repo_context = chat_session.repo_context
-        if isinstance(session_repo_context, str):
-            try:
-                session_repo_context = json.loads(session_repo_context)
-            except json.JSONDecodeError:
-                session_repo_context = {}
-        if not isinstance(session_repo_context, dict):
-            session_repo_context = {}
-        session_repo_context["file_tree"] = file_tree_payload
-        chat_session.repo_context = session_repo_context
-
-        # Merge the tree into repository cache metadata and on-disk cache
-        repository_github_context = repository.github_context
-        if isinstance(repository_github_context, str):
-            try:
-                repository_github_context = json.loads(repository_github_context)
-            except json.JSONDecodeError:
-                repository_github_context = {}
-        if not isinstance(repository_github_context, dict):
-            repository_github_context = {}
-        repository_github_context["file_tree"] = file_tree_payload
-
-        try:
-            cache_payload = LLMService.read_github_context_cache(
-                repository_github_context
-            )
-        except Exception as cache_read_error:  # pragma: no cover - defensive logging
-            logger.warning(
-                "[Index] Failed to read GitHub context cache for %s/%s: %s",
-                repo_owner,
-                repo_name,
-                cache_read_error,
-            )
-            cache_payload = None
-
-        if cache_payload is not None:
-            cache_payload["file_tree"] = file_tree_payload
-            try:
-                updated_metadata = LLMService.write_github_context_cache(
-                    repository_github_context, cache_payload
-                )
-                if isinstance(updated_metadata, dict):
-                    repository_github_context.update(updated_metadata)
-            except (
-                Exception
-            ) as cache_write_error:  # pragma: no cover - defensive logging
-                logger.warning(
-                    "[Index] Failed to update GitHub context cache for %s/%s: %s",
-                    repo_owner,
-                    repo_name,
-                    cache_write_error,
-                )
-
-        repository_github_context["file_tree"] = file_tree_payload
-        repository.github_context = repository_github_context
-        repository.github_context_updated_at = utc_now()
-
-        # Save file items directly from files_data
-        saved_file_items = []
-        saved_embeddings = []
-
-        embedding_pipeline = EmbeddingPipeline() if generate_embeddings else None
-
-        logger.info(f"[Index] Processing {len(files_data)} files for database storage")
-
-        for i, repo_file in enumerate(files_data):
-            try:
-                file_path = repo_file.path
-                logger.debug(
-                    f"[Index] Processing file {i + 1}/{len(files_data)}: {file_path}"
-                )
-
-                # Create FileItem record
-                file_item = FileItem(
-                    session_id=chat_session.id,
-                    repository_id=repository.id,
-                    name=repo_file.file_name or "unknown",
-                    path=repo_file.path,
-                    type=repo_file.category or "INTERNAL",
-                    tokens=_estimate_tokens_for_file(
-                        repo_file.path,
-                        repo_file.content_size,
-                    ),
-                    category=repo_file.category or "unknown",
-                    is_directory=False,
-                    content_size=repo_file.content_size,
-                    file_name=repo_file.file_name,
-                    file_path=repo_file.path,
-                    file_type=repo_file.category,
-                )
-                db.add(file_item)
-                db.flush()  # Get the ID
-                saved_file_items.append(file_item)
-                logger.debug(
-                    f"[Index] Successfully saved file item: {file_path} (ID: {file_item.id})"
-                )
-
-                # Create embeddings for the file content when requested
-                if (
-                    generate_embeddings
-                    and embedding_pipeline
-                    and repo_file.content
-                    and repo_file.content.strip()
-                ):
-                    try:
-                        chunks = embedding_pipeline.process_file(repo_file)
-                        for chunk in chunks:
-                            embedding = FileEmbedding(
-                                session_id=chat_session.id,
-                                repository_id=repository.id,
-                                file_item_id=file_item.id,
-                                file_path=chunk.file_path,
-                                file_name=chunk.file_name,
-                                chunk_index=chunk.chunk_index,
-                                chunk_text=chunk.chunk_text,
-                                embedding=Vector(chunk.embedding),
-                                tokens=chunk.tokens,
-                                file_metadata=chunk.metadata,
-                            )
-                            db.add(embedding)
-                            saved_embeddings.append(embedding)
-                    except Exception as embed_error:
-                        logger.warning(
-                            f"[Index] Failed to create embeddings for {repo_file.path}: {embed_error}"
-                        )
-                        # Continue processing other files
-
-            except Exception as file_error:
-                logger.warning(
-                    f"[Index] Failed to process file {getattr(repo_file, 'path', 'unknown')}: {file_error}"
-                )
-                continue
-
-        logger.info(
-            f"[Index] Saved {len(saved_file_items)} file items and {len(saved_embeddings)} embeddings"
-        )
-
-        try:
-            db.commit()
-            logger.info(
-                f"[Index] Database commit successful for session {session_uuid}"
-            )
-        except Exception as commit_error:
-            logger.error(f"[Index] Database commit failed: {commit_error}")
-            db.rollback()
-            return
-
-        if generate_facts_memories:
-            try:
-                logger.info(
-                    f"[Index] Generating repository facts for session {session_uuid}"
-                )
-                facts_service = FactsAndMemoriesService()
-                result = await facts_service.generate_facts(
-                    snapshot=snapshot,
-                )
-                MemoryService.store_facts(
-                    chat_session,
-                    facts=result.facts,
-                    highlights=result.highlights,
-                )
-                db.commit()
-                logger.info(
-                    f"[Index] Repository facts stored for session {session_uuid}"
-                )
-            except Exception as fam_error:
-                logger.warning(
-                    f"[Index] Repository facts generation failed for session {session_uuid}: {fam_error}"
-                )
-                db.rollback()
-
-        logger.info(
-            f"[Index] Completed indexing for session {session_uuid}: {len(saved_file_items)} files processed"
-        )
-    except Exception as e:
-        logger.error(f"[Index] Unexpected indexing error: {e}")
-        db.rollback()
-    finally:
-        db.close()
-
-
-# ============================================================================
 # ISSUES ENDPOINTS - Consolidated under sessions context
 # ============================================================================
 
@@ -2572,7 +1699,6 @@ async def create_issue_with_context_for_session(
             title=request.get("title", ""),
             description=request.get("description", ""),
             chat_messages=request.get("chat_messages", []),
-            file_context=request.get("file_context", []),
             repo_owner=repo_owner,
             repo_name=repo_name,
             priority=request.get("priority", "medium"),
@@ -2645,8 +1771,6 @@ async def get_issues_for_session(
                 "issue_text_raw": issue.issue_text_raw,
                 "issue_steps": issue.issue_steps,
                 "session_id": issue.session_id,
-                "context_card_id": issue.context_card_id,
-                "context_cards": issue.context_cards,
                 "ideas": issue.ideas,
                 "repo_owner": issue.repo_owner,
                 "repo_name": issue.repo_name,
@@ -2729,8 +1853,6 @@ async def get_issue_for_session(
             "issue_text_raw": issue.issue_text_raw,
             "issue_steps": issue.issue_steps,
             "session_id": issue.session_id,
-            "context_card_id": issue.context_card_id,
-            "context_cards": issue.context_cards,
             "ideas": issue.ideas,
             "repo_owner": issue.repo_owner,
             "repo_name": issue.repo_name,
@@ -2815,8 +1937,6 @@ async def update_issue_status_for_session(
             "issue_text_raw": updated_issue.issue_text_raw,
             "issue_steps": updated_issue.issue_steps,
             "session_id": updated_issue.session_id,
-            "context_card_id": updated_issue.context_card_id,
-            "context_cards": updated_issue.context_cards,
             "ideas": updated_issue.ideas,
             "repo_owner": updated_issue.repo_owner,
             "repo_name": updated_issue.repo_name,

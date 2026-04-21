@@ -33,17 +33,6 @@ router = APIRouter(tags=["realtime-controller"])
 RUNTIME_STATUS_NOT_PROVISIONED = "not_provisioned"
 
 
-def _normalize_context_cards(raw: Any) -> list[str]:
-    if not isinstance(raw, list):
-        return []
-    values: list[str] = []
-    for item in raw:
-        candidate = str(item or "").strip()
-        if candidate:
-            values.append(candidate)
-    return values
-
-
 def _to_sandbox_response(sandbox) -> SandboxResponse:
     return SandboxResponse(
         sandbox_id=sandbox.id,
@@ -442,7 +431,6 @@ async def unified_session_websocket(
             if msg_type == WSMessageType.CHAT_MESSAGE.value:
                 payload = message.get("payload", {}) or {}
                 content = str(payload.get("content") or "").strip()
-                context_cards = _normalize_context_cards(payload.get("context_cards"))
                 repository = payload.get("repository")
                 if not isinstance(repository, dict):
                     repository = None
@@ -470,7 +458,6 @@ async def unified_session_websocket(
                         user_id=user.id,
                         message_text=content,
                         on_chunk=send_llm_delta,
-                        context_cards=context_cards or None,
                         repository=repository,
                     )
                     reply_text = str(result.get("reply") or "")

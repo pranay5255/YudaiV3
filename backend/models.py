@@ -5,24 +5,21 @@ BACKEND MODIFICATION PLAN FOR UNIFIED STATE MANAGEMENT:
 ====================================================================
 
 ✅ COMPLETED:
-1. Session management models (ChatSession, ChatMessage, ContextCard, FileEmbedding)
+1. Session management models (ChatSession, ChatMessage, ContextCard)
 2. Authentication models (User, AuthToken, SessionToken)
 3. Repository models (Repository, Issue, PullRequest, Commit)
 4. AI Solver models (AIModel, Solve, SolveRun)
 
 🔄 IN PROGRESS:
-1. Model consolidation (FileItem → FileEmbedding, FileAnalysis → Repository metadata)
-2. API endpoint unification (all operations through session context)
-3. Error response standardization
+1. API endpoint unification (all operations through session context)
+2. Error response standardization
 
 📋 NEXT STEPS:
 1. Add session update endpoints (PUT /daifu/sessions/{session_id})
 2. Add bulk message operations (POST /daifu/sessions/{session_id}/messages/bulk)
-3. Add file dependency update endpoints (PUT /daifu/sessions/{session_id}/file-deps/{file_id})
-4. Standardize error responses across all endpoints
-5. Add session statistics endpoint (GET /daifu/sessions/{session_id}/stats)
-6. Remove deprecated FileItem and FileAnalysis models after migration
-7. Add session export/import functionality
+3. Standardize error responses across all endpoints
+4. Add session statistics endpoint (GET /daifu/sessions/{session_id}/stats)
+5. Add session export/import functionality
 
 🔧 IMMEDIATE TODO:
 - Update session_routes.py to add missing CRUD endpoints
@@ -35,7 +32,6 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from pgvector.sqlalchemy import Vector
 from pydantic import BaseModel, ConfigDict, Field, model_validator, validator
 from sqlalchemy import (
     JSON,
@@ -64,12 +60,6 @@ except ImportError:
 # ============================================================================
 
 
-class ContextSource(str, Enum):
-    CHAT = "chat"
-    FILE_DEPS = "file-deps"
-    UPLOAD = "upload"
-
-
 class ComplexityLevel(str, Enum):
     S = "S"
     M = "M"
@@ -92,14 +82,8 @@ class ProgressStep(str, Enum):
 
 class TabType(str, Enum):
     CHAT = "chat"
-    FILE_DEPS = "file-deps"
     CONTEXT = "context"
     IDEAS = "ideas"
-
-
-class FileType(str, Enum):
-    INTERNAL = "internal"
-    EXTERNAL = "external"
 
 
 # AI Solver Enums
@@ -502,8 +486,6 @@ class ChatSession(Base):
     runtime_workspace_path: Mapped[Optional[str]] = mapped_column(
         String(512), nullable=True
     )
-    generate_embeddings: Mapped[bool] = mapped_column(Boolean, default=False)
-    generate_facts_memories: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Status and statistics
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -559,16 +541,10 @@ class ChatSession(Base):
     messages: Mapped[List["ChatMessage"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
-    user_questions: Mapped[List["UserQuestion"]] = relationship(
-        back_populates="session", cascade="all, delete-orphan"
-    )
     context_cards: Mapped[List["ContextCard"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
-    file_embeddings: Mapped[List["FileEmbedding"]] = relationship(
-        back_populates="session", cascade="all, delete-orphan"
-    )
-    file_items: Mapped[List["FileItem"]] = relationship(
+    user_questions: Mapped[List["UserQuestion"]] = relationship(
         back_populates="session", cascade="all, delete-orphan"
     )
     solves: Mapped[List["Solve"]] = relationship(
@@ -615,7 +591,9 @@ class ChatMessage(Base):
     processing_time: Mapped[Optional[float]] = mapped_column(
         nullable=True
     )  # milliseconds
-    context_cards: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
+    context_cards: Mapped[Optional[List[str]]] = mapped_column(
+        JSON_TYPE, nullable=True
+    )
     referenced_files: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     actions: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSON, nullable=True)
@@ -630,6 +608,35 @@ class ChatMessage(Base):
 
     # Relationships
     session: Mapped["ChatSession"] = relationship(back_populates="messages")
+
+
+class ContextCard(Base):
+    """Curated user/session context cards for chat and issue generation."""
+
+    __tablename__ = "context_cards"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    tokens: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), onupdate=func.now()
+    )
+
+    user: Mapped["User"] = relationship()
+    session: Mapped["ChatSession"] = relationship(back_populates="context_cards")
 
 
 class UserQuestion(Base):
@@ -670,42 +677,6 @@ class UserQuestion(Base):
     user: Mapped["User"] = relationship()
 
 
-class ContextCard(Base):
-    """Context cards created by users"""
-
-    __tablename__ = "context_cards"
-
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    session_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("chat_sessions.id"), nullable=True
-    )
-
-    # Context data
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str] = mapped_column(Text, nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    source: Mapped[str] = mapped_column(String(50), nullable=False)
-    tokens: Mapped[int] = mapped_column(Integer, default=0)
-
-    # Metadata
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now()
-    )
-
-    # Relationships
-    user: Mapped["User"] = relationship()
-    session: Mapped[Optional["ChatSession"]] = relationship(
-        back_populates="context_cards"
-    )
-
-
 class UserIssue(Base):
     """User-generated issues for agent processing (distinct from GitHub Issues)"""
 
@@ -717,9 +688,6 @@ class UserIssue(Base):
     # Core issue data (as requested by user)
     issue_id: Mapped[str] = mapped_column(
         String(255), unique=True, nullable=False, index=True
-    )
-    context_card_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("context_cards.id"), nullable=True
     )
     issue_text_raw: Mapped[str] = mapped_column(Text, nullable=False)
     issue_steps: Mapped[Optional[List[str]]] = mapped_column(
@@ -735,7 +703,6 @@ class UserIssue(Base):
     # chat_session_id: Mapped[Optional[int]] = mapped_column(ForeignKey("chat_sessions.id"), nullable=True)
 
     # Context and metadata
-    # context_cards: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)  # Array of context card IDs
     # ideas: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)  # Array of idea IDs
     repo_owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     repo_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -768,102 +735,6 @@ class UserIssue(Base):
 
     # Relationships
     user: Mapped["User"] = relationship()
-
-
-class FileEmbedding(Base):
-    """File embeddings for semantic search and file dependencies storage"""
-
-    __tablename__ = "file_embeddings"
-
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    session_id: Mapped[int] = mapped_column(
-        ForeignKey("chat_sessions.id"), nullable=False
-    )
-    repository_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("repositories.id"), nullable=True
-    )
-
-    # File reference (foreign key to FileItem)
-    file_item_id: Mapped[int] = mapped_column(
-        ForeignKey("file_items.id"), nullable=False
-    )
-
-    # File information (minimal - most data in FileItem)
-    file_path: Mapped[str] = mapped_column(String(1000), nullable=False, index=True)
-    file_name: Mapped[str] = mapped_column(String(500), nullable=False)
-
-    # Embedding data - using pgvector for efficient similarity search
-    embedding: Mapped[Optional[Vector]] = mapped_column(
-        Vector(384), nullable=True
-    )  # sentence-transformers/all-MiniLM-L6-v2 dimensions
-    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
-    chunk_text: Mapped[str] = mapped_column(Text, nullable=False)
-    tokens: Mapped[int] = mapped_column(Integer, default=0)
-
-    # Token tracking for quota management
-    session_tokens_used: Mapped[int] = mapped_column(
-        Integer, default=0
-    )  # Track tokens used for this session
-
-    # Metadata (renamed to avoid SQLAlchemy conflict)
-    file_metadata: Mapped[Optional[str]] = mapped_column(JSON, nullable=True)
-
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now()
-    )
-
-    # Relationships
-    session: Mapped["ChatSession"] = relationship(back_populates="file_embeddings")
-    repository: Mapped[Optional["Repository"]] = relationship()
-    file_item: Mapped["FileItem"] = relationship(back_populates="embeddings")
-
-
-class FileItem(Base):
-    """File metadata for frontend display - matches FileItem interface exactly"""
-
-    __tablename__ = "file_items"
-
-    id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    session_id: Mapped[int] = mapped_column(
-        ForeignKey("chat_sessions.id"), nullable=False
-    )
-    repository_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("repositories.id"), nullable=True
-    )
-
-    # Core file information (matches frontend FileItem interface)
-    name: Mapped[str] = mapped_column(String(500), nullable=False)
-    path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
-    type: Mapped[str] = mapped_column(String(50), nullable=False, default="INTERNAL")
-    tokens: Mapped[int] = mapped_column(Integer, default=0)
-    category: Mapped[str] = mapped_column(String(100), nullable=False)
-
-    # Optional fields
-    is_directory: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    content_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    file_name: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    file_path: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
-    file_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    content_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), onupdate=func.now()
-    )
-
-    # Relationships
-    session: Mapped["ChatSession"] = relationship(back_populates="file_items")
-    repository: Mapped[Optional["Repository"]] = relationship()
-    embeddings: Mapped[List["FileEmbedding"]] = relationship(
-        back_populates="file_item", cascade="all, delete-orphan"
-    )
 
 
 class GitHubAppInstallation(Base):
@@ -1522,45 +1393,6 @@ class ChatMessageInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
-class ContextCardInput(BaseModel):
-    title: str = Field(..., min_length=1, max_length=100)
-    description: str = Field(..., min_length=1, max_length=500)
-    content: str = Field(..., min_length=1)
-    source: ContextSource = Field(default=ContextSource.CHAT)
-
-    @validator("title")
-    def validate_title(cls, v):
-        if len(v.strip()) < 1:
-            raise ValueError("Title cannot be empty")
-        return v.strip()
-
-
-class FileItemInput(BaseModel):
-    name: str = Field(..., min_length=1)
-    file_type: FileType = Field(...)
-    tokens: int = Field(..., ge=0)
-    is_directory: bool = Field(default=False)
-    path: Optional[str] = Field(None)
-    content: Optional[str] = Field(None)
-
-    @validator("name")
-    def validate_name(cls, v):
-        if not v.strip():
-            raise ValueError("File name cannot be empty")
-        return v.strip()
-
-
-class RepositoryRequest(BaseModel):
-    repo_url: str = Field(..., min_length=1)
-    max_file_size: Optional[int] = Field(None, ge=1)
-
-    @validator("repo_url")
-    def validate_repo_url(cls, v):
-        if not v.strip():
-            raise ValueError("Repository URL cannot be empty")
-        return v.strip()
-
-
 # Chat Models
 class CreateChatMessageRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=255)
@@ -1572,7 +1404,6 @@ class CreateChatMessageRequest(BaseModel):
     tokens: int = Field(default=0, ge=0)
     model_used: Optional[str] = Field(None, max_length=100)
     processing_time: Optional[float] = Field(None, ge=0)
-    context_cards: Optional[List[str]] = Field(default_factory=list)
     referenced_files: Optional[List[str]] = Field(default_factory=list)
     error_message: Optional[str] = Field(None)
 
@@ -1614,8 +1445,6 @@ class ChatSessionResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     last_activity: Optional[datetime] = None
-    generate_embeddings: bool = False
-    generate_facts_memories: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1640,10 +1469,41 @@ class ChatMessageResponse(BaseModel):
     tokens: int
     model_used: Optional[str] = None
     processing_time: Optional[float] = None
-    context_cards: Optional[List[str]] = None
     referenced_files: Optional[List[str]] = None
     error_message: Optional[str] = None
     actions: Optional[List[ChatAction]] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CreateContextCardRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None)
+    content: str = Field(..., min_length=1)
+    source: Literal["chat", "upload"] = Field(default="chat")
+    tokens: int = Field(default=0, ge=0)
+
+
+class UpdateContextCardRequest(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None)
+    content: Optional[str] = Field(None, min_length=1)
+    source: Optional[Literal["chat", "upload"]] = None
+    tokens: Optional[int] = Field(None, ge=0)
+    is_active: Optional[bool] = None
+
+
+class ContextCardResponse(BaseModel):
+    id: int
+    session_id: int
+    title: str
+    description: Optional[str] = None
+    content: str
+    source: Literal["chat", "upload"]
+    tokens: int
+    is_active: bool
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -1657,10 +1517,6 @@ class CreateSessionRequest(BaseModel):
     repo_branch: Optional[str] = Field("main", max_length=255)
     title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = Field(None)
-    index_codebase: Optional[bool] = Field(default=True)
-    index_max_file_size: Optional[int] = Field(default=None, ge=1)
-    generate_embeddings: bool = Field(default=True)
-    generate_facts_memories: bool = Field(default=False)
 
 
 class UpdateSessionRequest(BaseModel):
@@ -1668,8 +1524,6 @@ class UpdateSessionRequest(BaseModel):
     description: Optional[str] = Field(None)
     repo_branch: Optional[str] = Field(None, max_length=255)
     is_active: Optional[bool] = Field(None)
-    generate_embeddings: Optional[bool] = None
-    generate_facts_memories: Optional[bool] = None
 
 
 class SessionResponse(BaseModel):
@@ -1702,8 +1556,6 @@ class SessionResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     last_activity: Optional[datetime] = None
-    generate_embeddings: bool = False
-    generate_facts_memories: bool = False
     runtime_id: Optional[str] = None
     sandbox_id: Optional[str] = None
     tunnel_url: Optional[str] = None
@@ -1712,68 +1564,14 @@ class SessionResponse(BaseModel):
 
 
 class SessionContextResponse(BaseModel):
-    """Complete session context including messages, context cards, and unified state"""
+    """Complete session context including messages and unified state"""
 
     session: SessionResponse
     messages: List[ChatMessageResponse]
-    context_cards: List[str] = Field(default_factory=list)
+    context_cards: Optional[List[ContextCardResponse]] = Field(default_factory=list)
     repository_info: Optional[Dict[str, Any]] = None
-    file_embeddings_count: int = 0
     statistics: Optional[Dict[str, Any]] = Field(default_factory=dict)
     user_issues: Optional[List["UserIssueResponse"]] = Field(default_factory=list)
-    file_embeddings: Optional[List["FileEmbeddingResponse"]] = Field(
-        default_factory=list
-    )
-
-
-# Context Card Models
-class CreateContextCardRequest(BaseModel):
-    title: str = Field(..., min_length=1, max_length=255)
-    description: str = Field(..., min_length=1)
-    content: str = Field(..., min_length=1)
-    source: str = Field(..., pattern="^(chat|file-deps|upload)$")
-    tokens: int = Field(default=0, ge=0)
-
-
-# File Embedding Models
-class FileEmbeddingResponse(BaseModel):
-    """Response model for embedding operations - excludes vector data"""
-
-    id: int
-    session_id: int
-    repository_id: Optional[int] = None
-    file_item_id: int
-    file_path: str
-    file_name: str
-    chunk_index: int
-    chunk_text: str
-    tokens: int
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-# Frontend UI Response Models
-class FileItemResponse(BaseModel):
-    """Response model for frontend UI display in FileDependencies component"""
-
-    id: str
-    name: str
-    path: Optional[str] = None
-    type: str
-    tokens: int
-    category: str
-    isDirectory: Optional[bool] = None
-    children: Optional[List["FileItemResponse"]] = None
-    expanded: Optional[bool] = None
-    content_size: Optional[int] = None
-    created_at: Optional[str] = None
-    file_name: Optional[str] = None
-    file_path: Optional[str] = None
-    file_type: Optional[str] = None
-    content_summary: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
 
 
 # User Issue Models
@@ -1782,7 +1580,6 @@ class CreateUserIssueRequest(BaseModel):
     issue_text_raw: str = Field(..., min_length=1)
     description: Optional[str] = Field(None)
     session_id: Optional[str] = Field(None, max_length=255)
-    context_card_id: Optional[int] = Field(None)
     repo_owner: Optional[str] = Field(None, max_length=255)
     repo_name: Optional[str] = Field(None, max_length=255)
     priority: Literal["low", "medium", "high"] = Field(default="medium")
@@ -1798,8 +1595,6 @@ class UserIssueResponse(BaseModel):
     issue_text_raw: str
     issue_steps: Optional[List[str]] = None
     session_id: Optional[str] = None
-    context_card_id: Optional[int] = None
-    context_cards: Optional[List[str]] = None
     ideas: Optional[List[str]] = None
     repo_owner: Optional[str] = None
     repo_name: Optional[str] = None
@@ -1833,7 +1628,6 @@ class CreateGitHubIssueResponse(BaseModel):
 class ChatRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=255)
     message: ChatMessageInput
-    context_cards: Optional[List[str]] = Field(default_factory=list)
     repository: Optional[Dict[str, Any]] = None
     model_config = ConfigDict(populate_by_name=True)
 
@@ -1961,21 +1755,6 @@ class CancelExecutionResponse(BaseModel):
     session_id: str
     status: str
     message: str
-
-
-class ContextCardResponse(BaseModel):
-    id: int = Field(...)
-    session_id: Optional[int] = Field(None)
-    title: str = Field(...)
-    description: str = Field(...)
-    content: str = Field(...)
-    source: str = Field(...)
-    tokens: int = Field(...)
-    is_active: bool = Field(default=True)
-    created_at: datetime = Field(...)
-    updated_at: Optional[datetime] = Field(None)
-
-    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================================

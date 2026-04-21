@@ -17,9 +17,6 @@ from models import (
     ChatSession,
     ContextCard,
     ContextCardResponse,
-    FileEmbedding,
-    FileEmbeddingResponse,
-    FileItem,
     SessionContextResponse,
     SessionResponse,
 )
@@ -74,7 +71,7 @@ class SessionService:
     @staticmethod
     def get_context(db: Session, db_session: ChatSession) -> SessionContextResponse:
         """
-        Get complete session context including messages, context cards, and file embeddings.
+        Get complete session context including messages and context cards.
 
         Args:
             db: Database session
@@ -90,18 +87,10 @@ class SessionService:
             .order_by(ChatMessage.created_at.asc())
             .all()
         )
-
-        # Get context cards for this session
         context_cards = (
             db.query(ContextCard)
             .filter(ContextCard.session_id == db_session.id, ContextCard.is_active)
-            .all()
-        )
-
-        # Get file embeddings for this session
-        file_embeddings = (
-            db.query(FileEmbedding)
-            .filter(FileEmbedding.session_id == db_session.id)
+            .order_by(ContextCard.created_at.desc())
             .all()
         )
 
@@ -136,8 +125,6 @@ class SessionService:
             created_at=db_session.created_at,
             updated_at=db_session.updated_at,
             last_activity=db_session.last_activity,
-            generate_embeddings=db_session.generate_embeddings,
-            generate_facts_memories=db_session.generate_facts_memories,
         )
 
         message_responses = [
@@ -151,7 +138,6 @@ class SessionService:
                 tokens=msg.tokens,
                 model_used=msg.model_used,
                 processing_time=msg.processing_time,
-                context_cards=msg.context_cards,
                 referenced_files=msg.referenced_files,
                 error_message=msg.error_message,
                 actions=msg.actions,
@@ -161,42 +147,24 @@ class SessionService:
             for msg in messages
         ]
 
-        context_card_responses = [
-            ContextCardResponse(
-                id=card.id,
-                session_id=card.session_id,
-                title=card.title,
-                description=card.description,
-                content=card.content,
-                source=card.source,
-                tokens=card.tokens,
-                is_active=card.is_active,
-                created_at=card.created_at,
-                updated_at=card.updated_at,
-            )
-            for card in context_cards
-        ]
-
-        file_embedding_responses = [
-            FileEmbeddingResponse(
-                id=fe.id,
-                session_id=fe.session_id,
-                repository_id=fe.repository_id,
-                file_path=fe.file_path,
-                file_name=fe.file_name,
-                file_type=fe.file_type,
-                chunk_index=fe.chunk_index,
-                tokens=fe.tokens,
-                file_metadata=fe.file_metadata,
-                created_at=fe.created_at,
-            )
-            for fe in file_embeddings
-        ]
-
         context_response = SessionContextResponse(
             session=session_response,
             messages=message_responses,
-            context_cards=context_card_responses,
+            context_cards=[
+                ContextCardResponse(
+                    id=card.id,
+                    session_id=card.session_id,
+                    title=card.title,
+                    description=card.description,
+                    content=card.content,
+                    source=card.source,
+                    tokens=card.tokens,
+                    is_active=card.is_active,
+                    created_at=card.created_at,
+                    updated_at=card.updated_at,
+                )
+                for card in context_cards
+            ],
             repository_info={
                 "owner": db_session.repo_owner,
                 "name": db_session.repo_name,
@@ -206,7 +174,6 @@ class SessionService:
             }
             if db_session.repo_owner and db_session.repo_name
             else None,
-            file_embeddings_count=len(file_embeddings),
             statistics={
                 "total_messages": db_session.total_messages,
                 "total_tokens": db_session.total_tokens,
@@ -218,7 +185,6 @@ class SessionService:
                 else 0,
             },
             user_issues=[],
-            file_embeddings=file_embedding_responses,
         )
 
         return context_response
@@ -257,7 +223,6 @@ class SessionService:
                 tokens=msg.tokens,
                 model_used=msg.model_used,
                 processing_time=msg.processing_time,
-                context_cards=msg.context_cards,
                 referenced_files=msg.referenced_files,
                 error_message=msg.error_message,
                 actions=msg.actions,
@@ -289,19 +254,6 @@ class SessionService:
             func.avg(ChatMessage.processing_time).label('avg_processing_time')
         ).filter(ChatMessage.session_id == db_session.id).group_by(ChatMessage.sender_type).all()
 
-        # Get context card count
-        context_card_count = db.query(func.count(ContextCard.id)).filter(
-            ContextCard.session_id == db_session.id,
-            ContextCard.is_active
-        ).scalar()
-
-        # Get file embedding statistics
-        file_stats = db.query(
-            func.count(FileEmbedding.id).label('total_files'),
-            func.sum(FileEmbedding.tokens).label('total_file_tokens'),
-            func.count(func.distinct(FileEmbedding.file_path)).label('unique_files')
-        ).filter(FileEmbedding.session_id == db_session.id).first()
-
         # Calculate session duration
         session_duration = None
         if db_session.created_at and db_session.last_activity:
@@ -313,10 +265,6 @@ class SessionService:
             "basic_stats": {
                 "total_messages": db_session.total_messages,
                 "total_tokens": db_session.total_tokens,
-                "total_context_cards": context_card_count,
-                "total_file_embeddings": file_stats.total_files or 0,
-                "unique_files": file_stats.unique_files or 0,
-                "total_file_tokens": file_stats.total_file_tokens or 0,
                 "session_duration_seconds": session_duration,
                 "is_active": db_session.is_active,
             },
@@ -344,73 +292,13 @@ class SessionService:
         return stats
 
 
-class FileDepsService:
-    """
-    Service for file dependency operations.
-    """
-
-    @staticmethod
-    def list_for_session(db: Session, db_session: ChatSession) -> List[dict]:
-        """
-        List file dependencies for a session.
-
-        Args:
-            db: Database session
-            db_session: The ChatSession object
-
-        Returns:
-            List of file dependency dictionaries
-        """
-        # Get file items for this session (new approach)
-        file_items = (
-            db.query(FileItem)
-            .filter(FileItem.session_id == db_session.id)
-            .order_by(FileItem.created_at.desc())
-            .all()
-        )
-
-        # Convert to response format
-        return [
-            {
-                "id": item.id,
-                "name": item.name,
-                "path": item.path,
-                "type": item.type,
-                "tokens": item.tokens,
-                "category": item.category,
-                "is_directory": item.is_directory,
-                "content_size": item.content_size,
-                "created_at": item.created_at,
-                "file_name": item.file_name,
-                "file_path": item.file_path,
-                "file_type": item.file_type,
-                "content_summary": item.content_summary,
-            }
-            for item in file_items
-        ]
-
-    @staticmethod
-    def get_file_items_for_session(db: Session, db_session: ChatSession) -> List[dict]:
-        """
-        Get file items for a session (for frontend display).
-
-        Args:
-            db: Database session
-            db_session: The ChatSession object
-
-        Returns:
-            List of file item dictionaries
-        """
-        return FileDepsService.list_for_session(db, db_session)
-
-
 class MemoryService:
     """
     Manages repository facts, rolling episodic memories, and session snapshots.
 
-    Semantic memory (facts + highlights) is generated after repository indexing.
-    Episodic memory (memories + snapshots) is created during chat and retained in
-    an append-only rolling window.
+    Episodic memory (memories + snapshots) is created during chat and retained
+    in an append-only rolling window. Fact storage is kept for existing session
+    metadata and tests, but no repository indexing task populates it.
     """
 
     MAX_FACTS = 30

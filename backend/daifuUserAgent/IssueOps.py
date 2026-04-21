@@ -45,7 +45,6 @@ from models import (
     ChatMessage,
     ChatSession,
     CreateUserIssueRequest,
-    FileItem,
     UserIssue,
 )
 from sqlalchemy.orm import Session
@@ -104,7 +103,6 @@ class IssueService:
             title = request.get("title", "New Issue")
             description = request.get("description", "")
             chat_messages = request.get("chat_messages", [])
-            file_context = request.get("file_context", [])
             repository_info = request.get("repository_info")
 
             # Build issue body from chat context
@@ -121,15 +119,6 @@ class IssueService:
                     sender = "User" if msg.get("isUser", True) else "Assistant"
                     content = msg.get("content", "")[:200]  # Truncate long messages
                     body_parts.append(f"**{sender}**: {content}")
-                body_parts.append("")
-
-            if file_context:
-                body_parts.append("## Relevant Files\n")
-                for file in file_context[:5]:  # Limit to 5 files
-                    file_name = file.get("name", file.get("file_name", "Unknown"))
-                    body_parts.append(
-                        f"- `{file_name}` ({file.get('tokens', 0)} tokens)"
-                    )
                 body_parts.append("")
 
             # Add standard footer
@@ -156,7 +145,6 @@ class IssueService:
                 "metadata": {
                     "generated_from": "chat",
                     "chat_messages_count": len(chat_messages),
-                    "files_context_count": len(file_context),
                     "preview_generated_at": utc_now().isoformat(),
                 },
             }
@@ -182,7 +170,6 @@ class IssueService:
         title: str,
         description: str,
         chat_messages: List[Dict[str, Any]],
-        file_context: List[Dict[str, Any]],
         repo_owner: str,
         repo_name: str,
         priority: str = "medium",
@@ -197,7 +184,6 @@ class IssueService:
             title: Issue title
             description: Issue description
             chat_messages: List of chat messages
-            file_context: List of relevant files
             repo_owner: Repository owner
             repo_name: Repository name
             priority: Issue priority
@@ -216,7 +202,6 @@ class IssueService:
                 title=title,
                 description=description,
                 chat_messages=chat_messages,
-                file_context=file_context,
                 repo_owner=repo_owner,
                 repo_name=repo_name,
                 priority=priority,
@@ -230,13 +215,12 @@ class IssueService:
                 issue_text_raw=llm_generated_issue["body"],
                 description=description,
                 session_id=session_id,
-                context_cards=[],  # Will be populated from session
                 repo_owner=repo_owner,
                 repo_name=repo_name,
                 priority=priority,
                 issue_steps=[
                     "Analyze chat conversation context",
-                    "Review file dependencies and implementation details",
+                    "Review repository and session context",
                     "Design implementation approach based on static analysis",
                     "Implement functionality according to specifications",
                     "Add comprehensive tests and documentation",
@@ -321,7 +305,6 @@ class IssueService:
                 issue_text_raw=issue_request.issue_text_raw,
                 description=issue_request.description,
                 session_id=issue_request.session_id,
-                context_card_id=issue_request.context_card_id,
                 repo_owner=issue_request.repo_owner,
                 repo_name=issue_request.repo_name,
                 priority=issue_request.priority,
@@ -412,7 +395,6 @@ class IssueService:
         title: str,
         description: str,
         chat_messages: List[Dict[str, Any]],
-        file_context: List[Dict[str, Any]],
         repo_owner: str,
         repo_name: str,
         priority: str = "medium",
@@ -426,7 +408,6 @@ class IssueService:
             title: Issue title
             description: Issue description
             chat_messages: List of chat messages
-            file_context: List of relevant files
             repo_owner: Repository owner
             repo_name: Repository name
             priority: Issue priority
@@ -448,66 +429,12 @@ class IssueService:
                 repo_name=repo_name,
             )
 
-            # Get context cards for additional context
-            context_cards = self._get_session_context_cards(session_id, user_id)
-
-            # Retrieve relevant file contexts via embeddings using last few messages + description
-            embedding_contexts: List[str] = []
-            try:
-                from models import ChatSession as _ChatSession
-
-                from .llm_service import LLMService as _LLM
-
-                # Fetch numeric session id
-                sess = (
-                    self.db.query(_ChatSession)
-                    .filter(
-                        _ChatSession.session_id == session_id,
-                        _ChatSession.user_id == user_id,
-                    )
-                    .first()
-                )
-                if sess:
-                    # Build comprehensive query text including context cards
-                    last_msgs = " ".join(
-                        m.get("content", "") for m in (chat_messages or [])[-5:]
-                    )
-                    context_card_content = self._get_session_context_cards_content(
-                        session_id, user_id
-                    )
-                    query_text = " ".join(
-                        filter(
-                            None,
-                            [
-                                title or "",
-                                description or "",
-                                last_msgs,
-                                context_card_content,
-                            ],
-                        )
-                    )
-                    embedding_contexts = await _LLM.get_relevant_file_contexts(
-                        db=self.db, session_id=sess.id, query_text=query_text, top_k=5
-                    )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to retrieve embedding contexts for issue generation: {e}"
-                )
-                # Reset DB session if a read failed to avoid aborted transaction state
-                try:
-                    self.db.rollback()
-                except Exception:
-                    pass
-
             # Build the LLM prompt for issue generation
             prompt = self._build_issue_generation_prompt(
                 title=title,
                 description=description,
                 chat_messages=chat_messages,
-                file_context=file_context,
                 repo_context=repo_context,
-                context_cards=context_cards,
-                embedding_contexts=embedding_contexts,
                 priority=priority,
             )
 
@@ -545,76 +472,6 @@ class IssueService:
             logger.error(f"Failed to generate issue from context: {e}")
             raise IssueOpsError(f"Failed to generate issue: {str(e)}")
 
-    def _get_session_context_cards(
-        self, session_id: str, user_id: int
-    ) -> List[Dict[str, Any]]:
-        """Get context cards for a session"""
-        try:
-            from models import ChatSession as _ChatSession
-            from models import ContextCard
-
-            # Resolve the numeric chat session primary key from the public session_id
-            sess = (
-                self.db.query(_ChatSession)
-                .filter(
-                    _ChatSession.session_id == session_id,
-                    _ChatSession.user_id == user_id,
-                )
-                .first()
-            )
-            if not sess:
-                return []
-
-            cards = (
-                self.db.query(ContextCard)
-                .filter(
-                    ContextCard.session_id == sess.id,
-                    ContextCard.user_id == user_id,
-                    ContextCard.is_active,
-                )
-                .order_by(ContextCard.created_at.desc())
-                .all()
-            )
-
-            return [
-                {
-                    "id": card.id,
-                    "title": card.title,
-                    "content": card.content,
-                    "source": card.source,
-                    "tokens": card.tokens,
-                }
-                for card in cards
-            ]
-
-        except Exception as e:
-            logger.error(f"Failed to get context cards: {e}")
-            try:
-                self.db.rollback()
-            except Exception:
-                pass
-            return []
-
-    def _get_session_context_cards_content(self, session_id: str, user_id: int) -> str:
-        """Get concatenated content from all context cards for a session"""
-        try:
-            cards = self._get_session_context_cards(session_id, user_id)
-            if not cards:
-                return ""
-
-            # Concatenate card titles and content for embedding query
-            card_contents = []
-            for card in cards[:5]:  # Limit to 5 cards to avoid overly long queries
-                card_contents.append(
-                    f"{card['title']}: {card['content'][:200]}"
-                )  # Truncate content
-
-            return " ".join(card_contents)
-
-        except Exception as e:
-            logger.error(f"Failed to get context cards content: {e}")
-            return ""
-
     # Consolidated repo context helpers moved to services.context_utils
 
     def _build_issue_generation_prompt(
@@ -623,10 +480,7 @@ class IssueService:
         description: str,
         priority: str,
         chat_messages: List[Dict[str, Any]],
-        file_context: List[Dict[str, Any]],
         repo_context: str,
-        context_cards: List[Dict[str, Any]],
-        embedding_contexts: Optional[List[str]] = None,
     ) -> str:
         """Build the prompt for LLM issue generation"""
         prompt_parts = [
@@ -662,40 +516,6 @@ class IssueService:
             f"{repo_context}",
             "",
         ]
-
-        if context_cards:
-            prompt_parts.extend(
-                [
-                    "CONTEXT CARDS:",
-                    *[
-                        f"- {card['title']}: {card['content'][:200]}..."
-                        for card in context_cards
-                    ],
-                    "",
-                ]
-            )
-
-        if file_context:
-            prompt_parts.extend(
-                [
-                    "RELEVANT FILES (top candidates):",
-                    *[
-                        f"- {file.get('path', file.get('name', file.get('file_name', 'Unknown')))} (tokens: {file.get('tokens', 0)})"
-                        for file in file_context
-                    ],
-                    "",
-                ]
-            )
-
-        # Include semantic code snippets from embeddings when available
-        if embedding_contexts:
-            prompt_parts.extend(
-                [
-                    "RELEVANT CODE CONTEXT (semantic):",
-                    *[ctx[:400] for ctx in embedding_contexts[:5]],
-                    "",
-                ]
-            )
 
         if chat_messages:
             prompt_parts.extend(
@@ -947,26 +767,6 @@ class IssueService:
                         "text": message.message_text,
                     }
                     for message in reversed(messages)
-                ]
-
-            if "files" not in context:
-                files = (
-                    self.db.query(FileItem)
-                    .filter(
-                        FileItem.session_id == chat_session.id,
-                        FileItem.is_directory.is_(False),
-                    )
-                    .order_by(FileItem.tokens.desc())
-                    .limit(5)
-                    .all()
-                )
-                context["files"] = [
-                    {
-                        "path": file.path,
-                        "tokens": file.tokens,
-                    }
-                    for file in files
-                    if file.path
                 ]
 
         return context

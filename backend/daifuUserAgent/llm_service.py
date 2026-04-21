@@ -3,21 +3,16 @@ Centralized LLM Service for DAifu Agent
 Eliminates duplication and standardizes LLM calls across chat endpoints
 """
 
-import hashlib
 import json
 import logging
 import os
 import re
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import HTTPException, status
-from models import ChatSession, FileEmbedding
-from sentence_transformers import SentenceTransformer
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from utils import utc_now
@@ -41,13 +36,6 @@ class LLMService:
     DEFAULT_TEMPERATURE = 0.6
     DEFAULT_MAX_TOKENS = 4000
     DEFAULT_TIMEOUT = 30
-    EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-
-    # Class variable to cache the model
-    _embedding_model = None
-
-    # Cache directory configuration
-    HF_HOME = os.getenv("HF_HOME", "/tmp/huggingface_cache")
 
     BUTTON_ACTION_PATTERN = re.compile(
         r'Button\{\s*"(?P<label>[^"]+)"\s*\}', re.IGNORECASE
@@ -195,46 +183,6 @@ class LLMService:
             "OPENROUTER_API_URL",
             "https://openrouter.ai/api/v1/chat/completions",
         )
-
-    @staticmethod
-    def get_embedding_model() -> SentenceTransformer:
-        """Get or load the embedding model (cached for performance)"""
-        if LLMService._embedding_model is None:
-            try:
-                # Ensure cache directory exists and has correct permissions
-                os.makedirs(LLMService.HF_HOME, exist_ok=True)
-
-                # Set environment variable for huggingface
-                os.environ["HF_HOME"] = LLMService.HF_HOME
-
-                logger.info(f"Loading embedding model: {LLMService.EMBEDDING_MODEL}")
-                logger.info(f"Using HF cache directory: {LLMService.HF_HOME}")
-
-                LLMService._embedding_model = SentenceTransformer(
-                    LLMService.EMBEDDING_MODEL,
-                    cache_folder=LLMService.HF_HOME,
-                    local_files_only=False
-                )
-                logger.info("Embedding model loaded successfully")
-            except Exception as e:
-                logger.error(f"Failed to load embedding model: {e}")
-                # Try with a fallback model if the primary model fails
-                try:
-                    logger.info("Attempting to load fallback model: all-MiniLM-L6-v2")
-                    LLMService._embedding_model = SentenceTransformer(
-                        "all-MiniLM-L6-v2",
-                        cache_folder=LLMService.HF_HOME,
-                        local_files_only=False
-                    )
-                    logger.info("Fallback embedding model loaded successfully")
-                except Exception as fallback_error:
-                    logger.error(f"Fallback model also failed: {fallback_error}")
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"Failed to load embedding model: {str(e)}, fallback also failed: {str(fallback_error)}"
-                    )
-
-        return LLMService._embedding_model
 
     @staticmethod
     async def generate_response(
@@ -438,74 +386,6 @@ class LLMService:
             )
 
     @staticmethod
-    async def get_relevant_file_contexts(
-        db: Session,
-        session_id: int,
-        query_text: str,
-        top_k: int = 5,
-        model: str = None,
-        expected_repo_owner: Optional[str] = None,
-        expected_repo_name: Optional[str] = None,
-    ) -> List[str]:
-        """
-        Retrieve relevant file chunk texts using embedding similarity search.
-
-        Args:
-            db: Database session
-            session_id: Session ID to scope the search
-            query_text: Text to embed and search against
-            top_k: Number of top results to return
-            model: Ignored (uses local sentence-transformers model)
-            expected_repo_owner: Optional selected repo owner for scope validation
-            expected_repo_name: Optional selected repo name for scope validation
-
-        Returns:
-            List of relevant chunk texts
-        """
-        session_scope = db.execute(
-            select(ChatSession.repo_owner, ChatSession.repo_name).where(
-                ChatSession.id == session_id
-            )
-        ).one_or_none()
-        if session_scope is None:
-            logger.warning("File context lookup skipped: session %s not found", session_id)
-            return []
-
-        if (
-            expected_repo_owner
-            and expected_repo_name
-            and session_scope.repo_owner
-            and session_scope.repo_name
-            and (
-                session_scope.repo_owner != expected_repo_owner
-                or session_scope.repo_name != expected_repo_name
-            )
-        ):
-            logger.warning(
-                "File context lookup skipped due to repo mismatch for session %s: session=%s/%s request=%s/%s",
-                session_id,
-                session_scope.repo_owner,
-                session_scope.repo_name,
-                expected_repo_owner,
-                expected_repo_name,
-            )
-            return []
-
-        # Generate embedding for query
-        query_embedding = LLMService.embed_text(query_text)
-
-        # Query for top similar embeddings
-        stmt = (
-            select(FileEmbedding.chunk_text)
-            .where(FileEmbedding.session_id == session_id)
-            .order_by(FileEmbedding.embedding.cosine_distance(query_embedding))
-            .limit(top_k)
-        )
-
-        results = db.execute(stmt).scalars().all()
-        return results
-
-    @staticmethod
     async def generate_response_with_stored_context(
         db: Session,
         user_id: int,
@@ -525,13 +405,12 @@ class LLMService:
         Args:
             db: Database session (unused but retained for signature compatibility)
             user_id: ID of the user requesting the response
-            github_context: Rich repository context pulled from GitHub APIs
+            github_context: Repository/session context dictionary
             conversation_history: Recent conversation turns
             file_contexts: Supplemental repository snippets
             probe_context: Code exploration results returned by sandbox probes.
-            fallback_repo_summary: Cached textual summary when GitHub context retrieval fails.
-                Expected to be sourced from ``ChatContext.build_combined_summary`` so it
-                reflects the JSON cache stored in ``/tmp/github_context_cache``.
+            fallback_repo_summary: Textual summary from ``ChatContext`` when
+                structured context is unavailable.
             model: Override model identifier
             temperature: Override generation temperature
             max_tokens: Maximum tokens for the response
@@ -608,16 +487,15 @@ class LLMService:
         fallback_repo_summary: Optional[str] = None,
     ) -> str:
         """
-        Centralized prompt building using stored GitHub context
+        Centralized prompt building using stored repository/session context.
 
         Args:
-            github_context: Pre-fetched comprehensive GitHub context dictionary
+            github_context: Repository/session context dictionary
             conversation: List of (speaker, message) tuples
             file_contexts: Optional list of file context strings
             probe_context: Optional code exploration context produced by probes.
-            fallback_repo_summary: Optional textual summary when GitHub context is unavailable.
-                This should come from :class:`ChatContext` which reads the cached
-                JSON stored in ``/tmp/github_context_cache``.
+            fallback_repo_summary: Optional textual summary when structured
+                context is unavailable.
 
         Returns:
             Complete prompt string with stored GitHub context
@@ -906,123 +784,3 @@ parameters: object,
             logger.error(f"Failed to build prompt from context: {e}")
             # Return a simple fallback prompt
             return f"User: {conversation[-1][1] if conversation else 'Hello'}\nAssistant:"
-
-    @staticmethod
-    def read_github_context_cache(
-        metadata: Optional[Any],
-    ) -> Optional[Dict[str, Any]]:
-        """Load cached GitHub context JSON using persisted metadata."""
-
-        if metadata is None:
-            return None
-
-        from context.cache_metadata import CacheMetadata
-
-        cache_meta: Optional[Any]
-        if isinstance(metadata, CacheMetadata):
-            cache_meta = metadata
-        elif isinstance(metadata, dict):
-            cache_meta = CacheMetadata.from_dict(metadata)
-        else:
-            return None
-
-        if not cache_meta or not cache_meta.cache_path:
-            return None
-
-        path = Path(cache_meta.cache_path)
-        if not path.exists():
-            return None
-
-        try:
-            with path.open("r", encoding="utf-8") as handle:
-                return json.load(handle)
-        except json.JSONDecodeError as decode_error:
-            logger.warning(
-                "Failed to decode GitHub context cache at %s: %s",
-                path,
-                decode_error,
-            )
-            return None
-        except OSError as os_error:
-            logger.warning(
-                "Failed to read GitHub context cache at %s: %s",
-                path,
-                os_error,
-            )
-            return None
-
-    @staticmethod
-    def write_github_context_cache(
-        metadata: Optional[Any], payload: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Persist GitHub context JSON and return refreshed metadata."""
-
-        if payload is None:
-            raise ValueError("Cache payload must not be None")
-
-        from context.cache_metadata import CacheMetadata
-
-        if isinstance(metadata, CacheMetadata):
-            cache_meta = metadata
-            metadata_dict: Dict[str, Any] = metadata.to_dict()
-        elif isinstance(metadata, dict):
-            cache_meta = CacheMetadata.from_dict(metadata)
-            metadata_dict = dict(metadata)
-        else:
-            raise ValueError("Metadata must be a dict or CacheMetadata instance")
-
-        if not cache_meta or not cache_meta.cache_path:
-            raise ValueError("Metadata missing cache path; cannot write cache")
-
-        path = Path(cache_meta.cache_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        with path.open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(8192), b""):
-                digest.update(chunk)
-
-        refreshed_meta = CacheMetadata(
-            cache_path=str(path),
-            owner=cache_meta.owner,
-            name=cache_meta.name,
-            session_id=cache_meta.session_id,
-            user_id=cache_meta.user_id,
-            size=path.stat().st_size,
-            sha256=digest.hexdigest(),
-            cached_at=utc_now().isoformat(),
-            version=cache_meta.version,
-        )
-
-        refreshed_dict = refreshed_meta.to_dict()
-        metadata_dict.update(refreshed_dict)
-        return metadata_dict
-
-    @staticmethod
-    def embed_text(text: str) -> List[float]:
-        """
-        Generate embedding for text using local sentence-transformers model.
-
-        This is a minimal, synchronous implementation optimized for local inference.
-
-        Args:
-            text: Text to embed
-
-        Returns:
-            Embedding vector as list of floats (384 dimensions for all-MiniLM-L6-v2)
-
-        Raises:
-            HTTPException: For model loading or inference errors
-        """
-        try:
-            model_instance = LLMService.get_embedding_model()
-            embedding = model_instance.encode(text, convert_to_numpy=False)
-            return embedding.tolist()
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Embedding generation failed: {str(e)}",
-            )

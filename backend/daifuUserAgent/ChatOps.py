@@ -9,14 +9,6 @@ previously scattered across multiple files and provides unified chat operations.
 TODO: Implementation Tasks
 ==========================
 
-HIGH PRIORITY:
-
-3. Facts & Memories Integration
-   - Complete FactsAndMemoriesService integration
-   - Implement automatic facts generation during conversations
-   - Add facts persistence and retrieval optimization
-   - Implement memories-based context enhancement
-
 MEDIUM PRIORITY:
 
 
@@ -46,12 +38,10 @@ from typing import (
     Dict,
     List,
     Optional,
-    Sequence,
     Tuple,
 )
 
 from context.chat_context import ChatContext
-from context.facts_and_memories import FactsAndMemoriesService
 from models import (
     ChatMessage,
     ChatSession,
@@ -92,14 +82,12 @@ class ChatOps:
     def __init__(self, db: Session):
         self.db = db
         self.logger = logging.getLogger(__name__)
-        self._facts_service = FactsAndMemoriesService()
 
     async def process_chat_message(
         self,
         session_id: str,
         user_id: int,
         message_text: str,
-        context_cards: Optional[List[str]] = None,
         repository: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
@@ -130,16 +118,6 @@ class ChatOps:
             history = self._get_conversation_history(session.id, 10)
 
             context_inputs: List[str] = []
-            if context_cards:
-                try:
-                    cards_text = self._get_context_cards_content(context_cards, user_id)
-                    if cards_text:
-                        context_inputs.append(cards_text)
-                except Exception as card_error:
-                    logger.warning(
-                        f"Failed to collect context card content: {card_error}"
-                    )
-
             bootstrap_ctx = self._bootstrap_memory_context(session)
             if bootstrap_ctx:
                 context_inputs.append(bootstrap_ctx)
@@ -149,33 +127,6 @@ class ChatOps:
             answered_question_context = self._answered_question_context(session)
             if answered_question_context:
                 context_inputs.append(answered_question_context)
-
-            # Get file contexts (with error handling)
-            try:
-                from .llm_service import LLMService
-
-                retrieved_contexts = await LLMService.get_relevant_file_contexts(
-                    db=self.db,
-                    session_id=session.id,
-                    query_text=message_text,
-                    top_k=5,
-                    expected_repo_owner=repo_owner,
-                    expected_repo_name=repo_name,
-                )
-                if retrieved_contexts:
-                    context_inputs.extend(retrieved_contexts)
-            except Exception as e:
-                logger.warning(f"Failed to get file contexts: {e}")
-                # Continue without file contexts - non-fatal
-
-            memory_context = None
-            if session.generate_facts_memories:
-                memory_context = await self._refresh_session_memories(
-                    session=session,
-                    conversation_history=history + [("user", message_text)],
-                )
-                if memory_context:
-                    context_inputs.append(memory_context)
 
             # Generate AI response with improved error handling
             try:
@@ -316,7 +267,6 @@ class ChatOps:
         message_text: str,
         *,
         on_chunk: Callable[[str], Awaitable[None]],
-        context_cards: Optional[List[str]] = None,
         repository: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
@@ -340,16 +290,6 @@ class ChatOps:
             history = self._get_conversation_history(session.id, 10)
 
             context_inputs: List[str] = []
-            if context_cards:
-                try:
-                    cards_text = self._get_context_cards_content(context_cards, user_id)
-                    if cards_text:
-                        context_inputs.append(cards_text)
-                except Exception as card_error:
-                    logger.warning(
-                        f"Failed to collect context card content: {card_error}"
-                    )
-
             bootstrap_ctx = self._bootstrap_memory_context(session)
             if bootstrap_ctx:
                 context_inputs.append(bootstrap_ctx)
@@ -359,30 +299,6 @@ class ChatOps:
             answered_question_context = self._answered_question_context(session)
             if answered_question_context:
                 context_inputs.append(answered_question_context)
-
-            try:
-                from .llm_service import LLMService
-
-                retrieved_contexts = await LLMService.get_relevant_file_contexts(
-                    db=self.db,
-                    session_id=session.id,
-                    query_text=message_text,
-                    top_k=5,
-                    expected_repo_owner=repo_owner,
-                    expected_repo_name=repo_name,
-                )
-                if retrieved_contexts:
-                    context_inputs.extend(retrieved_contexts)
-            except Exception as e:
-                logger.warning(f"Failed to get file contexts: {e}")
-
-            if session.generate_facts_memories:
-                memory_context = await self._refresh_session_memories(
-                    session=session,
-                    conversation_history=history + [("user", message_text)],
-                )
-                if memory_context:
-                    context_inputs.append(memory_context)
 
             ai_actions: List[Dict[str, Any]] = []
             ai_questions: List[Dict[str, Any]] = []
@@ -827,29 +743,6 @@ class ChatOps:
             logger.error(f"Failed to get conversation history: {e}")
             return []
 
-    def _get_context_cards_content(self, card_ids: List[str], user_id: int) -> str:
-        """Get content from context cards"""
-        try:
-            from models import ContextCard
-
-            cards = (
-                self.db.query(ContextCard)
-                .filter(
-                    ContextCard.id.in_(card_ids),
-                    ContextCard.user_id == user_id,
-                    ContextCard.is_active,
-                )
-                .all()
-            )
-
-            return "\n\n".join(
-                [f"Context: {card.title}\n{card.content}" for card in cards]
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to get context cards content: {e}")
-            return ""
-
     def _resolve_session_repository(
         self,
         session: ChatSession,
@@ -881,63 +774,6 @@ class ChatOps:
             return session_repo
 
         return requested_repo
-
-    async def _refresh_session_memories(
-        self,
-        session: ChatSession,
-        conversation_history: Sequence[Tuple[str, str]],
-    ) -> Optional[str]:
-        """Append new episodic memories for the active session chat."""
-
-        if not session.generate_facts_memories:
-            return None
-
-        try:
-            from .session_service import MemoryService
-
-            conversation_payload = self._build_conversation_payload(conversation_history)
-            stored = MemoryService.get_memories(session)
-
-            result = await self._facts_service.generate_memories(
-                conversation=conversation_payload,
-                existing_memories=stored.get("memories", []),
-                repo_facts=stored.get("facts", []),
-                repo_highlights=stored.get("highlights", []),
-                max_messages=12,
-            )
-
-            appended = MemoryService.append_memories(
-                session,
-                new_memories=result.memories,
-            )
-            if not appended:
-                return None
-
-            return MemoryService.render_internal_context(memories=appended)
-
-        except Exception as memory_error:
-            logger.warning(f"Failed to refresh session memories: {memory_error}")
-            return None
-
-    def _build_conversation_payload(
-        self,
-        history: Sequence[Tuple[str, str]],
-    ) -> List[Dict[str, str]]:
-        """Format conversation history for episodic memory extraction."""
-
-        payload: List[Dict[str, str]] = []
-
-        for speaker, text in history or []:
-            if not text:
-                continue
-            payload.append(
-                {
-                    "author": speaker.lower() if speaker else "user",
-                    "text": text.strip(),
-                }
-            )
-
-        return payload
 
     def _bootstrap_memory_context(self, session: ChatSession) -> Optional[str]:
         """Inject stored facts, memories, and the latest snapshot into each turn."""
