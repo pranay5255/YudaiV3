@@ -22,18 +22,7 @@ def _install_import_stubs() -> None:
 
     fake_context = types.ModuleType("context")
     fake_context.__path__ = []
-    for name in (
-        "EmbeddingPipeline",
-        "FactsAndMemoriesService",
-        "RepositoryFile",
-        "RepositorySnapshotService",
-    ):
-        setattr(fake_context, name, type(name, (), {}))
     sys.modules["context"] = fake_context
-    fake_context_facts = types.ModuleType("context.facts_and_memories")
-    fake_context_facts.FactsAndMemoriesService = type("FactsAndMemoriesService", (), {})
-    fake_context_facts.RepositorySnapshotService = type("RepositorySnapshotService", (), {})
-    sys.modules["context.facts_and_memories"] = fake_context_facts
 
     fake_githubops = types.ModuleType("daifuUserAgent.githubOps")
     fake_githubops.GitHubOps = type("GitHubOps", (), {})

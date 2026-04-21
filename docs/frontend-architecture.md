@@ -32,12 +32,10 @@ flowchart TD
     AppContent --> RepositorySelectionToast
 
     TopBar --> ChatTab[chat]
-    TopBar --> ContextTab[context]
     TopBar --> IdeasTab[ideas]
     TopBar --> SolveTab[solve]
 
     ChatTab --> Chat
-    ContextTab --> ContextCards
     IdeasTab --> TrajectoryViewer
     SolveTab --> SolveIssues
 ```
@@ -49,7 +47,6 @@ Current tabs are declared in `src/components/TopBar.tsx`.
 | Internal key | Visible label | Rendered component | Purpose |
 | --- | --- | --- | --- |
 | `chat` | `Chat` | `Chat` | Main conversation with the session |
-| `context` | `Context` | `ContextCards` | Curated context used for issue generation and session work |
 | `ideas` | `Trajectory` | `TrajectoryViewer` | Live or static execution trajectory viewer |
 | `solve` | `Execution` | `SolveIssues` | Pick a GitHub issue and start execution |
 
@@ -131,7 +128,6 @@ That wiring currently lives in:
   - session status
   - runtime status
   - tab buttons
-  - indexing toggle
   - user profile/logout control
 
 ### `SessionOrchestrator`
@@ -141,7 +137,7 @@ That wiring currently lives in:
 - Centralizes session side effects.
 - If user is authenticated and a repo is selected but no session exists, it creates one.
 - If there is an active session that has not been validated yet, it validates it.
-- Once a session is ready, it hydrates messages, context cards, and file dependencies.
+- Once a session is ready, it hydrates messages and context cards.
 
 This component is important because it keeps session creation and hydration out of the view components.
 
@@ -160,15 +156,7 @@ This component is important because it keeps session creation and hydration out 
 
 - Main chat UI for the selected repo/session.
 - Uses `useSessionStore` actions for message send and issue generation.
-- Can turn conversation and context into a GitHub issue preview.
-
-### `ContextCards`
-
-`src/components/ContextCards.tsx`
-
-- Displays curated context items.
-- Allows removing context items.
-- Can build an issue preview from context cards.
+- Can turn conversation, file context, and repository context into a GitHub issue preview.
 
 ### `SolveIssues`
 
@@ -324,14 +312,12 @@ High-level shape:
   // data
   messages,
   contextCards,
-  fileContext,
   userIssues,
 
   // ui
   activeTab,
   sidebarCollapsed,
   sessionLoadingEnabled,
-  indexCodebaseEnabled,
 
   // stats
   totalTokens,
@@ -343,7 +329,6 @@ High-level shape:
   ensureSessionExists,
   loadMessages,
   loadContextCards,
-  loadFileDependencies,
   sendChatMessage,
   createIssueWithContext,
   syncRuntimeState,
@@ -393,7 +378,6 @@ flowchart TD
 
     subgraph Views
         Chat[Chat]
-        Context[ContextCards]
         Trajectory[TrajectoryViewer]
         Solve[SolveIssues]
         RepoToast[RepositorySelectionToast]
@@ -409,14 +393,12 @@ flowchart TD
     UseAuth --> TopBar
     UseRepo --> AppContent
     UseRepo --> Chat
-    UseRepo --> Context
     UseRepo --> Solve
 
     SessionStore --> AppContent
     SessionStore --> TopBar
     SessionStore --> SessionOrchestrator
     SessionStore --> Chat
-    SessionStore --> Context
     SessionStore --> Solve
 
     UseSessionWs --> Trajectory
@@ -438,7 +420,6 @@ These are the main frontend-to-backend channels.
 | Load session | `loadSession()` / `ensureSessionExists()` | HTTP GET | `/daifu/sessions/{sessionId}` |
 | Load messages | `loadMessages()` | HTTP GET | `/daifu/sessions/{sessionId}/messages` |
 | Load context cards | `loadContextCards()` | HTTP GET | `/daifu/sessions/{sessionId}/context-cards` |
-| Load file deps | `loadFileDependencies()` | HTTP GET | `/daifu/sessions/{sessionId}/file-deps/session` |
 | Send chat | `sendChatMessage()` | WebSocket first, HTTP fallback | `/controller/sessions/{sessionId}/ws/unified` or `/daifu/sessions/{sessionId}/chat` |
 | Create issue preview | `createIssueWithContext()` | HTTP POST | `/daifu/sessions/{sessionId}/issues/create-with-context` |
 | Fetch repo issues for execution | `SolveIssues` | HTTP GET | `/daifu/github/repositories/{owner}/{repo}/issues` |
@@ -494,7 +475,7 @@ flowchart TD
     NeedSession -->|yes| ValidateSession[GET /daifu/sessions/{sessionId}]
 
     CreateSession --> Hydrate
-    ValidateSession --> Hydrate[Load messages/context/file deps]
+    ValidateSession --> Hydrate[Load messages/context cards]
 
     Hydrate --> Ready[Workspace ready]
 ```
@@ -596,7 +577,6 @@ If you want a simple way to think about the current frontend:
 - `sessionStore` = everything about the selected repo, active daifu session, runtime, and workspace UI
 - `SessionOrchestrator` = the side-effect engine that makes repo selection turn into a hydrated session
 - `Chat` = conversational work surface
-- `ContextCards` = curated context surface
 - `SolveIssues` = execution launcher
 - `TrajectoryViewer` = execution monitor
 

@@ -43,8 +43,6 @@ const baseSession: Session = {
 const sessionContext: SessionContext = {
   session: baseSession,
   messages: [],
-  context_cards: [],
-  file_embeddings_count: 0,
   statistics: {
     total_messages: 0,
     total_tokens: 0,
@@ -52,14 +50,12 @@ const sessionContext: SessionContext = {
     session_duration: 0,
   },
   user_issues: [],
-  file_embeddings: [],
 };
 
 const issueRequest: CreateIssueWithContextRequest = {
   title: 'Fix onboarding flow',
   description: 'The onboarding state never completes.',
   chat_messages: [],
-  file_context: [],
 };
 
 const issueResponse: IssueCreationResponse = {
@@ -72,7 +68,6 @@ const issueResponse: IssueCreationResponse = {
     assignees: [],
     metadata: {
       chat_messages_count: 0,
-      files_context_count: 0,
       total_tokens: 0,
       generated_at: new Date().toISOString(),
       generation_method: 'test',
@@ -113,8 +108,6 @@ const resetStores = () => {
     messages: [],
     isLoadingMessages: false,
     messageError: null,
-    contextCards: [],
-    fileContext: [],
     userIssues: [],
     currentIssue: null,
     isLoadingIssues: false,
@@ -275,7 +268,6 @@ describe('sessionStore runtime split', () => {
 
     const response = await useSessionStore.getState().sendChatMessage(
       'hello',
-      [],
       mockRepository
     );
 

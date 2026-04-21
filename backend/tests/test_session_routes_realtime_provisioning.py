@@ -25,13 +25,6 @@ def _install_import_stubs() -> None:
     sys.modules["solver.solver"] = fake_solver
 
     fake_context = types.ModuleType("context")
-    for name in (
-        "EmbeddingPipeline",
-        "FactsAndMemoriesService",
-        "RepositoryFile",
-        "RepositorySnapshotService",
-    ):
-        setattr(fake_context, name, type(name, (), {}))
     sys.modules["context"] = fake_context
 
     fake_githubops = types.ModuleType("daifuUserAgent.githubOps")
@@ -115,9 +108,6 @@ def test_create_session_skips_runtime_when_realtime_enabled(db_and_user, monkeyp
                 repo_owner="octocat",
                 repo_name="yudaiv3",
                 repo_branch="main",
-                index_codebase=False,
-                generate_embeddings=False,
-                generate_facts_memories=False,
             ),
             current_user=user,
             db=db,
@@ -148,9 +138,6 @@ def test_create_session_skips_runtime_when_realtime_disabled(db_and_user, monkey
                 repo_owner="octocat",
                 repo_name="yudaiv3",
                 repo_branch="main",
-                index_codebase=False,
-                generate_embeddings=False,
-                generate_facts_memories=False,
             ),
             current_user=user,
             db=db,
@@ -195,9 +182,6 @@ def test_create_session_succeeds_when_runtime_provisioning_would_fail(db_and_use
                 repo_owner="octocat",
                 repo_name="yudaiv3",
                 repo_branch="main",
-                index_codebase=False,
-                generate_embeddings=False,
-                generate_facts_memories=False,
             ),
             current_user=user,
             db=db,

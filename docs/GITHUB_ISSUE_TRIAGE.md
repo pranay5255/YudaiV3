@@ -28,7 +28,7 @@ Scope: open GitHub issues only, excluding pull requests.
 
 | Issue | Flag | Action |
 | --- | --- | --- |
-| `#138` | Solved pending merge/close | Modal image now installs `pgvector`; `uv run modal` preflight and workflow probes verified sandbox creation, healthcheck, exec, artifacts, and termination. Close after this branch lands or after one production preflight. |
+| `#138` | Superseded by cleanup | The obsolete indexing dependency path has been removed; keep open only if a fresh Modal preflight exposes a current runtime import failure. |
 | `#182` | Partially solved, scope reduced | Frontend chat token streaming works; sandbox stdout/stderr is now proxied through the unified controller WebSocket and grouped in `TrajectoryViewer`. Keep open for UX polish: loading states, mode progress summaries, cancel/retry affordances. |
 | `#173` | Reframe | Do not build a duplicate `ArchitectSubagent` now. Treat this as Architect MSWEA config/contract: consume an existing GitHub issue, ask clarifying questions when needed, search repo context, and append `.yudai/context.md`. |
 | `#174` | Reframe | Do not build a duplicate `TesterSubagent` now. Treat this as Tester MSWEA config/contract: only write tests/test fixtures, commit a tester branch, and append `.yudai/context.md`. |
@@ -44,12 +44,11 @@ Scope: open GitHub issues only, excluding pull requests.
 
 | Issue | Title | Area | Effort | Time | Input | Locality / Dependency |
 | --- | --- | --- | --- | --- | --- | --- |
-| `#138` | ModuleNotFoundError: No module named `pgvector` in Modal sandbox | Backend/Infra | XS | <2h | Low | Local: `backend/requirements`, Modal image config |
+| `#138` | Modal sandbox dependency drift | Backend/Infra | XS | <2h | Low | Local: `backend/requirements`, Modal image config |
 | `#180` | Persist sidebar collapsed/expanded state across sessions | Frontend | S | 0.5-1d | Low | Local: `src/components/Sidebar.tsx` or store |
-| `#181` | Add contextual quick-start suggestions in empty states | Frontend | S | 0.5-1d | Med | Local: `Chat`, `ContextCards`, repo metadata hook |
+| `#181` | Add contextual quick-start suggestions in empty states | Frontend | S | 0.5-1d | Med | Local: `Chat`, repo metadata hook |
 | `#184` | Improve toast notification UX | Frontend | S/M | 1-2d | Low | Local: `src/components/Toast.tsx` |
 | `#186` | Replace repository selection Toast with slide-over panel | Frontend | M | 1-2d | Med | Local-ish: replace `RepositorySelectionToast`, touches TopBar/sidebar |
-| `#183` | Add grouping, filtering, and search to context cards | Frontend | M | 1-2d | Med | Local: `src/components/ContextCards.tsx` |
 | `#185` | Add actionable recovery buttons to error states | Frontend + maybe Backend | M | 1-2d | Med | Cross: `Toast`, error boundaries, API error shapes |
 | `#182` | Improve loading feedback with streaming tokens and step progress | Frontend + Backend | L | 3-5d | Med | Cross: chat, context, solve tabs, streaming/cancel semantics |
 | `#60` | Implement constraints for GitHub issue and PR creation | Backend | M | 1-2d | Med | Local-ish: `IssueOps`, `githubOps`, `ChatOps` |

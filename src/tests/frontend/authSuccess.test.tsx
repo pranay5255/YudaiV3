@@ -32,8 +32,6 @@ const resetStores = () => {
     messages: [],
     isLoadingMessages: false,
     messageError: null,
-    contextCards: [],
-    fileContext: [],
     userIssues: [],
     currentIssue: null,
     isLoadingIssues: false,

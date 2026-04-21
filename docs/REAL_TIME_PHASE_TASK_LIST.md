@@ -25,7 +25,7 @@ Execution rule:
 - No proxy fallback when tunnel fails (hard error).
 - Session persistence end condition: both GitHub issue creation and PR creation are completed.
 - On end condition: export artifact bundle, persist metadata, then terminate immediately.
-- yudai-grep training is manual script in this codebase, admin-only trigger.
+- Legacy repo-helper training was planned as a manual admin workflow, but the indexing path has since been removed.
 
 ---
 
@@ -136,12 +136,12 @@ P1-B6. Verify artifact metadata row exists in PG and cache export is recorded.
 
 ---
 
-## Phase 2: yudai-grep Activation (manual training workflow)
+## Phase 2: Legacy Repo-Helper Activation (removed)
 
 ### Backend Tasks
-P2-1. ⬜ Remove optional/fallback import path and make yudai-grep load mandatory at sandbox boot.
+P2-1. ⬜ Removed with the legacy indexing path.
 P2-2. ⬜ Implement hard-fail startup behavior when model load fails, with explicit error messaging.
-P2-3. ⬜ Wire yudai-grep routing in query paths used by chat/context/solver preparation.
+P2-3. ⬜ Removed with the legacy indexing path.
 P2-4. ⬜ Add basic runtime diagnostics endpoint for model readiness state.
 
 ### Training Script Tasks (manual/admin)
@@ -161,7 +161,7 @@ P2-13. ⬜ Integration test: train command runs on sample trajectories and produ
 P2-14. ⬜ Integration test: sandbox startup fails as expected when checkpoint missing/corrupt.
 
 ### Browser Validation Gate (must pass before Phase 3)
-P2-B1. Start a new session and verify sandbox boot confirms yudai-grep model loaded.
+P2-B1. Start a new session and verify sandbox boot succeeds without legacy repo-helper loading.
 P2-B2. Perform chat and issue workflows and verify no regressions with mandatory model path.
 P2-B3. Temporarily break checkpoint path in staging and verify hard-fail UX appears clearly.
 

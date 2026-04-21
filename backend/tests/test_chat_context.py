@@ -1,16 +1,14 @@
-import asyncio
 from pathlib import Path
 import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+import asyncio
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from context.chat_context import ChatContext  # noqa: E402
-
-from utils import utc_now  # noqa: E402
 
 
 class DummyQuery:
@@ -24,20 +22,27 @@ class DummyQuery:
         return self.repository
 
 
-def test_chat_context_summary_uses_cached_json(tmp_path, monkeypatch):
+def test_chat_context_summary_uses_session_and_repository_metadata():
     session = SimpleNamespace(
-        session_id="sess-1", repo_context={}, description="Session description"
+        id=None,
+        session_id="sess-1",
+        repo_context={"summary": "Stored session summary"},
+        title="Session title",
+        description="Session description",
+        repo_branch="main",
+        repo_url="https://github.com/octo/repo",
     )
     repository = SimpleNamespace(
-        github_context=None, github_context_updated_at=utc_now()
+        description="Repository description",
+        language="Python",
+        html_url="https://github.com/octo/repo",
+        default_branch="main",
     )
 
     db = MagicMock()
     db.query.return_value = DummyQuery(repository)
     db.commit = MagicMock()
     db.rollback = MagicMock()
-
-    monkeypatch.setattr(ChatContext, "CACHE_ROOT", tmp_path)
 
     chat_context = ChatContext(
         db=db,
@@ -47,32 +52,25 @@ def test_chat_context_summary_uses_cached_json(tmp_path, monkeypatch):
         session_obj=session,
     )
 
-    cached_payload = {
-        "repository": {
-            "full_name": "octo/repo",
-            "description": "Repository description",
-            "language": "Python",
-        },
-        "recent_issues": [{"number": 1, "title": "Bug"}],
-        "recent_commits": [
-            {"commit": {"message": "Initial commit", "author": {"name": "Octocat"}}}
-        ],
-    }
-
-    metadata = chat_context.write_cache(cached_payload)
-    repository.github_context = metadata.to_dict()
-
     summary = asyncio.run(chat_context.build_combined_summary())
 
     assert "Repository: octo/repo" in summary
     assert "Description: Repository description" in summary
-    assert "Recent Open Issues" in summary
+    assert "Stored session summary" in summary
     assert session.repo_context["context_string"].startswith("Repository: octo/repo")
 
 
-def test_chat_context_summary_falls_back_to_gitingest(monkeypatch):
-    session = SimpleNamespace(session_id="sess-2", repo_context={})
-    repository = SimpleNamespace(github_context=None, github_context_updated_at=None)
+def test_chat_context_summary_falls_back_to_repo_identity():
+    session = SimpleNamespace(
+        id=None,
+        session_id="sess-2",
+        repo_context={},
+        title=None,
+        description=None,
+        repo_branch="main",
+        repo_url="https://github.com/octo/repo",
+    )
+    repository = None
 
     db = MagicMock()
     db.query.return_value = DummyQuery(repository)
@@ -87,13 +85,8 @@ def test_chat_context_summary_falls_back_to_gitingest(monkeypatch):
         session_obj=session,
     )
 
-    async def fake_gitingest(self):
-        return "Repository: octo/repo\nSummary: from gitingest"
-
-    monkeypatch.setattr(ChatContext, "gitingest_fallback", fake_gitingest)
-    monkeypatch.setattr(ChatContext, "read_cache", lambda self, meta=None: None)
-
     summary = asyncio.run(chat_context.build_combined_summary())
 
-    assert "Summary: from gitingest" in summary
+    assert "Repository: octo/repo" in summary
+    assert "Branch: main" in summary
     db.commit.assert_called()

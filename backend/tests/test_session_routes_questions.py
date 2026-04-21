@@ -25,13 +25,6 @@ def _install_import_stubs() -> None:
     sys.modules["solver.solver"] = fake_solver
 
     fake_context = types.ModuleType("context")
-    for name in (
-        "EmbeddingPipeline",
-        "FactsAndMemoriesService",
-        "RepositoryFile",
-        "RepositorySnapshotService",
-    ):
-        setattr(fake_context, name, type(name, (), {}))
     sys.modules["context"] = fake_context
 
     fake_githubops = types.ModuleType("daifuUserAgent.githubOps")

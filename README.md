@@ -9,7 +9,7 @@ This repository contains the frontend, backend API, solver integration, and in-p
 - Sign in with GitHub OAuth
 - Select a repository and branch
 - Create persistent chat sessions for a repo context
-- Generate context cards and file dependency context
+- Generate context cards from chat and uploaded context
 - Draft issues from chat context and create GitHub issues
 - Start solver runs for issues and track progress
 - View solver trajectories (SSE streaming path exists)
@@ -38,7 +38,7 @@ Planning and scope documents are in:
 
 - Frontend: React + Vite + TypeScript + Tailwind CSS + Zustand
 - Backend: FastAPI + SQLAlchemy
-- Database: PostgreSQL + pgvector
+- Database: PostgreSQL
 - Solver: Python-based sandbox/trajectory orchestration
 - Realtime: SSE + WebSocket (phase rollout via feature flags)
 
@@ -48,7 +48,6 @@ Planning and scope documents are in:
 - `backend/` — FastAPI backend, auth, GitHub APIs, solver, realtime services
 - `backend/realtime/` — controller/sandbox lifecycle services, schemas, cache/artifact export
 - `backend/db/` — schema init + migrations
-- `backend/context/yudai-grep/` — local model utilities and training code for repo-structure assistance
 
 ## Running Locally
 
@@ -56,7 +55,7 @@ Planning and scope documents are in:
 
 - Node.js 18+
 - Python 3.10+
-- PostgreSQL (with `pgvector`)
+- PostgreSQL
 
 ### 2. Install Dependencies
 
@@ -138,14 +137,6 @@ Frontend equivalents:
 - `VITE_REALTIME_WS_CHAT_ENABLED`
 - `VITE_REALTIME_SSE_STREAM_ENABLED`
 - `VITE_REALTIME_CONTRACT_VERSION`
-
-## yudai-grep (Repo Context Helper)
-
-The repo includes a local `yudai-grep` module under `backend/context/yudai-grep/` used for repository structure analysis and context generation support.
-
-- Inference/runtime code: `backend/context/yudai-grep/src/runtime.py`
-- Training utility: `backend/context/yudai-grep/src/train.py`
-- Example datasets: `backend/context/yudai-grep/datasets/`
 
 ## Current Status
 
