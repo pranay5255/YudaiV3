@@ -46,6 +46,7 @@ from yudai.models import (  # noqa: E402
     ChatMessage,
     ChatSession,
     CreateGitHubIssueToolRequest,
+    FrontendBrowserCheckToolRequest,
     User,
     UserIssue,
     UserQuestion,
@@ -684,6 +685,61 @@ def test_create_github_issue_tool_rejects_issue_from_other_session_before_issue_
 
     assert exc_info.value.status_code == 404
     assert calls == []
+
+
+def test_frontend_browser_check_tool_wraps_mode_service(db_and_user, monkeypatch):
+    db, user, session = db_and_user
+    monkeypatch.setattr(
+        session_routes,
+        "get_realtime_feature_flags",
+        lambda: _flags(orchestrator_enabled=True),
+    )
+    captured: dict[str, object] = {}
+
+    class DummyModeToolService:
+        async def run_frontend_browser_check(self, db, *, session, user_id, objective):
+            captured["call"] = {
+                "session_id": session.session_id,
+                "user_id": user_id,
+                "objective": objective,
+            }
+            return {
+                "execution_id": "exec_browser_check",
+                "session_id": session.session_id,
+                "mode": "browser_check",
+                "status": "running",
+                "plan": ["Run browser check"],
+                "started_at": session_routes.utc_now(),
+                "completed_at": None,
+                "cancel_requested": False,
+                "waiting_for_input": False,
+                "current_mode_execution_id": "exec_browser_check",
+                "artifact": None,
+                "detail": "Browser check queued",
+            }
+
+    monkeypatch.setattr(
+        session_routes,
+        "get_daifu_mode_tool_service",
+        lambda: DummyModeToolService(),
+    )
+
+    response = asyncio.run(
+        session_routes.execute_frontend_browser_check_tool(
+            session_id=session.session_id,
+            request=FrontendBrowserCheckToolRequest(objective="Verify the login page visually"),
+            db=db,
+            current_user=user,
+        )
+    )
+
+    assert response.execution_id == "exec_browser_check"
+    assert response.mode == "browser_check"
+    assert captured["call"] == {
+        "session_id": session.session_id,
+        "user_id": user.id,
+        "objective": "Verify the login page visually",
+    }
 
 
 def test_create_github_issue_tool_requires_pending_issue_questions_answered(
