@@ -32,7 +32,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///tmp/consolidation-tests.db")
 # ModalSandboxRegistry (now in modal_sandbox)
 # ---------------------------------------------------------------------------
 
-from realtime.modal_sandbox import ModalSandboxRegistry, get_modal_registry  # noqa: E402
+from yudai.realtime.modal_sandbox import ModalSandboxRegistry, get_modal_registry  # noqa: E402
 
 
 def test_modal_registry_register_and_get():
@@ -77,7 +77,7 @@ def test_modal_registry_get_modal_registry_singleton():
 # SessionWebSocketHub (now in ws_protocol)
 # ---------------------------------------------------------------------------
 
-from realtime.ws_protocol import SessionWebSocketHub, get_ws_hub, WSMessageType  # noqa: E402
+from yudai.realtime.ws_protocol import SessionWebSocketHub, get_ws_hub, WSMessageType  # noqa: E402
 
 
 def _run(coro):
@@ -134,7 +134,7 @@ def test_get_ws_hub_singleton():
 # SandboxManager (now in lifecycle)
 # ---------------------------------------------------------------------------
 
-from realtime.lifecycle import SandboxManager  # noqa: E402
+from yudai.realtime.lifecycle import SandboxManager  # noqa: E402
 
 
 def test_sandbox_manager_build_tunnel_url_with_template():
@@ -195,7 +195,7 @@ def test_sandbox_manager_probe_stop_no_task():
 # Stream protocol constants (now in agentScriptGen)
 # ---------------------------------------------------------------------------
 
-from realtime.agentScriptGen import TRAJECTORY_UPDATE_PREFIX, SOLVE_RESULT_PREFIX  # noqa: E402
+from yudai.realtime.agentScriptGen import TRAJECTORY_UPDATE_PREFIX, SOLVE_RESULT_PREFIX  # noqa: E402
 
 
 def test_stream_protocol_trajectory_prefix():
@@ -210,7 +210,7 @@ def test_stream_protocol_solve_result_prefix():
 # build_artifact_archive_command (now in cache_store)
 # ---------------------------------------------------------------------------
 
-from realtime.cache_store import (  # noqa: E402
+from yudai.realtime.cache_store import (  # noqa: E402
     ARTIFACT_STREAM_START,
     ARTIFACT_STREAM_END,
     SandboxArtifactStore,
@@ -275,7 +275,7 @@ def test_downloaded_artifact_bundle_is_immutable():
 # sandbox_transport — URL conversion
 # ---------------------------------------------------------------------------
 
-from realtime.sandbox_transport import to_websocket_url  # noqa: E402
+from yudai.realtime.sandbox_transport import to_websocket_url  # noqa: E402
 
 
 def test_to_websocket_url_https():
@@ -300,5 +300,5 @@ def test_to_websocket_url_passthrough_wss():
 # ---------------------------------------------------------------------------
 
 def test_shim_modal_registry():
-    from realtime.modal_registry import get_modal_registry as gmr
+    from yudai.realtime.modal_registry import get_modal_registry as gmr
     assert callable(gmr)
