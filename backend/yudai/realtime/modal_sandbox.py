@@ -41,6 +41,7 @@ SANDBOX_SERVER_PIP_PACKAGES = (
 # Import path stays `minisweagent`, but the published distribution is hyphenated.
 SANDBOX_SOLVER_PIP_PACKAGES = (
     "mini-swe-agent",
+    "playwright",
 )
 
 SANDBOX_ENV_PASSTHROUGH_KEYS = (
@@ -126,6 +127,8 @@ def _get_unified_sandbox_image() -> modal.Image:
         .pip_install(*SANDBOX_SERVER_PIP_PACKAGES)
         # ── Solver Python deps (mini-swe-agent) ──
         .pip_install(*SANDBOX_SOLVER_PIP_PACKAGES)
+        # ── Browser support for manual frontend verification ──
+        .run_commands("python -m playwright install --with-deps chromium")
         # ── Workspace dir for cloned repos ──
         .run_commands("mkdir -p /workspace")
         .env({
