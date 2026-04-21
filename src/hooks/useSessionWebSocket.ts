@@ -488,7 +488,7 @@ export function useSessionWebSocket({
         }
 
         case 'tool_call': {
-          const tc = envelope.payload as ToolCallInfo;
+          const tc = envelope.payload as unknown as ToolCallInfo;
           setToolCalls((prev) => [...prev, tc]);
           break;
         }

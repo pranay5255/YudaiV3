@@ -1,15 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { CheckCircle2, Loader2 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useSessionStore } from '../stores/sessionStore';
 
-/**
- * AuthSuccess component handles the OAuth callback from GitHub
- * Processes URL parameters and sets up the user session
- */
-export const AuthSuccess: React.FC = () => {
+export function AuthSuccess(): JSX.Element {
   const navigate = useNavigate();
-  const { setAuthFromCallback, clearAuth } = useAuth();
+  const { clearAuth, setAuthFromCallback } = useAuth();
   const clearSession = useSessionStore((state) => state.clearSession);
   const setActiveTab = useSessionStore((state) => state.setActiveTab);
   const hasProcessed = useRef(false);
@@ -21,73 +18,51 @@ export const AuthSuccess: React.FC = () => {
 
     hasProcessed.current = true;
 
-    const handleAuthSuccess = async () => {
-      try {
-        console.log('[AuthSuccess] Processing OAuth callback data');
+    const searchParams = new URLSearchParams(window.location.search);
+    const sessionToken = searchParams.get('session_token');
+    const userId = searchParams.get('user_id');
+    const username = searchParams.get('username');
+    const name = searchParams.get('name');
+    const email = searchParams.get('email');
+    const avatar = searchParams.get('avatar');
+    const githubId = searchParams.get('github_id');
 
-        const searchParams = new URLSearchParams(window.location.search);
+    if (!sessionToken || !userId || !username) {
+      navigate('/auth/login?error=missing_auth_data', { replace: true });
+      return;
+    }
 
-        // Extract auth data from URL parameters
-        const sessionToken = searchParams.get('session_token');
-        const userId = searchParams.get('user_id');
-        const username = searchParams.get('username');
-        const name = searchParams.get('name');
-        const email = searchParams.get('email');
-        const avatar = searchParams.get('avatar');
-        const githubId = searchParams.get('github_id');
+    clearAuth();
+    clearSession();
+    setActiveTab('chat');
 
-        if (!sessionToken || !userId || !username) {
-          console.error('[AuthSuccess] Missing required auth parameters');
-          navigate('/auth/login?error=missing_auth_data');
-          return;
-        }
+    setAuthFromCallback({
+      sessionToken,
+      user: {
+        avatar_url: avatar || '',
+        created_at: new Date().toISOString(),
+        display_name: name || username,
+        email: email || '',
+        github_user_id: githubId || '',
+        github_username: username,
+        id: Number.parseInt(userId, 10),
+        last_login: new Date().toISOString(),
+      },
+    });
 
-        // Create user object from callback data
-        const user = {
-          id: parseInt(userId),
-          github_username: username,
-          github_user_id: githubId || '',
-          email: email || '',
-          display_name: name || username,
-          avatar_url: avatar || '',
-          created_at: new Date().toISOString(),
-          last_login: new Date().toISOString(),
-        };
-
-        console.log('[AuthSuccess] Setting up user session:', user);
-
-        // Ensure any prior auth/session data is cleared before applying the new token.
-        clearAuth();
-        clearSession();
-        setActiveTab('chat');
-
-        // Set up the session using the session store
-        setAuthFromCallback({
-          user,
-          sessionToken,
-        });
-
-        console.log('[AuthSuccess] Authentication successful, redirecting to main app');
-        
-        // Redirect to the main application
-        navigate('/', { replace: true });
-
-      } catch (error) {
-        console.error('[AuthSuccess] Error processing auth callback:', error);
-        navigate('/auth/login?error=auth_processing_failed');
-      }
-    };
-
-    handleAuthSuccess();
-  }, [navigate, setAuthFromCallback, clearSession, clearAuth, setActiveTab]);
+    navigate('/', { replace: true });
+  }, [clearAuth, clearSession, navigate, setActiveTab, setAuthFromCallback]);
 
   return (
-    <div className="min-h-screen bg-zinc-900 flex items-center justify-center">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-        <p className="text-fg/70">Completing authentication...</p>
-        <p className="text-xs text-fg/50 mt-2">Please wait while we set up your session...</p>
-      </div>
-    </div>
+    <main className="grid min-h-dvh place-items-center bg-bg text-fg">
+      <section className="rounded-lg bg-bg-secondary p-5 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+        <div className="relative mx-auto mb-4 grid size-12 place-items-center rounded-lg bg-emerald-500/10 text-emerald-200 shadow-[0_0_0_1px_rgba(16,185,129,0.22)]">
+          <Loader2 aria-hidden="true" className="absolute size-8 animate-spin opacity-45" />
+          <CheckCircle2 aria-hidden="true" className="size-5" />
+        </div>
+        <p className="text-sm font-medium">Completing authentication</p>
+        <p className="mt-1 text-xs text-fg-muted">GitHub session</p>
+      </section>
+    </main>
   );
-};
+}
