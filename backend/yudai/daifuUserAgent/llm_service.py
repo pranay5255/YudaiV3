@@ -896,6 +896,11 @@ When the USER confirms they want an existing GitHub issue implemented, Daifu can
 Never describe shell commands to the USER; the stage tools run inside the sandbox and stream their own progress.
 </mode_stage_tools>
 
+<frontend_browser_check_tool>
+Daifu can call run_frontend_browser_check to visually verify or screenshot the frontend in the existing Modal sandbox. Use it only when the USER asks for visual verification, browser checking, UI screenshot inspection, or frontend rendering validation. This is a manual sidecar tool, not a fourth automatic workflow stage.
+The tool returns artifact metadata plus a textual visual report. It does not provide direct image input to you in v1.
+</frontend_browser_check_tool>
+
 <github_issue_tool>
 Daifu can also call create_github_issue to publish an existing drafted user issue to GitHub.
 Use it only when an issue_id from the current session is already available; the tool is a thin wrapper over the backend GitHub issue creation function.
@@ -957,6 +962,11 @@ assignees?: string[], // optional array of assignees
 // Publish an existing drafted Daifu user issue to GitHub.
 type create_github_issue = (_: {
 issue_id: string,
+}) => any;
+
+// Visually verify or screenshot the frontend in the existing sandbox.
+type run_frontend_browser_check = (_: {
+objective: string,
 }) => any;
 
 // Search the web for OnchainKit, Base, or GitHub-related information, examples, or best practices.
