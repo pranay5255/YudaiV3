@@ -1,0 +1,13 @@
+LICENSE
+README.md
+pyproject.toml
+src/__init__.py
+src/model.py
+src/openai_forwarder.py
+src/runtime.py
+src/train.py
+src/op_grep.egg-info/PKG-INFO
+src/op_grep.egg-info/SOURCES.txt
+src/op_grep.egg-info/dependency_links.txt
+src/op_grep.egg-info/requires.txt
+src/op_grep.egg-info/top_level.txt
