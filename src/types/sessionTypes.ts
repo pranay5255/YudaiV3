@@ -67,12 +67,10 @@ export interface SessionRuntimeInfo {
 export interface SessionContext {
   session: Session | null;
   messages: ChatMessage[];
-  context_cards: string[];
+  context_cards?: ContextCard[];
   repository_info?: RepositoryInfo;
-  file_embeddings_count: number;
   statistics?: SessionStatistics;
   user_issues?: UserIssue[];
-  file_embeddings?: FileItem[];
 }
 
 // ============================================================================
@@ -88,47 +86,11 @@ export interface ChatMessage {
   tokens: number;
   model_used?: string;
   processing_time?: number;
-  context_cards?: string[];
   referenced_files?: string[];
   error_message?: string;
   actions?: ChatAction[];
   created_at: string;
   updated_at?: string;
-}
-
-// ============================================================================
-// CONTEXT CARD TYPES
-// ============================================================================
-
-export interface ContextCard {
-  id: string;
-  title: string;
-  description: string;
-  tokens: number;
-  source: 'chat' | 'file-deps' | 'upload';
-  content?: string;
-}
-
-// ============================================================================
-// FILE DEPENDENCY TYPES
-// ============================================================================
-
-export interface FileItem {
-  id: string;
-  name: string;
-  path?: string;
-  type: 'INTERNAL' | 'EXTERNAL';
-  tokens: number;
-  category: string;
-  isDirectory?: boolean;
-  children?: FileItem[];
-  expanded?: boolean;
-  content_size?: number;
-  created_at?: string;
-  file_name?: string;
-  file_path?: string;
-  file_type?: string;
-  content_summary?: string;
 }
 
 // ============================================================================
@@ -144,8 +106,6 @@ export interface UserIssue {
   issue_text_raw: string;
   issue_steps?: string[];
   session_id?: string;
-  context_card_id?: number;
-  context_cards?: string[];
   ideas?: string[];
   repo_owner?: string;
   repo_name?: string;
@@ -179,7 +139,19 @@ export interface SessionStatistics {
   total_cost: number;
   session_duration: number;
   user_issues_count?: number;
-  file_embeddings_count?: number;
+}
+
+export interface ContextCard {
+  id: string | number;
+  session_id?: number;
+  title: string;
+  description?: string;
+  content?: string;
+  source: 'chat' | 'upload';
+  tokens: number;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface AgentStatus {
@@ -208,8 +180,6 @@ export interface CreateUserIssueRequest {
   issue_text_raw: string;
   description?: string;
   session_id?: string;
-  context_card_id?: number;
-  context_cards?: string[];
   ideas?: string[];
   repo_owner?: string;
   repo_name?: string;
@@ -221,7 +191,6 @@ export interface IssueGenerationRequest {
   title: string;
   description: string;
   chat_messages: ChatContextMessage[];
-  file_context: FileContextItem[];
   repository_info?: {
     owner: string;
     name: string;
@@ -307,7 +276,6 @@ export interface ChatProcessingRequest {
   session_id: string;
   user_id: number;
   message_text: string;
-  context_cards?: string[];
   repository?: {
     owner: string;
     name: string;
@@ -333,14 +301,29 @@ export interface CreateSessionRequest {
   repo_branch?: string;
   title?: string;
   description?: string;
-  index_codebase?: boolean;
-  index_max_file_size?: number;
 }
 
 export interface UpdateSessionRequest {
   title?: string;
   description?: string;
   repo_branch?: string;
+}
+
+export interface CreateContextCardRequest {
+  title: string;
+  description?: string;
+  content: string;
+  source?: 'chat' | 'upload';
+  tokens?: number;
+}
+
+export interface UpdateContextCardRequest {
+  title?: string;
+  description?: string;
+  content?: string;
+  source?: 'chat' | 'upload';
+  tokens?: number;
+  is_active?: boolean;
 }
 
 export interface ConversationOption {
@@ -463,46 +446,11 @@ export interface CancelExecutionResponse {
   message: string;
 }
 
-export interface CreateContextCardRequest {
-  title: string;
-  description: string;
-  source: 'chat' | 'file-deps' | 'upload';
-  tokens: number;
-  content?: string;
-}
-
-export interface UpdateContextCardRequest {
-  title?: string;
-  description?: string;
-  content?: string;
-}
-
-export interface CreateFileEmbeddingRequest {
-  file_path: string;
-  file_name: string;
-  file_type: string;
-  chunk_index: number;
-  tokens: number;
-  file_metadata?: Record<string, unknown>;
-}
-
-export interface UpdateFileEmbeddingRequest {
-  file_path?: string;
-  file_name?: string;
-  file_type?: string;
-  file_content?: string;
-  chunk_text?: string;
-  chunk_index?: number;
-  tokens?: number;
-  file_metadata?: Record<string, unknown>;
-}
-
 export interface ChatRequest {
   session_id?: string;
   message: {
     message_text: string;
   };
-  context_cards?: string[];
   repository?: {
     owner: string;
     name: string;
@@ -514,7 +462,6 @@ export interface CreateIssueWithContextRequest {
   title: string;
   description?: string;
   chat_messages: ChatContextMessage[];
-  file_context: FileContextItem[];
   repository_info?: {
     owner: string;
     name: string;
@@ -528,15 +475,6 @@ export interface ChatContextMessage {
   content: string;
   isCode: boolean;
   timestamp: string;
-}
-
-export interface FileContextItem {
-  id: string;
-  name: string;
-  type: string;
-  tokens: number;
-  category: string;
-  path?: string;
 }
 
 // ============================================================================
@@ -577,7 +515,6 @@ export interface GitHubIssuePreview {
   };
   metadata: {
     chat_messages_count: number;
-    files_context_count: number;
     total_tokens: number;
     generated_at: string;
     generation_method: string;
@@ -657,44 +594,6 @@ export interface CreateSessionMutationData {
   repoBranch?: string;
 }
 
-export interface AddContextCardMutationData {
-  sessionId: string;
-  card: {
-    title: string;
-    description: string;
-    source: 'chat' | 'file-deps' | 'upload';
-    tokens: number;
-    content?: string;
-  };
-}
-
-export interface RemoveContextCardMutationData {
-  sessionId: string;
-  cardId: string;
-}
-
-export interface AddFileDependencyMutationData {
-  sessionId: string;
-  fileDependency: {
-    file_path: string;
-    file_name: string;
-    file_type: string;
-    chunk_index: number;
-    tokens: number;
-    file_metadata?: Record<string, unknown>;
-  };
-}
-
-export interface ContextCardMutationContext {
-  previousCards: ContextCard[];
-  optimisticCard?: ContextCard;
-}
-
-export interface FileDependencyMutationContext {
-  previousFiles: FileItem[];
-  optimisticFile?: FileItem;
-}
-
 // ============================================================================
 // UI & STATE TYPES
 // ============================================================================
@@ -705,7 +604,6 @@ export interface TabState {
   activeTab: TabType;
   refreshKeys: {
     chat: number;
-    context: number;
     ideas: number;
   };
   tabHistory: TabType[];
@@ -936,11 +834,6 @@ export interface RepositoryDetailsResponse {
   branches: string[];
 }
 
-export interface FileAnalysisResponse {
-  dependencies: FileContextItem[];
-  total_tokens: number;
-}
-
 // ============================================================================
 // LEGACY TYPE ALIASES (for backward compatibility)
 // ============================================================================
@@ -950,13 +843,5 @@ export type SessionResponse = Session;
 export type SessionContextResponse = SessionContext;
 export type ChatMessageAPI = ChatMessage;
 export type ChatMessageResponse = ChatMessage;
-export type ContextCardResponse = ContextCard;
 export type UserIssueResponse = UserIssue;
 export type CreateSessionDaifuRequest = CreateSessionRequest;
-export type SessionFileDependencyResponse = FileItem;
-export type ExtractFileDependenciesRequest = {
-  repo_url: string;
-};
-export type ExtractFileDependenciesResponse = {
-  children: FileItem[];
-};

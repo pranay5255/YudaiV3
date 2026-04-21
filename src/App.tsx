@@ -152,7 +152,6 @@ function AppContent() {
       .catch(() => addToast('Failed to remove context card', 'error'));
   };
 
-
   const handleTabChange = (newTab: TabType) => {
     setActiveTab(newTab);
   };
@@ -167,6 +166,7 @@ function AppContent() {
         <ContextCards
           cards={contextCards}
           onRemoveCard={removeContextCardHandler}
+          onShowError={addToast}
         />
       );
       break;

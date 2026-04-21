@@ -48,7 +48,6 @@ export interface ChatRequest {
   message: {
     message_text: string;
   };
-  context_cards?: string[];
   repository?: {
     owner: string;
     name: string;
@@ -82,8 +81,6 @@ export interface CreateIssueFromChatResponse {
     issue_text_raw: string;
     issue_steps?: string[];
     session_id?: string;
-    context_card_id?: number;
-    context_cards?: string[];
     ideas?: string[];
     repo_owner?: string;
     repo_name?: string;
@@ -105,16 +102,6 @@ export interface CreateIssueFromChatResponse {
 // ISSUE MANAGEMENT API TYPES
 // ============================================================================
 
-export interface FileContextItem {
-  id: string;
-  name: string;
-  type: string;
-  tokens: number;
-  category: string;
-  path?: string;
-}
-
-
 export interface GitHubIssuePreview {
   title: string;
   body: string;
@@ -127,7 +114,6 @@ export interface GitHubIssuePreview {
   };
   metadata: {
     chat_messages_count: number;
-    file_context_count: number;
     total_tokens: number;
     generated_at: string;
     generation_method: string;
@@ -169,8 +155,6 @@ export interface CreateSessionDaifuRequest {
   repo_branch?: string;
   title?: string;
   description?: string;
-  index_codebase?: boolean;
-  index_max_file_size?: number;
 }
 
 export interface UpdateSessionRequest {
@@ -182,18 +166,6 @@ export interface UpdateSessionRequest {
 export interface UpdateMessageRequest {
   message_text?: string;
   tokens?: number;
-}
-
-export interface UpdateContextCardRequest {
-  title?: string;
-  description?: string;
-  content?: string;
-}
-
-export interface UpdateFileDependencyRequest {
-  file_path?: string;
-  tokens?: number;
-  file_metadata?: Record<string, unknown>;
 }
 
 export interface SessionResponse {
@@ -219,7 +191,6 @@ export interface SessionResponse {
 export interface SessionContextResponse {
   session: SessionResponse;
   messages: ChatMessageResponse[];
-  context_cards: string[];
   repository_info?: {
     owner: string;
     name: string;
@@ -227,14 +198,12 @@ export interface SessionContextResponse {
     full_name: string;
     html_url: string;
   };
-  file_embeddings_count: number;
   statistics?: {
     total_messages: number;
     total_tokens: number;
     total_cost: number;
     session_duration: number;
     user_issues_count?: number;
-    file_embeddings_count?: number;
   };
   user_issues?: UserIssueResponse[];
 }
@@ -249,7 +218,6 @@ export interface ChatMessageResponse {
   tokens: number;
   model_used?: string;
   processing_time?: number;
-  context_cards?: string[];
   referenced_files?: string[];
   error_message?: string;
   created_at: string;
@@ -293,34 +261,7 @@ export interface RepositoryDetailsResponse {
 }
 
 // ============================================================================
-// FILE DEPENDENCIES API TYPES
-// ============================================================================
-
-export interface FileAnalysisResponse {
-  dependencies: FileContextItem[];
-  total_tokens: number;
-}
-
-export interface FileDependencyNode {
-  id: string;
-  name: string;
-  type: string;
-  tokens: number;
-  Category: string;
-  isDirectory?: boolean;
-  children?: FileDependencyNode[];
-}
-
-export interface ExtractFileDependenciesRequest {
-  repo_url: string;
-}
-
-export interface ExtractFileDependenciesResponse {
-  children: FileDependencyNode[];
-}
-
-// ============================================================================
-// USER ISSUES & FILE EMBEDDINGS API TYPES
+// USER ISSUES API TYPES
 // ============================================================================
 
 export interface UserIssueResponse {
@@ -332,8 +273,6 @@ export interface UserIssueResponse {
   issue_text_raw: string;
   issue_steps?: string[];
   session_id?: string;
-  context_card_id?: number;
-  context_cards?: string[];
   ideas?: string[];
   repo_owner?: string;
   repo_name?: string;
@@ -347,72 +286,6 @@ export interface UserIssueResponse {
   created_at: string;
   updated_at?: string;
   processed_at?: string;
-}
-
-
-
-export interface SessionFileDependencyResponse {
-  id: number;
-  file_name: string;
-  file_path: string;
-  file_type: string;
-  tokens: number;
-  category?: string;
-  created_at: string;
-}
-
-export interface FileTreeResponse {
-  id: string;
-  name: string;
-  type: string;
-  Category: string;
-  tokens: number;
-  isDirectory: boolean;
-  children?: FileTreeResponse[];
-  path?: string;
-  expanded?: boolean;
-}
-
-export interface FileItemResponse {
-  id: string;
-  name: string;
-  path?: string;
-  type: string;
-  tokens: number;
-  category: string;
-  isDirectory?: boolean;
-  children?: FileItemResponse[];
-  expanded?: boolean;
-  content_size?: number;
-  created_at?: string;
-  file_name?: string;
-  file_path?: string;
-  file_type?: string;
-  content_summary?: string;
-}
-
-// ============================================================================
-// CONTEXT CARDS & FILE EMBEDDINGS API TYPES
-// ============================================================================
-
-export interface CreateContextCardRequest {
-  title: string;
-  description: string;
-  source: 'chat' | 'file-deps' | 'upload';
-  tokens: number;
-  content?: string;
-}
-
-export interface ContextCardResponse {
-  id: number;
-  session_id: number;
-  title: string;
-  description: string;
-  source: string;
-  tokens: number;
-  content?: string;
-  created_at: string;
-  updated_at?: string;
 }
 
 
