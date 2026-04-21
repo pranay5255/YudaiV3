@@ -12,6 +12,10 @@ fake_sentence_transformers = types.ModuleType("sentence_transformers")
 fake_sentence_transformers.SentenceTransformer = type("SentenceTransformer", (), {})
 sys.modules.setdefault("sentence_transformers", fake_sentence_transformers)
 
+stubbed_llm_service = sys.modules.get("daifuUserAgent.llm_service")
+if stubbed_llm_service is not None and not hasattr(stubbed_llm_service, "DaifuParsedResponse"):
+    sys.modules.pop("daifuUserAgent.llm_service", None)
+
 from daifuUserAgent.llm_service import LLMService  # noqa: E402
 
 
