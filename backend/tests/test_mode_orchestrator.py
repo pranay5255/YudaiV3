@@ -87,6 +87,70 @@ def test_start_execution_returns_non_null_execution_id_and_started_at():
         db.close()
 
 
+def test_start_stage_execution_schedules_one_mode_with_stage_trigger():
+    engine = create_engine("sqlite:///:memory:")
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(engine)
+
+    db = SessionLocal()
+    try:
+        user = User(
+            github_username="stage-orchestrator",
+            github_user_id="8102",
+            email="stage-orchestrator@example.com",
+            display_name="Stage Orchestrator Test",
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        session = ChatSession(
+            user_id=user.id,
+            session_id="session_stage_exec_test",
+            title="Stage Execution Session",
+            repo_owner="octocat",
+            repo_name="yudaiv3",
+            repo_branch="main",
+            is_active=True,
+            total_messages=0,
+            total_tokens=0,
+            mode_metadata={},
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+
+        orchestrator = SessionExecutionOrchestrator(
+            broker=object(),
+            lifecycle=object(),
+            ws_hub=DummyHub(),
+        )
+        scheduled: dict[str, object] = {}
+        orchestrator._schedule_execution_task = lambda **kwargs: scheduled.update(kwargs)
+
+        payload = asyncio.run(
+            orchestrator.start_stage_execution(
+                db,
+                session=session,
+                user_id=user.id,
+                objective="Resolve issue #77",
+                mode="architect",
+                trigger="daifu_tool:run_architect_mode",
+            )
+        )
+
+        db.refresh(session)
+        execution = db.query(AgentExecution).filter(AgentExecution.id == payload["execution_id"]).one()
+
+        assert payload["detail"] == "Stage queued"
+        assert scheduled["max_modes"] == 1
+        assert execution.execution_metadata["trigger"] == "daifu_tool:run_architect_mode"
+        assert execution.execution_metadata["max_modes"] == 1
+        assert (session.mode_metadata or {})["active_execution"]["max_modes"] == 1
+    finally:
+        db.close()
+
+
 def test_build_mswea_command_uses_official_mini_cli_probe(tmp_path, monkeypatch):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
