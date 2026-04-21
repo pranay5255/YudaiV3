@@ -259,9 +259,9 @@ seed_auth_token() {
 from datetime import timedelta
 import os
 
-from db.database import SessionLocal
-from models import AuthToken, User
-from utils import utc_now
+from yudai.db.database import SessionLocal
+from yudai.models import AuthToken, User
+from yudai.utils import utc_now
 
 db = SessionLocal()
 try:

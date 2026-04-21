@@ -6,7 +6,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from daifuUserAgent.llm_service import LLMService  # noqa: E402
+from yudai.daifuUserAgent.llm_service import LLMService  # noqa: E402
 
 
 def test_format_chat_response_v2_parses_questions_probes_and_buttons():

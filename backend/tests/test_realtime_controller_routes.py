@@ -18,30 +18,30 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///tmp/realtime-controller-tests.d
 
 
 def _install_import_stubs() -> None:
-    fake_chatops_module = types.ModuleType("daifuUserAgent.ChatOps")
+    fake_chatops_module = types.ModuleType("yudai.daifuUserAgent.ChatOps")
 
     class DummyChatOps:  # pragma: no cover - test import stub only
         pass
 
     fake_chatops_module.ChatOps = DummyChatOps
-    sys.modules["daifuUserAgent.ChatOps"] = fake_chatops_module
+    sys.modules["yudai.daifuUserAgent.ChatOps"] = fake_chatops_module
 
 
 _install_import_stubs()
 
-from config.realtime_flags import RealtimeFeatureFlags  # noqa: E402
-from models import AuthToken, Base, ChatSession, User  # noqa: E402
-from realtime.cache_store import SessionCacheStore  # noqa: E402
-from realtime.controller_routes import (  # noqa: E402
+from yudai.config.realtime_flags import RealtimeFeatureFlags  # noqa: E402
+from yudai.models import AuthToken, Base, ChatSession, User  # noqa: E402
+from yudai.realtime.cache_store import SessionCacheStore  # noqa: E402
+from yudai.realtime.controller_routes import (  # noqa: E402
     delete_sandbox,
     ensure_runtime_for_session,
     get_runtime_for_session,
     get_sandbox,
     resolve_tunnel,
 )
-from realtime.lifecycle import RealtimeLifecycleService  # noqa: E402
-import realtime.lifecycle as lifecycle_module  # noqa: E402
-from realtime.schemas import RuntimeEnsureRequest  # noqa: E402
+from yudai.realtime.lifecycle import RealtimeLifecycleService  # noqa: E402
+import yudai.realtime.lifecycle as lifecycle_module  # noqa: E402
+from yudai.realtime.schemas import RuntimeEnsureRequest  # noqa: E402
 
 
 @pytest.fixture

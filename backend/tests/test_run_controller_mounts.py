@@ -20,21 +20,21 @@ def _install_import_stubs() -> None:
     fake_solver.solver_manager = type("DummySolverManager", (), {})()
     sys.modules["solver.solver"] = fake_solver
 
-    fake_context = types.ModuleType("context")
+    fake_context = types.ModuleType("yudai.context")
     fake_context.__path__ = []
-    sys.modules["context"] = fake_context
+    sys.modules["yudai.context"] = fake_context
 
-    fake_githubops = types.ModuleType("daifuUserAgent.githubOps")
+    fake_githubops = types.ModuleType("yudai.daifuUserAgent.githubOps")
     fake_githubops.GitHubOps = type("GitHubOps", (), {})
-    sys.modules["daifuUserAgent.githubOps"] = fake_githubops
+    sys.modules["yudai.daifuUserAgent.githubOps"] = fake_githubops
 
-    fake_chatops = types.ModuleType("daifuUserAgent.ChatOps")
+    fake_chatops = types.ModuleType("yudai.daifuUserAgent.ChatOps")
     fake_chatops.ChatOps = type("ChatOps", (), {})
-    sys.modules["daifuUserAgent.ChatOps"] = fake_chatops
+    sys.modules["yudai.daifuUserAgent.ChatOps"] = fake_chatops
 
-    fake_llm_service = types.ModuleType("daifuUserAgent.llm_service")
+    fake_llm_service = types.ModuleType("yudai.daifuUserAgent.llm_service")
     fake_llm_service.LLMService = type("LLMService", (), {})
-    sys.modules["daifuUserAgent.llm_service"] = fake_llm_service
+    sys.modules["yudai.daifuUserAgent.llm_service"] = fake_llm_service
 
 
 def test_run_controller_mounts_canonical_routes_only():
@@ -42,7 +42,7 @@ def test_run_controller_mounts_canonical_routes_only():
 
     import importlib
 
-    run_controller = importlib.import_module("run_controller")
+    run_controller = importlib.import_module("yudai.run_controller")
 
     paths = {getattr(route, "path", None) for route in run_controller.fastapi_app.routes}
 
@@ -68,7 +68,7 @@ def test_run_sandbox_server_mounts_internal_routes_only():
 
     import importlib
 
-    run_sandbox_server = importlib.import_module("run_sandbox_server")
+    run_sandbox_server = importlib.import_module("yudai.run_sandbox_server")
     paths = {getattr(route, "path", None) for route in run_sandbox_server.app.routes}
 
     assert "/healthz" in paths
@@ -81,7 +81,7 @@ def test_parse_allow_origins_trims_and_drops_empty_values():
     _install_import_stubs()
     import importlib
 
-    run_controller = importlib.import_module("run_controller")
+    run_controller = importlib.import_module("yudai.run_controller")
     parsed = run_controller._parse_allow_origins(" https://app.example.com, ,http://localhost:3000 ")
     assert parsed == ["https://app.example.com", "http://localhost:3000"]
 
@@ -128,7 +128,7 @@ def test_run_controller_adds_cors_headers_on_unhandled_500():
     _install_import_stubs()
     import importlib
 
-    run_controller = importlib.import_module("run_controller")
+    run_controller = importlib.import_module("yudai.run_controller")
 
     if not any(
         getattr(route, "path", None) == "/__tests__/boom"

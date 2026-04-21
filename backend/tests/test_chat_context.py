@@ -8,7 +8,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from context.chat_context import ChatContext  # noqa: E402
+from yudai.context.chat_context import ChatContext  # noqa: E402
 
 
 class DummyQuery:

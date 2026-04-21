@@ -15,8 +15,8 @@ if str(BACKEND_ROOT) not in sys.path:
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///tmp/mode-orchestrator-tests.db")
 
-from models import AgentExecution, Base, ChatSession, User  # noqa: E402
-from realtime.mode_orchestrator import SessionExecutionOrchestrator  # noqa: E402
+from yudai.models import AgentExecution, Base, ChatSession, User  # noqa: E402
+from yudai.realtime.mode_orchestrator import SessionExecutionOrchestrator  # noqa: E402
 
 
 class DummyHub:

@@ -19,8 +19,8 @@ This repository contains the frontend, backend API, solver integration, and in-p
 
 This codebase now includes real-time session foundations and partial implementation for the split controller/sandbox model:
 
-- Controller entrypoint: `backend/run_controller.py`
-- Sandbox session server entrypoint: `backend/run_sandbox_server.py`
+- Controller entrypoint: `python -m yudai.run_controller`
+- Sandbox session server entrypoint: `python -m yudai.run_sandbox_server`
 - Lifecycle APIs: create/get/delete sandbox, resolve tunnel, heartbeat, cleanup
 - Runtime/session persistence tables: `sandboxes`, `session_runtime`, `session_artifacts`, `session_audit_events`
 - Append-only sandbox cache + artifact export metadata under `/home/yudai/.cache/`
@@ -109,13 +109,15 @@ npm run build
 Controller host:
 
 ```bash
-python backend/run_controller.py
+cd backend
+python -m yudai.run_controller
 ```
 
 Sandbox session server:
 
 ```bash
-python backend/run_sandbox_server.py
+cd backend
+python -m yudai.run_sandbox_server
 ```
 
 Realtime behavior is controlled by feature flags (`REALTIME_*` / `VITE_REALTIME_*`).

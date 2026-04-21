@@ -16,7 +16,7 @@ if str(BACKEND_ROOT) not in sys.path:
 # Realtime lifecycle imports db.database.SessionLocal at import time.
 os.environ.setdefault("DATABASE_URL", "sqlite:///tmp/realtime-lifecycle-tests.db")
 
-from models import (  # noqa: E402
+from yudai.models import (  # noqa: E402
     Base,
     ChatSession,
     Sandbox,
@@ -28,8 +28,8 @@ from models import (  # noqa: E402
     SolveRun,
     User,
 )
-from realtime.cache_store import SessionCacheStore  # noqa: E402
-from realtime.lifecycle import RealtimeLifecycleService  # noqa: E402
+from yudai.realtime.cache_store import SessionCacheStore  # noqa: E402
+from yudai.realtime.lifecycle import RealtimeLifecycleService  # noqa: E402
 
 
 @pytest.fixture

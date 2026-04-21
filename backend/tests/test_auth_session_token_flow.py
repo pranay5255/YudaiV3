@@ -16,10 +16,10 @@ if str(BACKEND_ROOT) not in sys.path:
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///tmp/auth-session-token-tests.db")
 
-from auth import auth_routes  # noqa: E402
-import auth.github_oauth as github_oauth  # noqa: E402
-from models import Base, SessionToken, User  # noqa: E402
-from utils import ensure_utc, utc_now  # noqa: E402
+from yudai.auth import auth_routes  # noqa: E402
+import yudai.auth.github_oauth as github_oauth  # noqa: E402
+from yudai.models import Base, SessionToken, User  # noqa: E402
+from yudai.utils import ensure_utc, utc_now  # noqa: E402
 
 
 @pytest.fixture

@@ -18,7 +18,7 @@ services:
     environment:
       - DOCKER_COMPOSE=true
       - PYTHONPATH=/app
-    command: ["python", "-m", "realtime.modal_preflight"]
+    command: ["python", "-m", "yudai.realtime.modal_preflight"]
     networks:
       - yudai-network
     security_opt:
@@ -90,7 +90,7 @@ services:
       - ./backend/.env.prod
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./backend/yudai/db/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - yudai-network
     healthcheck:
