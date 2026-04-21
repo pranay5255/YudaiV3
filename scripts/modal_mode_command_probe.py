@@ -96,14 +96,14 @@ async def _run(args: argparse.Namespace) -> int:
     _require_env("MODAL_TOKEN_ID")
     _require_env("MODAL_TOKEN_SECRET")
 
-    from realtime.modal_preflight import (  # noqa: WPS433
+    from yudai.realtime.modal_preflight import (  # noqa: WPS433
         run_modal_exec_smoke_test,
         validate_modal_exec_smoke_result,
         wait_for_sandbox_healthcheck,
     )
-    from realtime.modal_sandbox import RealtimeModalSandbox  # noqa: WPS433
-    from realtime.mode_orchestrator import SessionExecutionOrchestrator  # noqa: WPS433
-    from realtime.sandbox_transport import run_sandbox_command  # noqa: WPS433
+    from yudai.realtime.modal_sandbox import RealtimeModalSandbox  # noqa: WPS433
+    from yudai.realtime.mode_orchestrator import SessionExecutionOrchestrator  # noqa: WPS433
+    from yudai.realtime.sandbox_transport import run_sandbox_command  # noqa: WPS433
 
     controller_base_url = args.controller_base_url or _require_env("CONTROLLER_BASE_URL")
     session_public_id = args.session_id or f"probe_session_{uuid.uuid4().hex[:12]}"

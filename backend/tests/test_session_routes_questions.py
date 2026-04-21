@@ -24,7 +24,7 @@ def _install_import_stubs() -> None:
     fake_solver.solver_manager = type("DummySolverManager", (), {})()
     sys.modules["solver.solver"] = fake_solver
 
-    fake_context = types.ModuleType("context")
+    fake_context = types.ModuleType("yudai.context")
     for name in (
         "EmbeddingPipeline",
         "FactsAndMemoriesService",
@@ -32,24 +32,22 @@ def _install_import_stubs() -> None:
         "RepositorySnapshotService",
     ):
         setattr(fake_context, name, type(name, (), {}))
-    sys.modules["context"] = fake_context
+    sys.modules["yudai.context"] = fake_context
 
-    fake_githubops = types.ModuleType("daifuUserAgent.githubOps")
+    fake_githubops = types.ModuleType("yudai.daifuUserAgent.githubOps")
     fake_githubops.GitHubOps = type("GitHubOps", (), {})
-    sys.modules["daifuUserAgent.githubOps"] = fake_githubops
+    sys.modules["yudai.daifuUserAgent.githubOps"] = fake_githubops
 
-    fake_llm_service = types.ModuleType("daifuUserAgent.llm_service")
+    fake_llm_service = types.ModuleType("yudai.daifuUserAgent.llm_service")
     fake_llm_service.LLMService = type("LLMService", (), {})
-    sys.modules["daifuUserAgent.llm_service"] = fake_llm_service
+    sys.modules["yudai.daifuUserAgent.llm_service"] = fake_llm_service
 
 
 _install_import_stubs()
 
-from config.realtime_flags import RealtimeFeatureFlags  # noqa: E402
-from daifuUserAgent import session_routes  # noqa: E402
-from models import (  # noqa: E402
-    AnswerQuestionRequest,
-    AskQuestionRequest,
+from yudai.config.realtime_flags import RealtimeFeatureFlags  # noqa: E402
+from yudai.daifuUserAgent import session_routes  # noqa: E402
+from yudai.models import (  # noqa: E402
     Base,
     ChatMessage,
     ChatSession,
@@ -58,6 +56,7 @@ from models import (  # noqa: E402
     UserQuestion,
     UserQuestionStatus,
 )
+from yudai.types import AnswerQuestionRequest, AskQuestionRequest  # noqa: E402
 
 
 @pytest.fixture
@@ -320,7 +319,7 @@ def test_create_github_issue_seeds_existing_issue_and_autostarts_pipeline(
     db.add(issue)
     db.commit()
 
-    fake_issue_ops = types.ModuleType("daifuUserAgent.IssueOps")
+    fake_issue_ops = types.ModuleType("yudai.daifuUserAgent.IssueOps")
 
     class FakeIssueService:
         def __init__(self, db):
@@ -339,7 +338,7 @@ def test_create_github_issue_seeds_existing_issue_and_autostarts_pipeline(
             return row
 
     fake_issue_ops.IssueService = FakeIssueService
-    monkeypatch.setitem(sys.modules, "daifuUserAgent.IssueOps", fake_issue_ops)
+    monkeypatch.setitem(sys.modules, "yudai.daifuUserAgent.IssueOps", fake_issue_ops)
     monkeypatch.setattr(session_routes.MemoryService, "save_session_snapshot", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         session_routes,

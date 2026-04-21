@@ -85,5 +85,5 @@ echo "🚀 Starting unified YudaiV3 backend server..."
 echo "📊 Server will be available at: http://localhost:8000"
 echo "📚 API documentation at: http://localhost:8000/docs"
 
-# Start the server (use run_controller.py for new realtime architecture)
-exec python run_controller.py
+# Start the server (use yudai.run_controller for new realtime architecture)
+exec python -m yudai.run_controller

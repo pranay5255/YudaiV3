@@ -33,7 +33,7 @@ COPY . .
 # Set environment variables for model caching
 ENV TRANSFORMERS_CACHE=/tmp/transformers_cache
 ENV HF_HOME=/tmp/huggingface_cache
-RUN python download_model.py && \
+RUN python -m yudai.download_model && \
     echo "Model download completed successfully"
 
 # Create non-root user for production (no sudo, minimal privileges)
