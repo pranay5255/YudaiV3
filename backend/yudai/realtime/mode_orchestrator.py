@@ -17,6 +17,8 @@ from yudai.models import (
     AuthToken,
     ChatMessage,
     ChatSession,
+    ContextCard,
+    SandboxStatus,
     SessionArtifact,
     SessionMode,
     SessionModeStatus,
@@ -48,12 +50,19 @@ MODE_ORDER: tuple[str, str, str] = (
 )
 
 SANDBOX_EXECUTION_ROOT = ".yudai/executions"
+BROWSER_CHECK_TOOL_NAME = "run_frontend_browser_check"
+BROWSER_CHECK_MODE = SessionMode.BROWSER_CHECK.value
+BROWSER_CHECK_SUMMARY_START = "__YUDAI_BROWSER_CHECK_SUMMARY_START__"
+BROWSER_CHECK_SUMMARY_END = "__YUDAI_BROWSER_CHECK_SUMMARY_END__"
+BROWSER_CHECK_REPORT_START = "__YUDAI_BROWSER_CHECK_REPORT_START__"
+BROWSER_CHECK_REPORT_END = "__YUDAI_BROWSER_CHECK_REPORT_END__"
 
 MSWEA_CONFIG_ROOT = SANDBOX_MSWEA_CONFIG_ROOT
 MSWEA_CONFIG_PATHS = {
     SessionMode.ARCHITECT.value: f"{MSWEA_CONFIG_ROOT}/architect/config.yaml",
     SessionMode.TESTER.value: f"{MSWEA_CONFIG_ROOT}/tester/config.yaml",
     SessionMode.CODER.value: f"{MSWEA_CONFIG_ROOT}/coder/config.yaml",
+    BROWSER_CHECK_MODE: f"{MSWEA_CONFIG_ROOT}/browser/config.yaml",
 }
 
 ISSUE_URL_PATTERN = re.compile(r"https?://github\.com/[\w.-]+/[\w.-]+/issues/(\d+)")
@@ -85,6 +94,7 @@ class SessionExecutionOrchestrator:
         self.lifecycle = lifecycle or get_realtime_lifecycle_service()
         self.ws_hub = ws_hub or get_ws_hub()
         self._session_tasks: Dict[str, asyncio.Task[None]] = {}
+        self._browser_check_tasks: Dict[str, asyncio.Task[None]] = {}
         self._session_locks: Dict[str, asyncio.Lock] = {}
 
     async def start_execution(
@@ -214,6 +224,95 @@ class SessionExecutionOrchestrator:
             max_modes=1,
             trigger=trigger,
         )
+
+    async def start_browser_check(
+        self,
+        db: Session,
+        *,
+        session: ChatSession,
+        user_id: int,
+        objective: str,
+        trigger: str = f"daifu_tool:{BROWSER_CHECK_TOOL_NAME}",
+    ) -> Dict[str, Any]:
+        """Start the manual browser verifier sidecar without advancing mode state."""
+        if self._has_active_task(session.session_id):
+            raise ExecutionConflictError("An execution is already running for this session")
+
+        execution_id = f"exec_{uuid.uuid4().hex[:24]}"
+        started_at = utc_now()
+        execution_plan = self._build_mode_plan(BROWSER_CHECK_MODE, objective)
+        execution = AgentExecution(
+            id=execution_id,
+            session_id=session.id,
+            mode=BROWSER_CHECK_MODE,
+            status=SessionModeStatus.RUNNING.value,
+            execution_plan=execution_plan,
+            execution_metadata={
+                "trigger": trigger,
+                "objective": objective,
+                "tool_name": BROWSER_CHECK_TOOL_NAME,
+                "sidecar": True,
+            },
+            started_at=started_at,
+        )
+        db.add(execution)
+
+        metadata = dict(session.mode_metadata or {})
+        metadata["browser_check"] = {
+            "execution_id": execution_id,
+            "status": SessionModeStatus.RUNNING.value,
+            "objective": objective,
+            "started_at": started_at.isoformat(),
+            "completed_at": None,
+        }
+        session.mode_metadata = metadata
+        session.last_activity = utc_now()
+        db.commit()
+
+        self._schedule_browser_check_task(
+            session_public_id=session.session_id,
+            user_id=user_id,
+            execution_id=execution_id,
+            objective=objective,
+        )
+
+        await self.ws_hub.send_to_session(
+            session.session_id,
+            WSMessageType.TOOL_CALL,
+            {
+                "tool_name": BROWSER_CHECK_TOOL_NAME,
+                "tool_input": {
+                    "session_id": session.session_id,
+                    "objective": objective,
+                },
+                "call_id": execution_id,
+            },
+        )
+        await self.ws_hub.send_to_session(
+            session.session_id,
+            WSMessageType.MODE_EVENT,
+            {
+                "mode": BROWSER_CHECK_MODE,
+                "state": SessionModeStatus.RUNNING.value,
+                "execution_id": execution_id,
+                "detail": "Browser check queued",
+            },
+        )
+
+        return {
+            "execution_id": execution_id,
+            "session_id": session.session_id,
+            "mode": BROWSER_CHECK_MODE,
+            "status": SessionModeStatus.RUNNING.value,
+            "plan": execution_plan,
+            "started_at": started_at,
+            "completed_at": None,
+            "cancel_requested": False,
+            "waiting_for_input": False,
+            "current_mode_execution_id": execution_id,
+            "artifact": None,
+            "detail": "Browser check queued",
+        }
 
     async def resume_execution(
         self,
@@ -688,6 +787,161 @@ class SessionExecutionOrchestrator:
             finally:
                 db.close()
 
+    async def run_browser_check(
+        self,
+        *,
+        session_public_id: str,
+        user_id: int,
+        execution_id: str,
+        objective: str,
+    ) -> None:
+        lock = self._session_locks.setdefault(session_public_id, asyncio.Lock())
+        async with lock:
+            db = SessionLocal()
+            session: Optional[ChatSession] = None
+            execution: Optional[AgentExecution] = None
+            result: Dict[str, Any] = {}
+            try:
+                session = (
+                    db.query(ChatSession)
+                    .filter(
+                        ChatSession.session_id == session_public_id,
+                        ChatSession.user_id == user_id,
+                    )
+                    .first()
+                )
+                if not session:
+                    return
+
+                execution = (
+                    db.query(AgentExecution)
+                    .filter(
+                        AgentExecution.id == execution_id,
+                        AgentExecution.session_id == session.id,
+                        AgentExecution.mode == BROWSER_CHECK_MODE,
+                    )
+                    .first()
+                )
+                if not execution:
+                    return
+
+                await self._ensure_runtime_ready(db, session=session, user_id=user_id)
+                result = await self._execute_browser_check(
+                    db,
+                    session=session,
+                    execution=execution,
+                    objective=objective,
+                )
+                if result.get("exit_code", 1) != 0:
+                    raise RuntimeError(
+                        "Browser check failed with "
+                        f"exit_code={result.get('exit_code')}"
+                    )
+
+                artifact = await self._export_browser_check_artifact(
+                    db,
+                    session=session,
+                    execution_id=execution_id,
+                    result=result,
+                )
+                if artifact:
+                    result["artifact"] = artifact
+
+                execution.status = SessionModeStatus.COMPLETE.value
+                execution.completed_at = utc_now()
+                execution.output_summary = result
+                self._record_browser_check_metadata(
+                    session,
+                    execution_id=execution_id,
+                    status=SessionModeStatus.COMPLETE.value,
+                    objective=objective,
+                    result=result,
+                    artifact=artifact,
+                )
+                self._create_browser_check_context_card(
+                    db,
+                    session=session,
+                    result=result,
+                    artifact=artifact,
+                )
+                session.last_activity = utc_now()
+                db.commit()
+
+                await self.ws_hub.send_to_session(
+                    session_public_id,
+                    WSMessageType.MODE_EVENT,
+                    {
+                        "mode": BROWSER_CHECK_MODE,
+                        "state": SessionModeStatus.COMPLETE.value,
+                        "execution_id": execution_id,
+                        "detail": "Browser check complete",
+                    },
+                )
+            except asyncio.CancelledError:
+                if session is not None and execution is not None:
+                    execution.status = SessionModeStatus.CANCELLED.value
+                    execution.completed_at = utc_now()
+                    execution.output_summary = result or None
+                    self._record_browser_check_metadata(
+                        session,
+                        execution_id=execution_id,
+                        status=SessionModeStatus.CANCELLED.value,
+                        objective=objective,
+                        result=result,
+                        artifact=None,
+                    )
+                    db.commit()
+                    await self.ws_hub.send_to_session(
+                        session_public_id,
+                        WSMessageType.MODE_EVENT,
+                        {
+                            "mode": BROWSER_CHECK_MODE,
+                            "state": SessionModeStatus.CANCELLED.value,
+                            "execution_id": execution_id,
+                            "detail": "Browser check cancelled",
+                        },
+                    )
+                raise
+            except Exception as exc:
+                if session is not None and execution is not None:
+                    result = dict(result or {})
+                    result["error"] = str(exc)
+                    execution.status = SessionModeStatus.FAILED.value
+                    execution.completed_at = utc_now()
+                    execution.error_message = str(exc)
+                    execution.output_summary = result
+                    self._record_browser_check_metadata(
+                        session,
+                        execution_id=execution_id,
+                        status=SessionModeStatus.FAILED.value,
+                        objective=objective,
+                        result=result,
+                        artifact=None,
+                    )
+                    session.last_activity = utc_now()
+                    db.commit()
+                    await self.ws_hub.send_to_session(
+                        session_public_id,
+                        WSMessageType.ERROR,
+                        {
+                            "message": str(exc),
+                            "execution_id": execution_id,
+                            "mode": BROWSER_CHECK_MODE,
+                        },
+                    )
+                    await self.ws_hub.send_to_session(
+                        session_public_id,
+                        WSMessageType.MODE_EVENT,
+                        {
+                            "mode": BROWSER_CHECK_MODE,
+                            "state": SessionModeStatus.FAILED.value,
+                            "execution_id": execution_id,
+                            "detail": str(exc),
+                        },
+                    )
+            finally:
+                db.close()
+
     def _schedule_execution_task(
         self,
         *,
@@ -716,9 +970,36 @@ class SessionExecutionOrchestrator:
 
         task.add_done_callback(_cleanup)
 
+    def _schedule_browser_check_task(
+        self,
+        *,
+        session_public_id: str,
+        user_id: int,
+        execution_id: str,
+        objective: str,
+    ) -> None:
+        task = asyncio.create_task(
+            self.run_browser_check(
+                session_public_id=session_public_id,
+                user_id=user_id,
+                execution_id=execution_id,
+                objective=objective,
+            ),
+            name=f"browser-check-{session_public_id}",
+        )
+        self._browser_check_tasks[session_public_id] = task
+
+        def _cleanup(done_task: asyncio.Task[None]) -> None:
+            current = self._browser_check_tasks.get(session_public_id)
+            if current is done_task:
+                self._browser_check_tasks.pop(session_public_id, None)
+
+        task.add_done_callback(_cleanup)
+
     def _has_active_task(self, session_public_id: str) -> bool:
         task = self._session_tasks.get(session_public_id)
-        return bool(task and not task.done())
+        sidecar_task = self._browser_check_tasks.get(session_public_id)
+        return bool(task and not task.done()) or bool(sidecar_task and not sidecar_task.done())
 
     def _remaining_modes(self, session: ChatSession) -> List[str]:
         pending: List[str] = []
@@ -862,6 +1143,17 @@ class SessionExecutionOrchestrator:
             return [
                 "Run MSWEA tester mode with the architect issue number.",
                 "Stream sandbox stdout/stderr/exit events to unified websocket clients.",
+            ]
+        if mode == SessionMode.CODER.value:
+            return [
+                "Run MSWEA coder mode with issue number and tester branch.",
+                "Parse PR metadata and export sandbox artifacts before termination.",
+            ]
+        if mode == BROWSER_CHECK_MODE:
+            return [
+                "Run MSWEA browser-check mode inside the existing sandbox workspace.",
+                "Start the frontend, inspect it with Playwright Chromium, and capture a screenshot.",
+                "Persist the visual report and screenshot artifact without terminating the sandbox.",
             ]
         return [
             "Run MSWEA coder mode with issue number and tester branch.",
@@ -1214,6 +1506,303 @@ class SessionExecutionOrchestrator:
 
         return "\n".join(command_lines)
 
+    def _build_browser_check_command(self) -> str:
+        config_path = MSWEA_CONFIG_PATHS[BROWSER_CHECK_MODE]
+        execution_dir_expr = f'"$workspace/{SANDBOX_EXECUTION_ROOT}/$pipeline_execution_id/{BROWSER_CHECK_MODE}"'
+        command_lines = [
+            "set -euo pipefail",
+            f'workspace="${{WORKSPACE_PATH:-{SANDBOX_WORKSPACE_PATH}}}"',
+            'HOME="${HOME:-/root}"',
+            'repo_branch="${REPO_BRANCH:-main}"',
+            'repo_url="${REPO_URL:-}"',
+            'pipeline_execution_id="${PIPELINE_EXECUTION_ID:-manual}"',
+            f'mode_name="{BROWSER_CHECK_MODE}"',
+            f"execution_dir={execution_dir_expr}",
+            'screenshot_path="${BROWSER_CHECK_SCREENSHOT_PATH:-$execution_dir/screenshot.png}"',
+            'report_path="${BROWSER_CHECK_REPORT_PATH:-$execution_dir/visual_report.md}"',
+            'summary_path="${BROWSER_CHECK_SUMMARY_PATH:-$execution_dir/summary.json}"',
+            'if [ -n "${GITHUB_TOKEN:-}" ]; then',
+            '  mkdir -p "$HOME"',
+            '  umask 077',
+            '  printf "machine github.com\\nlogin x-access-token\\npassword %s\\n" "$GITHUB_TOKEN" > "$HOME/.netrc"',
+            'fi',
+            'if [ "${repo_url#git@github.com:}" != "$repo_url" ]; then',
+            '  repo_url="https://github.com/${repo_url#git@github.com:}"',
+            'fi',
+            'if [ -d "$workspace/.git" ]; then',
+            '  cd "$workspace"',
+            'elif [ -e "$workspace" ] && [ "$(find "$workspace" -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1)" ]; then',
+            '  cd "$workspace"',
+            'elif [ ! -e "$workspace" ] && [ -n "$repo_url" ]; then',
+            '  mkdir -p "$(dirname "$workspace")"',
+            '  git clone --depth 1 -b "$repo_branch" "$repo_url" "$workspace"',
+            '  cd "$workspace"',
+            'else',
+            '  mkdir -p "$workspace"',
+            '  cd "$workspace"',
+            'fi',
+            'mkdir -p "$execution_dir" "$(dirname "$screenshot_path")" "$(dirname "$report_path")" "$(dirname "$summary_path")"',
+            'export WORKSPACE_PATH="$workspace"',
+            'export BROWSER_CHECK_SCREENSHOT_PATH="$screenshot_path"',
+            'export BROWSER_CHECK_REPORT_PATH="$report_path"',
+            'export BROWSER_CHECK_SUMMARY_PATH="$summary_path"',
+            'printf "%s\\n" "$mode_name" > "$execution_dir/mode.txt"',
+            'printf "%s\\n" "$repo_branch" > "$execution_dir/repo_branch.txt"',
+            'printf "%s\\n" "${BROWSER_CHECK_OBJECTIVE:-}" > "$execution_dir/objective.txt"',
+            'if [ -d .git ]; then',
+            '  git status --porcelain=v1 > "$execution_dir/before_status.txt" 2>/dev/null || true',
+            'else',
+            '  : > "$execution_dir/before_status.txt"',
+            'fi',
+            f'config_path="{config_path}"',
+            'if ! command -v mini >/dev/null 2>&1; then',
+            '  echo "mini-swe-agent CLI not found: expected executable named mini" >&2',
+            '  exit 127',
+            'fi',
+            'python_bin="${PYTHON:-}"',
+            'if [ -z "$python_bin" ]; then',
+            '  if command -v python3 >/dev/null 2>&1; then',
+            '    python_bin="python3"',
+            '  elif command -v python >/dev/null 2>&1; then',
+            '    python_bin="python"',
+            '  else',
+            '    echo "python interpreter not found: expected python3 or python" >&2',
+            '    exit 127',
+            '  fi',
+            'fi',
+            f'model_name="${{MSWEA_MODEL_NAME:-{get_model_config().agent_model_name}}}"',
+            'task_text="${BROWSER_CHECK_OBJECTIVE:-}"',
+            'task_text="$(printf "%s\\n\\nWorkspace: %s" "$task_text" "$workspace")"',
+            'task_text="$(printf "%s\\nScreenshot path: %s" "$task_text" "$screenshot_path")"',
+            'task_text="$(printf "%s\\nReport path: %s" "$task_text" "$report_path")"',
+            'task_text="$(printf "%s\\nSummary JSON path: %s" "$task_text" "$summary_path")"',
+            'task_text="$(printf "%s\\n\\nDo not edit implementation files. You may write generated artifacts and helpers under .yudai/." "$task_text")"',
+            'cmd=(mini -c "$config_path" -y -m "$model_name" -t "$task_text")',
+            'printf "%q " "${cmd[@]}" > "$execution_dir/command.txt"',
+            'if [ "${YUDAI_BROWSER_CHECK_COMMAND_PROBE:-0}" = "1" ]; then',
+            '  export mode_name config_path model_name',
+            '  "$python_bin" - "$execution_dir/command_probe.json" "${cmd[@]}" <<\'PY\'',
+            'import json',
+            'import os',
+            'import sys',
+            'payload = {',
+            '    "mode": os.environ.get("mode_name", ""),',
+            '    "workspace": os.environ.get("WORKSPACE_PATH", ""),',
+            '    "repo_url": os.environ.get("REPO_URL", ""),',
+            '    "repo_branch": os.environ.get("REPO_BRANCH", "main"),',
+            '    "config_path": os.environ.get("config_path", ""),',
+            '    "model_name": os.environ.get("model_name", ""),',
+            '    "objective": os.environ.get("BROWSER_CHECK_OBJECTIVE", ""),',
+            '    "screenshot_path": os.environ.get("BROWSER_CHECK_SCREENSHOT_PATH", ""),',
+            '    "report_path": os.environ.get("BROWSER_CHECK_REPORT_PATH", ""),',
+            '    "summary_path": os.environ.get("BROWSER_CHECK_SUMMARY_PATH", ""),',
+            '    "argv": sys.argv[2:],',
+            '}',
+            'path = sys.argv[1]',
+            'with open(path, "w", encoding="utf-8") as fh:',
+            '    json.dump(payload, fh, ensure_ascii=True, indent=2)',
+            '    fh.write("\\n")',
+            'print(json.dumps(payload, ensure_ascii=True))',
+            'PY',
+            '  exit 0',
+            'fi',
+            f"printf '[{BROWSER_CHECK_MODE}] running:'",
+            'printf " %q" "${cmd[@]}"',
+            'printf "\\n"',
+            'set +e',
+            '"${cmd[@]}" > >(tee "$execution_dir/stdout.log") 2> >(tee "$execution_dir/stderr.log" >&2)',
+            'exit_code=$?',
+            'set -e',
+            'printf "%s" "$exit_code" > "$execution_dir/exit_code.txt"',
+            'if [ "$exit_code" -ne 0 ]; then',
+            '  exit "$exit_code"',
+            'fi',
+            'if [ -d .git ]; then',
+            '  git status --porcelain=v1 > "$execution_dir/after_status.txt" 2>/dev/null || true',
+            'else',
+            '  : > "$execution_dir/after_status.txt"',
+            'fi',
+            '"$python_bin" - <<\'PY\'',
+            'import json',
+            'import os',
+            'import pathlib',
+            'import re',
+            'import struct',
+            'import subprocess',
+            'import sys',
+            'import zlib',
+            '',
+            'workspace = pathlib.Path(os.environ["WORKSPACE_PATH"]).resolve()',
+            'screenshot_path = pathlib.Path(os.environ["BROWSER_CHECK_SCREENSHOT_PATH"])',
+            'report_path = pathlib.Path(os.environ["BROWSER_CHECK_REPORT_PATH"])',
+            'summary_path = pathlib.Path(os.environ["BROWSER_CHECK_SUMMARY_PATH"])',
+            'execution_dir = summary_path.parent',
+            'critical = []',
+            '',
+            'def load_status_paths(path):',
+            '    if not path.exists():',
+            '        return []',
+            '    paths = []',
+            '    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():',
+            '        if not line.strip():',
+            '            continue',
+            '        raw_path = line[3:] if len(line) > 3 else line',
+            '        if " -> " in raw_path:',
+            '            raw_path = raw_path.split(" -> ", 1)[1]',
+            '        paths.append(raw_path.strip())',
+            '    return paths',
+            '',
+            'def allowed_setup_path(path):',
+            '    normalized = path.replace("\\\\", "/")',
+            '    name = pathlib.PurePosixPath(normalized).name',
+            '    if normalized.startswith(".yudai/"):',
+            '        return True',
+            '    if name in {',
+            '        "package.json", "package-lock.json", "npm-shrinkwrap.json",',
+            '        "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",',
+            '        ".npmrc", ".yarnrc", ".yarnrc.yml",',
+            '    }:',
+            '        return True',
+            '    return False',
+            '',
+            'def png_unique_pixel_count(path):',
+            '    data = path.read_bytes()',
+            '    if len(data) < 33 or data[:8] != b"\\x89PNG\\r\\n\\x1a\\n":',
+            '        raise ValueError("not a PNG file")',
+            '    pos = 8',
+            '    width = height = bit_depth = color_type = None',
+            '    idat = bytearray()',
+            '    palette = None',
+            '    while pos + 8 <= len(data):',
+            '        length = struct.unpack(">I", data[pos:pos+4])[0]',
+            '        chunk_type = data[pos+4:pos+8]',
+            '        chunk = data[pos+8:pos+8+length]',
+            '        pos += 12 + length',
+            '        if chunk_type == b"IHDR":',
+            '            width, height, bit_depth, color_type, _, _, _ = struct.unpack(">IIBBBBB", chunk)',
+            '        elif chunk_type == b"PLTE":',
+            '            palette = chunk',
+            '        elif chunk_type == b"IDAT":',
+            '            idat.extend(chunk)',
+            '        elif chunk_type == b"IEND":',
+            '            break',
+            '    if not width or not height or not idat:',
+            '        raise ValueError("missing PNG image data")',
+            '    channels_by_type = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}',
+            '    channels = channels_by_type.get(color_type)',
+            '    if channels is None or bit_depth != 8:',
+            '        raw = zlib.decompress(bytes(idat))',
+            '        return len(set(raw))',
+            '    bpp = channels',
+            '    row_len = width * channels',
+            '    raw = zlib.decompress(bytes(idat))',
+            '    rows = []',
+            '    prev = bytearray(row_len)',
+            '    offset = 0',
+            '    for _ in range(height):',
+            '        filter_type = raw[offset]',
+            '        offset += 1',
+            '        row = bytearray(raw[offset:offset + row_len])',
+            '        offset += row_len',
+            '        for i in range(row_len):',
+            '            left = row[i - bpp] if i >= bpp else 0',
+            '            up = prev[i]',
+            '            up_left = prev[i - bpp] if i >= bpp else 0',
+            '            if filter_type == 1:',
+            '                row[i] = (row[i] + left) & 0xff',
+            '            elif filter_type == 2:',
+            '                row[i] = (row[i] + up) & 0xff',
+            '            elif filter_type == 3:',
+            '                row[i] = (row[i] + ((left + up) // 2)) & 0xff',
+            '            elif filter_type == 4:',
+            '                p = left + up - up_left',
+            '                pa, pb, pc = abs(p - left), abs(p - up), abs(p - up_left)',
+            '                predictor = left if pa <= pb and pa <= pc else up if pb <= pc else up_left',
+            '                row[i] = (row[i] + predictor) & 0xff',
+            '            elif filter_type != 0:',
+            '                raise ValueError(f"unsupported PNG filter {filter_type}")',
+            '        rows.append(bytes(row))',
+            '        prev = row',
+            '    pixels = set()',
+            '    sample_stride = max(1, (width * height) // 250000)',
+            '    index = 0',
+            '    for row in rows:',
+            '        for i in range(0, len(row), bpp):',
+            '            if index % sample_stride == 0:',
+            '                pixels.add(row[i:i+bpp])',
+            '                if len(pixels) > 1:',
+            '                    return len(pixels)',
+            '            index += 1',
+            '    return len(pixels)',
+            '',
+            'if not report_path.is_file() or report_path.stat().st_size == 0:',
+            '    critical.append("visual report is missing or empty")',
+            'if not summary_path.is_file() or summary_path.stat().st_size == 0:',
+            '    critical.append("summary JSON is missing or empty")',
+            'if not screenshot_path.is_file() or screenshot_path.stat().st_size == 0:',
+            '    critical.append("screenshot is missing or empty")',
+            '',
+            'summary = {}',
+            'if summary_path.is_file() and summary_path.stat().st_size > 0:',
+            '    try:',
+            '        summary = json.loads(summary_path.read_text(encoding="utf-8"))',
+            '        if not isinstance(summary, dict):',
+            '            critical.append("summary JSON is not an object")',
+            '            summary = {}',
+            '    except Exception as exc:',
+            '        critical.append(f"summary JSON is invalid: {exc}")',
+            '',
+            'if screenshot_path.is_file() and screenshot_path.stat().st_size > 0:',
+            '    try:',
+            '        if png_unique_pixel_count(screenshot_path) < 2:',
+            '            critical.append("screenshot appears visually blank")',
+            '    except Exception as exc:',
+            '        critical.append(f"screenshot is corrupt or unreadable: {exc}")',
+            '',
+            'before_paths = load_status_paths(execution_dir / "before_status.txt")',
+            'after_paths = load_status_paths(execution_dir / "after_status.txt")',
+            'newly_changed = sorted(set(after_paths) - set(before_paths))',
+            'disallowed = [path for path in newly_changed if not allowed_setup_path(path)]',
+            'if disallowed:',
+            '    critical.append("browser check changed implementation files: " + ", ".join(disallowed[:20]))',
+            '',
+            'existing_critical = summary.get("critical_failures")',
+            'if isinstance(existing_critical, list):',
+            '    critical.extend(str(item) for item in existing_critical if str(item).strip())',
+            'elif existing_critical:',
+            '    critical.append(str(existing_critical))',
+            '',
+            'changed_file_summary = {',
+            '    "before": before_paths,',
+            '    "after": after_paths,',
+            '    "newly_changed": newly_changed,',
+            '    "disallowed": disallowed,',
+            '}',
+            'summary.update({',
+            '    "mode": "browser_check",',
+            '    "status": "failed" if critical else summary.get("status", "complete"),',
+            '    "screenshot_path": str(screenshot_path),',
+            '    "report_path": str(report_path),',
+            '    "changed_file_summary": changed_file_summary,',
+            '    "critical_failures": critical,',
+            '})',
+            'summary.setdefault("console_warning_count", 0)',
+            'summary.setdefault("failed_request_count", 0)',
+            'summary_path.write_text(json.dumps(summary, ensure_ascii=True, indent=2) + "\\n", encoding="utf-8")',
+            'if critical:',
+            '    print(json.dumps(summary, ensure_ascii=True))',
+            '    sys.exit(4)',
+            'print(json.dumps(summary, ensure_ascii=True))',
+            'PY',
+            f'printf "{BROWSER_CHECK_SUMMARY_START}\\n"',
+            'cat "$summary_path"',
+            f'printf "\\n{BROWSER_CHECK_SUMMARY_END}\\n"',
+            f'printf "{BROWSER_CHECK_REPORT_START}\\n"',
+            'cat "$report_path"',
+            f'printf "\\n{BROWSER_CHECK_REPORT_END}\\n"',
+        ]
+        return "\n".join(command_lines)
+
     def _build_summary_write_command(
         self,
         *,
@@ -1273,6 +1862,266 @@ class SessionExecutionOrchestrator:
         )
         if result.get("exit_code", 1) != 0:
             raise RuntimeError(f"Failed to write sandbox summary for {mode} mode")
+
+    @staticmethod
+    def _extract_between_markers(text: str, start: str, end: str) -> Optional[str]:
+        start_index = text.rfind(start)
+        if start_index < 0:
+            return None
+        start_index += len(start)
+        end_index = text.find(end, start_index)
+        if end_index < 0:
+            return None
+        return text[start_index:end_index].strip()
+
+    def _parse_browser_check_output(self, output_text: str) -> Dict[str, Any]:
+        parsed: Dict[str, Any] = {}
+
+        summary_text = self._extract_between_markers(
+            output_text,
+            BROWSER_CHECK_SUMMARY_START,
+            BROWSER_CHECK_SUMMARY_END,
+        )
+        if summary_text:
+            try:
+                summary = json.loads(summary_text)
+                if isinstance(summary, dict):
+                    parsed["summary"] = summary
+            except Exception as exc:
+                parsed["summary_parse_error"] = str(exc)
+
+        report_text = self._extract_between_markers(
+            output_text,
+            BROWSER_CHECK_REPORT_START,
+            BROWSER_CHECK_REPORT_END,
+        )
+        if report_text:
+            parsed["visual_report"] = report_text
+
+        if "summary" not in parsed:
+            for line in reversed(output_text.splitlines()):
+                raw = line.strip()
+                if not raw.startswith("{"):
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except Exception:
+                    continue
+                if isinstance(payload, dict) and payload.get("mode") == BROWSER_CHECK_MODE:
+                    parsed["summary"] = payload
+                    break
+
+        summary = parsed.get("summary")
+        if isinstance(summary, dict):
+            if isinstance(summary.get("screenshot_path"), str):
+                parsed["screenshot_path"] = summary["screenshot_path"]
+            if isinstance(summary.get("report_path"), str):
+                parsed["report_path"] = summary["report_path"]
+            parsed["console_warning_count"] = self._to_int(summary.get("console_warning_count")) or 0
+            parsed["failed_request_count"] = self._to_int(summary.get("failed_request_count")) or 0
+            parsed["changed_file_summary"] = summary.get("changed_file_summary")
+
+        return parsed
+
+    async def _execute_browser_check(
+        self,
+        db: Session,
+        *,
+        session: ChatSession,
+        execution: AgentExecution,
+        objective: str,
+    ) -> Dict[str, Any]:
+        async def _relay_event(event: Dict[str, Any]) -> None:
+            if event.get("type") != WSMessageType.SANDBOX_STREAM.value:
+                return
+            payload = event.get("payload", {}) or {}
+            payload["mode"] = BROWSER_CHECK_MODE
+            payload["execution_id"] = execution.id
+            await self.ws_hub.send_to_session(
+                session.session_id,
+                WSMessageType.SANDBOX_STREAM,
+                payload,
+            )
+
+        workspace = session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH
+        execution_root = f"{workspace}/{SANDBOX_EXECUTION_ROOT}/{execution.id}/{BROWSER_CHECK_MODE}"
+        env: Dict[str, str] = {
+            "MSWEA_CONFIG_ROOT": MSWEA_CONFIG_ROOT,
+            "PIPELINE_EXECUTION_ID": execution.id,
+            "WORKSPACE_PATH": workspace,
+            "REPO_BRANCH": session.repo_branch or "main",
+            "BROWSER_CHECK_OBJECTIVE": objective,
+            "BROWSER_CHECK_SCREENSHOT_PATH": f"{execution_root}/screenshot.png",
+            "BROWSER_CHECK_REPORT_PATH": f"{execution_root}/visual_report.md",
+            "BROWSER_CHECK_SUMMARY_PATH": f"{execution_root}/summary.json",
+        }
+        repo_url = session.repo_url
+        if not repo_url and session.repo_owner and session.repo_name:
+            repo_url = f"https://github.com/{session.repo_owner}/{session.repo_name}.git"
+        if repo_url:
+            env["REPO_URL"] = repo_url
+
+        github_token = self._get_user_github_token(db, session.user_id)
+        if github_token:
+            env["GITHUB_TOKEN"] = github_token
+
+        env.update(dict(get_sandbox_config().env_passthrough_values))
+
+        result = await self.broker.run_command(
+            db,
+            session=session,
+            command=self._build_browser_check_command(),
+            cwd=workspace,
+            env=env,
+            timeout_seconds=get_sandbox_config().command_timeout_seconds,
+            on_event=_relay_event,
+        )
+        output_text = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
+        parsed = self._parse_browser_check_output(output_text)
+        result.update(parsed)
+        result["config_path"] = MSWEA_CONFIG_PATHS[BROWSER_CHECK_MODE]
+        result["execution_dir"] = execution_root
+        return result
+
+    async def _export_browser_check_artifact(
+        self,
+        db: Session,
+        *,
+        session: ChatSession,
+        execution_id: str,
+        result: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        runtime = self.lifecycle._get_latest_runtime(db, session_id=session.id)
+        if not runtime or not runtime.sandbox_id:
+            return None
+
+        sandbox = self.lifecycle.get_sandbox_or_404(db, runtime.sandbox_id)
+        if sandbox.status == SandboxStatus.TERMINATED.value or not sandbox.tunnel_url:
+            return None
+
+        source_path = f"{SANDBOX_EXECUTION_ROOT}/{execution_id}/{BROWSER_CHECK_MODE}"
+        workflow_name = f"{execution_id}-{BROWSER_CHECK_MODE}"
+        runtime_summary = {
+            "status": SessionModeStatus.COMPLETE.value,
+            "execution_id": execution_id,
+            "mode": BROWSER_CHECK_MODE,
+            "screenshot_path": result.get("screenshot_path"),
+            "report_path": result.get("report_path"),
+            "console_warning_count": result.get("console_warning_count"),
+            "failed_request_count": result.get("failed_request_count"),
+        }
+        export_info = await self.lifecycle.cache_store.download_and_export_bundle(
+            tunnel_url=sandbox.tunnel_url,
+            session_public_id=session.session_id,
+            runtime_id=runtime.runtime_id,
+            sandbox_id=sandbox.id,
+            identity_key=sandbox.identity_key,
+            workflow_name=workflow_name,
+            archive_name="browser-check.tar.gz",
+            source_paths=[source_path],
+            runtime_summary=runtime_summary,
+            cwd=session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH,
+            env={"WORKSPACE_PATH": session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH},
+            object_store={
+                "provider": "s3",
+                "key": self._browser_check_artifact_key(
+                    session=session,
+                    sandbox=sandbox,
+                    execution_id=execution_id,
+                ),
+                "etag": None,
+            },
+        )
+
+        artifact = SessionArtifact(
+            session_id=session.id,
+            runtime_id=runtime.id,
+            artifact_key=self._browser_check_artifact_key(
+                session=session,
+                sandbox=sandbox,
+                execution_id=execution_id,
+            ),
+            artifact_type="browser_check",
+            cache_manifest_path=export_info["metadata"]["cache_manifest_path"],
+            bundle_path=export_info["bundle_path"],
+            checksum_sha256=export_info["bundle_sha256"],
+            object_etag=None,
+            byte_size=export_info["bundle_size"],
+            artifact_metadata=export_info["metadata"],
+            exported_at=utc_now(),
+        )
+        db.add(artifact)
+        db.flush()
+        return {
+            "bundle_path": export_info["bundle_path"],
+            "metadata_path": export_info["metadata_path"],
+            "checksum_sha256": export_info["bundle_sha256"],
+            "byte_size": export_info["bundle_size"],
+            "artifact_type": "browser_check",
+            "artifact_id": artifact.id,
+        }
+
+    def _record_browser_check_metadata(
+        self,
+        session: ChatSession,
+        *,
+        execution_id: str,
+        status: str,
+        objective: str,
+        result: Dict[str, Any],
+        artifact: Optional[Dict[str, Any]],
+    ) -> None:
+        metadata = dict(session.mode_metadata or {})
+        metadata["browser_check"] = {
+            "execution_id": execution_id,
+            "status": status,
+            "objective": objective,
+            "completed_at": utc_now().isoformat(),
+            "screenshot_path": result.get("screenshot_path"),
+            "report_path": result.get("report_path"),
+            "visual_report": result.get("visual_report"),
+            "artifact": artifact,
+            "console_warning_count": result.get("console_warning_count"),
+            "failed_request_count": result.get("failed_request_count"),
+            "changed_file_summary": result.get("changed_file_summary"),
+            "error": result.get("error"),
+        }
+        session.mode_metadata = metadata
+
+    def _create_browser_check_context_card(
+        self,
+        db: Session,
+        *,
+        session: ChatSession,
+        result: Dict[str, Any],
+        artifact: Optional[Dict[str, Any]],
+    ) -> None:
+        report = str(result.get("visual_report") or "").strip()
+        summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+        artifact_ref = json.dumps(artifact or {}, ensure_ascii=True, indent=2)
+        content_parts = [
+            "Browser check visual report:",
+            report or "No textual report was captured.",
+            "",
+            "Screenshot artifact reference:",
+            artifact_ref,
+            "",
+            "Summary:",
+            json.dumps(summary, ensure_ascii=True, indent=2),
+        ]
+        content = "\n".join(content_parts).strip()
+        db.add(
+            ContextCard(
+                user_id=session.user_id,
+                session_id=session.id,
+                title="Frontend Browser Check",
+                description="Visual verification report and screenshot artifact reference.",
+                content=content,
+                source="chat",
+                tokens=max(1, len(content) // 4),
+                is_active=True,
+            )
+        )
 
     async def _execute_mswea_mode(
         self,
@@ -1635,6 +2484,19 @@ class SessionExecutionOrchestrator:
             execution_status=execution_status,
             execution_id=execution_id,
             artifact_source_paths=[f"{SANDBOX_EXECUTION_ROOT}/{execution_id}"],
+        )
+
+    @staticmethod
+    def _browser_check_artifact_key(
+        *,
+        session: ChatSession,
+        sandbox: Any,
+        execution_id: str,
+    ) -> str:
+        return (
+            "session-artifacts/"
+            f"{sandbox.org_slug}/{sandbox.repo_owner}/{sandbox.repo_name}/"
+            f"{sandbox.environment}/{session.session_id}/{execution_id}-browser-check.tar.gz"
         )
 
 
