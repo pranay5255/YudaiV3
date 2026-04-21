@@ -83,7 +83,7 @@ services:
 
   # PostgreSQL Database (included for local deployment)
   db:
-    image: pgvector/pgvector:pg15
+    image: postgres:15
     container_name: yudai-db
     restart: unless-stopped
     env_file:

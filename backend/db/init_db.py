@@ -28,7 +28,6 @@ def wait_for_database(max_retries=30, delay=2):
                 pool_pre_ping=True
             )
             with engine.connect() as conn:
-                conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
                 conn.execute(text("SELECT 1"))
             print("✓ Database is ready!")
             return engine
@@ -224,8 +223,6 @@ def create_tables_standalone(engine):
             repo_url VARCHAR(1000),
             repo_context JSON,
             runtime_workspace_path VARCHAR(512),
-            generate_embeddings BOOLEAN DEFAULT FALSE,
-            generate_facts_memories BOOLEAN DEFAULT FALSE,
             is_active BOOLEAN DEFAULT TRUE,
             total_messages INTEGER DEFAULT 0,
             total_tokens INTEGER DEFAULT 0,
@@ -261,10 +258,25 @@ def create_tables_standalone(engine):
             tokens INTEGER DEFAULT 0,
             model_used VARCHAR(100),
             processing_time FLOAT,
-            context_cards JSON,
+            context_cards JSONB,
             referenced_files JSON,
             error_message TEXT,
             actions JSON,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS context_cards (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            content TEXT NOT NULL,
+            source VARCHAR(50) NOT NULL,
+            tokens INTEGER DEFAULT 0,
+            is_active BOOLEAN DEFAULT TRUE,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             updated_at TIMESTAMP WITH TIME ZONE
         )
@@ -290,26 +302,10 @@ def create_tables_standalone(engine):
         )
         """,
         """
-        CREATE TABLE IF NOT EXISTS context_cards (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-            session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
-            title VARCHAR(255) NOT NULL,
-            description TEXT NOT NULL,
-            content TEXT NOT NULL,
-            source VARCHAR(50) NOT NULL,
-            tokens INTEGER DEFAULT 0,
-            is_active BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE
-        )
-        """,
-        """
         CREATE TABLE IF NOT EXISTS user_issues (
             id SERIAL PRIMARY KEY,
             user_id INTEGER REFERENCES users(id),
             issue_id VARCHAR(255) UNIQUE NOT NULL,
-            context_card_id INTEGER,
             issue_text_raw TEXT NOT NULL,
             issue_steps JSON,
             title VARCHAR(255) NOT NULL,
@@ -327,46 +323,6 @@ def create_tables_standalone(engine):
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             updated_at TIMESTAMP WITH TIME ZONE,
             processed_at TIMESTAMP WITH TIME ZONE
-        )
-        """,
-
-        # ---- File Items & Embeddings ----
-        """
-        CREATE TABLE IF NOT EXISTS file_items (
-            id SERIAL PRIMARY KEY,
-            session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE NOT NULL,
-            repository_id INTEGER REFERENCES repositories(id),
-            name VARCHAR(500) NOT NULL,
-            path VARCHAR(1000),
-            type VARCHAR(50) NOT NULL DEFAULT 'INTERNAL',
-            tokens INTEGER DEFAULT 0,
-            category VARCHAR(100) NOT NULL,
-            is_directory BOOLEAN,
-            content_size INTEGER,
-            file_name VARCHAR(500),
-            file_path VARCHAR(1000),
-            file_type VARCHAR(100),
-            content_summary TEXT,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS file_embeddings (
-            id SERIAL PRIMARY KEY,
-            session_id INTEGER REFERENCES chat_sessions(id) ON DELETE CASCADE,
-            repository_id INTEGER REFERENCES repositories(id),
-            file_item_id INTEGER REFERENCES file_items(id) NOT NULL,
-            file_path VARCHAR(1000) NOT NULL,
-            file_name VARCHAR(500) NOT NULL,
-            embedding VECTOR(384),
-            chunk_index INTEGER DEFAULT 0,
-            chunk_text TEXT NOT NULL,
-            tokens INTEGER DEFAULT 0,
-            session_tokens_used INTEGER DEFAULT 0,
-            file_metadata JSON,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE
         )
         """,
 
@@ -598,16 +554,6 @@ def create_tables_standalone(engine):
         "CREATE INDEX IF NOT EXISTS idx_user_issues_issue_id ON user_issues(issue_id)",
         "CREATE INDEX IF NOT EXISTS idx_user_issues_session_id ON user_issues(session_id)",
         "CREATE INDEX IF NOT EXISTS idx_user_issues_status ON user_issues(status)",
-
-        # File item indexes
-        "CREATE INDEX IF NOT EXISTS idx_file_items_session_id ON file_items(session_id)",
-        "CREATE INDEX IF NOT EXISTS idx_file_items_repository_id ON file_items(repository_id)",
-
-        # File embedding indexes
-        "CREATE INDEX IF NOT EXISTS idx_file_embeddings_session_id ON file_embeddings(session_id)",
-        "CREATE INDEX IF NOT EXISTS idx_file_embeddings_repository_id ON file_embeddings(repository_id)",
-        "CREATE INDEX IF NOT EXISTS idx_file_embeddings_file_path ON file_embeddings(file_path)",
-        "CREATE INDEX IF NOT EXISTS idx_file_embeddings_file_item_id ON file_embeddings(file_item_id)",
 
         # Chat session indexes
         "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)",
@@ -863,8 +809,6 @@ def check_database_health():
                     "chat_messages",
                     "context_cards",
                     "user_issues",
-                    "file_items",
-                    "file_embeddings",
                     "github_app_installations",
                     "oauth_states",
                     "ai_models",

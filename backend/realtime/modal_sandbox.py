@@ -34,7 +34,6 @@ SANDBOX_SERVER_PIP_PACKAGES = (
     "websockets",
     "python-jose[cryptography]",
     "passlib",
-    "pgvector",
     "psycopg2-binary",
 )
 

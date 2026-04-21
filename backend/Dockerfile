@@ -29,28 +29,14 @@ RUN pip install --upgrade pip && \
 # Copy application code
 COPY . .
 
-# Pre-download the sentence-transformers model to avoid runtime delays
-# Set environment variables for model caching
-ENV TRANSFORMERS_CACHE=/tmp/transformers_cache
-ENV HF_HOME=/tmp/huggingface_cache
-RUN python download_model.py && \
-    echo "Model download completed successfully"
-
 # Create non-root user for production (no sudo, minimal privileges)
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     chown -R appuser:appuser /app && \
     chmod +x /app/start.sh
 
-# Fix sentence-transformers cache permissions (after model download)
 RUN mkdir -p /home/appuser/.cache && \
-    mkdir -p /tmp/transformers_cache && \
-    mkdir -p /tmp/huggingface_cache && \
     chown -R appuser:appuser /home/appuser && \
-    chown -R appuser:appuser /tmp/transformers_cache && \
-    chown -R appuser:appuser /tmp/huggingface_cache && \
-    chmod -R 755 /home/appuser && \
-    chmod -R 755 /tmp/transformers_cache && \
-    chmod -R 755 /tmp/huggingface_cache
+    chmod -R 755 /home/appuser
 
 # Switch to non-root user
 USER appuser

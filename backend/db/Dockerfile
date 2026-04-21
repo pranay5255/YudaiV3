@@ -1,5 +1,4 @@
-# Use pre-built pgvector image as base (includes pgvector extension)
-FROM pgvector/pgvector:pg15
+FROM postgres:15
 
 # Set environment variables for database initialization
 ENV POSTGRES_DB=yudai_dev

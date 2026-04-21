@@ -10,7 +10,7 @@ import requests
 
 # Import Base from unified models
 from models import Base
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from utils import utc_now
@@ -34,16 +34,6 @@ engine = create_engine(
 )
 
 
-# Enable pgvector extension for vector similarity search
-@event.listens_for(engine, "connect")
-def set_postgres_pragma(dbapi_connection, connection_record):
-    """Enable pgvector extension when connecting to PostgreSQL"""
-    if DATABASE_URL.startswith("postgresql"):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-        cursor.close()
-
-
 # Create session maker
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -65,16 +55,6 @@ def init_db():
     """
     try:
         print("Initializing database with SQLAlchemy models...")
-
-        # Create pgvector extension for PostgreSQL
-        if DATABASE_URL.startswith("postgresql"):
-            try:
-                with engine.connect() as conn:
-                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-                    conn.commit()
-                    print("✓ pgvector extension enabled")
-            except Exception as e:
-                print(f"⚠ Warning: Could not enable pgvector extension: {e}")
 
         # Import all models here to ensure they are registered with SQLAlchemy
         # This ensures Base.metadata has all tables including Sandbox, SessionRuntime, etc.
@@ -213,8 +193,6 @@ def create_sample_data():
         ChatMessage,
         ChatSession,
         Commit,
-        ContextCard,
-        FileEmbedding,
         Issue,
         PullRequest,
         Repository,
@@ -454,8 +432,6 @@ def create_sample_data():
             db.add(commit)
         db.commit()
 
-        # Note: FileItem and FileAnalysis models have been removed from models.py
-        # Sample data for these models is no longer created
         # The swe_agent_configs / ai_solve_* tables have also been retired;
         # Solve/SolveRun rows now capture solver telemetry end-to-end.
 
@@ -464,14 +440,12 @@ def create_sample_data():
             UserIssue(
                 user_id=1,
                 issue_id="issue_001",
-                # context_card_id=1,
                 issue_text_raw="Need help implementing OAuth2 authentication",
                 issue_steps='["Set up OAuth2 provider", "Implement callback handler", "Add JWT token validation"]',
                 title="OAuth2 Authentication Implementation",
                 description="Help needed to implement OAuth2 authentication flow",
                 session_id="session_001",
                 # chat_session_id=1,  # DISABLED - ChatSession model commented out
-                # context_cards='["card_001", "card_002"]',
                 # ideas='["idea_001"]',
                 repo_owner="alice_dev",
                 repo_name="awesome-project",
@@ -569,74 +543,6 @@ def create_sample_data():
                 "UPDATE chat_sessions SET total_messages = 1, total_tokens = 15 WHERE id = 2"
             )
         )
-        db.commit()
-
-        # Sample Context Cards
-        sample_context_cards = [
-            ContextCard(
-                user_id=1,
-                session_id=1,
-                title="OAuth2 Flow Documentation",
-                description="Essential OAuth2 implementation guide",
-                content="OAuth2 is an authorization framework that enables applications to obtain limited access to user accounts...",
-                source="upload",
-                tokens=150,
-            ),
-            ContextCard(
-                user_id=1,
-                session_id=1,
-                title="Flask-OAuthlib Example",
-                description="Code example for Flask OAuth integration",
-                content="```python\nfrom flask_oauthlib.client import OAuth\n\noauth = OAuth(app)\n```",
-                source="chat",
-                tokens=75,
-                is_active=True,
-            ),
-            ContextCard(
-                user_id=2,
-                session_id=2,
-                title="React Performance Tips",
-                description="Best practices for React optimization",
-                content="1. Use React.memo for functional components\n2. Implement useMemo for expensive calculations\n3. Use useCallback for function references",
-                source="chat",
-                tokens=120,
-            ),
-        ]
-
-        for context_card in sample_context_cards:
-            db.add(context_card)
-        db.commit()
-
-        # Sample File Embeddings for session context
-        sample_file_embeddings = [
-            FileEmbedding(
-                session_id=1,
-                repository_id=1,
-                file_path="src/main.py",
-                file_name="main.py",
-                file_type="python",
-                file_content="# Main application file\n\ndef main():\n    print('Hello, World!')\n\nif __name__ == '__main__':\n    main()",
-                chunk_index=0,
-                chunk_text="# Main application file\n\ndef main():\n    print('Hello, World!')",
-                tokens=25,
-                file_metadata='{"size": 500, "encoding": "utf-8", "lines": 6}',
-            ),
-            FileEmbedding(
-                session_id=1,
-                repository_id=1,
-                file_path="requirements.txt",
-                file_name="requirements.txt",
-                file_type="text",
-                file_content="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
-                chunk_index=0,
-                chunk_text="flask==2.0.1\nsqlalchemy==1.4.23\nrequests==2.26.0",
-                tokens=15,
-                file_metadata='{"size": 200, "encoding": "utf-8", "lines": 3}',
-            ),
-        ]
-
-        for file_embedding in sample_file_embeddings:
-            db.add(file_embedding)
         db.commit()
 
         # NOTE: fetch_and_add_openrouter_models() removed from startup path.
