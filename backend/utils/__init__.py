@@ -7,8 +7,6 @@ This package contains utility functions and classes used across the application.
 from datetime import datetime, timezone
 from typing import Optional
 
-from .chunking import FileChunker, create_file_chunker
-
 
 def utc_now() -> datetime:
     """Return the current time in UTC as a timezone-aware datetime."""
@@ -39,4 +37,4 @@ def ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
     return dt.replace(tzinfo=timezone.utc)
 
 
-__all__ = ['FileChunker', 'create_file_chunker', 'utc_now', 'ensure_utc']
+__all__ = ['utc_now', 'ensure_utc']
