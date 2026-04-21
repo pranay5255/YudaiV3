@@ -37,6 +37,7 @@ from yudai.models import (  # noqa: F401
     ExecutionRequest,
     ExecutionResponse,
     ExecutionStatusResponse,
+    FrontendBrowserCheckToolRequest,
     GitHubAppInstallationResponse,
     GitHubRepo,
     SessionContextResponse,
@@ -90,7 +91,7 @@ class SandboxState(BaseModel):
 
 class ExecutionStatus(BaseModel):
     status: Literal["idle", "running", "complete", "failed"]
-    mode: Literal["architect", "tester", "coder"] | None = None
+    mode: Literal["architect", "tester", "coder", "browser_check"] | None = None
     detail: str | None = None
 
 
