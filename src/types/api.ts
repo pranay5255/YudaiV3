@@ -157,6 +157,13 @@ export interface CreateGitHubIssueResponse {
   execution_id?: string;
   execution_status?: string;
   execution_error?: string;
+  requires_confirmation?: boolean;
+  confirmation_question_id?: string;
+  pending_tool?: string;
+}
+
+export interface CreateGitHubIssueToolRequest {
+  issue_id: string;
 }
 
 // ============================================================================
