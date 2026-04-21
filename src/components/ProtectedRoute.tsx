@@ -1,5 +1,6 @@
-import React, { ReactNode } from 'react';
+import { ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
 interface ProtectedRouteProps {
@@ -8,36 +9,32 @@ interface ProtectedRouteProps {
   loadingComponent?: ReactNode;
 }
 
-/**
- * ProtectedRoute component that guards routes requiring authentication
- * Shows loading spinner during auth verification
- * Redirects to login if not authenticated
- */
-export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
+export function ProtectedRoute({
   children,
   fallback,
-  loadingComponent
-}) => {
+  loadingComponent,
+}: ProtectedRouteProps): JSX.Element {
   const { isAuthenticated, isLoading, user } = useAuth();
 
-  // Show loading spinner while checking authentication (with timeout fallback)
   if (isLoading) {
-    return loadingComponent || (
-      <div className="min-h-screen bg-bg flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-fg/70">Verifying authentication...</p>
-          <p className="text-xs text-fg/50 mt-2">This may take a few seconds...</p>
+    return loadingComponent ? (
+      <>{loadingComponent}</>
+    ) : (
+      <div className="grid min-h-dvh place-items-center bg-bg text-fg">
+        <div className="rounded-lg bg-bg-secondary p-5 text-center shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+          <div className="mx-auto mb-4 grid size-12 place-items-center rounded-lg bg-cyan/10 text-cyan shadow-[0_0_0_1px_rgba(34,211,238,0.2)]">
+            <Loader2 aria-hidden="true" className="size-5 animate-spin" />
+          </div>
+          <p className="text-sm font-medium">Verifying session</p>
+          <p className="mt-1 text-xs text-fg-muted">GitHub authentication</p>
         </div>
       </div>
     );
   }
 
-  // Redirect to login if not authenticated
   if (!isAuthenticated || !user) {
-    return fallback ? <>{fallback}</> : <Navigate to="/auth/login" replace />;
+    return fallback ? <>{fallback}</> : <Navigate replace to="/auth/login" />;
   }
 
-  // Render protected content
-  return <>{children}</>;
-};
+  return <div className="min-h-dvh">{children}</div>;
+}
