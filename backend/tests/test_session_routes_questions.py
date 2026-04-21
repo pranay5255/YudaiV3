@@ -515,6 +515,136 @@ def test_create_github_issue_tool_wraps_issue_ops_and_emits_tool_call(
     assert lifecycle_calls[0]["issue_number"] == 88
 
 
+def test_create_github_issue_tool_rejects_issue_from_other_session_before_issue_ops(
+    db_and_user,
+    monkeypatch,
+):
+    db, user, session = db_and_user
+    other_session = ChatSession(
+        user_id=user.id,
+        session_id="session_other_issue_owner",
+        title="Other Issue Session",
+        repo_owner="octocat",
+        repo_name="yudaiv3",
+        repo_branch="main",
+        is_active=True,
+        total_messages=0,
+        total_tokens=0,
+        mode_metadata={},
+    )
+    db.add(other_session)
+    issue = UserIssue(
+        user_id=user.id,
+        issue_id="issue_wrong_session",
+        title="Wrong session issue",
+        description="This issue belongs to another session.",
+        issue_text_raw="Do not publish this from the active session.",
+        issue_steps=["Validate session ownership"],
+        session_id=other_session.session_id,
+        repo_owner="octocat",
+        repo_name="yudaiv3",
+        priority="medium",
+        status="pending",
+        tokens_used=1,
+    )
+    db.add(issue)
+    db.commit()
+
+    fake_issue_ops = types.ModuleType("daifuUserAgent.IssueOps")
+    calls: list[dict[str, object]] = []
+
+    class FakeIssueService:
+        def __init__(self, db):
+            self.db = db
+
+        async def create_github_issue_from_user_issue(self, user_id, issue_id, context_bundle=None):
+            calls.append({"user_id": user_id, "issue_id": issue_id})
+            return None
+
+    fake_issue_ops.IssueService = FakeIssueService
+    monkeypatch.setitem(sys.modules, "daifuUserAgent.IssueOps", fake_issue_ops)
+
+    with pytest.raises(session_routes.HTTPException) as exc_info:
+        asyncio.run(
+            session_routes.execute_create_github_issue_tool(
+                session_id=session.session_id,
+                request=CreateGitHubIssueToolRequest(issue_id=issue.issue_id),
+                db=db,
+                current_user=user,
+            )
+        )
+
+    assert exc_info.value.status_code == 404
+    assert calls == []
+
+
+def test_create_github_issue_tool_requires_pending_issue_questions_answered(
+    db_and_user,
+    monkeypatch,
+):
+    db, user, session = db_and_user
+
+    issue = UserIssue(
+        user_id=user.id,
+        issue_id="issue_pending_clarification",
+        title="Needs clarification",
+        description="This issue has an unanswered task question.",
+        issue_text_raw="The GitHub issue should wait until clarification is answered.",
+        issue_steps=["Ask question", "Answer question", "Publish issue"],
+        session_id=session.session_id,
+        repo_owner="octocat",
+        repo_name="yudaiv3",
+        priority="medium",
+        status="pending",
+        tokens_used=1,
+    )
+    question = UserQuestion(
+        question_id="q_issue_pending",
+        session_id=session.id,
+        user_id=user.id,
+        mode="architect",
+        question_text="Which behavior should this issue prioritize?",
+        options=[{"id": "api", "label": "API behavior"}],
+        multi_select=False,
+        status=UserQuestionStatus.PENDING.value,
+        question_metadata={
+            "origin": "issue_creation_clarification",
+            "issue_id": issue.issue_id,
+        },
+    )
+    db.add(issue)
+    db.add(question)
+    db.commit()
+
+    fake_issue_ops = types.ModuleType("daifuUserAgent.IssueOps")
+    calls: list[dict[str, object]] = []
+
+    class FakeIssueService:
+        def __init__(self, db):
+            self.db = db
+
+        async def create_github_issue_from_user_issue(self, user_id, issue_id, context_bundle=None):
+            calls.append({"user_id": user_id, "issue_id": issue_id})
+            return None
+
+    fake_issue_ops.IssueService = FakeIssueService
+    monkeypatch.setitem(sys.modules, "daifuUserAgent.IssueOps", fake_issue_ops)
+
+    with pytest.raises(session_routes.HTTPException) as exc_info:
+        asyncio.run(
+            session_routes.execute_create_github_issue_tool(
+                session_id=session.session_id,
+                request=CreateGitHubIssueToolRequest(issue_id=issue.issue_id),
+                db=db,
+                current_user=user,
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["pending_question_ids"] == ["q_issue_pending"]
+    assert calls == []
+
+
 def test_answer_issue_confirmation_starts_daifu_stage_tool_sequence(db_and_user, monkeypatch):
     db, user, session = db_and_user
     objective = "Resolve GitHub issue #77 with the 3-mode workflow."

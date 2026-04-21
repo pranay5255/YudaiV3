@@ -140,6 +140,7 @@ from models import (
     UserQuestionOption,
     UserQuestionResponse,
     UserQuestionStatus,
+    UserIssue,
     UserIssueResponse,
 )
 from pgvector.sqlalchemy import Vector
@@ -161,6 +162,12 @@ DAIFU_STAGE_CONFIRMATION_ORIGIN = "github_issue_created_confirmation"
 DAIFU_STAGE_START_OPTION_ID = "start_workflow"
 DAIFU_STAGE_DECLINE_OPTION_ID = "not_now"
 DAIFU_STAGE_SEQUENCE_TOOL = "run_architect_mode"
+USER_ISSUE_CREATION_QUESTION_ORIGINS = {
+    "user_issue_creation",
+    "issue_creation",
+    "issue_creation_clarification",
+    "github_issue_creation_validation",
+}
 
 
 def _is_stage_confirmation_question(question: UserQuestion) -> bool:
@@ -174,6 +181,69 @@ def _wants_stage_execution(request: AnswerQuestionRequest) -> bool:
         return True
     answer_text = (request.answer_text or "").strip().lower()
     return answer_text in {"yes", "y", "start", "start workflow", "run it", "go ahead"}
+
+
+def _question_references_user_issue(question: UserQuestion, issue_id: str) -> bool:
+    metadata = question.question_metadata if isinstance(question.question_metadata, dict) else {}
+    referenced_issue_id = str(
+        metadata.get("issue_id")
+        or metadata.get("user_issue_id")
+        or metadata.get("user_issue_public_id")
+        or ""
+    ).strip()
+    if referenced_issue_id:
+        return referenced_issue_id == issue_id
+    return str(metadata.get("origin") or "").strip() in USER_ISSUE_CREATION_QUESTION_ORIGINS
+
+
+def _ensure_user_issue_ready_for_github_creation(
+    db: Session,
+    *,
+    db_session: ChatSession,
+    current_user: User,
+    issue_id: str,
+) -> UserIssue:
+    user_issue = (
+        db.query(UserIssue)
+        .filter(
+            UserIssue.user_id == current_user.id,
+            UserIssue.issue_id == issue_id,
+            UserIssue.session_id == db_session.session_id,
+        )
+        .first()
+    )
+    if not user_issue:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Issue not found for this session",
+        )
+
+    pending_questions = (
+        db.query(UserQuestion)
+        .filter(
+            UserQuestion.session_id == db_session.id,
+            UserQuestion.user_id == current_user.id,
+            UserQuestion.status == UserQuestionStatus.PENDING.value,
+        )
+        .all()
+    )
+    blocking_questions = [
+        question
+        for question in pending_questions
+        if _question_references_user_issue(question, issue_id)
+    ]
+    if blocking_questions:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Answer pending issue clarification questions before creating the GitHub issue",
+                "pending_question_ids": [
+                    question.question_id for question in blocking_questions
+                ],
+            },
+        )
+
+    return user_issue
 
 
 def _build_github_issue_execution_objective(
@@ -256,34 +326,58 @@ async def _prepare_github_issue_created_response(
         issue_number=result.github_issue_number,
     )
 
-    confirmation_question_id = f"q_{uuid.uuid4().hex[:10]}"
     issue_label = (
         f"#{result.github_issue_number}"
         if result.github_issue_number is not None
         else result.github_issue_url
     )
-    confirmation_question = UserQuestion(
-        question_id=confirmation_question_id,
-        session_id=db_session.id,
-        user_id=current_user.id,
-        mode=SessionMode.ARCHITECT.value,
-        question_text=(
-            f"Start the Architect -> Tester -> Coder workflow for GitHub issue {issue_label}?"
-        ),
-        options=[
-            {"id": DAIFU_STAGE_START_OPTION_ID, "label": "Start workflow"},
-            {"id": DAIFU_STAGE_DECLINE_OPTION_ID, "label": "Not now"},
-        ],
-        multi_select=False,
-        status=UserQuestionStatus.PENDING.value,
-        question_metadata={
-            "origin": DAIFU_STAGE_CONFIRMATION_ORIGIN,
-            "pending_tool": DAIFU_STAGE_SEQUENCE_TOOL,
-            "issue_number": result.github_issue_number,
-            "issue_url": result.github_issue_url,
-        },
+    confirmation_question = (
+        db.query(UserQuestion)
+        .filter(
+            UserQuestion.session_id == db_session.id,
+            UserQuestion.user_id == current_user.id,
+            UserQuestion.status == UserQuestionStatus.PENDING.value,
+        )
+        .all()
     )
-    db.add(confirmation_question)
+    confirmation_question = next(
+        (
+            question
+            for question in confirmation_question
+            if _is_stage_confirmation_question(question)
+            and isinstance(question.question_metadata, dict)
+            and (
+                question.question_metadata.get("issue_url") == result.github_issue_url
+                or question.question_metadata.get("issue_number")
+                == result.github_issue_number
+            )
+        ),
+        None,
+    )
+    if confirmation_question is None:
+        confirmation_question = UserQuestion(
+            question_id=f"q_{uuid.uuid4().hex[:10]}",
+            session_id=db_session.id,
+            user_id=current_user.id,
+            mode=SessionMode.ARCHITECT.value,
+            question_text=(
+                f"Start the Architect -> Tester -> Coder workflow for GitHub issue {issue_label}?"
+            ),
+            options=[
+                {"id": DAIFU_STAGE_START_OPTION_ID, "label": "Start workflow"},
+                {"id": DAIFU_STAGE_DECLINE_OPTION_ID, "label": "Not now"},
+            ],
+            multi_select=False,
+            status=UserQuestionStatus.PENDING.value,
+            question_metadata={
+                "origin": DAIFU_STAGE_CONFIRMATION_ORIGIN,
+                "pending_tool": DAIFU_STAGE_SEQUENCE_TOOL,
+                "issue_number": result.github_issue_number,
+                "issue_url": result.github_issue_url,
+            },
+        )
+        db.add(confirmation_question)
+    confirmation_question_id = confirmation_question.question_id
 
     mode_metadata = dict(db_session.mode_metadata or {})
     pending_question_ids = [
@@ -291,7 +385,8 @@ async def _prepare_github_issue_created_response(
         for item in (mode_metadata.get("pending_question_ids") or [])
         if str(item).strip()
     ]
-    pending_question_ids.append(confirmation_question_id)
+    if confirmation_question_id not in pending_question_ids:
+        pending_question_ids.append(confirmation_question_id)
     mode_metadata.update(
         {
             "pending_question_ids": pending_question_ids,
@@ -345,6 +440,12 @@ async def _run_create_github_issue_tool(
     current_user: User,
     issue_id: str,
 ) -> CreateGitHubIssueResponse:
+    _ensure_user_issue_ready_for_github_creation(
+        db,
+        db_session=db_session,
+        current_user=current_user,
+        issue_id=issue_id,
+    )
     call_id = f"tool_{uuid.uuid4().hex[:10]}"
     await get_ws_hub().send_to_session(
         session_id,

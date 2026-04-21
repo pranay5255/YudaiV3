@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from models import ChatSession, SessionMode
+from models import ChatSession, SessionMode, UserIssue
 from realtime.mode_orchestrator import (
     SessionExecutionOrchestrator,
     get_session_execution_orchestrator,
@@ -80,6 +80,18 @@ class DaifuIssueToolService:
         """Create a GitHub issue from an existing UserIssue via IssueOps."""
 
         from .IssueOps import IssueService as IssueOpsService
+
+        user_issue = (
+            db.query(UserIssue)
+            .filter(
+                UserIssue.user_id == user_id,
+                UserIssue.issue_id == issue_id,
+                UserIssue.session_id == session.session_id,
+            )
+            .first()
+        )
+        if not user_issue:
+            raise ValueError("Issue not found for this session")
 
         issue_service = IssueOpsService(db)
         result = await issue_service.create_github_issue_from_user_issue(
