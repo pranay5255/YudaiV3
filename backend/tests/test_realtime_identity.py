@@ -6,7 +6,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
-from config.realtime_identity import (  # noqa: E402
+from yudai.config.realtime_identity import (  # noqa: E402
     build_sandbox_identity,
     normalize_environment,
     normalize_identity_segment,
