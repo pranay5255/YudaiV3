@@ -300,15 +300,15 @@ export const YudaiLoginDemo: React.FC<YudaiLoginDemoProps> = (props) => {
         }}
       />
 
-      <Sequence from={0} durationInFrames={140} premountFor={30}>
+      <Sequence from={0} durationInFrames={120} premountFor={30}>
         <HeroScene {...props} />
       </Sequence>
 
-      <Sequence from={120} durationInFrames={160} premountFor={30}>
+      <Sequence from={120} durationInFrames={140} premountFor={30}>
         <WorkflowScene />
       </Sequence>
 
-      <Sequence from={260} durationInFrames={120} premountFor={30}>
+      <Sequence from={260} durationInFrames={100} premountFor={30}>
         <CapabilityScene />
       </Sequence>
 
