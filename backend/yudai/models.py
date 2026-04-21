@@ -128,6 +128,7 @@ class SessionMode(str, Enum):
     ARCHITECT = "architect"
     TESTER = "tester"
     CODER = "coder"
+    BROWSER_CHECK = "browser_check"
     COMPLETE = "complete"
     FAILED = "failed"
 
@@ -1729,6 +1730,10 @@ class ExecutionRequest(BaseModel):
 
 class StageToolRequest(BaseModel):
     tool_name: Literal["run_architect_mode", "run_tester_mode", "run_coder_mode"]
+    objective: str = Field(..., min_length=1, max_length=10000)
+
+
+class FrontendBrowserCheckToolRequest(BaseModel):
     objective: str = Field(..., min_length=1, max_length=10000)
 
 
