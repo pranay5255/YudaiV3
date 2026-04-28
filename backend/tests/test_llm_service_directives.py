@@ -201,3 +201,9 @@ def test_daifu_prompt_includes_architect_ready_issue_sizing_guidance():
         "ask clarifying questions before drafting or publishing an issue"
         in compact_prompt
     )
+    assert "Ask at most 2 clarifying questions before proposing issues." in prompt
+    assert "The only chat tool call you should normally emit is `create_github_issue`" in prompt
+    assert "Do not emit `run_architect_mode`, `run_tester_mode`, or `run_coder_mode`" in prompt
+    assert "SubagentExecutor" in prompt
+    assert "namespace functions" not in prompt
+    assert "web_search" not in prompt
