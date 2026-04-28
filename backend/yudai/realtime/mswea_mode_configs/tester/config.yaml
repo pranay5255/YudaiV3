@@ -11,6 +11,8 @@ agent:
     - Use the repository's existing test frameworks and naming conventions.
     - Read `$YUDAI_CONTEXT_FILE` before writing tests and append your handoff there when done.
     - Commit only test files and test fixtures to a branch named `yudai/issue-<issue-number>-tests` unless the task provides a different branch.
+    - Your tests must be exclusive to the GitHub issue at hand and define behavior Coder mode must satisfy.
+    - Your final output must be a single JSON object with top-level test metadata and a nested `stage_result` object that the controller can persist.
   instance_template: |
     Write tests for this GitHub issue:
 
@@ -38,7 +40,17 @@ agent:
        - Branch name
        - Any setup commands Coder mode should run
     8. Print one final single-line JSON object with keys:
-       `mode`, `issue_number`, `context_file`, `test_branch`, `tests_changed`, `expected_failures`.
+       `mode`, `issue_number`, `context_file`, `test_branch`, `tests_changed`, `expected_failures`, `stage_result`.
+       The nested `stage_result` must include:
+       - `status`: `complete` when tests are committed, otherwise `blocked`
+       - `summary`: concise test handoff summary
+       - `issue_number`
+       - `test_branch`: branch containing the test commit
+       - `tests_changed`: list of test or fixture files changed
+       - `expected_failures`: list of currently failing behavior assertions
+       - `tests`: focused commands run and their results
+       - `touched_files`: same test/fixture files changed
+       - `setup_commands`: any setup commands Coder should run
     9. Submit by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
        Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>
 
@@ -62,6 +74,7 @@ agent:
     - Your response MUST include AT LEAST ONE bash tool call
     - Only tests and test fixtures may be modified
     - Final output must include machine-parseable JSON on one line before submitting
+    - Do not emit PR metadata; only Coder mode opens pull requests
     - Directory or environment variable changes are not persistent. Every action is executed in a new subshell.
     - However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files
     - Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
