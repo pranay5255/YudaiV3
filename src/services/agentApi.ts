@@ -38,6 +38,9 @@ export type ContractIssue = ApiSchema<'UserIssueResponse'>;
 export type ContractGitHubIssue = ApiSchema<'GitHubIssueResponse'>;
 export type ContractTrajectory = ApiSchema<'TrajectorySummaryResponse'>;
 export type ContractContextCard = ApiSchema<'ContextCardResponse'>;
+export type ContractUserQuestion = ApiSchema<'UserQuestionResponse'>;
+export type ContractAnswerQuestionRequest = ApiSchema<'AnswerQuestionRequest'>;
+export type ContractAnswerQuestionResponse = ApiSchema<'AnswerQuestionResponse'>;
 
 export class AgentApiError extends Error {
   status: number;
@@ -228,6 +231,23 @@ export const agentApi = {
         body,
         method: 'POST',
         pathParams: { session_id: sessionId },
+        token,
+      }
+    );
+  },
+
+  answerQuestion(
+    sessionId: string,
+    questionId: string,
+    body: ContractAnswerQuestionRequest,
+    token?: string | null
+  ): Promise<ContractAnswerQuestionResponse> {
+    return requestJson<ContractAnswerQuestionResponse>(
+      '/daifu/sessions/{session_id}/questions/{question_id}/answer',
+      {
+        body,
+        method: 'POST',
+        pathParams: { session_id: sessionId, question_id: questionId },
         token,
       }
     );
