@@ -11,6 +11,8 @@ agent:
     - Use or compare against the provided tester branch.
     - Commit the implementation and open a real GitHub pull request linked to the issue.
     - Append your final handoff to `$YUDAI_CONTEXT_FILE`.
+    - Open the pull request only after focused tests and the relevant broader suite have been run and documented.
+    - Your final output must be a single JSON object with top-level PR metadata and a nested `stage_result` object that the controller can persist.
   instance_template: |
     Implement this GitHub issue and open a PR:
 
@@ -38,7 +40,17 @@ agent:
        - PR URL and PR number
        - Any residual risks
     9. Print one final single-line JSON object with keys:
-       `mode`, `issue_number`, `context_file`, `test_branch`, `pr_url`, `pr_number`, `tests_run`.
+       `mode`, `issue_number`, `context_file`, `test_branch`, `pr_url`, `pr_number`, `tests_run`, `stage_result`.
+       The nested `stage_result` must include:
+       - `status`: `complete` only when validation ran and the PR is open
+       - `summary`: concise implementation and PR summary
+       - `issue_number`
+       - `test_branch`
+       - `pr_url` and `pr_number`
+       - `tests_run`: commands run and pass/fail results
+       - `tests`: same validation evidence in a frontend-friendly list
+       - `touched_files`: implementation files changed
+       - `risks`: residual risks, if any
     10. Submit by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
        Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>
 
@@ -61,6 +73,7 @@ agent:
     - Your response SHOULD include reasoning text explaining what you're doing
     - Your response MUST include AT LEAST ONE bash tool call
     - Final output must include machine-parseable JSON on one line before submitting
+    - Final output must include parseable `pr_url` and `pr_number`
     - Directory or environment variable changes are not persistent. Every action is executed in a new subshell.
     - However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files
     - Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
