@@ -26,4 +26,3 @@ Optional Modal parity smoke:
 ```bash
 backend/tests/manual/08_modal_parity_optional.sh
 ```
-
