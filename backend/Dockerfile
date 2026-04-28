@@ -38,6 +38,14 @@ RUN mkdir -p /home/appuser/.cache && \
     chown -R appuser:appuser /home/appuser && \
     chmod -R 755 /home/appuser
 
+RUN mkdir -p \
+      /data/sandbox_artifacts \
+      /data/swe_runs \
+      /tmp/sandbox_cache \
+      /tmp/sandbox_repos \
+      /workspace/repo && \
+    chown -R appuser:appuser /data /tmp/sandbox_cache /tmp/sandbox_repos /workspace
+
 # Switch to non-root user
 USER appuser
 
