@@ -49,4 +49,3 @@ PY
 )"
 ws_send "$get_request_id" "$get_message" ack | tee /tmp/yudai-ws-workflow.log
 grep -q 'Backend websocket manual smoke test' /tmp/yudai-ws-workflow.log
-
