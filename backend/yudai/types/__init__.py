@@ -56,6 +56,9 @@ from yudai.models import (  # noqa: F401
     UserProfile,
     UserQuestionOption,
     UserQuestionResponse,
+    WorkflowContextUpdateRequest,
+    WorkflowIssueRequest,
+    WorkflowResponse,
 )
 from yudai.realtime.schemas import (  # noqa: F401
     CleanupResponse,
@@ -186,7 +189,7 @@ class GitHubIssueResponse(BaseModel):
     state: str
     html_url: str | None = None
     body: str | None = None
-    labels: List[Any] = Field(default_factory=list)
+    labels: List[str] = Field(default_factory=list)
     created_at: datetime | str | None = None
     updated_at: datetime | str | None = None
 
