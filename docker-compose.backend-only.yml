@@ -10,6 +10,8 @@ x-backend-build: &backend-build
 services:
   # Modal sandbox provisioning + exec smoke test.
   modal-preflight:
+    profiles:
+      - modal
     build: *backend-build
     image: yudai-backend:local
     restart: "no"
@@ -41,13 +43,20 @@ services:
       - SANDBOX_GIT_ROOT=/tmp/sandbox_repos
       - SANDBOX_CACHE_ROOT=/tmp/sandbox_cache
       - SANDBOX_ARTIFACT_ROOT=/data/sandbox_artifacts
+      - SANDBOX_TUNNEL_TEMPLATE
+      - REALTIME_MODAL_PROVISIONING_ENABLED
+      - REALTIME_WS_UNIFIED_ENABLED
+      - CONTROLLER_INTERNAL_WS_SECRET=${CONTROLLER_INTERNAL_WS_SECRET:-local-dev-secret}
+      - CONTROLLER_HEARTBEAT_SECRET=${CONTROLLER_HEARTBEAT_SECRET:-local-heartbeat-secret}
+      # Disabled by default. Manual backend-only tests export this as true.
+      - YUDAI_TEST_API_ENABLED=${YUDAI_TEST_API_ENABLED:-false}
+      - YUDAI_TEST_FAKE_LLM=${YUDAI_TEST_FAKE_LLM:-false}
+      - YUDAI_TEST_FAKE_MSWEA=${YUDAI_TEST_FAKE_MSWEA:-false}
     ports:
       - "${PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
-      modal-preflight:
-        condition: service_completed_successfully
     volumes:
       - app_logs:/app/logs
       - ./backend/yudaiv3.2025-09-07.private-key.pem:/app/yudaiv3.2025-09-07.private-key.pem:ro
@@ -81,9 +90,52 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # Local sandbox-session server for backend-only websocket/manual testing.
+  sandbox-dev:
+    profiles:
+      - local-sandbox
+    build: *backend-build
+    image: yudai-backend:local
+    container_name: yudai-sandbox-dev
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.prod
+    environment:
+      - DOCKER_COMPOSE=true
+      - PYTHONPATH=/app
+      - PORT=8100
+      - SANDBOX_ID=local-sandbox
+      - CONTROLLER_BASE_URL=http://backend:8000
+      - REALTIME_WORKSPACE_PATH=/workspace/repo
+      - WORKSPACE_PATH=/workspace/repo
+      - SANDBOX_CACHE_ROOT=/tmp/sandbox_cache
+      - SANDBOX_ARTIFACT_ROOT=/data/sandbox_artifacts
+      - CONTROLLER_INTERNAL_WS_SECRET=${CONTROLLER_INTERNAL_WS_SECRET:-local-dev-secret}
+      - CONTROLLER_HEARTBEAT_SECRET=${CONTROLLER_HEARTBEAT_SECRET:-local-heartbeat-secret}
+    command: ["python", "-m", "yudai.run_sandbox_server"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - sandbox_workspace:/workspace/repo
+      - sandbox_artifacts:/data/sandbox_artifacts
+    networks:
+      - yudai-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8100/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+
   # PostgreSQL Database (included for local deployment)
   db:
-    image: postgres:15
+    build:
+      context: ./backend/yudai/db
+      dockerfile: Dockerfile
+    image: yudai-db:local
     container_name: yudai-db
     restart: unless-stopped
     env_file:
@@ -117,6 +169,8 @@ volumes:
   transformers_cache:
     driver: local
   huggingface_cache:
+    driver: local
+  sandbox_workspace:
     driver: local
 
 networks:
