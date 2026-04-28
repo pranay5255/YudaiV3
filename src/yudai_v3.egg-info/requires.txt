@@ -15,6 +15,7 @@ ruff>=0.12.7
 pyjwt>=2.10.1
 cryptography>=45.0.5
 modal>=1.0.0
+mini-swe-agent
 pytest>=8.4.1
 
 [dev]
