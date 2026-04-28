@@ -1572,6 +1572,7 @@ class SessionContextResponse(BaseModel):
     repository_info: Optional[Dict[str, Any]] = None
     statistics: Optional[Dict[str, Any]] = Field(default_factory=dict)
     user_issues: Optional[List["UserIssueResponse"]] = Field(default_factory=list)
+    pending_questions: Optional[List["UserQuestionResponse"]] = Field(default_factory=list)
 
 
 # User Issue Models
