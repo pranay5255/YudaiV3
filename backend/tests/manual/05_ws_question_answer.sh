@@ -30,4 +30,3 @@ PY
 
 ws_send "$request_id" "$message" ack | tee /tmp/yudai-ws-question.log
 grep -q "$QUESTION_ID" /tmp/yudai-ws-question.log
-
