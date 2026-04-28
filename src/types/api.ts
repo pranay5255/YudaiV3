@@ -195,6 +195,25 @@ export interface SessionResponse {
   tunnel_url?: string;
 }
 
+export interface UserQuestionOption {
+  id: string;
+  label: string;
+}
+
+export interface UserQuestionResponse {
+  question_id: string;
+  session_id: string;
+  mode?: string | null;
+  prompt: string;
+  options?: UserQuestionOption[];
+  multi_select?: boolean;
+  selected_option_ids?: string[];
+  answer_text?: string | null;
+  status: string;
+  asked_at: string;
+  answered_at?: string | null;
+}
+
 export interface SessionContextResponse {
   session: SessionResponse;
   messages: ChatMessageResponse[];
@@ -213,6 +232,7 @@ export interface SessionContextResponse {
     user_issues_count?: number;
   };
   user_issues?: UserIssueResponse[];
+  pending_questions?: UserQuestionResponse[];
 }
 
 export interface ChatMessageResponse {
