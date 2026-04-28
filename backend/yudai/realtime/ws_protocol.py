@@ -18,6 +18,16 @@ class WSMessageType(str, Enum):
     # Client -> Server
     CHAT_MESSAGE = "chat_message"
     USER_RESPONSE = "user_response"
+    QUESTION_ANSWER = "question.answer"
+    WORKFLOW_GET = "workflow.get"
+    WORKFLOW_ISSUE_SELECT = "workflow.issue.select"
+    WORKFLOW_CONTEXT_UPDATE = "workflow.context.update"
+    RUNTIME_ENSURE = "runtime.ensure"
+    RUNTIME_STATUS = "runtime.status"
+    EXECUTION_START = "execution.start"
+    EXECUTION_STAGE_START = "execution.stage_start"
+    EXECUTION_STATUS = "execution.status"
+    EXECUTION_CANCEL = "execution.cancel"
     EXEC_START = "exec.start"
     EXEC_STDIN = "exec.stdin"
     EXEC_CANCEL = "exec.cancel"
@@ -31,6 +41,7 @@ class WSMessageType(str, Enum):
     TOOL_CALL = "tool_call"
     AGENT_QUESTION = "agent_question"
     STATUS = "status"
+    ACK = "ack"
     HEARTBEAT = "heartbeat"
     ERROR = "error"
     DONE = "done"
@@ -43,6 +54,7 @@ class WSEnvelope(BaseModel):
     ts: datetime = Field(default_factory=utc_now)
     payload: Dict[str, Any] = Field(default_factory=dict)
     seq: int = 0
+    request_id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -128,12 +140,15 @@ def _next_seq() -> int:
 def build_envelope(
     msg_type: WSMessageType,
     payload: Optional[Dict[str, Any]] = None,
+    *,
+    request_id: Optional[str] = None,
 ) -> str:
     """Serialize a WSEnvelope to JSON string."""
     envelope = WSEnvelope(
         type=msg_type,
         payload=payload or {},
         seq=_next_seq(),
+        request_id=request_id,
     )
     return envelope.model_dump_json()
 
