@@ -21,4 +21,3 @@ done
 
 curl -fsS "${BACKEND_URL:-http://localhost:8000}/health"
 curl -fsS "${BACKEND_URL:-http://localhost:8000}/realtime/flags"
-
