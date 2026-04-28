@@ -414,18 +414,36 @@ export interface paths {
         };
         /**
          * Get Context Cards
-         * @description Get context cards for a session.
-         *     This is a HIGH priority endpoint for context display.
+         * @description Get active context cards for a session.
          */
         get: operations["get_context_cards_daifu_sessions__session_id__context_cards_get"];
         put?: never;
         /**
          * Add Context Card
-         * @description Add a context card to a session.
-         *     This is a HIGH priority endpoint for context management.
+         * @description Add a chat/upload context card to a session.
          */
         post: operations["add_context_card_daifu_sessions__session_id__context_cards_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/daifu/sessions/{session_id}/context-cards/{card_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Context Card
+         * @description Soft-delete a context card from a session.
+         */
+        delete: operations["delete_context_card_daifu_sessions__session_id__context_cards__card_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -483,6 +501,26 @@ export interface paths {
         put?: never;
         /** Cancel Session Execution */
         post: operations["cancel_session_execution_daifu_sessions__session_id__execution_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/daifu/sessions/{session_id}/execution/stage-tool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Session Stage Tool
+         * @description Start exactly one legal Daifu stage tool: Architect, Tester, or Coder.
+         */
+        post: operations["execute_session_stage_tool_daifu_sessions__session_id__execution_stage_tool_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -676,6 +714,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/daifu/sessions/{session_id}/tools/create-github-issue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Create Github Issue Tool
+         * @description Run the Daifu create_github_issue tool for an existing drafted issue.
+         */
+        post: operations["execute_create_github_issue_tool_daifu_sessions__session_id__tools_create_github_issue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/daifu/sessions/{session_id}/trajectories": {
         parameters: {
             query?: never;
@@ -710,6 +768,66 @@ export interface paths {
         get: operations["get_trajectory_file_daifu_sessions__session_id__trajectories__run_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/daifu/sessions/{session_id}/workflow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Workflow
+         * @description Return the durable issue-to-PR workflow state for the workbench.
+         */
+        get: operations["get_session_workflow_daifu_sessions__session_id__workflow_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/daifu/sessions/{session_id}/workflow/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Session Workflow Context
+         * @description Persist user-provided PR context such as affected systems and constraints.
+         */
+        patch: operations["update_session_workflow_context_daifu_sessions__session_id__workflow_context_patch"];
+        trace?: never;
+    };
+    "/daifu/sessions/{session_id}/workflow/issue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Select Session Workflow Issue
+         * @description Persist the GitHub issue the user wants to turn into a PR.
+         */
+        post: operations["select_session_workflow_issue_daifu_sessions__session_id__workflow_issue_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -909,8 +1027,6 @@ export interface components {
         ChatMessageResponse: {
             /** Actions */
             actions?: components["schemas"]["ChatAction"][] | null;
-            /** Context Cards */
-            context_cards?: string[] | null;
             /**
              * Created At
              * Format: date-time
@@ -943,8 +1059,6 @@ export interface components {
         };
         /** ChatRequest */
         ChatRequest: {
-            /** Context Cards */
-            context_cards?: string[] | null;
             message: components["schemas"]["ChatMessageInput"];
             /** Repository */
             repository?: {
@@ -986,18 +1100,18 @@ export interface components {
              */
             created_at: string;
             /** Description */
-            description: string;
+            description?: string | null;
             /** Id */
             id: number;
-            /**
-             * Is Active
-             * @default true
-             */
+            /** Is Active */
             is_active: boolean;
             /** Session Id */
-            session_id?: number | null;
-            /** Source */
-            source: string;
+            session_id: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "chat" | "upload";
             /** Title */
             title: string;
             /** Tokens */
@@ -1050,9 +1164,13 @@ export interface components {
             /** Content */
             content: string;
             /** Description */
-            description: string;
-            /** Source */
-            source: string;
+            description?: string | null;
+            /**
+             * Source
+             * @default chat
+             * @enum {string}
+             */
+            source: "chat" | "upload";
             /** Title */
             title: string;
             /**
@@ -1066,6 +1184,8 @@ export interface components {
          * @description Response model for GitHub issue creation endpoint
          */
         CreateGitHubIssueResponse: {
+            /** Confirmation Question Id */
+            confirmation_question_id?: string | null;
             /** Execution Error */
             execution_error?: string | null;
             /** Execution Id */
@@ -1083,8 +1203,20 @@ export interface components {
             github_url: string;
             /** Message */
             message: string;
+            /** Pending Tool */
+            pending_tool?: string | null;
+            /**
+             * Requires Confirmation
+             * @default false
+             */
+            requires_confirmation: boolean;
             /** Success */
             success: boolean;
+        };
+        /** CreateGitHubIssueToolRequest */
+        CreateGitHubIssueToolRequest: {
+            /** Issue Id */
+            issue_id: string;
         };
         /** CreateSessionRequest */
         CreateSessionRequest: {
@@ -1218,7 +1350,7 @@ export interface components {
             /** Html Url */
             html_url?: string | null;
             /** Labels */
-            labels?: unknown[];
+            labels?: string[];
             /** Number */
             number: number;
             /** State */
@@ -1455,11 +1587,11 @@ export interface components {
         };
         /**
          * SessionContextResponse
-         * @description Complete session context including messages, context cards, and unified state
+         * @description Complete session context including messages and unified state
          */
         SessionContextResponse: {
             /** Context Cards */
-            context_cards?: string[];
+            context_cards?: components["schemas"]["ContextCardResponse"][] | null;
             /** Messages */
             messages: components["schemas"]["ChatMessageResponse"][];
             /** Pending Questions */
@@ -1561,6 +1693,16 @@ export interface components {
             /** Session Token */
             session_token: string;
         };
+        /** StageToolRequest */
+        StageToolRequest: {
+            /** Objective */
+            objective: string;
+            /**
+             * Tool Name
+             * @enum {string}
+             */
+            tool_name: "run_architect_mode" | "run_tester_mode" | "run_coder_mode";
+        };
         /** TrajectoryFileResponse */
         TrajectoryFileResponse: {
             /** Content */
@@ -1658,10 +1800,6 @@ export interface components {
         UserIssueResponse: {
             /** Agent Response */
             agent_response?: string | null;
-            /** Context Card Id */
-            context_card_id?: number | null;
-            /** Context Cards */
-            context_cards?: string[] | null;
             /**
              * Created At
              * Format: date-time
@@ -1767,6 +1905,70 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** WorkflowContextUpdateRequest */
+        WorkflowContextUpdateRequest: {
+            /** Acceptance Criteria */
+            acceptance_criteria?: string | null;
+            /** Affected Systems */
+            affected_systems?: string[];
+            /** Constraints */
+            constraints?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Out Of Scope */
+            out_of_scope?: string | null;
+        };
+        /** WorkflowIssueRequest */
+        WorkflowIssueRequest: {
+            /** Body */
+            body?: string | null;
+            /**
+             * Comments
+             * @default 0
+             */
+            comments: number;
+            /** Created At */
+            created_at?: string | null;
+            /** Html Url */
+            html_url?: string | null;
+            /** Labels */
+            labels?: string[];
+            /** Number */
+            number: number;
+            /**
+             * State
+             * @default open
+             */
+            state: string;
+            /** Title */
+            title: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /** WorkflowResponse */
+        WorkflowResponse: {
+            artifact?: components["schemas"]["ExecutionArtifactResponse"] | null;
+            execution: components["schemas"]["ExecutionStatusResponse"];
+            /** Pending Questions */
+            pending_questions?: components["schemas"]["UserQuestionResponse"][];
+            /** Pr Readiness */
+            pr_readiness?: {
+                [key: string]: unknown;
+            };
+            /** Selected Issue */
+            selected_issue?: {
+                [key: string]: unknown;
+            } | null;
+            session: components["schemas"]["SessionResponse"];
+            /** Stage Results */
+            stage_results?: {
+                [key: string]: unknown;
+            };
+            /** User Context */
+            user_context?: {
+                [key: string]: unknown;
+            };
         };
     };
     responses: never;
@@ -2518,6 +2720,38 @@ export interface operations {
             };
         };
     };
+    delete_context_card_daifu_sessions__session_id__context_cards__card_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                card_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     conversation_in_session_daifu_sessions__session_id__conversation_post: {
         parameters: {
             query?: never;
@@ -2637,6 +2871,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CancelExecutionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_session_stage_tool_daifu_sessions__session_id__execution_stage_tool_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StageToolRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2997,6 +3266,41 @@ export interface operations {
             };
         };
     };
+    execute_create_github_issue_tool_daifu_sessions__session_id__tools_create_github_issue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateGitHubIssueToolRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateGitHubIssueResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_session_trajectories_daifu_sessions__session_id__trajectories_get: {
         parameters: {
             query?: never;
@@ -3047,6 +3351,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrajectoryFileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_workflow_daifu_sessions__session_id__workflow_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_session_workflow_context_daifu_sessions__session_id__workflow_context_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkflowContextUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    select_session_workflow_issue_daifu_sessions__session_id__workflow_issue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkflowIssueRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowResponse"];
                 };
             };
             /** @description Validation Error */
