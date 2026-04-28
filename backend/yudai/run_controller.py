@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from yudai.github import github_router
 from yudai.realtime.controller_routes import router as controller_router
+from yudai.test_routes import router as test_router, test_api_enabled
 from yudai.types import HealthResponse, RealtimeFlagsResponse, RootResponse
 
 
@@ -44,6 +45,8 @@ fastapi_app.include_router(auth_router, prefix="/auth", tags=["auth"])
 fastapi_app.include_router(github_router, prefix="/github", tags=["github"])
 fastapi_app.include_router(session_router, prefix="/daifu", tags=["sessions"])
 fastapi_app.include_router(controller_router)
+if test_api_enabled():
+    fastapi_app.include_router(test_router)
 
 
 @fastapi_app.get("/", response_model=RootResponse)
