@@ -210,3 +210,62 @@ def test_build_mswea_command_uses_official_mini_cli_probe(tmp_path, monkeypatch)
     assert payload["context_file"] in task_text
     assert (workspace / ".yudai" / "executions" / "probe_exec" / "coder" / "command_probe.json").is_file()
     assert (workspace / ".yudai" / "context.md").is_file()
+
+
+def test_parse_and_merge_extended_stage_result_fields():
+    orchestrator = SessionExecutionOrchestrator(
+        broker=object(),
+        lifecycle=object(),
+        ws_hub=DummyHub(),
+    )
+    payload = {
+        "mode": "tester",
+        "issue_number": 123,
+        "test_branch": "yudai/issue-123-tests",
+        "stage_result": {
+            "status": "complete",
+            "summary": "Added regression tests for reconnect handling.",
+            "issue_number": 123,
+            "test_branch": "yudai/issue-123-tests",
+            "tests_changed": ["backend/tests/test_reconnect.py"],
+            "expected_failures": ["test_reconnect_preserves_session"],
+            "tests_run": ["uv run pytest backend/tests/test_reconnect.py"],
+            "setup_commands": ["uv sync"],
+            "ready_for_tester": True,
+        },
+    }
+
+    parsed = orchestrator.parse_mswea_output(
+        "stdout\nYUDAI_STAGE_RESULT: " + json.dumps(payload)
+    )
+
+    assert parsed["issue_number"] == 123
+    assert parsed["test_branch"] == "yudai/issue-123-tests"
+    assert parsed["stage_result"]["tests_changed"] == [
+        "backend/tests/test_reconnect.py"
+    ]
+
+    session = ChatSession(
+        user_id=1,
+        session_id="session_stage_result_merge",
+        title="Stage Result Merge",
+        repo_owner="octocat",
+        repo_name="yudaiv3",
+        repo_branch="main",
+        is_active=True,
+        total_messages=0,
+        total_tokens=0,
+        mode_metadata={},
+    )
+    merged = orchestrator._merge_workflow_stage_result(
+        session,
+        mode="tester",
+        result={**parsed, "execution_id": "exec_stage", "exit_code": 0},
+    )
+
+    assert merged["tests_changed"] == ["backend/tests/test_reconnect.py"]
+    assert merged["expected_failures"] == ["test_reconnect_preserves_session"]
+    assert merged["tests_run"] == ["uv run pytest backend/tests/test_reconnect.py"]
+    assert merged["setup_commands"] == ["uv sync"]
+    assert merged["ready_for_tester"] is True
+    assert session.mode_metadata["workflow"]["stage_results"]["tester"] == merged
