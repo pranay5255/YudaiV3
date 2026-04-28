@@ -27,4 +27,3 @@ PY
 )"
 ws_send "$workflow_request_id" "$workflow_message" ack | tee /tmp/yudai-ws-artifact.log
 grep -q '"artifact"' /tmp/yudai-ws-artifact.log
-
