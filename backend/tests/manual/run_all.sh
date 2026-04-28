@@ -11,4 +11,3 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "$SCRIPT_DIR/05_ws_question_answer.sh"
 "$SCRIPT_DIR/06_ws_execution_lifecycle.sh"
 "$SCRIPT_DIR/07_artifact_and_cache.sh"
-
