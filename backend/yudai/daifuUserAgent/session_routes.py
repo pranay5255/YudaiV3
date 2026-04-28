@@ -1614,7 +1614,9 @@ async def answer_session_question(
     question.answered_at = utc_now()
     db_session.last_activity = utc_now()
 
-    mode_metadata = dict(db_session.mode_metadata or {})
+    original_mode_metadata = dict(db_session.mode_metadata or {})
+    original_gathering_state = original_mode_metadata.get("gathering_state")
+    mode_metadata = dict(original_mode_metadata)
     mode_metadata["last_answered_question_id"] = question.question_id
     mode_metadata["last_answered_question_at"] = utc_now().isoformat()
     pending_question_ids = [
@@ -1627,8 +1629,8 @@ async def answer_session_question(
         db_session.mode_status = SessionModeStatus.WAITING_FOR_INPUT.value
     else:
         mode_metadata["pending_question_ids"] = []
-        if (
-            mode_metadata.get("gathering_state") in {"probes_done", "complete"}
+        if original_gathering_state and (
+            original_gathering_state in {"probes_done", "complete"}
             or not mode_metadata.get("pending_probe_ids")
         ):
             mode_metadata["gathering_state"] = "complete"
@@ -1642,6 +1644,13 @@ async def answer_session_question(
     next_mode = _next_mode_for_session(db_session)
     realtime_flags = get_realtime_feature_flags()
     is_stage_confirmation = _is_stage_confirmation_question(question)
+    question_metadata = (
+        question.question_metadata if isinstance(question.question_metadata, dict) else {}
+    )
+    is_daifu_gathering_question = (
+        question_metadata.get("origin") == "daifu_directive"
+        or original_gathering_state in {"active", "probes_done", "complete"}
+    )
     if is_stage_confirmation and not pending_question_ids:
         if request.resume_execution and _wants_stage_execution(request):
             if not realtime_flags.mode_orchestrator_enabled:
@@ -1684,6 +1693,7 @@ async def answer_session_question(
         request.resume_execution
         and was_waiting_for_input
         and not pending_question_ids
+        and not is_daifu_gathering_question
         and realtime_flags.mode_orchestrator_enabled
         and next_mode != SessionMode.COMPLETE.value
     ):
@@ -1736,6 +1746,27 @@ async def answer_session_question(
         resumed_mode = str(execution_status.get("mode") or next_mode)
     else:
         db.commit()
+
+    if (
+        is_daifu_gathering_question
+        and not is_stage_confirmation
+        and not pending_question_ids
+    ):
+        latest_metadata = dict(db_session.mode_metadata or {})
+        pending_probe_ids = [
+            str(item)
+            for item in (latest_metadata.get("pending_probe_ids") or [])
+            if str(item).strip()
+        ]
+        if not pending_probe_ids:
+            from .ChatOps import ChatOps
+
+            await ChatOps(db)._continue_daifu_after_gathering(
+                session_id=session_id,
+                user_id=current_user.id,
+                trigger="clarification answer",
+            )
+            db.refresh(db_session)
 
     return AnswerQuestionResponse(
         question=_to_user_question_response(question, session_public_id=session_id),
