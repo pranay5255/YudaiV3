@@ -42,8 +42,12 @@ import {
   ContractIssue,
   ContractRepository,
   ContractSession,
+  ContractSessionContext,
   ContractTrajectory,
+  ContractUserQuestion,
 } from '../services/agentApi';
+import { UserQuestionPrompt } from './UserQuestionPrompt';
+import type { AgentQuestionInfo } from '../types/sessionTypes';
 
 type WorkspaceView = 'chat' | 'context' | 'execution' | 'issues';
 type ExecutionMode = 'architect' | 'tester' | 'coder';
@@ -152,6 +156,35 @@ function toMessage(message: ContractChatMessage): WorkspaceMessage {
   };
 }
 
+function toAgentQuestionInfo(question: ContractUserQuestion): AgentQuestionInfo {
+  return {
+    multi_select: question.multi_select,
+    options: question.options || [],
+    question_id: question.question_id,
+    question_text: question.prompt,
+  };
+}
+
+function getGatheringState(session: ContractSession | null): string | null {
+  const metadata = session?.mode_metadata;
+  if (!metadata || typeof metadata !== 'object') {
+    return null;
+  }
+
+  const value = (metadata as Record<string, unknown>).gathering_state;
+  return typeof value === 'string' ? value : null;
+}
+
+function isGatheringStateActive(session: ContractSession | null): boolean {
+  return ['active', 'probes_done', 'continuing'].includes(getGatheringState(session) || '');
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 function getStatusTone(status?: string | null): 'amber' | 'cyan' | 'emerald' | 'red' | 'zinc' {
   switch ((status || '').toLowerCase()) {
     case 'complete':
@@ -242,6 +275,7 @@ export function AgentWorkbench(): JSX.Element {
   const [isLoadingRepos, setIsLoadingRepos] = useState(true);
   const [messages, setMessages] = useState<WorkspaceMessage[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [pendingQuestions, setPendingQuestions] = useState<ContractUserQuestion[]>([]);
   const [repositories, setRepositories] = useState<ContractRepository[]>([]);
   const [repoSearch, setRepoSearch] = useState('');
   const [selectedBranch, setSelectedBranch] = useState('');
@@ -396,13 +430,14 @@ export function AgentWorkbench(): JSX.Element {
     setExecutionObjective('');
     setExecutionStatus(null);
     setMessages([]);
+    setPendingQuestions([]);
     setSessionIssues([]);
     setTrajectories([]);
   }
 
-  async function hydrateSession(sessionId: string): Promise<void> {
+  async function hydrateSession(sessionId: string): Promise<ContractSessionContext | null> {
     if (!sessionToken) {
-      return;
+      return null;
     }
 
     const [
@@ -422,6 +457,7 @@ export function AgentWorkbench(): JSX.Element {
     if (context.status === 'fulfilled') {
       setCurrentSession(context.value.session);
       setMessages(context.value.messages.map(toMessage));
+      setPendingQuestions(context.value.pending_questions || []);
     }
 
     if (cards.status === 'fulfilled') {
@@ -438,6 +474,44 @@ export function AgentWorkbench(): JSX.Element {
 
     if (nextTrajectories.status === 'fulfilled') {
       setTrajectories(nextTrajectories.value);
+    }
+
+    return context.status === 'fulfilled' ? context.value : null;
+  }
+
+  async function refreshAfterDaifuActivity(sessionId: string): Promise<void> {
+    const baseline = await hydrateSession(sessionId);
+    if (!baseline) {
+      return;
+    }
+
+    if ((baseline.pending_questions || []).length > 0) {
+      return;
+    }
+
+    if (!isGatheringStateActive(baseline.session)) {
+      return;
+    }
+
+    const baselineMessageCount = baseline.messages.length;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await delay(900);
+      const nextContext = await hydrateSession(sessionId);
+      if (!nextContext) {
+        return;
+      }
+
+      if ((nextContext.pending_questions || []).length > 0) {
+        return;
+      }
+
+      if (nextContext.messages.length > baselineMessageCount) {
+        return;
+      }
+
+      if (!isGatheringStateActive(nextContext.session)) {
+        return;
+      }
     }
   }
 
@@ -460,12 +534,13 @@ export function AgentWorkbench(): JSX.Element {
 
       setCurrentSession(session);
       setMessages([]);
+      setPendingQuestions([]);
       setContextCards([]);
       setSessionIssues([]);
       setTrajectories([]);
       setExecutionStatus(null);
       pushNotice('success', 'Session ready.');
-      await hydrateSession(session.session_id);
+      await refreshAfterDaifuActivity(session.session_id);
       return session;
     } catch (error) {
       pushNotice('error', getErrorText(error, 'Failed to start session'));
@@ -574,6 +649,24 @@ export function AgentWorkbench(): JSX.Element {
     } finally {
       setIsBusy(false);
     }
+  }
+
+  async function handleAnswerQuestion(
+    questionId: string,
+    selectedOptionIds: string[],
+    answerText?: string
+  ): Promise<void> {
+    if (!currentSession || !sessionToken) {
+      throw new Error('Missing active session');
+    }
+
+    await agentApi.answerQuestion(currentSession.session_id, questionId, {
+      answer_text: answerText,
+      resume_execution: true,
+      selected_option_ids: selectedOptionIds,
+    }, sessionToken);
+
+    await refreshAfterDaifuActivity(currentSession.session_id);
   }
 
   async function handleStartExecution(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -712,8 +805,12 @@ export function AgentWorkbench(): JSX.Element {
                 draft={draft}
                 isBusy={isBusy}
                 messages={messages}
+                onAnswerQuestion={(questionId, selectedOptionIds, answerText) => (
+                  handleAnswerQuestion(questionId, selectedOptionIds, answerText)
+                )}
                 onDraftChange={setDraft}
                 onSubmit={(event) => void handleSendMessage(event)}
+                pendingQuestions={pendingQuestions}
                 selectedRepository={selectedRepository}
               />
             )}
@@ -997,15 +1094,23 @@ function ChatPanel({
   draft,
   isBusy,
   messages,
+  onAnswerQuestion,
   onDraftChange,
   onSubmit,
+  pendingQuestions,
   selectedRepository,
 }: {
   draft: string;
   isBusy: boolean;
   messages: WorkspaceMessage[];
+  onAnswerQuestion: (
+    questionId: string,
+    selectedOptionIds: string[],
+    answerText?: string
+  ) => Promise<void>;
   onDraftChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  pendingQuestions: ContractUserQuestion[];
   selectedRepository: ContractRepository | null;
 }): JSX.Element {
   return (
@@ -1024,6 +1129,20 @@ function ChatPanel({
           </div>
         )}
       </div>
+
+      {pendingQuestions.length > 0 && (
+        <div className="grid gap-3 border-t border-border/75 bg-bg-secondary/30 px-3 py-3">
+          {pendingQuestions.map((question) => (
+            <UserQuestionPrompt
+              key={question.question_id}
+              question={toAgentQuestionInfo(question)}
+              onSubmit={(selectedOptionIds, answerText) => (
+                onAnswerQuestion(question.question_id, selectedOptionIds, answerText)
+              )}
+            />
+          ))}
+        </div>
+      )}
 
       <form className="border-t border-border/75 p-3" onSubmit={onSubmit}>
         <label className="block">
