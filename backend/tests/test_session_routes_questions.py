@@ -147,6 +147,42 @@ def test_ask_question_persists_record_and_waiting_status(db_and_user):
     assert (session.mode_metadata or {}).get("pending_resume_objective") == "Fix login race condition"
 
 
+def test_session_context_includes_pending_questions(db_and_user):
+    db, user, session = db_and_user
+
+    pending = UserQuestion(
+        question_id="q_context_pending",
+        session_id=session.id,
+        user_id=user.id,
+        mode=None,
+        question_text="Which module should Daifu inspect?",
+        options=[{"id": "auth", "label": "Auth"}],
+        multi_select=False,
+        status=UserQuestionStatus.PENDING.value,
+    )
+    answered = UserQuestion(
+        question_id="q_context_answered",
+        session_id=session.id,
+        user_id=user.id,
+        mode=None,
+        question_text="Answered question",
+        options=[],
+        multi_select=False,
+        status=UserQuestionStatus.ANSWERED.value,
+    )
+    db.add(pending)
+    db.add(answered)
+    db.commit()
+
+    context = session_routes.SessionService.get_context(db, session)
+
+    assert [question.question_id for question in context.pending_questions] == [
+        "q_context_pending"
+    ]
+    assert context.pending_questions[0].prompt == "Which module should Daifu inspect?"
+    assert context.pending_questions[0].options[0].id == "auth"
+
+
 def test_answer_question_marks_answered_and_resumes_pipeline(db_and_user, monkeypatch):
     db, user, session = db_and_user
 
@@ -289,6 +325,85 @@ def test_answer_question_keeps_gathering_open_for_pending_questions(db_and_user)
     assert first_question.status == UserQuestionStatus.ANSWERED.value
     assert (session.mode_metadata or {}).get("pending_question_ids") == ["q_gather_02"]
     assert (session.mode_metadata or {}).get("gathering_state") == "active"
+
+
+def test_answer_last_daifu_question_continues_daifu_without_mode_resume(
+    db_and_user,
+    monkeypatch,
+):
+    db, user, session = db_and_user
+
+    question = UserQuestion(
+        question_id="q_daifu_final",
+        session_id=session.id,
+        user_id=user.id,
+        mode=None,
+        question_text="Which auth flow?",
+        options=[{"id": "jwt", "label": "JWT"}],
+        multi_select=False,
+        status=UserQuestionStatus.PENDING.value,
+        question_metadata={"origin": "daifu_directive"},
+    )
+    session.mode_status = "waiting_for_input"
+    session.mode_metadata = {
+        "gathering_state": "active",
+        "pending_question_ids": [question.question_id],
+    }
+    db.add(question)
+    db.commit()
+
+    monkeypatch.setattr(
+        session_routes,
+        "get_realtime_feature_flags",
+        lambda: _flags(orchestrator_enabled=True),
+    )
+
+    continuation_calls: list[dict[str, object]] = []
+    fake_chatops_module = types.ModuleType("yudai.daifuUserAgent.ChatOps")
+
+    class FakeChatOps:
+        def __init__(self, db_arg):
+            self.db = db_arg
+
+        async def _continue_daifu_after_gathering(self, *, session_id, user_id, trigger):
+            continuation_calls.append(
+                {
+                    "session_id": session_id,
+                    "user_id": user_id,
+                    "trigger": trigger,
+                }
+            )
+            return None
+
+    fake_chatops_module.ChatOps = FakeChatOps
+    monkeypatch.setitem(sys.modules, "yudai.daifuUserAgent.ChatOps", fake_chatops_module)
+
+    response = asyncio.run(
+        session_routes.answer_session_question(
+            session_id=session.session_id,
+            question_id=question.question_id,
+            request=AnswerQuestionRequest(
+                selected_option_ids=["jwt"],
+                resume_execution=True,
+            ),
+            db=db,
+            current_user=user,
+        )
+    )
+
+    db.refresh(question)
+    db.refresh(session)
+
+    assert response.resumed is False
+    assert response.mode_status == "idle"
+    assert question.status == UserQuestionStatus.ANSWERED.value
+    assert continuation_calls == [
+        {
+            "session_id": session.session_id,
+            "user_id": user.id,
+            "trigger": "clarification answer",
+        }
+    ]
 
 
 def test_create_github_issue_seeds_existing_issue_and_asks_before_execution(
