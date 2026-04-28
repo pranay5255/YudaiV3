@@ -1575,6 +1575,37 @@ class SessionContextResponse(BaseModel):
     pending_questions: Optional[List["UserQuestionResponse"]] = Field(default_factory=list)
 
 
+class WorkflowIssueRequest(BaseModel):
+    number: int = Field(..., ge=1)
+    title: str = Field(..., min_length=1, max_length=500)
+    state: str = Field(default="open", max_length=50)
+    html_url: Optional[str] = Field(default=None, max_length=1000)
+    body: Optional[str] = None
+    labels: List[str] = Field(default_factory=list)
+    comments: int = Field(default=0, ge=0)
+    created_at: Optional[datetime | str] = None
+    updated_at: Optional[datetime | str] = None
+
+
+class WorkflowContextUpdateRequest(BaseModel):
+    affected_systems: List[str] = Field(default_factory=list)
+    constraints: Optional[str] = Field(default=None, max_length=4000)
+    acceptance_criteria: Optional[str] = Field(default=None, max_length=4000)
+    out_of_scope: Optional[str] = Field(default=None, max_length=4000)
+    notes: Optional[str] = Field(default=None, max_length=4000)
+
+
+class WorkflowResponse(BaseModel):
+    session: SessionResponse
+    execution: "ExecutionStatusResponse"
+    selected_issue: Optional[Dict[str, Any]] = None
+    user_context: Dict[str, Any] = Field(default_factory=dict)
+    stage_results: Dict[str, Any] = Field(default_factory=dict)
+    pending_questions: List["UserQuestionResponse"] = Field(default_factory=list)
+    pr_readiness: Dict[str, Any] = Field(default_factory=dict)
+    artifact: Optional["ExecutionArtifactResponse"] = None
+
+
 # User Issue Models
 class CreateUserIssueRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
