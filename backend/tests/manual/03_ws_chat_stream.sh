@@ -23,4 +23,3 @@ PY
 ws_send "$request_id" "$message" ack | tee /tmp/yudai-ws-chat.log
 grep -q '"type": "llm_stream"' /tmp/yudai-ws-chat.log
 grep -q '"type": "ack"' /tmp/yudai-ws-chat.log
-
