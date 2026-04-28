@@ -1,433 +1,184 @@
 # Frontend Architecture
 
-This document explains the current frontend structure in `src/`, the tab model, the main stores, and how the frontend talks to the backend.
+Last updated: 2026-04-28
+
+This document describes the current `src/` frontend: route structure, the visual system, the public demo surface, and how the authenticated workbench drives issue-to-PR repository automation.
 
 ## TL;DR
 
-- The visible tabs are `Chat`, `Context`, `Trajectory`, and `Execution`.
-- The internal tab key `ideas` is a legacy name. It now renders the `Trajectory` tab, not a separate ideas feature.
-- The `Execution` tab (`SolveIssues`) starts a sandbox task.
-- After execution starts, the app currently switches to the `Trajectory` tab for live streaming.
-- GitHub auth was not fundamentally broken in `LoginPage.tsx`. The confusing part was an auth probe on app mount that used to call `/auth/api/user` even when there was no token yet.
+- `docs/design-doc.md` is the visual source of truth.
+- `src/components/LoginPage.tsx` is the canonical public landing page and uses the real logo from `/assets/baseLogo.png` plus the embedded product video from `/videos/yudai-enterprise-intro.mp4`.
+- `src/App.tsx` registers a public `/demo` route for inspecting a dummy Yudai workspace without GitHub auth.
+- The protected root route renders `AgentWorkbench`, which owns repository selection, chat, context, GitHub issues, PR workflow context, execution status, and readiness panels.
+- The main workbench tabs are `Chat`, `Context`, `Runs`, and `Issues`.
+- The product flow is issue-guided: select a GitHub issue, gather context through user/agent back-and-forth, run Architect -> Tester -> Coder, and surface affected systems plus PR outputs.
 
-## Route And Shell Structure
+## Visual System
 
-The app has a small public auth surface and one protected workspace route.
+The visual system follows `docs/design-doc.md`.
+
+Core rules:
+
+- Use `/assets/baseLogo.png` for brand placement. Do not replace it with a text badge.
+- Use dark navy elevated surfaces, white/10 borders, large radii, soft shadows, and restrained backdrop blur.
+- Prefer cyan, sky, and emerald for active, live, verified, and success states.
+- Reserve amber for caution or pending states, not the global shell personality.
+- Use sans typography for product UI. Reserve mono for issue numbers, counters, branches, and technical identifiers.
+
+Important implementation files:
+
+| File | Role |
+| --- | --- |
+| `src/components/LoginPage.tsx` | Public landing page and visual source for logo/video/product messaging. |
+| `src/components/DemoWorkbench.tsx` | Public dummy workbench at `/demo` with static repository, issue, context, run, and PR-readiness data. |
+| `src/components/AgentWorkbench.tsx` | Authenticated product workbench backed by real APIs. |
+| `src/index.css` | Base theme tokens. |
+| `src/tailwind.config.js` | Tailwind token mapping. |
+| `src/public/assets/baseLogo.png` | Primary logo asset. |
+| `src/public/videos/yudai-enterprise-intro.mp4` | Landing page product video. |
+
+## Routes
+
+The app has public auth/demo routes and one protected workspace route.
 
 ```mermaid
 flowchart TD
     Browser[Browser] --> Router[React Router]
 
     Router --> Login[/auth/login -> LoginPage/]
+    Router --> Demo[/demo -> DemoWorkbench/]
     Router --> Success[/auth/success -> AuthSuccess/]
     Router --> Callback[/auth/callback -> AuthCallback/]
     Router --> Root[/ -> ProtectedRoute/]
 
-    Root -->|authenticated| AppContent
+    Root -->|authenticated| AgentWorkbench
     Root -->|not authenticated| Login
-
-    AppContent --> SessionOrchestrator
-    AppContent --> TopBar
-    AppContent --> ToastContainer
-    AppContent --> RepositorySelectionToast
-
-    TopBar --> ChatTab[chat]
-    TopBar --> IdeasTab[ideas]
-    TopBar --> SolveTab[solve]
-
-    ChatTab --> Chat
-    IdeasTab --> TrajectoryViewer
-    SolveTab --> SolveIssues
 ```
-
-## Tabs
-
-Current tabs are declared in `src/components/TopBar.tsx`.
-
-| Internal key | Visible label | Rendered component | Purpose |
-| --- | --- | --- | --- |
-| `chat` | `Chat` | `Chat` | Main conversation with the session |
-| `ideas` | `Trajectory` | `TrajectoryViewer` | Live or static execution trajectory viewer |
-| `solve` | `Execution` | `SolveIssues` | Pick a GitHub issue and start execution |
-
-### Important naming note
-
-`ideas` is not a separate user-facing ideas feature anymore.
-
-It is a legacy internal tab id that now maps to:
-
-- TopBar label: `Trajectory`
-- Content component: `TrajectoryViewer`
-
-That wiring currently lives in:
-
-- `src/components/TopBar.tsx`
-- `src/App.tsx`
-
-## What Each Main Component Does
-
-### `App`
-
-`src/App.tsx`
-
-- Owns route registration.
-- Calls `initializeAuth()` on mount.
-- Clears stale session state when the auth token changes.
-- Wraps the whole app in `SessionErrorBoundary`.
-
-### `ProtectedRoute`
-
-`src/components/ProtectedRoute.tsx`
-
-- Reads auth state from `useAuth()`.
-- Shows a loading screen while auth is resolving.
-- Redirects unauthenticated users to `/auth/login`.
 
 ### `LoginPage`
 
 `src/components/LoginPage.tsx`
 
 - Public landing page.
-- Shows auth-related error messages from query params or auth store state.
+- Shows the logo lockup using `/assets/baseLogo.png`.
+- Embeds the product video using `/videos/yudai-enterprise-intro.mp4`.
+- Explains the issue-to-PR workflow and the three repository automation modes.
+- Shows auth-related errors from query params or auth store state.
 - Calls `login()` when the GitHub button is clicked.
-- `login()` fetches `/auth/api/login`, receives a GitHub OAuth URL, then redirects the browser there.
+- Does not change auth behavior.
 
-### `AuthSuccess`
+### `DemoWorkbench`
 
-`src/components/AuthSuccess.tsx`
+`src/components/DemoWorkbench.tsx`
 
-- Handles the successful OAuth redirect from the backend.
-- Parses `session_token`, `user_id`, `username`, and related user fields from the URL.
-- Clears previous auth/session state.
-- Writes the new auth state into `authStore`.
-- Resets the active tab to `chat`.
-- Redirects to `/`.
+- Public single-page dummy app at `/demo`.
+- Does not call backend APIs.
+- Mirrors the authenticated workbench structure with static values:
+  - repository panel
+  - `Chat`, `Context`, `Runs`, `Issues` tabs
+  - selected GitHub issue
+  - Architect, Tester, Coder stage outputs
+  - PR readiness panel
+  - dummy PR link
+- Exists so the frontend can be inspected without requiring GitHub auth, session creation, or a backend runtime.
 
-### `AuthCallback`
+### `AgentWorkbench`
 
-`src/components/AuthCallback.tsx`
+`src/components/AgentWorkbench.tsx`
 
-- Handles OAuth error redirects.
-- Reads `?error=...` from the URL and sends the user back to `/auth/login`.
+- Protected authenticated workspace.
+- Owns repository loading, branch selection, session creation/hydration, chat, context cards, GitHub issues, workflow state, execution status, and readiness.
+- Calls `agentApi` for all REST-backed flows.
+- Polls workflow state while execution is active.
+- Starts execution from the selected issue and saved user PR context.
 
-### `AppContent`
+## Product Workflow
 
-`src/App.tsx`
-
-- Owns the protected workspace shell.
-- Decides which tab content to render based on `activeTab`.
-- Shows the repository selector after login when no repo is selected.
-- Owns toast state.
-
-### `TopBar`
-
-`src/components/TopBar.tsx`
-
-- Shows:
-  - current repository
-  - session status
-  - runtime status
-  - tab buttons
-  - user profile/logout control
-
-### `SessionOrchestrator`
-
-`src/components/SessionOrchestrator.tsx`
-
-- Centralizes session side effects.
-- If user is authenticated and a repo is selected but no session exists, it creates one.
-- If there is an active session that has not been validated yet, it validates it.
-- Once a session is ready, it hydrates messages and context cards.
-
-This component is important because it keeps session creation and hydration out of the view components.
-
-### `RepositorySelectionToast`
-
-`src/components/RepositorySelectionToast.tsx`
-
-- Modal/toast shown after login if no repository is selected.
-- Loads repositories from the backend.
-- Loads branches for the selected repository.
-- Confirms a `{ repository, branch }` selection back to `AppContent`.
-
-### `Chat`
-
-`src/components/Chat.tsx`
-
-- Main chat UI for the selected repo/session.
-- Uses `useSessionStore` actions for message send and issue generation.
-- Can turn conversation, file context, and repository context into a GitHub issue preview.
-
-### `SolveIssues`
-
-`src/components/SolveIssues.tsx`
-
-- Loads repository issues.
-- Lets the user choose an issue and start execution.
-- Polls execution status over HTTP.
-- After execution starts, it switches the app to the `ideas` tab, which is the visible `Trajectory` tab.
-
-This is the key handoff:
-
-- `Execution` tab starts the run.
-- `Trajectory` tab shows the stream.
-
-### `TrajectoryViewer`
-
-`src/components/TrajectoryViewer.tsx`
-
-- Renders execution trajectory data.
-- In live mode, connects to the unified session WebSocket via `useSessionWebSocket`.
-- In static mode, can render bundled trajectory JSON.
-
-### `UserProfile`
-
-`src/components/UserProfile.tsx`
-
-- Shows logged-in user info.
-- Shows the active repository.
-- Calls `logout()`.
-
-### `SessionErrorBoundary`
-
-`src/components/SessionErrorBoundary.tsx`
-
-- Catches session-related runtime errors in the protected app shell.
-- Gives retry/reset options.
-
-## Current Tab Behavior
-
-The current tab behavior is:
-
-1. After successful login, app should land on `chat`.
-2. User selects a repository.
-3. `SessionOrchestrator` creates or validates a session.
-4. User can move manually between `Chat`, `Context`, `Trajectory`, and `Execution`.
-5. If the user starts execution from `Execution`, `SolveIssues` currently sets `activeTab` to `ideas`, which shows `TrajectoryViewer`.
-
-That transition is intentional in the current code, even though it is not aligned with your intended UX.
-
-## Why You Saw The App Land On Solve
-
-Historically:
-
-- `activeTab` is persisted in `sessionStore`.
-- If the previously persisted tab was `solve`, the app could restore it after auth redirect.
-
-That is why the app appeared to land in the `Solve` tab after login.
-
-It was not because GitHub OAuth picked the tab.
-
-It was stale UI state restoration.
-
-## Why GitHub Auth Looked Broken
-
-The login button itself was straightforward:
+Yudai is organized around helping users participate in creating an effective pull request for a GitHub issue.
 
 ```text
-LoginPage -> authStore.login() -> GET /auth/api/login -> redirect to GitHub
+Select repository
+  -> Create or hydrate session
+  -> Select GitHub issue
+  -> Chat with agent to gather missing context
+  -> Save affected systems, constraints, acceptance criteria, notes
+  -> Start fixed Architect -> Tester -> Coder pipeline
+  -> Inspect mode outputs, tests, touched files, and PR metadata
 ```
 
-What caused confusion was a separate mount-time auth check:
+The frontend should make these user decisions visible:
 
-```text
-App mount -> initializeAuth() -> GET /auth/api/user
-```
+- Which issue is being solved.
+- Which systems may be affected.
+- What context the user supplied.
+- What each mode produced.
+- Whether unanswered questions block progress.
+- Whether the final PR is ready to inspect.
 
-Before the recent fix, that check happened even when no `sessionToken` existed yet. Since the backend uses Bearer auth, a missing `Authorization` header caused a `403` response.
+## Modes
 
-That made the logs look like auth was failing, even though the actual GitHub OAuth button flow was not the part failing.
+These are the user-facing explanations used by the login and demo surfaces.
 
-Current behavior is now:
+| Mode | User value | Repository automation role |
+| --- | --- | --- |
+| Architect | Plan | Turns the selected GitHub issue into a scoped implementation brief with affected systems, risks, and PR boundaries. |
+| Tester | Verify | Produces or validates tests, fixtures, evidence, and branch/check metadata for the implementation. |
+| Coder | Patch | Applies the code change, runs validation, and emits PR metadata for review. |
 
-- if there is no token, `initializeAuth()` does not call `/auth/api/user`
-- after OAuth success, the app resets to `chat`
+The frontend should never ask the user to manually choose arbitrary execution modes for the normal workflow. Mode progression is fixed and server-controlled.
 
-## State Structure
+## Workbench Tabs
 
-There are two main global stores:
+`AgentWorkbench` uses these visible tabs:
 
-- `authStore`
-- `sessionStore`
+| Tab | Purpose |
+| --- | --- |
+| `Chat` | Back-and-forth with the agent to collect context and answer clarification questions. |
+| `Context` | Inspect session context cards and repository evidence. |
+| `Runs` | Save PR context, start/cancel execution, and inspect Architect/Tester/Coder progress. |
+| `Issues` | Browse GitHub issues and select the issue that should become a PR. |
 
-### `authStore`
+## State Ownership
 
-`src/stores/authStore.ts`
+The current workbench keeps most UI state local to `AgentWorkbench`:
 
-Purpose:
+- repositories and branches
+- selected repository and branch
+- current session
+- messages and draft text
+- context cards
+- GitHub issues and session issues
+- workflow response and workflow context
+- execution status and trajectories
+- pending questions
+- active tab and notices
 
-- track authenticated user identity
-- hold the current session bearer token
-- own login/logout/auth initialization actions
+Global auth state remains in `authStore` through `useAuth()`.
 
-Shape:
-
-```ts
-{
-  user,
-  sessionToken,
-  isAuthenticated,
-  isLoading,
-  error,
-  initializeAuth,
-  login,
-  logout,
-  refreshAuth,
-  setAuthFromCallback,
-  clearAuth
-}
-```
-
-### `sessionStore`
-
-`src/stores/sessionStore.ts`
-
-Purpose:
-
-- own selected repository
-- own current daifu session
-- own messages, context, file dependencies, issues
-- own runtime state
-- own some UI state like `activeTab`
-
-High-level shape:
-
-```ts
-{
-  // session
-  activeSessionId,
-  currentSession,
-  sessionContext,
-  sessionStatus,
-  sessionInitialized,
-  runtime,
-  runtimeStatus,
-  runtimeError,
-
-  // repository
-  selectedRepository,
-  availableRepositories,
-  repositoryError,
-
-  // data
-  messages,
-  contextCards,
-  userIssues,
-
-  // ui
-  activeTab,
-  sidebarCollapsed,
-  sessionLoadingEnabled,
-
-  // stats
-  totalTokens,
-  lastActivity,
-  connectionStatus,
-
-  // actions
-  createSessionForRepository,
-  ensureSessionExists,
-  loadMessages,
-  loadContextCards,
-  sendChatMessage,
-  createIssueWithContext,
-  syncRuntimeState,
-  ...
-}
-```
-
-### Local Component State
-
-Some state stays local to components:
-
-- `AppContent`
-  - `toasts`
-  - `showRepositorySelection`
-- `RepositorySelectionToast`
-  - selected repo and branch dropdown UI
-- `SolveIssues`
-  - selected issue modal
-  - issue list
-  - execution status polling result
-- `TrajectoryViewer`
-  - expanded messages
-  - live WebSocket stream state
-
-## State Ownership Diagram
-
-```mermaid
-flowchart TD
-    subgraph Global Stores
-        AuthStore[authStore\nuser\nsessionToken\nisAuthenticated]
-        SessionStore[sessionStore\nrepo\nsession\nmessages\ncontext\nruntime\nactiveTab]
-    end
-
-    subgraph Hooks
-        UseAuth[useAuth]
-        UseRepo[useRepository]
-        UseSessionMgmt[useSessionManagement]
-        UseSessionWs[useSessionWebSocket]
-    end
-
-    subgraph Shell
-        App[App]
-        AppContent[AppContent]
-        TopBar[TopBar]
-        SessionOrchestrator[SessionOrchestrator]
-    end
-
-    subgraph Views
-        Chat[Chat]
-        Trajectory[TrajectoryViewer]
-        Solve[SolveIssues]
-        RepoToast[RepositorySelectionToast]
-    end
-
-    AuthStore --> UseAuth
-    SessionStore --> UseRepo
-    SessionStore --> UseSessionMgmt
-    AuthStore --> UseSessionWs
-    SessionStore --> UseSessionWs
-
-    UseAuth --> App
-    UseAuth --> TopBar
-    UseRepo --> AppContent
-    UseRepo --> Chat
-    UseRepo --> Solve
-
-    SessionStore --> AppContent
-    SessionStore --> TopBar
-    SessionStore --> SessionOrchestrator
-    SessionStore --> Chat
-    SessionStore --> Solve
-
-    UseSessionWs --> Trajectory
-    AppContent --> RepoToast
-```
+Session store still exists for older shared state and auth/session cleanup behavior, but the new issue-to-PR workbench flow is centered in `AgentWorkbench` and `agentApi`.
 
 ## Backend Communication Map
-
-These are the main frontend-to-backend channels.
 
 | Area | Frontend caller | Transport | Backend endpoint |
 | --- | --- | --- | --- |
 | Start login | `authStore.login()` | HTTP GET | `/auth/api/login` |
 | Resolve current user | `authStore.initializeAuth()` | HTTP GET | `/auth/api/user` |
 | Logout | `authStore.logout()` | HTTP POST | `/auth/api/logout` |
-| Load repos | `sessionStore.loadRepositories()` | HTTP GET | `/github/repositories` |
-| Load branches | `sessionStore.loadRepositoryBranches()` | HTTP GET | `/github/repositories/{owner}/{repo}/branches` |
-| Create session | `createSessionForRepository()` | HTTP POST | `/daifu/sessions` |
-| Load session | `loadSession()` / `ensureSessionExists()` | HTTP GET | `/daifu/sessions/{sessionId}` |
-| Load messages | `loadMessages()` | HTTP GET | `/daifu/sessions/{sessionId}/messages` |
-| Load context cards | `loadContextCards()` | HTTP GET | `/daifu/sessions/{sessionId}/context-cards` |
-| Send chat | `sendChatMessage()` | WebSocket first, HTTP fallback | `/controller/sessions/{sessionId}/ws/unified` or `/daifu/sessions/{sessionId}/chat` |
-| Create issue preview | `createIssueWithContext()` | HTTP POST | `/daifu/sessions/{sessionId}/issues/create-with-context` |
-| Fetch repo issues for execution | `SolveIssues` | HTTP GET | `/daifu/github/repositories/{owner}/{repo}/issues` |
-| Start execution | `SolveIssues` | HTTP POST | `/daifu/sessions/{sessionId}/execution` |
-| Poll execution status | `SolveIssues` | HTTP GET | `/daifu/sessions/{sessionId}/execution` |
-| Cancel execution | `SolveIssues` | HTTP POST | `/daifu/sessions/{sessionId}/execution/cancel` |
-| Runtime detail | `syncRuntimeState()` | HTTP GET | `/controller/sessions/{sessionId}/runtime` |
-| Live trajectory stream | `TrajectoryViewer` via `useSessionWebSocket` | WebSocket | `/controller/sessions/{sessionId}/ws/unified` |
+| Load repos | `agentApi.listRepositories()` | HTTP GET | `/github/repositories` |
+| Load branches | `agentApi.listBranches()` | HTTP GET | `/github/repositories/{owner}/{repo}/branches` |
+| Create session | `agentApi.createSession()` | HTTP POST | `/daifu/sessions` |
+| Load session context | `agentApi.getSessionContext()` | HTTP GET | `/daifu/sessions/{sessionId}` |
+| Send chat | `agentApi.sendChatMessage()` | HTTP POST | `/daifu/sessions/{sessionId}/chat` |
+| Answer question | `agentApi.answerQuestion()` | HTTP POST | `/daifu/sessions/{sessionId}/questions/{questionId}/answer` |
+| Load GitHub issues | `agentApi.listRepositoryIssues()` | HTTP GET | `/daifu/github/repositories/{owner}/{repo}/issues` |
+| Load workflow | `agentApi.getWorkflow()` | HTTP GET | `/daifu/sessions/{sessionId}/workflow` |
+| Select workflow issue | `agentApi.selectWorkflowIssue()` | HTTP POST | `/daifu/sessions/{sessionId}/workflow/issue` |
+| Save PR context | `agentApi.updateWorkflowContext()` | HTTP PATCH | `/daifu/sessions/{sessionId}/workflow/context` |
+| Start execution | `agentApi.startExecution()` | HTTP POST | `/daifu/sessions/{sessionId}/execution` |
+| Poll execution status | `agentApi.getExecutionStatus()` | HTTP GET | `/daifu/sessions/{sessionId}/execution` |
+| Cancel execution | `agentApi.cancelExecution()` | HTTP POST | `/daifu/sessions/{sessionId}/execution/cancel` |
+
+The unified WebSocket control plane also supports workflow and execution commands, but the current workbench still relies primarily on REST plus polling for this flow.
 
 ## Auth Flow
 
@@ -441,158 +192,59 @@ sequenceDiagram
     participant SUC as AuthSuccess
     participant APP as App
 
-    U->>LP: Click "Sign in with GitHub"
+    U->>LP: Click "Continue with GitHub"
     LP->>AS: login()
     AS->>BE: GET /auth/api/login
     BE-->>AS: { login_url }
     AS->>GH: Redirect browser to GitHub
     GH->>BE: OAuth callback
-    BE->>SUC: Redirect to /auth/success?session_token=...&user=...
+    BE->>SUC: Redirect to /auth/success?session_token=...
     SUC->>AS: setAuthFromCallback(...)
     SUC->>APP: navigate("/")
     APP->>AS: initializeAuth()
-    AS->>BE: GET /auth/api/user (only if token exists)
-    BE-->>AS: current user
+    AS->>BE: GET /auth/api/user only when token exists
 ```
 
-## Repository And Session Boot Flow
-
-```mermaid
-flowchart TD
-    Login[AuthSuccess completed] --> Home[AppContent mounted]
-    Home --> RepoCheck{selectedRepository exists?}
-
-    RepoCheck -->|no| RepoToast[RepositorySelectionToast opens]
-    RepoToast --> LoadRepos[GET /github/repositories]
-    LoadRepos --> SelectRepo[User picks repo and branch]
-    SelectRepo --> SetRepo[setSelectedRepository]
-
-    RepoCheck -->|yes| Orchestrator[SessionOrchestrator]
-    SetRepo --> Orchestrator
-
-    Orchestrator --> NeedSession{activeSessionId exists?}
-    NeedSession -->|no| CreateSession[POST /daifu/sessions]
-    NeedSession -->|yes| ValidateSession[GET /daifu/sessions/{sessionId}]
-
-    CreateSession --> Hydrate
-    ValidateSession --> Hydrate[Load messages/context cards]
-
-    Hydrate --> Ready[Workspace ready]
-```
-
-## Chat Flow
+## Issue-To-PR Flow
 
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant Chat as Chat
-    participant Store as sessionStore
-    participant WS as Unified WebSocket
-    participant API as REST Chat API
+    participant WB as AgentWorkbench
+    participant API as Backend APIs
+    participant ORCH as SessionExecutionOrchestrator
 
-    U->>Chat: Send message
-    Chat->>Store: sendChatMessage(message)
-
-    alt WebSocket chat enabled
-        Store->>Store: append optimistic user + assistant placeholder
-        Store->>WS: connect /controller/sessions/{sessionId}/ws/unified
-        WS-->>Store: llm_stream chunks
-        Store->>Store: update optimistic assistant text
-        WS-->>Store: final response
-        Store->>Store: finalize assistant message
-        Store->>Store: reconcile with loadMessages()
-    else HTTP fallback
-        Store->>API: POST /daifu/sessions/{sessionId}/chat
-        API-->>Store: ChatResponse
-        Store->>Store: append local user + assistant messages
-        Store->>Store: reconcile with loadMessages()
-    end
+    U->>WB: Select repository and branch
+    WB->>API: POST /daifu/sessions
+    WB->>API: GET GitHub issues
+    U->>WB: Select issue
+    WB->>API: POST /workflow/issue
+    U->>WB: Chat and save affected systems/context
+    WB->>API: PATCH /workflow/context
+    U->>WB: Start pipeline
+    WB->>API: POST /execution
+    API->>ORCH: Start next legal mode
+    ORCH-->>API: Architect/Tester/Coder outputs
+    WB->>API: Poll workflow/execution status
+    WB->>U: Show readiness, evidence, and PR metadata
 ```
 
-## Execution And Streaming Flow
+## Demo Route Constraints
 
-This is the part that currently causes the visible tab handoff.
+The `/demo` route is intentionally static:
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant Solve as SolveIssues
-    participant Store as sessionStore
-    participant ExecAPI as Execution API
-    participant Traj as TrajectoryViewer
-    participant WS as Unified WebSocket
+- no auth
+- no backend calls
+- no mutation
+- no persisted state
+- no fake network loading
 
-    U->>Solve: Open Execution tab
-    Solve->>ExecAPI: GET repo issues
-    U->>Solve: Start execution for issue
-    Solve->>ExecAPI: POST /daifu/sessions/{sessionId}/execution
-    Solve->>Store: syncRuntimeState()
-    Solve->>Store: setActiveTab("ideas")
+It should stay useful for visual inspection, screenshots, onboarding, and frontend design review. Production behavior belongs in `AgentWorkbench`.
 
-    Note over Store,Traj: "ideas" is the visible Trajectory tab
+## Non-Negotiables
 
-    Traj->>WS: connect /controller/sessions/{sessionId}/ws/unified
-    WS-->>Traj: status
-    WS-->>Traj: trajectory_update
-    WS-->>Traj: heartbeat
-    Traj->>U: live execution stream
-```
-
-## Tab State Diagram
-
-```mermaid
-stateDiagram-v2
-    [*] --> chat
-    chat --> context: user tab click
-    chat --> solve: user tab click
-    chat --> ideas: user tab click
-
-    context --> chat: user tab click
-    context --> solve: user tab click
-    context --> ideas: user tab click
-
-    solve --> chat: user tab click
-    solve --> context: user tab click
-    solve --> ideas: start execution\ncurrent behavior
-
-    ideas --> chat: user tab click
-    ideas --> context: user tab click
-    ideas --> solve: user tab click
-```
-
-## Current Architectural Mismatches
-
-These are the parts most likely to confuse someone reading the code:
-
-1. Internal tab key `ideas` means `Trajectory`, not ideas.
-2. `Execution` starts a run, but live streaming happens on `Trajectory`.
-3. `activeTab` is persisted, which previously allowed stale tab restoration after login.
-4. `SolveIssues` uses a direct issue-list endpoint string instead of going through the centralized API config constants.
-
-## Recommended Mental Model
-
-If you want a simple way to think about the current frontend:
-
-- `authStore` = who the user is and whether there is a bearer token
-- `sessionStore` = everything about the selected repo, active daifu session, runtime, and workspace UI
-- `SessionOrchestrator` = the side-effect engine that makes repo selection turn into a hydrated session
-- `Chat` = conversational work surface
-- `SolveIssues` = execution launcher
-- `TrajectoryViewer` = execution monitor
-
-## If You Want The UX To Match Your Intent
-
-Your stated intent is:
-
-- land on `Chat` after login
-- stay out of `Solve` until user explicitly starts execution
-- move to the streaming surface only when execution begins
-
-The first part is now aligned.
-
-The remaining decision is whether the streaming surface should:
-
-1. stay as the current `Trajectory` tab, or
-2. move into the `Execution` tab so one tab both launches and monitors the run
-
-Right now the code implements option 1.
+- Do not change auth behavior as part of visual or demo work.
+- Do not change backend API contracts from frontend-only refactors.
+- Do not introduce a competing visual language outside `docs/design-doc.md`.
+- Do not replace the real logo with generated badges or text-only marks.
+- Keep the normal execution mode order server-controlled: Architect -> Tester -> Coder.
