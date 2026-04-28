@@ -19,7 +19,7 @@ type QueryValue = string | number | boolean | null | undefined;
 
 type RequestOptions = {
   body?: unknown;
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   pathParams?: Record<string, string | number>;
   query?: Record<string, QueryValue>;
   token?: string | null;
@@ -41,6 +41,55 @@ export type ContractContextCard = ApiSchema<'ContextCardResponse'>;
 export type ContractUserQuestion = ApiSchema<'UserQuestionResponse'>;
 export type ContractAnswerQuestionRequest = ApiSchema<'AnswerQuestionRequest'>;
 export type ContractAnswerQuestionResponse = ApiSchema<'AnswerQuestionResponse'>;
+
+export type ContractWorkflowIssue = {
+  body?: string | null;
+  comments?: number | null;
+  created_at?: string | null;
+  html_url?: string | null;
+  labels?: string[];
+  number: number;
+  state: string;
+  title: string;
+  updated_at?: string | null;
+};
+
+export type ContractWorkflowContext = {
+  acceptance_criteria?: string | null;
+  affected_systems?: string[];
+  constraints?: string | null;
+  notes?: string | null;
+  out_of_scope?: string | null;
+};
+
+export type ContractWorkflowStageResult = {
+  acceptance_criteria?: string[] | string | null;
+  affected_systems?: string[];
+  completed_at?: string | null;
+  config_path?: string | null;
+  exit_code?: number | null;
+  issue_number?: number | null;
+  issue_url?: string | null;
+  pr_number?: number | null;
+  pr_url?: string | null;
+  risks?: string[] | string | null;
+  status?: string | null;
+  summary?: string | null;
+  test_branch?: string | null;
+  tests?: string[] | string | null;
+  touched_files?: string[];
+};
+
+export type ContractWorkflowResponse = {
+  artifact?: ApiSchema<'ExecutionArtifactResponse'> | null;
+  execution: ContractExecutionStatus;
+  pending_questions: ContractUserQuestion[];
+  pr_readiness: Record<string, unknown>;
+  selected_issue?: ContractWorkflowIssue | null;
+  session: ContractSession;
+  stage_results: Record<string, ContractWorkflowStageResult>;
+  user_context: ContractWorkflowContext;
+};
 
 export class AgentApiError extends Error {
   status: number;
@@ -276,6 +325,51 @@ export const agentApi = {
       query: { limit },
       token,
     });
+  },
+
+  getWorkflow(
+    sessionId: string,
+    token?: string | null
+  ): Promise<ContractWorkflowResponse> {
+    return requestJson<ContractWorkflowResponse>(
+      '/daifu/sessions/{session_id}/workflow',
+      {
+        pathParams: { session_id: sessionId },
+        token,
+      }
+    );
+  },
+
+  selectWorkflowIssue(
+    sessionId: string,
+    body: ContractWorkflowIssue,
+    token?: string | null
+  ): Promise<ContractWorkflowResponse> {
+    return requestJson<ContractWorkflowResponse>(
+      '/daifu/sessions/{session_id}/workflow/issue',
+      {
+        body,
+        method: 'POST',
+        pathParams: { session_id: sessionId },
+        token,
+      }
+    );
+  },
+
+  updateWorkflowContext(
+    sessionId: string,
+    body: ContractWorkflowContext,
+    token?: string | null
+  ): Promise<ContractWorkflowResponse> {
+    return requestJson<ContractWorkflowResponse>(
+      '/daifu/sessions/{session_id}/workflow/context',
+      {
+        body,
+        method: 'PATCH',
+        pathParams: { session_id: sessionId },
+        token,
+      }
+    );
   },
 
   createIssuePreview(
