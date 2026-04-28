@@ -11,7 +11,15 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 from yudai.config import get_agent_config, get_model_config, get_sandbox_config
-from yudai.models import ChatSession, Sandbox, SandboxStatus
+from yudai.models import (
+    ChatMessage,
+    ChatSession,
+    Sandbox,
+    SandboxStatus,
+    UserIssue,
+    UserQuestion,
+    UserQuestionStatus,
+)
 from yudai.realtime.lifecycle import SandboxExecBroker
 from yudai.realtime.modal_sandbox import (
     SANDBOX_MSWEA_CONFIG_ROOT,
@@ -48,6 +56,8 @@ class ContextProbeService:
     OUTPUT_BEGIN = "__YUDAI_PROBE_OUTPUT_BEGIN__"
     OUTPUT_END = "__YUDAI_PROBE_OUTPUT_END__"
     MAX_CONTEXT_CHARS_PER_PROBE = 6000
+    MAX_PROBE_TASK_CHARS = 12000
+    MAX_PROBE_CONVERSATION_CHARS = 7000
 
     def __init__(self, broker: SandboxExecBroker):
         self.broker = broker
@@ -76,11 +86,12 @@ class ContextProbeService:
 
         workspace = session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH
         output_path = f"{workspace}/.yudai/probes/{probe.probe_id}.md"
+        task_text = self._build_probe_task(db, session=session, query=probe.query)
         env: Dict[str, str] = {
             "WORKSPACE_PATH": workspace,
             "YUDAI_PROBE_ID": probe.probe_id,
             "YUDAI_PROBE_OUTPUT": output_path,
-            "MSWEA_PROBE_QUERY": probe.query,
+            "MSWEA_PROBE_QUERY": task_text,
             "MSWEA_CONFIG_ROOT": SANDBOX_MSWEA_CONFIG_ROOT,
             "REPO_BRANCH": session.repo_branch or "main",
         }
@@ -166,6 +177,166 @@ class ContextProbeService:
                     )
                 )
         return results
+
+    @classmethod
+    def _build_probe_task(
+        cls,
+        db: Session,
+        *,
+        session: ChatSession,
+        query: str,
+    ) -> str:
+        """Build the natural-language task sent to the sandbox probe agent."""
+
+        sections = [
+            "Answer this code exploration question:",
+            query.strip(),
+            "",
+            "Session metadata:",
+            f"- Session: {session.session_id}",
+            f"- Repository: {session.repo_owner or 'unknown'}/{session.repo_name or 'unknown'}",
+            f"- Branch: {session.repo_branch or 'main'}",
+            f"- Current mode: {session.current_mode}",
+            f"- Mode status: {session.mode_status}",
+        ]
+
+        if session.architect_issue_number is not None or session.architect_issue_url:
+            sections.extend(
+                [
+                    "",
+                    "Linked GitHub issue:",
+                    f"- Number: {session.architect_issue_number or 'unknown'}",
+                    f"- URL: {session.architect_issue_url or 'unknown'}",
+                ]
+            )
+
+        issue_context = cls._render_issue_context(db, session)
+        if issue_context:
+            sections.extend(["", issue_context])
+
+        question_context = cls._render_answered_questions(db, session)
+        if question_context:
+            sections.extend(["", question_context])
+
+        conversation_context = cls._render_conversation(db, session)
+        if conversation_context:
+            sections.extend(["", conversation_context])
+
+        sections.extend(
+            [
+                "",
+                "Return a concise repo-grounded summary with file paths and line references where useful.",
+                "Do not edit source files, tests, config, docs, issues, or pull requests.",
+            ]
+        )
+        return cls._truncate("\n".join(sections), cls.MAX_PROBE_TASK_CHARS)
+
+    @classmethod
+    def _render_conversation(cls, db: Session, session: ChatSession) -> Optional[str]:
+        messages = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == session.id)
+            .order_by(ChatMessage.created_at.asc())
+            .all()
+        )
+        if not messages:
+            return None
+
+        lines: List[str] = []
+        used = 0
+        truncated = False
+        for message in messages:
+            role = (message.role or message.sender_type or "user").strip().lower()
+            text = " ".join((message.message_text or "").split())
+            if not text:
+                continue
+            line = f"- [{role}] {text}"
+            projected = used + len(line) + 1
+            if projected > cls.MAX_PROBE_CONVERSATION_CHARS:
+                truncated = True
+                break
+            lines.append(line)
+            used = projected
+
+        if truncated:
+            lines.append("[conversation truncated]")
+        if not lines:
+            return None
+        return "Conversation context:\n" + "\n".join(lines)
+
+    @staticmethod
+    def _render_answered_questions(db: Session, session: ChatSession) -> Optional[str]:
+        questions = (
+            db.query(UserQuestion)
+            .filter(
+                UserQuestion.session_id == session.id,
+                UserQuestion.status == UserQuestionStatus.ANSWERED.value,
+            )
+            .order_by(UserQuestion.answered_at.desc(), UserQuestion.created_at.desc())
+            .limit(10)
+            .all()
+        )
+        if not questions:
+            return None
+
+        lines: List[str] = ["Answered clarification questions:"]
+        for question in reversed(questions):
+            option_labels = {
+                str(option.get("id")): str(option.get("label"))
+                for option in (question.options or [])
+                if isinstance(option, dict) and option.get("id") and option.get("label")
+            }
+            selected = [
+                option_labels.get(str(option_id), str(option_id))
+                for option_id in (question.selected_option_ids or [])
+            ]
+            answer_parts: List[str] = []
+            if selected:
+                answer_parts.append("selected: " + ", ".join(selected))
+            if question.answer_text:
+                answer_parts.append(
+                    "text: " + ContextProbeService._truncate(question.answer_text, 800)
+                )
+            if not answer_parts:
+                answer_parts.append("answered")
+            lines.append(
+                f"- Q: {ContextProbeService._truncate(question.question_text, 500)}\n"
+                f"  A: {'; '.join(answer_parts)}"
+            )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _render_issue_context(db: Session, session: ChatSession) -> Optional[str]:
+        issues = (
+            db.query(UserIssue)
+            .filter(UserIssue.session_id == session.session_id)
+            .order_by(UserIssue.created_at.desc())
+            .limit(5)
+            .all()
+        )
+        if not issues:
+            return None
+
+        lines = ["Session issue context:"]
+        for issue in reversed(issues):
+            github_ref = ""
+            if issue.github_issue_number is not None:
+                github_ref = f" GitHub #{issue.github_issue_number}."
+            elif issue.github_issue_url:
+                github_ref = f" GitHub URL: {issue.github_issue_url}."
+            body = " ".join((issue.issue_text_raw or issue.description or "").split())
+            if len(body) > 500:
+                body = body[:500].rstrip() + "..."
+            lines.append(
+                f"- {issue.issue_id}: {issue.title} ({issue.status}).{github_ref} {body}".strip()
+            )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _truncate(value: str, limit: int) -> str:
+        if len(value) <= limit:
+            return value
+        return value[:limit].rstrip() + "\n[truncated]"
 
     @staticmethod
     def format_as_context(results: List[ProbeResult]) -> Optional[str]:
