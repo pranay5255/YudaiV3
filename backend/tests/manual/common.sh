@@ -31,4 +31,3 @@ ws_send() {
     --request-id "$request_id" \
     --expect-type "$expect_type"
 }
-
