@@ -1,8 +1,9 @@
 # Architecture Drift RCA
 
-Date: 2026-04-20
+Date: 2026-04-20; issue mappings refreshed 2026-04-28
 
-Scope: root `docs/`, current backend/frontend implementation, and open issues listed in `docs/GITHUB_ISSUE_TRIAGE.md`.
+Scope: root `docs/`, current backend/frontend implementation, and active issue
+trackers listed in `docs/GITHUB_ISSUE_TRIAGE.md`.
 
 ## Verification Summary
 
@@ -119,10 +120,11 @@ Impact:
 - Users can create issues without any mode execution.
 - The lifecycle can mark issue-created before the orchestrator runs Architect, causing duplicate or contradictory issue semantics.
 
-Issue mapping:
+Active tracker mapping:
 
-- Existing: `#173`, `#174`, `#175`, `#179`
-- New issue recommended: "Auto-start or explicitly hand off 3-mode execution after GitHub issue creation".
+- `#179`: align ChatOps/session issue publishing with the current Daifu
+  orchestration handoff.
+- `#175`: harden the MSWEA pipeline contract once execution is started.
 
 ### 2. Architect Mode Semantics Are Ambiguous
 
@@ -138,10 +140,10 @@ This creates an unresolved product/architecture choice:
 
 Actual implementation mixes A and B.
 
-Issue mapping:
+Active tracker mapping:
 
-- Existing: `#173`, `#175`
-- New issue recommended: "Define Architect mode input contract: create issue vs consume existing issue".
+- `#175`: define the Architect mode input contract for existing GitHub issues.
+- `#179`: keep Daifu session handoff aligned with that contract.
 
 ### 3. Live Mode Configs Are Not Real Role-Specific Configs Yet
 
@@ -166,10 +168,10 @@ Impact:
 - Tester may modify source code.
 - Coder may not consume Tester output as a hard contract.
 
-Issue mapping:
+Active tracker mapping:
 
-- Existing: `#173`, `#174`, `#175`
-- New issue recommended: "Replace live Modal mode configs with strict Architect/Tester/Coder contracts and delete unused config copies".
+- `#175`: canonical tracker for live Architect, Tester, and Coder mode
+  contracts and config hardening.
 
 ### 4. MSWEA Output Parsing Is Too Fragile
 
@@ -183,10 +185,10 @@ Impact:
 - A random log line can be misparsed.
 - Mode summaries are not a reliable machine contract.
 
-Issue mapping:
+Active tracker mapping:
 
-- Existing: `#162`
-- New issue recommended: "Define structured MSWEA mode result contract and validate mode summaries".
+- `#175`: define and validate structured MSWEA result artifacts and PR
+  metadata.
 
 ### 5. Docs Still Mention The Wrong Mini CLI Contract
 
@@ -205,10 +207,10 @@ Impact:
 - The docs describe a CLI that is not what the code executes.
 - Future agents will implement against stale flags.
 
-Issue mapping:
+Active tracker mapping:
 
-- Existing: `#173` through `#175`
-- New issue recommended: "Canonicalize mini-swe-agent CLI docs and tests".
+- `#175`: canonicalize mini-swe-agent command docs and tests around the live
+  `mini -c <config> -y -m <model> -t <task>` invocation.
 
 ### 6. Completion Detector Docs Overstate Automatic Termination
 
@@ -227,14 +229,15 @@ Impact:
 - Non-orchestrator flows can drift from documented lifecycle behavior.
 - `_finalize_on_completion()` is effectively dead code in its current form.
 
-Issue mapping:
+Active tracker mapping:
 
-- Existing: `#166`, `#175`
-- New issue recommended: "Make lifecycle completion finalization single-source and remove dead `_finalize_on_completion`".
+- `#175`: make completion, export, termination, and structured mode results
+  part of one hardened pipeline contract.
 
 ### 7. Streaming Architecture Docs Conflict
 
-`REAL_TIME_IMPLEMENTATION_QUESTIONNAIRE.md` and `REAL_TIME_PHASE_TASK_LIST.md` describe an SSE trajectory + WS chat split and direct frontend tunnel access.
+`REAL_TIME_IMPLEMENTATION_QUESTIONNAIRE.md` and older phase-planning notes
+describe an SSE trajectory + WS chat split and direct frontend tunnel access.
 
 `sandbox-architecture-deep-dive.html` describes the newer architecture: controller unified WebSocket replaces SSE and direct frontend tunnel resolution.
 
@@ -249,10 +252,10 @@ Impact:
 - There is no single canonical real-time spec.
 - Future work could accidentally reintroduce SSE/direct tunnel complexity.
 
-Issue mapping:
+Active tracker mapping:
 
-- Existing: `#182`
-- New issue recommended: "Canonicalize real-time streaming docs around unified controller WebSocket".
+- `#182`: polish the Agent Workbench runtime UX against the unified controller
+  WebSocket model.
 
 ### 8. Sandbox Identity Policy Has Drifted
 
@@ -268,21 +271,26 @@ Impact:
 - It contradicts the shared-sandbox/invited-user direction in the questionnaire.
 - Future collaboration features need an explicit policy.
 
-Issue mapping:
+Active tracker mapping:
 
-- Existing: `#143`, `#167`, `#166`
-- New issue recommended: "Define sandbox identity policy for MVP single-user vs future shared sessions".
+- `#143`: product/backend tracker for multi-user handoff and shared execution
+  ownership policy.
 
-### 9. Sandbox Provider Abstractions Are Still Missing
+### 9. Sandbox Provider Abstraction Is Deferred
 
 The current code still directly uses `RealtimeModalSandbox`, `SandboxExecBroker`, `sandbox_transport`, and lifecycle internals.
 
-Open issues `#167`, `#166`, `#168`, and `#169` are still valid. They should now be treated as the next foundation for formalizing Modal/local providers, as the user requested.
+That is now intentional for the current backlog. `docs/GITHUB_ISSUE_TRIAGE.md`
+records that `#166`, `#168`, and `#169` were closed as `not_planned`, while
+`#167` completed the decision to keep Modal canonical until a concrete second
+provider requirement exists.
 
 Recommendation:
 
-- Keep these issues, but coalesce their acceptance criteria into a single provider-contract epic.
-- Do not start `#168` before the base ABC in `#167` is merged.
+- Keep Modal explicit until a real second provider or committed provider-switching
+  requirement exists.
+- Revisit provider interfaces only when the active backlog has a real second
+  provider or provider-switching requirement.
 
 ### 10. Frontend Execution UX Is Split Between Chat And SolveIssues
 
@@ -296,10 +304,11 @@ Impact:
 - Chat-initiated execution can hand the agent a fake GitHub issue number.
 - The UI does not clearly represent which mode is active or whether the issue is local preview vs upstream GitHub issue.
 
-Issue mapping:
+Active tracker mapping:
 
-- Existing: `#182`, `#185`
-- New issue recommended: "Unify Chat issue modal and Execution tab start contract".
+- `#182`: frontend runtime UX and recovery umbrella.
+- `#179`: backend/session start contract alignment for ChatOps and Daifu
+  session orchestration.
 
 ## Dead Code And Cleanup Targets
 
@@ -359,54 +368,29 @@ Ruthless cleanup candidates, with 2026-04-20 status:
 
 ## Open Issue Triage Correlation
 
-Current open issues fetched by `gh api` match `docs/GITHUB_ISSUE_TRIAGE.md`.
+Use `docs/GITHUB_ISSUE_TRIAGE.md` as the source of truth for active tracker
+status. The current active mapping is:
 
-### Should Close Or Reclassify
+| Active issue | Maps from this RCA |
+| --- | --- |
+| `#175` | MSWEA mode contracts, live configs, structured outputs, completion/export behavior, mini CLI contract, and fake-mini E2E. |
+| `#179` | ChatOps, Daifu session orchestration, GitHub issue publishing handoff, and backend start-contract alignment. |
+| `#182` | Agent Workbench progress, recovery, runtime UX, and unified controller WebSocket presentation. |
+| `#16` | Future PR changelog/review table work after PR metadata and execution artifacts stabilize. |
+| `#143` | Shared user handoff, ownership, and sandbox identity policy. |
+| `#139` | Better Auth / separate auth database architecture decision. |
+| `#135` | GitHub App org migration, Gmail auth, and auto-repo creation direction. |
 
-- `#138`: reclassify after the legacy indexing dependency path removal; keep open only if a fresh CI/prod Modal preflight exposes a current runtime import failure.
-- `#182`: partially completed for chat token streaming. Keep open, but narrow it to remaining loading feedback, mode progress, and trajectory UI.
+Closed or coalesced items from this RCA:
 
-### Keep As-Is
-
-- `#60`, `#63`, `#16`: still separate GitHub automation work.
-- `#139` and `#135`: still architecture decisions; do not mix with 3-mode orchestration.
-- `#180`, `#181`, `#183`, `#184`, `#185`, `#186`: frontend UX batch remains valid.
-- `#143`: still valid, but blocked on shared-sandbox identity policy.
-
-### Coalesce Into A Sandbox Provider Epic
-
-- `#167`: Sandbox ABC and SandboxProvider ABC
-- `#166`: Wire provider into lifecycle/broker/transport
-- `#168`: Modal provider implementation
-- `#169`: Local provider implementation
-- `#170`: SandboxMiddleware
-
-These should become one staged epic with strict acceptance tests.
-
-### Reframe The Agent Framework Epic Around Current Reality
-
-- `#173`, `#174`, `#175` should not create a separate duplicate subagent system if the immediate runtime is mini-swe-agent mode configs.
-- Reframe them as:
-  - Architect mode contract and config
-  - Tester mode contract and config
-  - Coder mode contract and config
-  - Structured mode result artifacts
-  - End-to-end orchestrator tests
-
-`#171`, `#172`, `#176`, `#177`, `#178`, and `#179` are still useful for the later first-class Yudai agent framework, but they should not block the immediate MSWEA 3-mode pipeline.
-
-### New Issues Recommended
-
-1. Auto-start or explicitly hand off 3-mode execution after GitHub issue creation.
-2. Define Architect mode input semantics: create issue vs consume existing issue.
-3. Replace live Modal mode configs with strict Architect/Tester/Coder contracts.
-4. Define and validate structured MSWEA result artifacts.
-5. Make lifecycle completion/export/termination single-source and remove dead `_finalize_on_completion`.
-6. Canonicalize real-time docs around unified controller WebSocket.
-7. Define sandbox identity policy for single-user MVP and future shared sessions.
-8. Unify Chat issue modal and Execution tab start contracts.
-9. Dead-code cleanup for compatibility shims, stale configs, generated docs, and static trajectory data.
-10. Add authenticated E2E that uses a fake/probe `mini` in Modal and verifies DB state across Architect -> Tester -> Coder.
+- `#60` and `#63` are completed low-hanging GitHub automation items.
+- `#166`, `#168`, and `#169` are closed as `not_planned`; sandbox provider
+  work is deferred by the completed `#167` decision.
+- `#173` and `#174` are closed as `not_planned`; their runtime substance now
+  belongs in `#175`.
+- `#180`, `#181`, `#184`, `#185`, and `#186` are folded into `#182`.
+- First-class agent framework issues are deferred; do not let them block the
+  current Daifu + MSWEA runtime hardening path.
 
 ## Recommended Next Build Order
 
