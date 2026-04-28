@@ -84,6 +84,7 @@ from yudai.realtime.mode_orchestrator import (
 )
 from yudai.realtime.ws_protocol import get_ws_hub
 from yudai.realtime.ws_protocol import WSMessageType
+from yudai.daifuUserAgent.session_actions import SessionActionService
 
 from yudai.models import (
     AgentExecution,
@@ -91,6 +92,7 @@ from yudai.models import (
     ChatSession,
     ContextCard,
     Repository,
+    SessionArtifact,
     SessionMode,
     SessionModeStatus,
     User,
@@ -132,6 +134,9 @@ from yudai.types import (
     UserIssueResponse,
     UserQuestionOption,
     UserQuestionResponse,
+    WorkflowContextUpdateRequest,
+    WorkflowIssueRequest,
+    WorkflowResponse,
 )
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.orm import Session
@@ -305,6 +310,20 @@ async def _prepare_github_issue_created_response(
         "seed_github_issue_number": result.github_issue_number,
         "seed_user_issue_id": result.issue_id,
     }
+    workflow = _get_workflow_metadata(db_session)
+    workflow["selected_issue"] = {
+        "number": result.github_issue_number,
+        "title": result.title,
+        "state": "open",
+        "html_url": result.github_issue_url,
+        "body": result.issue_text_raw or result.description,
+        "labels": ["chat-generated"],
+        "comments": 0,
+        "updated_at": utc_now().isoformat(),
+    }
+    workflow.setdefault("user_context", {})
+    workflow.setdefault("stage_results", {})
+    _set_workflow_metadata(db_session, workflow)
 
     lifecycle = get_realtime_lifecycle_service()
     lifecycle.mark_issue_created(
@@ -514,6 +533,198 @@ def _build_mode_plan(mode: str, objective: str) -> List[str]:
             "Run tests and publish PR metadata to lifecycle completion tracker.",
         ]
     return ["Workflow already complete."]
+
+
+WORKFLOW_METADATA_KEY = "workflow"
+
+
+def _clean_string_list(raw: Any, *, limit: int = 30) -> List[str]:
+    if not isinstance(raw, list):
+        return []
+    values: List[str] = []
+    for item in raw:
+        text = str(item or "").strip()
+        if text and text not in values:
+            values.append(text[:500])
+        if len(values) >= limit:
+            break
+    return values
+
+
+def _normalize_github_issue_labels(labels: Any) -> List[str]:
+    if not isinstance(labels, list):
+        return []
+    normalized: List[str] = []
+    for label in labels:
+        if isinstance(label, str):
+            name = label
+        elif isinstance(label, dict):
+            name = str(label.get("name") or label.get("label") or "").strip()
+        else:
+            name = ""
+        if name and name not in normalized:
+            normalized.append(name)
+    return normalized
+
+
+def _get_workflow_metadata(session: ChatSession) -> Dict[str, Any]:
+    metadata = session.mode_metadata if isinstance(session.mode_metadata, dict) else {}
+    workflow = metadata.get(WORKFLOW_METADATA_KEY)
+    return dict(workflow) if isinstance(workflow, dict) else {}
+
+
+def _set_workflow_metadata(session: ChatSession, workflow: Dict[str, Any]) -> None:
+    metadata = dict(session.mode_metadata or {})
+    metadata[WORKFLOW_METADATA_KEY] = workflow
+    session.mode_metadata = metadata
+    flag_modified(session, "mode_metadata")
+
+
+def _parse_datetime_value(raw: Any) -> Optional[datetime]:
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw
+    text = str(raw).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _artifact_payload_from_row(artifact: SessionArtifact) -> Dict[str, Any]:
+    metadata = artifact.artifact_metadata if isinstance(artifact.artifact_metadata, dict) else {}
+    sandbox_bundle = metadata.get("sandbox_bundle") if isinstance(metadata.get("sandbox_bundle"), dict) else {}
+    return {
+        "bundle_path": artifact.bundle_path,
+        "metadata_path": sandbox_bundle.get("metadata_path"),
+        "checksum_sha256": artifact.checksum_sha256,
+        "byte_size": artifact.byte_size,
+    }
+
+
+def _build_lightweight_execution_status(
+    db: Session,
+    session: ChatSession,
+) -> ExecutionStatusResponse:
+    metadata = session.mode_metadata if isinstance(session.mode_metadata, dict) else {}
+    active_execution = metadata.get("active_execution")
+    if not isinstance(active_execution, dict):
+        active_execution = {}
+    latest_artifact = (
+        db.query(SessionArtifact)
+        .filter(SessionArtifact.session_id == session.id)
+        .order_by(SessionArtifact.id.desc())
+        .first()
+    )
+    artifact_payload = active_execution.get("artifact")
+    if artifact_payload is None and latest_artifact:
+        artifact_payload = _artifact_payload_from_row(latest_artifact)
+
+    next_mode = _next_mode_for_session(session)
+    objective_for_plan = str(active_execution.get("objective_with_context") or "")
+    return ExecutionStatusResponse(
+        execution_id=active_execution.get("execution_id"),
+        session_id=session.session_id,
+        mode=str(active_execution.get("mode") or session.current_mode or next_mode),
+        status=str(active_execution.get("status") or session.mode_status or SessionModeStatus.IDLE.value),
+        plan=list(active_execution.get("plan") or _build_mode_plan(next_mode, objective_for_plan)),
+        started_at=_parse_datetime_value(active_execution.get("started_at")),
+        completed_at=_parse_datetime_value(active_execution.get("completed_at")),
+        cancel_requested=bool(active_execution.get("cancel_requested")),
+        waiting_for_input=session.mode_status == SessionModeStatus.WAITING_FOR_INPUT.value,
+        current_mode_execution_id=active_execution.get("current_mode_execution_id"),
+        artifact=artifact_payload,
+        detail=active_execution.get("detail"),
+    )
+
+
+def _build_pr_readiness(
+    *,
+    session: ChatSession,
+    execution: ExecutionStatusResponse,
+    selected_issue: Optional[Dict[str, Any]],
+    user_context: Dict[str, Any],
+    stage_results: Dict[str, Any],
+    pending_questions: List[UserQuestionResponse],
+) -> Dict[str, Any]:
+    checks = {
+        "issue_selected": bool(selected_issue or session.architect_issue_url),
+        "affected_systems_recorded": bool(user_context.get("affected_systems")),
+        "clarifications_answered": not pending_questions,
+        "architect_complete": bool(session.architect_completed_at),
+        "tester_complete": bool(session.tester_completed_at),
+        "coder_complete": bool(session.coder_completed_at),
+        "pr_created": bool(session.coder_pr_url),
+    }
+    status_value = (execution.status or session.mode_status or "").lower()
+    if session.coder_pr_url:
+        readiness = "ready"
+    elif pending_questions or execution.waiting_for_input:
+        readiness = "needs_input"
+    elif status_value in {"running", "provisioning", "pending"}:
+        readiness = "running"
+    elif status_value in {"failed", "cancelled", "error"}:
+        readiness = status_value
+    elif checks["issue_selected"]:
+        readiness = "drafting"
+    else:
+        readiness = "not_started"
+
+    mode_metadata = session.mode_metadata if isinstance(session.mode_metadata, dict) else {}
+    return {
+        "status": readiness,
+        "checks": checks,
+        "issue_number": session.architect_issue_number
+        or (selected_issue or {}).get("number"),
+        "issue_url": session.architect_issue_url
+        or (selected_issue or {}).get("html_url"),
+        "pr_number": session.coder_pr_number,
+        "pr_url": session.coder_pr_url,
+        "affected_systems": user_context.get("affected_systems") or [],
+        "test_branch": mode_metadata.get("tester_test_branch")
+        or (stage_results.get("tester") or {}).get("test_branch"),
+    }
+
+
+def _build_workflow_response(db: Session, db_session: ChatSession) -> WorkflowResponse:
+    context = SessionService.get_context(db, db_session)
+    execution = _build_lightweight_execution_status(db, db_session)
+    workflow = _get_workflow_metadata(db_session)
+    selected_issue = workflow.get("selected_issue")
+    if not isinstance(selected_issue, dict):
+        selected_issue = None
+    user_context = workflow.get("user_context")
+    if not isinstance(user_context, dict):
+        user_context = {}
+    stage_results = workflow.get("stage_results")
+    if not isinstance(stage_results, dict):
+        stage_results = {}
+
+    pending_questions = context.pending_questions or []
+    pr_readiness = _build_pr_readiness(
+        session=db_session,
+        execution=execution,
+        selected_issue=selected_issue,
+        user_context=user_context,
+        stage_results=stage_results,
+        pending_questions=pending_questions,
+    )
+
+    return WorkflowResponse(
+        session=context.session,
+        execution=execution,
+        selected_issue=selected_issue,
+        user_context=user_context,
+        stage_results=stage_results,
+        pending_questions=pending_questions,
+        pr_readiness=pr_readiness,
+        artifact=execution.artifact,
+    )
 
 
 def _truncate_for_context(value: str, limit: int = 400) -> str:
@@ -785,6 +996,12 @@ async def daifu_github_list_repository_issues(
             issue_data["id"] = issue.id
 
         db.commit()
+
+        for issue_data in issues:
+            if isinstance(issue_data, dict):
+                issue_data["labels"] = _normalize_github_issue_labels(
+                    issue_data.get("labels")
+                )
 
         return issues
     except HTTPException:
@@ -1070,6 +1287,44 @@ async def get_session_context(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get session context: {str(e)}",
         )
+
+
+@router.get("/sessions/{session_id}/workflow", response_model=WorkflowResponse)
+async def get_session_workflow(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the durable issue-to-PR workflow state for the workbench."""
+    return SessionActionService(db, current_user).get_workflow(session_id)
+
+
+@router.post("/sessions/{session_id}/workflow/issue", response_model=WorkflowResponse)
+async def select_session_workflow_issue(
+    session_id: str,
+    request: WorkflowIssueRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Persist the GitHub issue the user wants to turn into a PR."""
+    return SessionActionService(db, current_user).select_workflow_issue(
+        session_id,
+        request,
+    )
+
+
+@router.patch("/sessions/{session_id}/workflow/context", response_model=WorkflowResponse)
+async def update_session_workflow_context(
+    session_id: str,
+    request: WorkflowContextUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Persist user-provided PR context such as affected systems and constraints."""
+    return SessionActionService(db, current_user).update_workflow_context(
+        session_id,
+        request,
+    )
 
 
 # HIGH PRIORITY ENDPOINTS
@@ -1399,96 +1654,7 @@ async def conversation_in_session(
     current_user: User = Depends(get_current_user),
 ):
     """Conversation API: immediate natural-language response + optional follow-up question."""
-    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
-
-    content = request.message.strip()
-    lower_content = content.lower()
-    follow_up_question = None
-
-    user_message = ChatMessage(
-        session_id=db_session.id,
-        message_id=f"msg_{uuid.uuid4().hex[:12]}",
-        message_text=content,
-        sender_type="user",
-        role="user",
-        tokens=0,
-    )
-    db.add(user_message)
-    db_session.total_messages = (db_session.total_messages or 0) + 1
-
-    # Lightweight ambiguity detector: ask for preference before execution when request is broad.
-    ambiguous_terms = ("auth", "authentication", "api", "database", "testing")
-    if not request.selected_option_ids and any(term in lower_content for term in ambiguous_terms):
-        question_options = [
-            {"id": "behavior", "label": "Behavioral change first"},
-            {"id": "tests", "label": "Test coverage first"},
-            {"id": "refactor", "label": "Refactor and structure first"},
-        ]
-        question = UserQuestion(
-            question_id=f"q_{uuid.uuid4().hex[:10]}",
-            session_id=db_session.id,
-            user_id=current_user.id,
-            mode=_next_mode_for_session(db_session),
-            question_text="Choose the primary implementation focus for this run.",
-            options=question_options,
-            multi_select=False,
-            status=UserQuestionStatus.PENDING.value,
-            question_metadata={"origin": "conversation_ambiguity"},
-        )
-        db.add(question)
-        follow_up_question = {
-            "question_id": question.question_id,
-            "prompt": question.question_text,
-            "multi_select": question.multi_select,
-            "options": question_options,
-        }
-        db_session.mode_status = SessionModeStatus.WAITING_FOR_INPUT.value
-    else:
-        db_session.mode_status = SessionModeStatus.IDLE.value
-
-    reply = (
-        "Captured your request. The execution pipeline remains fixed "
-        "at Architect -> Tester -> Coder and will continue from the next pending mode."
-    )
-    assistant_message = ChatMessage(
-        session_id=db_session.id,
-        message_id=f"msg_{uuid.uuid4().hex[:12]}",
-        message_text=reply,
-        sender_type="assistant",
-        role="assistant",
-        tokens=0,
-    )
-    db.add(assistant_message)
-    db_session.total_messages = (db_session.total_messages or 0) + 1
-    db_session.last_activity = utc_now()
-    db_session.mode_updated_at = utc_now()
-    db.commit()
-
-    ws_hub = get_ws_hub()
-    await ws_hub.send_to_session(
-        session_id,
-        WSMessageType.LLM_STREAM,
-        {"stream": "llm", "text": reply, "final": True},
-    )
-    if follow_up_question:
-        await ws_hub.send_to_session(
-            session_id,
-            WSMessageType.AGENT_QUESTION,
-            {
-                "question_id": follow_up_question["question_id"],
-                "question_text": follow_up_question["prompt"],
-                "multi_select": bool(follow_up_question["multi_select"]),
-                "options": follow_up_question["options"],
-            },
-        )
-
-    return ConversationResponse(
-        session_id=session_id,
-        reply=reply,
-        current_mode=db_session.current_mode,
-        mode_status=db_session.mode_status,
-        follow_up_question=follow_up_question,
-    )
+    return await SessionActionService(db, current_user).conversation(session_id, request)
 
 
 @router.post(
