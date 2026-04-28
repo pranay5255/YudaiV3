@@ -9,18 +9,24 @@ from typing import Any, Dict, Optional
 
 from yudai.auth.github_oauth import get_current_user, validate_session_token
 from yudai.config import get_sandbox_config
-from yudai.daifuUserAgent.ChatOps import ChatOps
+from yudai.daifuUserAgent.session_actions import SessionActionService
 from yudai.db.database import get_db
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, WebSocket, status
+from fastapi.encoders import jsonable_encoder
 from yudai.models import AuthToken, ChatSession, SessionRuntime, User
 from yudai.types import (
+    AnswerQuestionRequest,
     CleanupResponse,
+    ExecutionRequest,
     HeartbeatResponse,
     RuntimeEnsureRequest,
     RuntimeResponse,
     SandboxCreateRequest,
     SandboxResponse,
+    StageToolRequest,
     TunnelResolveResponse,
+    WorkflowContextUpdateRequest,
+    WorkflowIssueRequest,
 )
 from sqlalchemy.orm import Session
 
@@ -263,49 +269,7 @@ async def ensure_runtime_for_session(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> RuntimeResponse:
-    lifecycle = get_realtime_lifecycle_service()
-    github_token = _get_user_github_token(db, current_user.id)
-
-    session_obj = (
-        db.query(ChatSession)
-        .filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id,
-        )
-        .first()
-    )
-    if not session_obj:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-
-    envelope = await lifecycle.create_runtime_for_session(
-        db,
-        session=session_obj,
-        user_id=current_user.id,
-        org=request.org,
-        repo_owner=request.repo_owner,
-        repo_name=request.repo_name,
-        environment=request.environment,
-        repo_branch=request.repo_branch,
-        repo_url=request.repo_url
-        or f"https://github.com/{request.repo_owner}/{request.repo_name}.git",
-        github_token=github_token,
-        env_inputs={
-            "SESSION_PUBLIC_ID": session_obj.session_id,
-            "WORKSPACE_PATH": session_obj.runtime_workspace_path or "/workspace/repo",
-        },
-    )
-
-    runtime_metadata = envelope.runtime.runtime_metadata or {}
-    runtime_metadata["identity_key"] = envelope.sandbox.identity_key
-    envelope.runtime.runtime_metadata = runtime_metadata
-
-    db.commit()
-    db.refresh(envelope.runtime)
-
-    response = _to_runtime_response(envelope.runtime)
-    response.identity_key = envelope.sandbox.identity_key
-    response.token_ttl_seconds = envelope.sandbox.tunnel_token_ttl_seconds or 3600
-    return response
+    return await SessionActionService(db, current_user).ensure_runtime(session_id, request)
 
 
 @router.get("/controller/sessions/{session_id}/runtime", response_model=RuntimeResponse)
@@ -314,29 +278,7 @@ def get_runtime_for_session(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> RuntimeResponse:
-    lifecycle = get_realtime_lifecycle_service()
-
-    session_obj = (
-        db.query(ChatSession)
-        .filter(
-            ChatSession.session_id == session_id,
-            ChatSession.user_id == current_user.id,
-        )
-        .first()
-    )
-    if not session_obj:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
-
-    runtime = lifecycle._get_latest_runtime(db, session_id=session_obj.id)
-    if not runtime:
-        return _not_provisioned_runtime_response()
-
-    response = _to_runtime_response(runtime)
-    sandbox = lifecycle.get_sandbox_or_404(db, runtime.sandbox_id) if runtime.sandbox_id else None
-    if sandbox:
-        response.identity_key = sandbox.identity_key
-        response.token_ttl_seconds = sandbox.tunnel_token_ttl_seconds or 3600
-    return response
+    return SessionActionService(db, current_user).get_runtime(session_id)
 
 
 @router.websocket("/controller/sessions/{session_id}/ws/unified")
@@ -405,10 +347,50 @@ async def unified_session_websocket(
                     "text": chunk,
                     "final": False,
                 },
+                request_id=current_request_id.get("value"),
             )
         )
 
+    current_request_id: Dict[str, Optional[str]] = {"value": None}
+
+    async def send_ack(
+        request_id: Optional[str],
+        result: Any,
+        *,
+        status_value: str = "ok",
+    ) -> None:
+        await websocket.send_text(
+            build_envelope(
+                WSMessageType.ACK,
+                {
+                    "ok": True,
+                    "status": status_value,
+                    "result": jsonable_encoder(result),
+                },
+                request_id=request_id,
+            )
+        )
+
+    async def send_error(
+        request_id: Optional[str],
+        *,
+        message: str,
+        code: str = "WS_COMMAND_FAILED",
+        status_code: Optional[int] = None,
+    ) -> None:
+        payload: Dict[str, Any] = {
+            "ok": False,
+            "message": message,
+            "code": code,
+        }
+        if status_code is not None:
+            payload["status_code"] = status_code
+        await websocket.send_text(
+            build_envelope(WSMessageType.ERROR, payload, request_id=request_id)
+        )
+
     async def receive_loop() -> None:
+        actions = SessionActionService(db, user)
         while not shutdown.is_set():
             try:
                 raw = await websocket.receive_text()
@@ -419,15 +401,17 @@ async def unified_session_websocket(
             try:
                 message = json.loads(raw)
             except json.JSONDecodeError:
-                await websocket.send_text(
-                    build_envelope(
-                        WSMessageType.ERROR,
-                        {"message": "Invalid JSON", "code": "WS_MESSAGE_PARSE_ERROR"},
-                    )
+                await send_error(
+                    None,
+                    message="Invalid JSON",
+                    code="WS_MESSAGE_PARSE_ERROR",
                 )
                 continue
 
             msg_type = message.get("type")
+            request_id = message.get("request_id")
+            if request_id is not None:
+                request_id = str(request_id)
             if msg_type == WSMessageType.CHAT_MESSAGE.value:
                 payload = message.get("payload", {}) or {}
                 content = str(payload.get("content") or "").strip()
@@ -436,11 +420,10 @@ async def unified_session_websocket(
                     repository = None
 
                 if not content:
-                    await websocket.send_text(
-                        build_envelope(
-                            WSMessageType.ERROR,
-                            {"message": "Missing chat content", "code": "CHAT_CONTENT_MISSING"},
-                        )
+                    await send_error(
+                        request_id,
+                        message="Missing chat content",
+                        code="CHAT_CONTENT_MISSING",
                     )
                     continue
 
@@ -452,29 +435,37 @@ async def unified_session_websocket(
                 )
 
                 try:
-                    chat_ops = ChatOps(db)
-                    result = await chat_ops.process_chat_message_stream(
+                    current_request_id["value"] = request_id
+                    result = await actions.stream_chat_message(
                         session_id=session_id,
-                        user_id=user.id,
-                        message_text=content,
+                        message=content,
                         on_chunk=send_llm_delta,
                         repository=repository,
                     )
                     reply_text = str(result.get("reply") or "")
                     message_id = str(result.get("message_id") or "").strip() or None
+                except HTTPException as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc.detail),
+                        code="CHAT_PROCESSING_FAILED",
+                        status_code=exc.status_code,
+                    )
+                    continue
                 except Exception as chat_error:
                     logger.error(
                         "Unified websocket chat processing failed for session %s: %s",
                         session_id,
                         chat_error,
                     )
-                    await websocket.send_text(
-                        build_envelope(
-                            WSMessageType.ERROR,
-                            {"message": "Chat processing failed", "code": "CHAT_PROCESSING_FAILED"},
-                        )
+                    await send_error(
+                        request_id,
+                        message="Chat processing failed",
+                        code="CHAT_PROCESSING_FAILED",
                     )
                     continue
+                finally:
+                    current_request_id["value"] = None
 
                 final_payload: Dict[str, Any] = {
                     "stream": "llm",
@@ -485,27 +476,254 @@ async def unified_session_websocket(
                 if message_id:
                     final_payload["message_id"] = message_id
                 await websocket.send_text(
-                    build_envelope(WSMessageType.LLM_STREAM, final_payload)
+                    build_envelope(
+                        WSMessageType.LLM_STREAM,
+                        final_payload,
+                        request_id=request_id,
+                    )
                 )
+                await send_ack(request_id, result, status_value="chat_completed")
                 await websocket.send_text(
                     build_envelope(
                         WSMessageType.STATUS,
                         {"status": "chat_completed"},
+                        request_id=request_id,
                     )
                 )
             elif msg_type == WSMessageType.USER_RESPONSE.value:
-                await websocket.send_text(
-                    build_envelope(
-                        WSMessageType.STATUS,
-                        {"status": "received", "detail": "User response acknowledged"},
+                payload = message.get("payload", {}) or {}
+                question_id = str(payload.get("question_id") or "").strip()
+                if question_id:
+                    try:
+                        request = AnswerQuestionRequest(
+                            selected_option_ids=list(payload.get("selected_option_ids") or []),
+                            answer_text=payload.get("answer") or payload.get("answer_text"),
+                            resume_execution=bool(payload.get("resume_execution", True)),
+                        )
+                        result = await actions.answer_question(session_id, question_id, request)
+                        await send_ack(request_id, result, status_value="question_answered")
+                    except HTTPException as exc:
+                        await send_error(
+                            request_id,
+                            message=str(exc.detail),
+                            code="QUESTION_ANSWER_FAILED",
+                            status_code=exc.status_code,
+                        )
+                    except Exception as exc:
+                        await send_error(
+                            request_id,
+                            message=str(exc),
+                            code="QUESTION_ANSWER_FAILED",
+                        )
+                else:
+                    await send_ack(
+                        request_id,
+                        {"received": True, "detail": "User response acknowledged"},
                     )
-                )
+            elif msg_type == WSMessageType.QUESTION_ANSWER.value:
+                payload = message.get("payload", {}) or {}
+                question_id = str(payload.get("question_id") or "").strip()
+                if not question_id:
+                    await send_error(
+                        request_id,
+                        message="Missing question_id",
+                        code="QUESTION_ID_MISSING",
+                    )
+                    continue
+                try:
+                    request = AnswerQuestionRequest(
+                        selected_option_ids=list(payload.get("selected_option_ids") or []),
+                        answer_text=payload.get("answer_text"),
+                        resume_execution=bool(payload.get("resume_execution", True)),
+                    )
+                    result = await actions.answer_question(session_id, question_id, request)
+                    await send_ack(request_id, result, status_value="question_answered")
+                except HTTPException as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc.detail),
+                        code="QUESTION_ANSWER_FAILED",
+                        status_code=exc.status_code,
+                    )
+                except Exception as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc),
+                        code="QUESTION_ANSWER_FAILED",
+                    )
+            elif msg_type == WSMessageType.WORKFLOW_GET.value:
+                try:
+                    await send_ack(
+                        request_id,
+                        actions.get_workflow(session_id),
+                        status_value="workflow_loaded",
+                    )
+                except HTTPException as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc.detail),
+                        code="WORKFLOW_GET_FAILED",
+                        status_code=exc.status_code,
+                    )
+                except Exception as exc:
+                    await send_error(request_id, message=str(exc), code="WORKFLOW_GET_FAILED")
+            elif msg_type == WSMessageType.WORKFLOW_ISSUE_SELECT.value:
+                try:
+                    request = WorkflowIssueRequest(**(message.get("payload", {}) or {}))
+                    await send_ack(
+                        request_id,
+                        actions.select_workflow_issue(session_id, request),
+                        status_value="workflow_issue_selected",
+                    )
+                except HTTPException as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc.detail),
+                        code="WORKFLOW_ISSUE_SELECT_FAILED",
+                        status_code=exc.status_code,
+                    )
+                except Exception as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc),
+                        code="WORKFLOW_ISSUE_SELECT_FAILED",
+                    )
+            elif msg_type == WSMessageType.WORKFLOW_CONTEXT_UPDATE.value:
+                try:
+                    request = WorkflowContextUpdateRequest(**(message.get("payload", {}) or {}))
+                    await send_ack(
+                        request_id,
+                        actions.update_workflow_context(session_id, request),
+                        status_value="workflow_context_updated",
+                    )
+                except HTTPException as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc.detail),
+                        code="WORKFLOW_CONTEXT_UPDATE_FAILED",
+                        status_code=exc.status_code,
+                    )
+                except Exception as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc),
+                        code="WORKFLOW_CONTEXT_UPDATE_FAILED",
+                    )
+            elif msg_type == WSMessageType.RUNTIME_ENSURE.value:
+                try:
+                    request = RuntimeEnsureRequest(**(message.get("payload", {}) or {}))
+                    result = await actions.ensure_runtime(session_id, request)
+                    await send_ack(request_id, result, status_value="runtime_ready")
+                except HTTPException as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc.detail),
+                        code="RUNTIME_ENSURE_FAILED",
+                        status_code=exc.status_code,
+                    )
+                except Exception as exc:
+                    await send_error(request_id, message=str(exc), code="RUNTIME_ENSURE_FAILED")
+            elif msg_type == WSMessageType.RUNTIME_STATUS.value:
+                try:
+                    await send_ack(
+                        request_id,
+                        actions.get_runtime(session_id),
+                        status_value="runtime_status",
+                    )
+                except HTTPException as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc.detail),
+                        code="RUNTIME_STATUS_FAILED",
+                        status_code=exc.status_code,
+                    )
+                except Exception as exc:
+                    await send_error(request_id, message=str(exc), code="RUNTIME_STATUS_FAILED")
+            elif msg_type == WSMessageType.EXECUTION_START.value:
+                try:
+                    request = ExecutionRequest(**(message.get("payload", {}) or {}))
+                    result = await actions.start_execution(
+                        session_id,
+                        objective=request.objective,
+                        force_mode=request.force_mode,
+                    )
+                    await send_ack(request_id, result, status_value="execution_started")
+                except HTTPException as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc.detail),
+                        code="EXECUTION_START_FAILED",
+                        status_code=exc.status_code,
+                    )
+                except Exception as exc:
+                    await send_error(request_id, message=str(exc), code="EXECUTION_START_FAILED")
+            elif msg_type == WSMessageType.EXECUTION_STAGE_START.value:
+                try:
+                    request = StageToolRequest(**(message.get("payload", {}) or {}))
+                    result = await actions.start_stage_execution(
+                        session_id,
+                        tool_name=request.tool_name,
+                        objective=request.objective,
+                    )
+                    await send_ack(request_id, result, status_value="execution_started")
+                except HTTPException as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc.detail),
+                        code="EXECUTION_STAGE_START_FAILED",
+                        status_code=exc.status_code,
+                    )
+                except Exception as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc),
+                        code="EXECUTION_STAGE_START_FAILED",
+                    )
+            elif msg_type == WSMessageType.EXECUTION_STATUS.value:
+                try:
+                    await send_ack(
+                        request_id,
+                        actions.get_execution_status(session_id),
+                        status_value="execution_status",
+                    )
+                except HTTPException as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc.detail),
+                        code="EXECUTION_STATUS_FAILED",
+                        status_code=exc.status_code,
+                    )
+                except Exception as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc),
+                        code="EXECUTION_STATUS_FAILED",
+                    )
+            elif msg_type in {
+                WSMessageType.EXECUTION_CANCEL.value,
+                WSMessageType.EXEC_CANCEL.value,
+            }:
+                try:
+                    result = await actions.cancel_execution(session_id)
+                    await send_ack(request_id, result, status_value="execution_cancelled")
+                except HTTPException as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc.detail),
+                        code="EXECUTION_CANCEL_FAILED",
+                        status_code=exc.status_code,
+                    )
+                except Exception as exc:
+                    await send_error(
+                        request_id,
+                        message=str(exc),
+                        code="EXECUTION_CANCEL_FAILED",
+                    )
             else:
-                await websocket.send_text(
-                    build_envelope(
-                        WSMessageType.ERROR,
-                        {"message": f"Unknown message type: {msg_type}"},
-                    )
+                await send_error(
+                    request_id,
+                    message=f"Unknown message type: {msg_type}",
+                    code="WS_UNKNOWN_MESSAGE",
                 )
 
     try:
