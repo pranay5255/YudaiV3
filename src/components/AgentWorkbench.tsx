@@ -10,6 +10,7 @@ import {
   Code2,
   Database,
   ExternalLink,
+  FileCheck2,
   FolderGit2,
   GitBranch,
   Github,
@@ -26,6 +27,7 @@ import {
   Sparkles,
   Square,
   TerminalSquare,
+  TextCursorInput,
   XCircle,
   Zap,
 } from 'lucide-react';
@@ -45,6 +47,9 @@ import {
   ContractSessionContext,
   ContractTrajectory,
   ContractUserQuestion,
+  ContractWorkflowContext,
+  ContractWorkflowIssue,
+  ContractWorkflowResponse,
 } from '../services/agentApi';
 import { UserQuestionPrompt } from './UserQuestionPrompt';
 import type { AgentQuestionInfo } from '../types/sessionTypes';
@@ -259,6 +264,122 @@ function createLocalMessage(
   };
 }
 
+const EMPTY_WORKFLOW_CONTEXT: ContractWorkflowContext = {
+  acceptance_criteria: '',
+  affected_systems: [],
+  constraints: '',
+  notes: '',
+  out_of_scope: '',
+};
+
+function toLabelStrings(labels?: unknown[] | string[] | null): string[] {
+  if (!Array.isArray(labels)) {
+    return [];
+  }
+
+  return labels
+    .map((label) => {
+      if (typeof label === 'string') {
+        return label;
+      }
+      if (label && typeof label === 'object') {
+        const value = (label as Record<string, unknown>).name
+          || (label as Record<string, unknown>).label;
+        return typeof value === 'string' ? value : '';
+      }
+      return '';
+    })
+    .map((label) => label.trim())
+    .filter(Boolean);
+}
+
+function toWorkflowIssue(issue: ContractGitHubIssue): ContractWorkflowIssue {
+  return {
+    body: issue.body || '',
+    comments: Number((issue as Record<string, unknown>).comments || 0),
+    created_at: issue.created_at || null,
+    html_url: issue.html_url || null,
+    labels: toLabelStrings(issue.labels),
+    number: issue.number,
+    state: issue.state,
+    title: issue.title,
+    updated_at: issue.updated_at || null,
+  };
+}
+
+function normalizeWorkflowContext(
+  context?: ContractWorkflowContext | null
+): ContractWorkflowContext {
+  return {
+    ...EMPTY_WORKFLOW_CONTEXT,
+    ...(context || {}),
+    affected_systems: Array.isArray(context?.affected_systems)
+      ? context.affected_systems
+      : [],
+  };
+}
+
+function parseAffectedSystems(value: string): string[] {
+  return value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item, index, list) => list.indexOf(item) === index);
+}
+
+function isExecutionActive(status?: string | null): boolean {
+  return ['pending', 'provisioning', 'running', 'waiting_for_input'].includes(
+    (status || '').toLowerCase()
+  );
+}
+
+function buildExecutionObjective({
+  contextCards,
+  issue,
+  notes,
+  repository,
+  selectedBranch,
+  workflowContext,
+}: {
+  contextCards: ContractContextCard[];
+  issue: ContractWorkflowIssue;
+  notes: string;
+  repository: ContractRepository | null;
+  selectedBranch: string;
+  workflowContext: ContractWorkflowContext;
+}): string {
+  const sections = [
+    `Resolve GitHub issue #${issue.number}: ${issue.title}`,
+    issue.html_url ? `GitHub issue: ${issue.html_url}` : '',
+    issue.body ? `Issue details:\n${issue.body}` : '',
+    repository
+      ? `Repository: ${repository.full_name}@${selectedBranch || getDefaultBranch(repository)}`
+      : '',
+    workflowContext.affected_systems?.length
+      ? `Affected systems:\n${workflowContext.affected_systems.map((item) => `- ${item}`).join('\n')}`
+      : '',
+    workflowContext.constraints ? `Constraints:\n${workflowContext.constraints}` : '',
+    workflowContext.acceptance_criteria
+      ? `Acceptance criteria:\n${workflowContext.acceptance_criteria}`
+      : '',
+    workflowContext.out_of_scope ? `Out of scope:\n${workflowContext.out_of_scope}` : '',
+    workflowContext.notes ? `User notes:\n${workflowContext.notes}` : '',
+    notes.trim() ? `Additional objective notes:\n${notes.trim()}` : '',
+    contextCards.length
+      ? `Available context cards:\n${contextCards.map((card) => `- ${card.title}`).join('\n')}`
+      : '',
+  ];
+
+  return sections.filter(Boolean).join('\n\n');
+}
+
+function formatListValue(value?: string[] | string | null): string {
+  if (Array.isArray(value)) {
+    return value.filter(Boolean).join(', ');
+  }
+  return value || 'Not recorded';
+}
+
 export function AgentWorkbench(): JSX.Element {
   const { logout, sessionToken, user } = useAuth();
   const [activeView, setActiveView] = useState<WorkspaceView>('chat');
@@ -266,7 +387,6 @@ export function AgentWorkbench(): JSX.Element {
   const [contextCards, setContextCards] = useState<ContractContextCard[]>([]);
   const [currentSession, setCurrentSession] = useState<ContractSession | null>(null);
   const [draft, setDraft] = useState('');
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>('architect');
   const [executionObjective, setExecutionObjective] = useState('');
   const [executionStatus, setExecutionStatus] = useState<ContractExecutionStatus | null>(null);
   const [githubIssues, setGithubIssues] = useState<ContractGitHubIssue[]>([]);
@@ -282,6 +402,8 @@ export function AgentWorkbench(): JSX.Element {
   const [selectedRepository, setSelectedRepository] = useState<ContractRepository | null>(null);
   const [sessionIssues, setSessionIssues] = useState<ContractIssue[]>([]);
   const [trajectories, setTrajectories] = useState<ContractTrajectory[]>([]);
+  const [workflow, setWorkflow] = useState<ContractWorkflowResponse | null>(null);
+  const [workflowContext, setWorkflowContext] = useState<ContractWorkflowContext>(EMPTY_WORKFLOW_CONTEXT);
 
   const filteredRepositories = useMemo(() => {
     const query = repoSearch.trim().toLowerCase();
@@ -309,6 +431,7 @@ export function AgentWorkbench(): JSX.Element {
   const selectedOwner = selectedRepository ? getRepositoryOwner(selectedRepository) : '';
   const selectedRepoName = selectedRepository?.name || '';
   const selectedRepoLabel = selectedRepository?.full_name || 'No repository selected';
+  const selectedWorkflowIssue = workflow?.selected_issue || null;
   const canCreateSession = Boolean(selectedRepository && selectedBranch && sessionToken && !isBusy);
   const hasSession = Boolean(currentSession);
 
@@ -321,6 +444,14 @@ export function AgentWorkbench(): JSX.Element {
       message,
       tone,
     });
+  }, []);
+
+  const applyWorkflowResponse = useCallback((nextWorkflow: ContractWorkflowResponse): void => {
+    setWorkflow(nextWorkflow);
+    setWorkflowContext(normalizeWorkflowContext(nextWorkflow.user_context));
+    setCurrentSession(nextWorkflow.session);
+    setExecutionStatus(nextWorkflow.execution);
+    setPendingQuestions(nextWorkflow.pending_questions || []);
   }, []);
 
   useEffect(() => {
@@ -422,6 +553,27 @@ export function AgentWorkbench(): JSX.Element {
     return () => window.clearTimeout(timer);
   }, [notice]);
 
+  useEffect(() => {
+    if (!currentSession || !sessionToken || !isExecutionActive(executionStatus?.status)) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      void agentApi.getWorkflow(currentSession.session_id, sessionToken)
+        .then(applyWorkflowResponse)
+        .catch((error) => {
+          console.warn('[AgentWorkbench] Failed to refresh workflow:', error);
+        });
+    }, 3000);
+
+    return () => window.clearInterval(timer);
+  }, [
+    applyWorkflowResponse,
+    currentSession,
+    executionStatus?.status,
+    sessionToken,
+  ]);
+
   function handleRepositorySelect(repository: ContractRepository): void {
     setSelectedRepository(repository);
     setSelectedBranch(getDefaultBranch(repository));
@@ -433,6 +585,8 @@ export function AgentWorkbench(): JSX.Element {
     setPendingQuestions([]);
     setSessionIssues([]);
     setTrajectories([]);
+    setWorkflow(null);
+    setWorkflowContext(EMPTY_WORKFLOW_CONTEXT);
   }
 
   async function hydrateSession(sessionId: string): Promise<ContractSessionContext | null> {
@@ -446,12 +600,14 @@ export function AgentWorkbench(): JSX.Element {
       issues,
       execution,
       nextTrajectories,
+      nextWorkflow,
     ] = await Promise.allSettled([
       agentApi.getSessionContext(sessionId, sessionToken),
       agentApi.listContextCards(sessionId, sessionToken),
       agentApi.listSessionIssues(sessionId, sessionToken, 20),
       agentApi.getExecutionStatus(sessionId, sessionToken),
       agentApi.listTrajectories(sessionId, sessionToken),
+      agentApi.getWorkflow(sessionId, sessionToken),
     ]);
 
     if (context.status === 'fulfilled') {
@@ -474,6 +630,10 @@ export function AgentWorkbench(): JSX.Element {
 
     if (nextTrajectories.status === 'fulfilled') {
       setTrajectories(nextTrajectories.value);
+    }
+
+    if (nextWorkflow.status === 'fulfilled') {
+      applyWorkflowResponse(nextWorkflow.value);
     }
 
     return context.status === 'fulfilled' ? context.value : null;
@@ -539,6 +699,8 @@ export function AgentWorkbench(): JSX.Element {
       setSessionIssues([]);
       setTrajectories([]);
       setExecutionStatus(null);
+      setWorkflow(null);
+      setWorkflowContext(EMPTY_WORKFLOW_CONTEXT);
       pushNotice('success', 'Session ready.');
       await refreshAfterDaifuActivity(session.session_id);
       return session;
@@ -606,7 +768,6 @@ export function AgentWorkbench(): JSX.Element {
 
     try {
       const response = await agentApi.sendChatMessage(session.session_id, {
-        context_cards: contextCards.map((card) => String(card.id)),
         message: {
           is_code: false,
           message_text: content,
@@ -667,13 +828,15 @@ export function AgentWorkbench(): JSX.Element {
     }, sessionToken);
 
     await refreshAfterDaifuActivity(currentSession.session_id);
+    try {
+      applyWorkflowResponse(await agentApi.getWorkflow(currentSession.session_id, sessionToken));
+    } catch (error) {
+      console.warn('[AgentWorkbench] Failed to refresh workflow after answer:', error);
+    }
   }
 
-  async function handleStartExecution(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-
-    const objective = executionObjective.trim();
-    if (!objective || !sessionToken) {
+  async function handleSelectWorkflowIssue(issue: ContractGitHubIssue): Promise<void> {
+    if (!sessionToken) {
       return;
     }
 
@@ -685,13 +848,80 @@ export function AgentWorkbench(): JSX.Element {
     setIsBusy(true);
 
     try {
+      const nextWorkflow = await agentApi.selectWorkflowIssue(
+        session.session_id,
+        toWorkflowIssue(issue),
+        sessionToken
+      );
+      applyWorkflowResponse(nextWorkflow);
+      setDraft((current) => current || `I want to prepare a pull request for GitHub issue #${issue.number}: ${issue.title}`);
+      setActiveView('chat');
+      pushNotice('success', `Issue #${issue.number} selected.`);
+    } catch (error) {
+      pushNotice('error', getErrorText(error, 'Failed to select issue'));
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function handleSaveWorkflowContext(): Promise<ContractWorkflowResponse | null> {
+    if (!currentSession || !sessionToken) {
+      pushNotice('error', 'Start a session before saving PR context.');
+      return null;
+    }
+
+    try {
+      const nextWorkflow = await agentApi.updateWorkflowContext(
+        currentSession.session_id,
+        workflowContext,
+        sessionToken
+      );
+      applyWorkflowResponse(nextWorkflow);
+      pushNotice('success', 'PR context saved.');
+      return nextWorkflow;
+    } catch (error) {
+      pushNotice('error', getErrorText(error, 'Failed to save PR context'));
+      return null;
+    }
+  }
+
+  async function handleStartExecution(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+
+    if (!selectedWorkflowIssue || !sessionToken) {
+      pushNotice('error', 'Select a GitHub issue before starting the pipeline.');
+      return;
+    }
+
+    const session = await ensureSession();
+    if (!session) {
+      return;
+    }
+
+    setIsBusy(true);
+
+    try {
+      const savedWorkflow = await agentApi.updateWorkflowContext(
+        session.session_id,
+        workflowContext,
+        sessionToken
+      );
+      applyWorkflowResponse(savedWorkflow);
+
       const response = await agentApi.startExecution(session.session_id, {
-        force_mode: executionMode,
-        objective,
+        objective: buildExecutionObjective({
+          contextCards,
+          issue: savedWorkflow.selected_issue || selectedWorkflowIssue,
+          notes: executionObjective,
+          repository: selectedRepository,
+          selectedBranch,
+          workflowContext: normalizeWorkflowContext(savedWorkflow.user_context),
+        }),
       }, sessionToken);
 
       setExecutionStatus(response);
-      pushNotice('success', `${executionMode} run started.`);
+      setWorkflow((current) => current ? { ...current, execution: response } : current);
+      pushNotice('success', 'Pipeline started.');
     } catch (error) {
       pushNotice('error', getErrorText(error, 'Failed to start run'));
     } finally {
@@ -825,21 +1055,27 @@ export function AgentWorkbench(): JSX.Element {
             {activeView === 'execution' && (
               <ExecutionPanel
                 currentSession={currentSession}
-                executionMode={executionMode}
                 executionObjective={executionObjective}
                 executionStatus={executionStatus}
                 isBusy={isBusy}
                 onCancel={() => void handleCancelExecution()}
-                onModeChange={setExecutionMode}
                 onObjectiveChange={setExecutionObjective}
+                onSaveContext={() => void handleSaveWorkflowContext()}
                 onSubmit={(event) => void handleStartExecution(event)}
+                onWorkflowContextChange={setWorkflowContext}
+                selectedIssue={selectedWorkflowIssue}
                 trajectories={trajectories}
+                workflow={workflow}
+                workflowContext={workflowContext}
               />
             )}
 
             {activeView === 'issues' && (
               <IssuesPanel
                 githubIssues={githubIssues}
+                isBusy={isBusy}
+                onSelectIssue={(issue) => void handleSelectWorkflowIssue(issue)}
+                selectedIssueNumber={selectedWorkflowIssue?.number || null}
                 sessionIssues={sessionIssues}
                 selectedRepository={selectedRepository}
               />
@@ -856,7 +1092,12 @@ export function AgentWorkbench(): JSX.Element {
             selectedRepoName={selectedRepoName}
             userName={user?.display_name || user?.github_username || 'Agent'}
           />
-          <WorkflowPanel currentSession={currentSession} executionStatus={executionStatus} />
+          <WorkflowPanel
+            currentSession={currentSession}
+            executionStatus={executionStatus}
+            workflow={workflow}
+          />
+          <PrReadinessPanel workflow={workflow} workflowContext={workflowContext} />
         </aside>
       </main>
     </div>
@@ -1250,86 +1491,154 @@ function ContextPanel({
 
 function ExecutionPanel({
   currentSession,
-  executionMode,
   executionObjective,
   executionStatus,
   isBusy,
   onCancel,
-  onModeChange,
   onObjectiveChange,
+  onSaveContext,
   onSubmit,
+  onWorkflowContextChange,
+  selectedIssue,
   trajectories,
+  workflow,
+  workflowContext,
 }: {
   currentSession: ContractSession | null;
-  executionMode: ExecutionMode;
   executionObjective: string;
   executionStatus: ContractExecutionStatus | null;
   isBusy: boolean;
   onCancel: () => void;
-  onModeChange: (mode: ExecutionMode) => void;
   onObjectiveChange: (value: string) => void;
+  onSaveContext: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onWorkflowContextChange: (context: ContractWorkflowContext) => void;
+  selectedIssue: ContractWorkflowIssue | null;
   trajectories: ContractTrajectory[];
+  workflow: ContractWorkflowResponse | null;
+  workflowContext: ContractWorkflowContext;
 }): JSX.Element {
+  const activeRun = isExecutionActive(executionStatus?.status);
+  const systemsText = (workflowContext.affected_systems || []).join(', ');
+
+  function updateContext(patch: Partial<ContractWorkflowContext>): void {
+    onWorkflowContextChange({
+      ...workflowContext,
+      ...patch,
+    });
+  }
+
   return (
     <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-3 sm:p-4 xl:grid-cols-[minmax(0,1fr)_360px]">
       <form className="rounded-lg bg-bg-secondary p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]" onSubmit={onSubmit}>
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-balance text-base font-semibold">Agent run</h2>
-            <p className="text-xs text-fg-muted">{currentSession?.session_id || 'No active session'}</p>
+            <h2 className="text-balance text-base font-semibold">PR pipeline</h2>
+            <p className="text-xs text-fg-muted">
+              {selectedIssue ? `Issue #${selectedIssue.number}` : currentSession?.session_id || 'No active session'}
+            </p>
           </div>
           {executionStatus && (
             <StatusBadge label={executionStatus.status} tone={getStatusTone(executionStatus.status)} />
           )}
         </div>
 
-        <div className="mb-4 grid grid-cols-3 gap-2">
-          {EXECUTION_MODES.map((mode) => {
-            const Icon = mode.icon;
-            const isActive = executionMode === mode.id;
-
-            return (
-              <button
-                className={cx(
-                  'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition-[background-color,color,scale] duration-150 ease-out active:scale-[0.96]',
-                  isActive
-                    ? 'bg-amber/14 text-amber shadow-[0_0_0_1px_rgba(245,158,11,0.25)]'
-                    : 'bg-bg-primary text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.08)] hover:bg-bg-tertiary hover:text-fg'
-                )}
-                key={mode.id}
-                onClick={() => onModeChange(mode.id)}
-                type="button"
+        <div className="mb-4 rounded-lg bg-bg-primary p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+          <div className="mb-2 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-fg-muted">Selected issue</p>
+              <h3 className="mt-1 text-balance text-sm font-semibold">
+                {selectedIssue ? selectedIssue.title : 'Choose an issue from the Issues tab'}
+              </h3>
+            </div>
+            {selectedIssue?.html_url && (
+              <a
+                aria-label={`Open issue ${selectedIssue.number}`}
+                className="grid size-9 shrink-0 place-items-center rounded-lg text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.09)] transition-[background-color,color,scale] duration-150 ease-out hover:bg-bg-tertiary hover:text-fg active:scale-[0.96]"
+                href={selectedIssue.html_url}
+                rel="noreferrer"
+                target="_blank"
               >
-                <Icon aria-hidden="true" className="size-4" />
-                <span className="hidden sm:inline">{mode.label}</span>
-              </button>
-            );
-          })}
+                <ExternalLink aria-hidden="true" className="size-4" />
+              </a>
+            )}
+          </div>
+          {executionStatus?.plan && executionStatus.plan.length > 0 && (
+            <div className="mt-3 grid gap-2">
+              {executionStatus.plan.slice(0, 3).map((item) => (
+                <p className="text-pretty text-xs leading-5 text-fg-muted" key={item}>
+                  {item}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
 
         <label className="block">
-          <span className="mb-1.5 block text-xs font-medium text-fg-secondary">Objective</span>
+          <span className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-fg-secondary">
+            <TextCursorInput aria-hidden="true" className="size-3.5" />
+            Affected systems
+          </span>
+          <input
+            className="min-h-11 w-full rounded-lg bg-bg-primary px-3 text-sm text-fg shadow-[0_0_0_1px_rgba(255,255,255,0.08)] outline-none transition-[box-shadow,background-color] duration-150 ease-out placeholder:text-fg-muted focus:shadow-[0_0_0_2px_rgba(245,158,11,0.38)]"
+            onChange={(event) => updateContext({ affected_systems: parseAffectedSystems(event.target.value) })}
+            placeholder="auth, sessions, GitHub API"
+            value={systemsText}
+          />
+        </label>
+
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-fg-secondary">Constraints</span>
+            <textarea
+              className="min-h-24 w-full resize-none rounded-lg bg-bg-primary p-3 text-sm leading-6 text-fg shadow-[0_0_0_1px_rgba(255,255,255,0.08)] outline-none transition-[box-shadow,background-color] duration-150 ease-out placeholder:text-fg-muted focus:shadow-[0_0_0_2px_rgba(245,158,11,0.38)]"
+              onChange={(event) => updateContext({ constraints: event.target.value })}
+              placeholder="Compatibility, rollout, or implementation constraints"
+              value={workflowContext.constraints || ''}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-fg-secondary">Acceptance criteria</span>
+            <textarea
+              className="min-h-24 w-full resize-none rounded-lg bg-bg-primary p-3 text-sm leading-6 text-fg shadow-[0_0_0_1px_rgba(255,255,255,0.08)] outline-none transition-[box-shadow,background-color] duration-150 ease-out placeholder:text-fg-muted focus:shadow-[0_0_0_2px_rgba(245,158,11,0.38)]"
+              onChange={(event) => updateContext({ acceptance_criteria: event.target.value })}
+              placeholder="What must be true before a PR is useful"
+              value={workflowContext.acceptance_criteria || ''}
+            />
+          </label>
+        </div>
+
+        <label className="mt-3 block">
+          <span className="mb-1.5 block text-xs font-medium text-fg-secondary">Additional objective notes</span>
           <textarea
-            className="min-h-44 w-full resize-none rounded-lg bg-bg-primary p-3 text-sm leading-6 text-fg shadow-[0_0_0_1px_rgba(255,255,255,0.08)] outline-none transition-[box-shadow,background-color] duration-150 ease-out placeholder:text-fg-muted focus:shadow-[0_0_0_2px_rgba(245,158,11,0.38)]"
+            className="min-h-28 w-full resize-none rounded-lg bg-bg-primary p-3 text-sm leading-6 text-fg shadow-[0_0_0_1px_rgba(255,255,255,0.08)] outline-none transition-[box-shadow,background-color] duration-150 ease-out placeholder:text-fg-muted focus:shadow-[0_0_0_2px_rgba(245,158,11,0.38)]"
             onChange={(event) => onObjectiveChange(event.target.value)}
-            placeholder="Fix the selected issue and open a PR"
+            placeholder="Extra context the agent should carry into the PR"
             value={executionObjective}
           />
         </label>
 
         <div className="mt-4 flex flex-wrap gap-2">
           <button
+            className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-bg-primary px-4 text-sm font-medium text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.09)] transition-[background-color,color,scale] duration-150 ease-out hover:bg-bg-tertiary hover:text-fg active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100"
+            disabled={!currentSession || isBusy}
+            onClick={onSaveContext}
+            type="button"
+          >
+            <FileCheck2 aria-hidden="true" className="size-4" />
+            Save context
+          </button>
+          <button
             className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-amber px-4 pl-4 pr-3.5 text-sm font-semibold text-black transition-[background-color,scale] duration-150 ease-out hover:bg-yellow-400 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100"
-            disabled={isBusy || !executionObjective.trim()}
+            disabled={isBusy || !selectedIssue || activeRun}
             type="submit"
           >
             {isBusy ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <Play aria-hidden="true" className="size-4" />}
-            Start run
+            Start pipeline
           </button>
           <button
             className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-bg-primary px-4 text-sm font-medium text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.09)] transition-[background-color,color,scale] duration-150 ease-out hover:bg-bg-tertiary hover:text-fg active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100"
-            disabled={!executionStatus || isBusy}
+            disabled={!activeRun || isBusy}
             onClick={onCancel}
             type="button"
           >
@@ -1340,6 +1649,37 @@ function ExecutionPanel({
       </form>
 
       <div className="grid content-start gap-3">
+        {workflow?.stage_results && Object.keys(workflow.stage_results).length > 0 && (
+          <div className="rounded-lg bg-bg-secondary p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+            <h3 className="mb-3 text-sm font-semibold">Stage summaries</h3>
+            <div className="grid gap-3">
+              {EXECUTION_MODES.map((mode) => {
+                const result = workflow.stage_results[mode.id];
+                if (!result) {
+                  return null;
+                }
+                const Icon = mode.icon;
+                return (
+                  <div className="grid grid-cols-[auto_1fr] gap-3" key={mode.id}>
+                    <div className="grid size-8 place-items-center rounded-lg bg-bg-primary text-fg-muted shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+                      <Icon aria-hidden="true" className="size-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium">{mode.label}</p>
+                        <StatusBadge label={result.status || 'complete'} tone={getStatusTone(result.status || 'complete')} />
+                      </div>
+                      <p className="mt-1 line-clamp-3 text-pretty text-xs leading-5 text-fg-muted">
+                        {result.summary || 'Completed.'}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {trajectories.length === 0 ? (
           <EmptyState icon={Activity} title="No trajectories" />
         ) : (
@@ -1368,36 +1708,26 @@ function ExecutionPanel({
 
 function IssuesPanel({
   githubIssues,
+  isBusy,
+  onSelectIssue,
+  selectedIssueNumber,
   selectedRepository,
   sessionIssues,
 }: {
   githubIssues: ContractGitHubIssue[];
+  isBusy: boolean;
+  onSelectIssue: (issue: ContractGitHubIssue) => void;
+  selectedIssueNumber: number | null;
   selectedRepository: ContractRepository | null;
   sessionIssues: ContractIssue[];
 }): JSX.Element {
-  const sourceLabel = sessionIssues.length > 0 ? 'Session issues' : 'GitHub issues';
-
   if (!selectedRepository) {
     return (
       <EmptyState icon={GitPullRequestArrow} title="No repository selected" />
     );
   }
 
-  const items = sessionIssues.length > 0
-    ? sessionIssues.map((issue) => ({
-      href: issue.github_issue_url || undefined,
-      id: issue.issue_id,
-      meta: `${issue.priority} / ${issue.status}`,
-      title: issue.title,
-    }))
-    : githubIssues.map((issue) => ({
-      href: issue.html_url || undefined,
-      id: String(issue.number),
-      meta: `#${issue.number} / ${issue.state}`,
-      title: issue.title,
-    }));
-
-  if (items.length === 0) {
+  if (githubIssues.length === 0 && sessionIssues.length === 0) {
     return (
       <EmptyState icon={GitPullRequestArrow} title="No issues found" />
     );
@@ -1406,35 +1736,96 @@ function IssuesPanel({
   return (
     <div className="min-h-0 overflow-y-auto p-3 sm:p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="text-balance text-base font-semibold">{sourceLabel}</h2>
+        <h2 className="text-balance text-base font-semibold">GitHub issues</h2>
         <StatusBadge label={selectedRepository.full_name} tone="zinc" />
       </div>
       <div className="grid gap-3">
-        {items.map((issue) => (
+        {githubIssues.map((issue) => {
+          const selected = selectedIssueNumber === issue.number;
+          const labels = toLabelStrings(issue.labels).slice(0, 4);
+          return (
           <article
-            className="rounded-lg bg-bg-secondary p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)] transition-[box-shadow,background-color] duration-150 ease-out hover:bg-bg-tertiary hover:shadow-[0_0_0_1px_rgba(255,255,255,0.14)]"
-            key={issue.id}
+            className={cx(
+              'rounded-lg bg-bg-secondary p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)] transition-[box-shadow,background-color] duration-150 ease-out hover:bg-bg-tertiary hover:shadow-[0_0_0_1px_rgba(255,255,255,0.14)]',
+              selected && 'bg-amber/10 shadow-[0_0_0_1px_rgba(245,158,11,0.28)]'
+            )}
+            key={issue.number}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="mb-1 text-xs text-fg-muted">{issue.meta}</p>
+                <div className="mb-2 flex flex-wrap gap-1.5">
+                  <span className="rounded-md bg-bg-primary px-2 py-0.5 text-xs text-fg-muted shadow-[0_0_0_1px_rgba(255,255,255,0.07)]">
+                    #{issue.number}
+                  </span>
+                  <span className="rounded-md bg-bg-primary px-2 py-0.5 text-xs text-fg-muted shadow-[0_0_0_1px_rgba(255,255,255,0.07)]">
+                    {issue.state}
+                  </span>
+                  {selected && (
+                    <span className="rounded-md bg-amber/12 px-2 py-0.5 text-xs text-amber shadow-[0_0_0_1px_rgba(245,158,11,0.2)]">
+                      selected
+                    </span>
+                  )}
+                </div>
                 <h3 className="text-balance text-sm font-semibold">{issue.title}</h3>
+                <p className="mt-2 line-clamp-3 text-pretty text-xs leading-5 text-fg-muted">
+                  {issue.body || 'No description provided.'}
+                </p>
+                {labels.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {labels.map((label) => (
+                      <span
+                        className="rounded-md bg-cyan/10 px-2 py-0.5 text-[11px] text-cyan shadow-[0_0_0_1px_rgba(34,211,238,0.16)]"
+                        key={`${issue.number}-${label}`}
+                      >
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-              {issue.href && (
-                <a
-                  aria-label={`Open ${issue.title}`}
-                  className="grid size-10 shrink-0 place-items-center rounded-lg text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.09)] transition-[background-color,color,scale] duration-150 ease-out hover:bg-bg-primary hover:text-fg active:scale-[0.96]"
-                  href={issue.href}
-                  rel="noreferrer"
-                  target="_blank"
+              <div className="grid shrink-0 gap-2">
+                {issue.html_url && (
+                  <a
+                    aria-label={`Open ${issue.title}`}
+                    className="grid size-10 place-items-center rounded-lg text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.09)] transition-[background-color,color,scale] duration-150 ease-out hover:bg-bg-primary hover:text-fg active:scale-[0.96]"
+                    href={issue.html_url}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <ExternalLink aria-hidden="true" className="size-4" />
+                  </a>
+                )}
+                <button
+                  aria-label={`Discuss issue ${issue.number}`}
+                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-cyan px-3 text-xs font-semibold text-black transition-[background-color,scale] duration-150 ease-out hover:bg-sky-300 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100"
+                  disabled={isBusy}
+                  onClick={() => onSelectIssue(issue)}
+                  type="button"
                 >
-                  <ExternalLink aria-hidden="true" className="size-4" />
-                </a>
-              )}
+                  <MessageSquareText aria-hidden="true" className="size-3.5" />
+                  Discuss
+                </button>
+              </div>
             </div>
           </article>
-        ))}
+          );
+        })}
       </div>
+
+      {githubIssues.length === 0 && sessionIssues.length > 0 && (
+        <div className="mt-4 grid gap-3">
+          <h3 className="text-sm font-semibold text-fg-secondary">Session issues</h3>
+          {sessionIssues.map((issue) => (
+            <article
+              className="rounded-lg bg-bg-secondary p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
+              key={issue.issue_id}
+            >
+              <p className="mb-1 text-xs text-fg-muted">{issue.priority} / {issue.status}</p>
+              <h3 className="text-balance text-sm font-semibold">{issue.title}</h3>
+            </article>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1492,50 +1883,158 @@ function SessionPanel({
 function WorkflowPanel({
   currentSession,
   executionStatus,
+  workflow,
 }: {
   currentSession: ContractSession | null;
   executionStatus: ContractExecutionStatus | null;
+  workflow: ContractWorkflowResponse | null;
 }): JSX.Element {
   const currentMode = currentSession?.current_mode || executionStatus?.mode || 'pending';
+  const stageResults = workflow?.stage_results || {};
+
+  function getModeState(mode: ExecutionMode): string {
+    if (stageResults[mode]?.status) {
+      return stageResults[mode].status || 'complete';
+    }
+    if (currentSession?.current_mode === 'complete' || currentSession?.workflow_completed_at) {
+      return 'complete';
+    }
+    if (currentMode === mode && executionStatus?.status) {
+      return executionStatus.status;
+    }
+    if (
+      (mode === 'architect' && currentSession?.architect_completed_at)
+      || (mode === 'tester' && currentSession?.tester_completed_at)
+      || (mode === 'coder' && currentSession?.coder_completed_at)
+    ) {
+      return 'complete';
+    }
+    return 'pending';
+  }
 
   return (
     <section className="rounded-lg bg-bg-secondary/72 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <h2 className="text-balance text-sm font-semibold">Workflow</h2>
-          <p className="text-xs text-fg-muted">Agent framework</p>
+          <p className="text-xs text-fg-muted">Architect to Tester to Coder</p>
         </div>
         <Sparkles aria-hidden="true" className="size-5 text-amber" />
       </div>
 
       <div className="grid gap-3">
         {EXECUTION_MODES.map((mode, index) => {
-          const isActive = currentMode === mode.id;
+          const state = getModeState(mode.id);
+          const isActive = currentMode === mode.id && isExecutionActive(executionStatus?.status);
+          const complete = state === 'complete' || state === 'completed' || state === 'success';
           const Icon = mode.icon;
 
           return (
             <div className="grid grid-cols-[auto_1fr] items-center gap-3" key={mode.id}>
               <div className={cx(
                 'grid size-9 place-items-center rounded-lg shadow-[0_0_0_1px_rgba(255,255,255,0.08)]',
-                isActive ? 'bg-amber/14 text-amber' : 'bg-bg-primary text-fg-muted'
+                complete
+                  ? 'bg-emerald-500/12 text-emerald-200'
+                  : isActive
+                    ? 'bg-amber/14 text-amber'
+                    : 'bg-bg-primary text-fg-muted'
               )}>
                 <Icon aria-hidden="true" className="size-4" />
               </div>
               <div className="min-w-0">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium">{mode.label}</p>
-                  <span className="tabular-nums text-xs text-fg-muted">0{index + 1}</span>
+                  <span className="tabular-nums text-xs text-fg-muted">{state.replace(/_/g, ' ') || `0${index + 1}`}</span>
                 </div>
                 <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-bg-primary">
                   <div className={cx(
                     'h-full rounded-full transition-[width,background-color] duration-200 ease-out',
-                    isActive ? 'w-3/4 bg-amber' : 'w-1/4 bg-white/12'
+                    complete
+                      ? 'w-full bg-emerald-400'
+                      : isActive
+                        ? 'w-3/4 bg-amber'
+                        : 'w-1/4 bg-white/12'
                   )} />
                 </div>
               </div>
             </div>
           );
         })}
+      </div>
+    </section>
+  );
+}
+
+function PrReadinessPanel({
+  workflow,
+  workflowContext,
+}: {
+  workflow: ContractWorkflowResponse | null;
+  workflowContext: ContractWorkflowContext;
+}): JSX.Element {
+  const selectedIssue = workflow?.selected_issue || null;
+  const readiness = workflow?.pr_readiness || {};
+  const checks = readiness.checks && typeof readiness.checks === 'object'
+    ? readiness.checks as Record<string, unknown>
+    : {};
+  const tester = workflow?.stage_results?.tester;
+  const coder = workflow?.stage_results?.coder;
+  const architect = workflow?.stage_results?.architect;
+  const prUrl = typeof readiness.pr_url === 'string' ? readiness.pr_url : coder?.pr_url;
+  const issueUrl = selectedIssue?.html_url || architect?.issue_url;
+
+  return (
+    <section className="rounded-lg bg-bg-secondary/72 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-balance text-sm font-semibold">PR readiness</h2>
+          <p className="text-xs text-fg-muted">{String(readiness.status || 'not_started').replace(/_/g, ' ')}</p>
+        </div>
+        <FileCheck2 aria-hidden="true" className="size-5 text-cyan" />
+      </div>
+
+      <div className="grid gap-2 text-sm">
+        <InfoRow icon={GitPullRequestArrow} label="Issue" value={selectedIssue ? `#${selectedIssue.number}` : 'Unselected'} />
+        <InfoRow icon={Layers3} label="Systems" value={formatListValue(workflowContext.affected_systems)} />
+        <InfoRow icon={ShieldCheck} label="Tests" value={formatListValue(tester?.tests)} />
+        <InfoRow icon={GitBranch} label="Test br." value={tester?.test_branch || 'Not created'} />
+        <InfoRow icon={Code2} label="Files" value={formatListValue(coder?.touched_files || architect?.touched_files)} />
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        {Object.entries(checks).map(([key, value]) => (
+          <div className="flex items-center justify-between gap-3 text-xs" key={key}>
+            <span className="text-fg-muted">{key.replace(/_/g, ' ')}</span>
+            <span className={value ? 'text-emerald-200' : 'text-fg-muted'}>
+              {value ? 'ready' : 'pending'}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        {issueUrl && (
+          <a
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-bg-primary px-3 text-sm font-medium text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.09)] transition-[background-color,color,scale] duration-150 ease-out hover:bg-bg-tertiary hover:text-fg active:scale-[0.96]"
+            href={issueUrl}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open issue
+            <ExternalLink aria-hidden="true" className="size-4" />
+          </a>
+        )}
+        {prUrl && (
+          <a
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-cyan px-3 text-sm font-semibold text-black transition-[background-color,scale] duration-150 ease-out hover:bg-sky-300 active:scale-[0.96]"
+            href={prUrl}
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open PR
+            <ExternalLink aria-hidden="true" className="size-4" />
+          </a>
+        )}
       </div>
     </section>
   );
