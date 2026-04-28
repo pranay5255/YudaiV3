@@ -19,6 +19,10 @@ from yudai.models import (
     ContextCardResponse,
     SessionContextResponse,
     SessionResponse,
+    UserQuestion,
+    UserQuestionOption,
+    UserQuestionResponse,
+    UserQuestionStatus,
 )
 from sqlalchemy.orm import Session
 
@@ -93,6 +97,15 @@ class SessionService:
             .order_by(ContextCard.created_at.desc())
             .all()
         )
+        pending_questions = (
+            db.query(UserQuestion)
+            .filter(
+                UserQuestion.session_id == db_session.id,
+                UserQuestion.status == UserQuestionStatus.PENDING.value,
+            )
+            .order_by(UserQuestion.asked_at.asc(), UserQuestion.created_at.asc())
+            .all()
+        )
 
         # Convert to response models
         session_response = SessionResponse(
@@ -147,6 +160,34 @@ class SessionService:
             for msg in messages
         ]
 
+        pending_question_responses: List[UserQuestionResponse] = []
+        for question in pending_questions:
+            options: List[UserQuestionOption] = []
+            for raw_option in question.options or []:
+                if not isinstance(raw_option, dict):
+                    continue
+                option_id = str(raw_option.get("id") or "").strip()
+                label = str(raw_option.get("label") or "").strip()
+                if option_id and label:
+                    options.append(UserQuestionOption(id=option_id, label=label))
+            pending_question_responses.append(
+                UserQuestionResponse(
+                    question_id=question.question_id,
+                    session_id=db_session.session_id,
+                    mode=question.mode,
+                    prompt=question.question_text,
+                    options=options,
+                    multi_select=bool(question.multi_select),
+                    selected_option_ids=[
+                        str(item) for item in (question.selected_option_ids or [])
+                    ],
+                    answer_text=question.answer_text,
+                    status=question.status,
+                    asked_at=question.asked_at,
+                    answered_at=question.answered_at,
+                )
+            )
+
         context_response = SessionContextResponse(
             session=session_response,
             messages=message_responses,
@@ -185,6 +226,7 @@ class SessionService:
                 else 0,
             },
             user_issues=[],
+            pending_questions=pending_question_responses,
         )
 
         return context_response
