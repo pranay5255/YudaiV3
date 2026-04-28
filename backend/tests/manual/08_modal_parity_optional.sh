@@ -17,4 +17,3 @@ docker compose -f docker-compose.backend-only.yml --profile modal up -d --build 
 "$(dirname "$0")/01_seed_test_session.sh"
 "$(dirname "$0")/04_ws_workflow_state.sh"
 "$(dirname "$0")/06_ws_execution_lifecycle.sh"
-
