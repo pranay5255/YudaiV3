@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 import json
+import os
 import re
 import uuid
 from typing import Any, Dict, List, Optional
@@ -17,6 +18,7 @@ from yudai.models import (
     AuthToken,
     ChatMessage,
     ChatSession,
+    ContextCard,
     SessionArtifact,
     SessionMode,
     SessionModeStatus,
@@ -61,6 +63,15 @@ PR_URL_PATTERN = re.compile(r"https?://github\.com/[\w.-]+/[\w.-]+/pull/(\d+)")
 ISSUE_NUMBER_PATTERN = re.compile(r"(?im)\b(?:issue[_ -]?number|issue number)\b\s*[:=]\s*(\d+)")
 PR_NUMBER_PATTERN = re.compile(r"(?im)\b(?:pr[_ -]?number|pull[_ -]?number|pr number)\b\s*[:=]\s*(\d+)")
 TEST_BRANCH_PATTERN = re.compile(r"(?im)\b(?:test[_ -]?branch|test branch)\b\s*[:=]\s*([^\s\"']+)")
+STAGE_RESULT_PREFIX = "YUDAI_STAGE_RESULT:"
+WORKFLOW_METADATA_KEY = "workflow"
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on", "enabled"}
 
 
 class ExecutionConflictError(RuntimeError):
@@ -524,6 +535,15 @@ class SessionExecutionOrchestrator:
                             "state": SessionModeStatus.COMPLETE.value,
                             "execution_id": execution_id,
                             "mode_execution_id": current_mode_execution.id,
+                            "issue_number": session.architect_issue_number,
+                            "issue_url": session.architect_issue_url,
+                            "pr_number": session.coder_pr_number,
+                            "pr_url": session.coder_pr_url,
+                            "stage_result": (
+                                self._get_workflow_metadata(session)
+                                .get("stage_results", {})
+                                .get(mode)
+                            ),
                         },
                     )
 
@@ -796,6 +816,61 @@ class SessionExecutionOrchestrator:
     ) -> str:
         objective_sections = [f"Primary Objective:\n{objective.strip()}"]
 
+        workflow = self._get_workflow_metadata(session)
+        selected_issue = workflow.get("selected_issue")
+        if isinstance(selected_issue, dict):
+            issue_lines = [
+                f"- Number: {selected_issue.get('number') or session.architect_issue_number or 'unknown'}",
+                f"- Title: {self._truncate_for_context(str(selected_issue.get('title') or ''), 300)}",
+            ]
+            if selected_issue.get("html_url") or session.architect_issue_url:
+                issue_lines.append(f"- URL: {selected_issue.get('html_url') or session.architect_issue_url}")
+            if selected_issue.get("body"):
+                issue_lines.append(
+                    "- Body: "
+                    + self._truncate_for_context(str(selected_issue.get("body") or ""), 1200)
+                )
+            labels = selected_issue.get("labels")
+            if isinstance(labels, list) and labels:
+                issue_lines.append("- Labels: " + ", ".join(str(item) for item in labels[:12]))
+            objective_sections.append("Selected GitHub Issue:\n" + "\n".join(issue_lines))
+
+        user_context = workflow.get("user_context")
+        if isinstance(user_context, dict) and user_context:
+            context_lines = []
+            affected_systems = user_context.get("affected_systems")
+            if isinstance(affected_systems, list) and affected_systems:
+                context_lines.append(
+                    "- Affected systems: "
+                    + ", ".join(str(item) for item in affected_systems[:20])
+                )
+            for key, label in (
+                ("constraints", "Constraints"),
+                ("acceptance_criteria", "Acceptance criteria"),
+                ("out_of_scope", "Out of scope"),
+                ("notes", "User notes"),
+            ):
+                value = str(user_context.get(key) or "").strip()
+                if value:
+                    context_lines.append(f"- {label}: {self._truncate_for_context(value, 800)}")
+            if context_lines:
+                objective_sections.append("User PR Context:\n" + "\n".join(context_lines))
+
+        context_cards = (
+            db.query(ContextCard)
+            .filter(ContextCard.session_id == session.id, ContextCard.is_active)
+            .order_by(ContextCard.created_at.desc())
+            .limit(6)
+            .all()
+        )
+        if context_cards:
+            card_lines = [
+                f"- {self._truncate_for_context(card.title, 180)}: "
+                f"{self._truncate_for_context(card.content or card.description or '', 500)}"
+                for card in reversed(context_cards)
+            ]
+            objective_sections.append("Context Cards:\n" + "\n".join(card_lines))
+
         recent_messages = (
             db.query(ChatMessage)
             .filter(ChatMessage.session_id == session.id)
@@ -918,6 +993,73 @@ class SessionExecutionOrchestrator:
         session.mode_metadata = metadata
 
     @staticmethod
+    def _get_workflow_metadata(session: ChatSession) -> Dict[str, Any]:
+        metadata = session.mode_metadata if isinstance(session.mode_metadata, dict) else {}
+        workflow = metadata.get(WORKFLOW_METADATA_KEY)
+        return dict(workflow) if isinstance(workflow, dict) else {}
+
+    def _merge_workflow_stage_result(
+        self,
+        session: ChatSession,
+        *,
+        mode: str,
+        result: Dict[str, Any],
+        extras: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        workflow = self._get_workflow_metadata(session)
+        stage_results = workflow.get("stage_results")
+        if not isinstance(stage_results, dict):
+            stage_results = {}
+
+        stage_result = result.get("stage_result")
+        if not isinstance(stage_result, dict):
+            stage_result = {}
+
+        summary = (
+            stage_result.get("summary")
+            or result.get("summary")
+            or result.get("detail")
+            or f"{mode.capitalize()} mode completed."
+        )
+        merged: Dict[str, Any] = {
+            "status": stage_result.get("status") or "complete",
+            "summary": str(summary)[:2000],
+            "completed_at": utc_now().isoformat(),
+            "execution_id": result.get("execution_id"),
+            "config_path": result.get("config_path"),
+            "exit_code": result.get("exit_code"),
+        }
+        for key in (
+            "affected_systems",
+            "acceptance_criteria",
+            "expected_failures",
+            "ready_for_tester",
+            "risks",
+            "setup_commands",
+            "tests",
+            "tests_changed",
+            "tests_run",
+            "test_branch",
+            "touched_files",
+            "issue_number",
+            "issue_url",
+            "pr_number",
+            "pr_url",
+        ):
+            value = stage_result.get(key, result.get(key))
+            if value not in (None, "", []):
+                merged[key] = value
+        if extras:
+            merged.update({key: value for key, value in extras.items() if value is not None})
+
+        stage_results[mode] = merged
+        workflow["stage_results"] = stage_results
+        metadata = dict(session.mode_metadata or {})
+        metadata[WORKFLOW_METADATA_KEY] = workflow
+        session.mode_metadata = metadata
+        return merged
+
+    @staticmethod
     def _infer_issue_url(session: ChatSession, issue_number: int) -> Optional[str]:
         if not session.repo_owner or not session.repo_name:
             return None
@@ -956,7 +1098,11 @@ class SessionExecutionOrchestrator:
 
         for line in reversed(output_text.splitlines()):
             raw = line.strip()
-            if not raw or not raw.startswith("{"):
+            if not raw:
+                continue
+            if raw.startswith(STAGE_RESULT_PREFIX):
+                raw = raw[len(STAGE_RESULT_PREFIX):].strip()
+            elif not raw.startswith("{"):
                 continue
             try:
                 payload = json.loads(raw)
@@ -964,6 +1110,44 @@ class SessionExecutionOrchestrator:
                 continue
             if not isinstance(payload, dict):
                 continue
+
+            stage_result = payload.get("stage_result")
+            if isinstance(stage_result, dict):
+                parsed["stage_result"] = stage_result
+            elif any(
+                key in payload
+                for key in (
+                    "summary",
+                    "affected_systems",
+                    "touched_files",
+                    "tests",
+                    "tests_changed",
+                    "tests_run",
+                    "expected_failures",
+                    "setup_commands",
+                    "ready_for_tester",
+                    "risks",
+                    "acceptance_criteria",
+                )
+            ):
+                parsed["stage_result"] = {
+                    key: payload[key]
+                    for key in (
+                        "summary",
+                        "affected_systems",
+                        "touched_files",
+                        "tests",
+                        "tests_changed",
+                        "tests_run",
+                        "expected_failures",
+                        "setup_commands",
+                        "ready_for_tester",
+                        "risks",
+                        "acceptance_criteria",
+                        "status",
+                    )
+                    if key in payload
+                }
 
             if "issue_url" in payload and isinstance(payload["issue_url"], str):
                 parsed["issue_url"] = payload["issue_url"].strip()
@@ -975,6 +1159,17 @@ class SessionExecutionOrchestrator:
                 parsed["pr_number"] = self._to_int(payload.get("pr_number"))
             if "test_branch" in payload and isinstance(payload["test_branch"], str):
                 parsed["test_branch"] = payload["test_branch"].strip()
+            if isinstance(stage_result, dict):
+                if "issue_url" in stage_result and isinstance(stage_result["issue_url"], str):
+                    parsed["issue_url"] = stage_result["issue_url"].strip()
+                if "issue_number" in stage_result:
+                    parsed["issue_number"] = self._to_int(stage_result.get("issue_number"))
+                if "pr_url" in stage_result and isinstance(stage_result["pr_url"], str):
+                    parsed["pr_url"] = stage_result["pr_url"].strip()
+                if "pr_number" in stage_result:
+                    parsed["pr_number"] = self._to_int(stage_result.get("pr_number"))
+                if "test_branch" in stage_result and isinstance(stage_result["test_branch"], str):
+                    parsed["test_branch"] = stage_result["test_branch"].strip()
             break
 
         return parsed
@@ -1250,6 +1445,88 @@ class SessionExecutionOrchestrator:
             ]
         )
 
+    def _build_fake_mswea_command(
+        self,
+        *,
+        session: ChatSession,
+        mode: str,
+        objective: str,
+        pipeline_execution_id: str,
+        issue_number: Optional[int],
+        issue_url: Optional[str],
+        test_branch: Optional[str],
+    ) -> str:
+        resolved_issue_number = issue_number or session.architect_issue_number or 101
+        resolved_issue_url = (
+            issue_url
+            or session.architect_issue_url
+            or self._infer_issue_url(session, resolved_issue_number)
+            or f"https://github.com/{session.repo_owner or 'octocat'}/{session.repo_name or 'repo'}/issues/{resolved_issue_number}"
+        )
+        resolved_test_branch = (
+            test_branch
+            or f"yudai/issue-{resolved_issue_number}-tests"
+        )
+        pr_number = session.coder_pr_number or 202
+        pr_url = (
+            session.coder_pr_url
+            or self._infer_pr_url(session, pr_number)
+            or f"https://github.com/{session.repo_owner or 'octocat'}/{session.repo_name or 'repo'}/pull/{pr_number}"
+        )
+        stage_result: Dict[str, Any] = {
+            "status": "complete",
+            "summary": f"Fake {mode} mode completed for backend websocket tests.",
+            "affected_systems": ["backend", "websocket", "sandbox"],
+            "acceptance_criteria": [
+                "Unified websocket commands acknowledge requests.",
+                "Sandbox stdout/stderr events stream through the controller.",
+            ],
+            "tests": ["manual backend websocket smoke"],
+            "touched_files": ["backend/yudai"],
+        }
+        if mode == SessionMode.ARCHITECT.value:
+            stage_result.update(
+                {
+                    "issue_number": resolved_issue_number,
+                    "issue_url": resolved_issue_url,
+                }
+            )
+        elif mode == SessionMode.TESTER.value:
+            stage_result["test_branch"] = resolved_test_branch
+        elif mode == SessionMode.CODER.value:
+            stage_result.update(
+                {
+                    "pr_number": pr_number,
+                    "pr_url": pr_url,
+                    "test_branch": resolved_test_branch,
+                }
+            )
+
+        payload = {
+            "mode": mode,
+            "pipeline_execution_id": pipeline_execution_id,
+            "objective": objective[:500],
+            "stage_result": stage_result,
+            "issue_number": stage_result.get("issue_number"),
+            "issue_url": stage_result.get("issue_url"),
+            "test_branch": stage_result.get("test_branch"),
+            "pr_number": stage_result.get("pr_number"),
+            "pr_url": stage_result.get("pr_url"),
+        }
+        return "\n".join(
+            [
+                "set -euo pipefail",
+                f"printf '[fake-mswea] mode={mode} pipeline={pipeline_execution_id}\\n'",
+                "printf '[fake-mswea] streaming stdout from sandbox\\n'",
+                "printf '[fake-mswea] streaming stderr from sandbox\\n' >&2",
+                "python3 - <<'PY'",
+                "import json",
+                f"payload = json.loads({json.dumps(json.dumps(payload, ensure_ascii=True))})",
+                f"print({json.dumps(STAGE_RESULT_PREFIX)} + ' ' + json.dumps(payload, ensure_ascii=True))",
+                "PY",
+            ]
+        )
+
     async def _write_mode_summary(
         self,
         db: Session,
@@ -1327,11 +1604,22 @@ class SessionExecutionOrchestrator:
         if test_branch:
             env["MSWEA_TEST_BRANCH"] = test_branch
 
-        command = self._build_mswea_command(
-            mode=mode,
-            include_issue_number=issue_number is not None,
-            include_test_branch=bool(test_branch),
-        )
+        if _env_bool("YUDAI_TEST_FAKE_MSWEA"):
+            command = self._build_fake_mswea_command(
+                session=session,
+                mode=mode,
+                objective=objective,
+                pipeline_execution_id=pipeline_execution_id,
+                issue_number=issue_number,
+                issue_url=issue_url,
+                test_branch=test_branch,
+            )
+        else:
+            command = self._build_mswea_command(
+                mode=mode,
+                include_issue_number=issue_number is not None,
+                include_test_branch=bool(test_branch),
+            )
 
         result = await self.broker.run_command(
             db,
@@ -1349,6 +1637,9 @@ class SessionExecutionOrchestrator:
         output_text = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
         parsed = self.parse_mswea_output(output_text)
         result.update(parsed)
+        result["execution_id"] = execution.id
+        result["pipeline_execution_id"] = pipeline_execution_id
+        result["mode"] = mode
         result["config_path"] = MSWEA_CONFIG_PATHS[mode]
         result["context_file"] = f"{session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH}/.yudai/context.md"
 
@@ -1463,6 +1754,16 @@ class SessionExecutionOrchestrator:
                 "architect_config_path": result.get("config_path"),
             },
         )
+        stage_result = self._merge_workflow_stage_result(
+            session,
+            mode=SessionMode.ARCHITECT.value,
+            result=result,
+            extras={
+                "issue_id": issue.issue_id,
+                "issue_number": issue_number,
+                "issue_url": issue_url,
+            },
+        )
 
         from yudai.daifuUserAgent.session_service import MemoryService
 
@@ -1487,6 +1788,19 @@ class SessionExecutionOrchestrator:
                 "stream": "llm",
                 "text": f"Architect mode enriched issue #{issue_number} and handed context to Tester mode.",
                 "final": True,
+            },
+        )
+        await self.ws_hub.send_to_session(
+            session.session_id,
+            WSMessageType.MODE_EVENT,
+            {
+                "mode": SessionMode.ARCHITECT.value,
+                "state": SessionModeStatus.COMPLETE.value,
+                "execution_id": pipeline_execution_id,
+                "mode_execution_id": execution.id,
+                "issue_number": issue_number,
+                "issue_url": issue_url,
+                "stage_result": stage_result,
             },
         )
 
@@ -1533,6 +1847,16 @@ class SessionExecutionOrchestrator:
                 "tester_exit_code": result.get("exit_code"),
                 "tester_test_branch": result.get("test_branch"),
                 "tester_config_path": result.get("config_path"),
+            },
+        )
+        self._merge_workflow_stage_result(
+            session,
+            mode=SessionMode.TESTER.value,
+            result=result,
+            extras={
+                "test_branch": result.get("test_branch"),
+                "issue_number": issue_number,
+                "issue_url": session.architect_issue_url,
             },
         )
         return result
@@ -1593,6 +1917,18 @@ class SessionExecutionOrchestrator:
                 "coder_exit_code": result.get("exit_code"),
                 "coder_test_branch": test_branch,
                 "coder_config_path": result.get("config_path"),
+            },
+        )
+        self._merge_workflow_stage_result(
+            session,
+            mode=SessionMode.CODER.value,
+            result=result,
+            extras={
+                "test_branch": test_branch,
+                "issue_number": issue_number,
+                "issue_url": session.architect_issue_url,
+                "pr_number": pr_number,
+                "pr_url": pr_url,
             },
         )
 
