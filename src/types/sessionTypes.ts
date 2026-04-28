@@ -71,6 +71,7 @@ export interface SessionContext {
   repository_info?: RepositoryInfo;
   statistics?: SessionStatistics;
   user_issues?: UserIssue[];
+  pending_questions?: UserQuestionResponse[];
 }
 
 // ============================================================================
