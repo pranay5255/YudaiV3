@@ -1462,6 +1462,8 @@ export interface components {
             context_cards?: string[];
             /** Messages */
             messages: components["schemas"]["ChatMessageResponse"][];
+            /** Pending Questions */
+            pending_questions?: components["schemas"]["UserQuestionResponse"][] | null;
             /** Repository Info */
             repository_info?: {
                 [key: string]: unknown;
