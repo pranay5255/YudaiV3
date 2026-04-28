@@ -21,4 +21,3 @@ STATE
 
 printf '%s\n' "$response"
 printf 'Wrote %s\n' "$STATE_FILE"
-
