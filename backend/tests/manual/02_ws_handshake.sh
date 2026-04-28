@@ -12,4 +12,3 @@ python3 "$SCRIPT_DIR/ws_client.py" \
   --token "$SESSION_TOKEN" \
   --expect-type status \
   --expect-status connected
-
