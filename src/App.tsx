@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { AgentWorkbench } from './components/AgentWorkbench';
 import { AuthCallback } from './components/AuthCallback';
 import { AuthSuccess } from './components/AuthSuccess';
+import { DemoWorkbench } from './components/DemoWorkbench';
 import { LoginPage } from './components/LoginPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { SessionErrorBoundary } from './components/SessionErrorBoundary';
@@ -61,6 +62,7 @@ function App(): JSX.Element {
     >
       <Routes>
         <Route element={<LoginPage />} path="/auth/login" />
+        <Route element={<DemoWorkbench />} path="/demo" />
         <Route element={<AuthSuccess />} path="/auth/success" />
         <Route element={<AuthCallback />} path="/auth/callback" />
         <Route
