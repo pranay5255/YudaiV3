@@ -61,7 +61,6 @@ CRITICAL ISSUES:
 
 """
 
-import asyncio
 import json
 import logging
 
@@ -90,7 +89,6 @@ from yudai.models import (
     ChatMessage,
     ChatSession,
     ContextCard,
-    Repository,
     SessionMode,
     SessionModeStatus,
     User,
@@ -139,7 +137,6 @@ from sqlalchemy.orm import Session
 
 from yudai.utils import utc_now
 
-from .llm_service import LLMService
 from .mode_tools import get_daifu_issue_tool_service, get_daifu_mode_tool_service
 from .session_service import MemoryService, SessionService
 
