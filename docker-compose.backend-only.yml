@@ -14,7 +14,9 @@ services:
     image: yudai-backend:local
     restart: "no"
     env_file:
-      - ./backend/.env.prod
+      - ./backend/docker-compose.defaults.env
+      - path: ./backend/.env.prod
+        required: false
     environment:
       - DOCKER_COMPOSE=true
       - PYTHONPATH=/app
@@ -30,13 +32,16 @@ services:
     image: yudai-backend:local
     container_name: yudai-be
     restart: unless-stopped
-    # Load all env vars from backend/.env.prod
+    # Load safe local defaults first; backend/.env.prod can override them when present.
     env_file:
-      - ./backend/.env.prod
+      - ./backend/docker-compose.defaults.env
+      - path: ./backend/.env.prod
+        required: false
     environment:
       # Ensure Docker-specific settings
       - DOCKER_COMPOSE=true
       - PYTHONPATH=/app
+      - PORT=8000
       # Realtime/cache directories must be writable by appuser in-container
       - SANDBOX_GIT_ROOT=/tmp/sandbox_repos
       - SANDBOX_CACHE_ROOT=/tmp/sandbox_cache
@@ -50,7 +55,6 @@ services:
         condition: service_completed_successfully
     volumes:
       - app_logs:/app/logs
-      - ./backend/yudaiv3.2025-09-07.private-key.pem:/app/yudaiv3.2025-09-07.private-key.pem:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - swe_runs:/data/swe_runs
       - sandbox_artifacts:/data/sandbox_artifacts
@@ -87,7 +91,9 @@ services:
     container_name: yudai-db
     restart: unless-stopped
     env_file:
-      - ./backend/.env.prod
+      - ./backend/docker-compose.defaults.env
+      - path: ./backend/.env.prod
+        required: false
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backend/yudai/db/init.sql:/docker-entrypoint-initdb.d/init.sql
