@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AgentWorkbench } from '@/components/AgentWorkbench';
 import { agentApi } from '@/services/agentApi';
+import { EXECUTION_OBJECTIVE_MAX_CHARS } from '@/utils/workflowObjective';
 
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({
@@ -76,7 +77,13 @@ const session = {
 describe('AgentWorkbench pending questions', () => {
   beforeEach(() => {
     vi.mocked(agentApi.listRepositories).mockResolvedValue([repo]);
-    vi.mocked(agentApi.listBranches).mockResolvedValue([{ name: 'main' }]);
+    vi.mocked(agentApi.listBranches).mockResolvedValue([
+      {
+        commit: {},
+        name: 'main',
+        protected: false,
+      },
+    ]);
     vi.mocked(agentApi.listRepositoryIssues).mockResolvedValue([]);
     vi.mocked(agentApi.createSession).mockResolvedValue(session);
     vi.mocked(agentApi.getSessionContext).mockResolvedValue({
@@ -100,9 +107,11 @@ describe('AgentWorkbench pending questions', () => {
     vi.mocked(agentApi.listContextCards).mockResolvedValue([]);
     vi.mocked(agentApi.listSessionIssues).mockResolvedValue([]);
     vi.mocked(agentApi.getExecutionStatus).mockResolvedValue({
+      cancel_requested: false,
       mode: 'pending',
       session_id: session.session_id,
       status: 'idle',
+      waiting_for_input: false,
     });
     vi.mocked(agentApi.listTrajectories).mockResolvedValue([]);
     vi.mocked(agentApi.answerQuestion).mockResolvedValue({
@@ -150,5 +159,42 @@ describe('AgentWorkbench pending questions', () => {
         'test-token'
       );
     });
+  });
+
+  it('caps a long run objective before starting execution', async () => {
+    const user = userEvent.setup();
+    vi.mocked(agentApi.getSessionContext).mockResolvedValue({
+      messages: [],
+      pending_questions: [],
+      session,
+      statistics: { total_messages: 0, total_tokens: 0 },
+      user_issues: [],
+    });
+    vi.mocked(agentApi.startExecution).mockResolvedValue({
+      cancel_requested: false,
+      execution_id: 'exec_long_objective',
+      mode: 'architect',
+      plan: [],
+      session_id: session.session_id,
+      started_at: '2026-04-28T00:00:04Z',
+      status: 'running',
+      waiting_for_input: false,
+    });
+    render(<AgentWorkbench />);
+
+    await user.click(await screen.findByRole('button', { name: /start session/i }));
+    await user.click(screen.getByRole('button', { name: /runs/i }));
+
+    fireEvent.change(screen.getByLabelText(/objective/i), {
+      target: { value: `Fix the workflow boundary\n${'x'.repeat(12000)}` },
+    });
+    await user.click(screen.getByRole('button', { name: /start run/i }));
+
+    await waitFor(() => {
+      expect(agentApi.startExecution).toHaveBeenCalled();
+    });
+    const request = vi.mocked(agentApi.startExecution).mock.calls[0][1];
+    expect(request.objective.length).toBeLessThanOrEqual(EXECUTION_OBJECTIVE_MAX_CHARS);
+    expect(request.objective).toContain('Fix the workflow boundary');
   });
 });
