@@ -139,6 +139,7 @@ from yudai.utils import utc_now
 
 from .mode_tools import get_daifu_issue_tool_service, get_daifu_mode_tool_service
 from .session_service import MemoryService, SessionService
+from .workflow_state import build_execution_objective, select_workflow_issue
 
 router = APIRouter(tags=["sessions"])
 
@@ -237,21 +238,22 @@ def _build_github_issue_execution_objective(
     db_session: ChatSession,
     result: Any,
 ) -> str:
-    issue_ref = (
-        f"#{result.github_issue_number}"
-        if result.github_issue_number is not None
-        else result.github_issue_url
-    )
-    return "\n\n".join(
-        part
-        for part in [
-            f"Resolve GitHub issue {issue_ref}: {result.title}",
-            f"GitHub issue URL: {result.github_issue_url}",
-            f"Repository: {result.repo_owner}/{result.repo_name}@{db_session.repo_branch or 'main'}",
-            f"Issue details:\n{result.issue_text_raw or result.description or ''}",
-        ]
-        if part and part.strip()
-    )
+    return build_execution_objective(_github_issue_ref_from_result(db_session, result))
+
+
+def _github_issue_ref_from_result(
+    db_session: ChatSession,
+    result: Any,
+) -> Dict[str, Any]:
+    return {
+        "github_issue_number": result.github_issue_number,
+        "github_issue_url": result.github_issue_url,
+        "issue_text_raw": result.issue_text_raw or result.description or "",
+        "repo_branch": db_session.repo_branch or "main",
+        "repo_name": result.repo_name or db_session.repo_name,
+        "repo_owner": result.repo_owner or db_session.repo_owner,
+        "title": result.title,
+    }
 
 
 def _raise_create_github_issue_http_error(exc: Exception) -> None:
@@ -292,15 +294,12 @@ async def _prepare_github_issue_created_response(
         trigger="github_issue_created",
     )
 
-    db_session.architect_issue_url = result.github_issue_url
-    db_session.architect_issue_number = result.github_issue_number
+    select_workflow_issue(db_session, _github_issue_ref_from_result(db_session, result))
 
     execution_objective = _build_github_issue_execution_objective(db_session, result)
     db_session.mode_metadata = {
         **(db_session.mode_metadata or {}),
         "pending_resume_objective": execution_objective,
-        "seed_github_issue_url": result.github_issue_url,
-        "seed_github_issue_number": result.github_issue_number,
         "seed_user_issue_id": result.issue_id,
     }
 
