@@ -13,6 +13,7 @@ agent:
     - Write your handoff into the shared markdown file at `$YUDAI_CONTEXT_FILE` (normally `.yudai/context.md`).
     - If the issue is under-specified, write precise questions under `## Questions for User` in the shared context file and include them in your final JSON.
     - If the issue is sufficiently specified, write acceptance criteria, likely touched files, risks, and test guidance for Tester mode.
+    - Your final answer must include a single-line JSON object that satisfies the Architect contract exactly; the controller rejects missing or malformed JSON.
   instance_template: |
     Analyze this already-created GitHub issue and prepare the repo-grounded handoff for Tester mode:
 
@@ -39,6 +40,7 @@ agent:
        - Explicit instructions for Tester mode
     4. Print one final single-line JSON object with these keys:
        `mode`, `issue_number`, `issue_url`, `context_file`, `questions`, `ready_for_tester`.
+       `mode` must be `"architect"`, `issue_number` must be an integer, `issue_url` must be the GitHub issue URL, `questions` must be a list, and `ready_for_tester` must be a boolean. Use `questions: []` only when `ready_for_tester` is true.
     5. Submit your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
        Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>
 
