@@ -10,6 +10,7 @@ WORKDIR /app
 
 # Install system dependencies (production optimized - minimal)
 RUN apt-get update && apt-get install -y \
+    bash \
     gcc \
     libpq-dev \
     postgresql-client \
@@ -31,7 +32,21 @@ COPY . .
 
 # Create non-root user for production (no sudo, minimal privileges)
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
+    mkdir -p \
+      /app/logs \
+      /data/sandbox_artifacts \
+      /data/swe_runs \
+      /tmp/huggingface_cache \
+      /tmp/sandbox_cache \
+      /tmp/sandbox_repos \
+      /tmp/transformers_cache && \
     chown -R appuser:appuser /app && \
+    chown -R appuser:appuser /data && \
+    chown -R appuser:appuser \
+      /tmp/huggingface_cache \
+      /tmp/sandbox_cache \
+      /tmp/sandbox_repos \
+      /tmp/transformers_cache && \
     chmod +x /app/start.sh
 
 RUN mkdir -p /home/appuser/.cache && \
