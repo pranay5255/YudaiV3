@@ -48,6 +48,7 @@ import {
 } from '../services/agentApi';
 import { UserQuestionPrompt } from './UserQuestionPrompt';
 import type { AgentQuestionInfo } from '../types/sessionTypes';
+import { capExecutionObjective } from '../utils/workflowObjective';
 
 type WorkspaceView = 'chat' | 'context' | 'execution' | 'issues';
 type ExecutionMode = 'architect' | 'tester' | 'coder';
@@ -672,7 +673,7 @@ export function AgentWorkbench(): JSX.Element {
   async function handleStartExecution(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
 
-    const objective = executionObjective.trim();
+    const objective = capExecutionObjective(executionObjective);
     if (!objective || !sessionToken) {
       return;
     }
