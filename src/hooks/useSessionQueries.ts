@@ -7,6 +7,7 @@ import { API } from '../config/api';
 import { buildControllerSessionTargetUrl } from '../utils/realtimeRouting';
 import { useAuthStore } from '../stores/authStore';
 import { useSessionStore } from '../stores/sessionStore';
+import { capExecutionObjective } from '../utils/workflowObjective';
 import type {
   ChatMessage,
   CancelExecutionResponse,
@@ -302,7 +303,10 @@ export const useStartSessionExecution = () => {
     const response = await fetch(startUrl, {
       method: 'POST',
       headers: getAuthHeaders(sessionToken),
-      body: JSON.stringify(request),
+      body: JSON.stringify({
+        ...request,
+        objective: capExecutionObjective(request.objective),
+      }),
     });
 
     if (!response.ok) {
