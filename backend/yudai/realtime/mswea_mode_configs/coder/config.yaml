@@ -11,6 +11,7 @@ agent:
     - Use or compare against the provided tester branch.
     - Commit the implementation and open a real GitHub pull request linked to the issue.
     - Append your final handoff to `$YUDAI_CONTEXT_FILE`.
+    - Your final answer must include a single-line JSON object that satisfies the Coder contract exactly; the controller rejects missing or malformed JSON.
   instance_template: |
     Implement this GitHub issue and open a PR:
 
@@ -39,6 +40,7 @@ agent:
        - Any residual risks
     9. Print one final single-line JSON object with keys:
        `mode`, `issue_number`, `context_file`, `test_branch`, `pr_url`, `pr_number`, `tests_run`.
+       `mode` must be `"coder"`, `pr_url` must be the GitHub PR URL, `pr_number` must be an integer, `test_branch` must be non-empty, and `tests_run` must be a non-empty list.
     10. Submit by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
        Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>
 
