@@ -11,6 +11,7 @@ agent:
     - Use the repository's existing test frameworks and naming conventions.
     - Read `$YUDAI_CONTEXT_FILE` before writing tests and append your handoff there when done.
     - Commit only test files and test fixtures to a branch named `yudai/issue-<issue-number>-tests` unless the task provides a different branch.
+    - Your final answer must include a single-line JSON object that satisfies the Tester contract exactly; the controller rejects missing or malformed JSON.
   instance_template: |
     Write tests for this GitHub issue:
 
@@ -39,6 +40,7 @@ agent:
        - Any setup commands Coder mode should run
     8. Print one final single-line JSON object with keys:
        `mode`, `issue_number`, `context_file`, `test_branch`, `tests_changed`, `expected_failures`.
+       `mode` must be `"tester"`, `test_branch` must be non-empty, `tests_changed` must list changed test or fixture files, and `expected_failures` must be a list.
     9. Submit by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.
        Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>
 
