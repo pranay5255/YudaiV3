@@ -8,6 +8,7 @@ import type {
   ExecutionResponse,
   ExecutionStatusResponse,
 } from '../types/sessionTypes';
+import { buildExecutionObjective } from '../utils/workflowObjective';
 
 const modeColor: Record<string, string> = {
   architect: 'text-cyan border-cyan/30 bg-cyan/10',
@@ -260,19 +261,28 @@ export function SolveIssues() {
         setRuntimeState(null, 'provisioning', null);
       }
 
-      const objectiveParts = [
-        `Resolve GitHub issue #${issue.number}: ${issue.title}`,
-        issue.body ? `Issue details:\n${issue.body}` : '',
-        `Repository: ${selectedRepository.repository.full_name}@${selectedRepository.branch || 'main'}`,
-        options.prioritizeTests ? 'Prioritize regression coverage and durable tests before implementation.' : '',
-        options.bestEffort ? 'Continue in best-effort mode and report blockers explicitly if the repository is inconsistent.' : '',
-      ].filter(Boolean);
+      const objective = buildExecutionObjective({
+        body: issue.body,
+        branch: selectedRepository.branch || 'main',
+        html_url: issue.html_url,
+        notes: [
+          options.prioritizeTests
+            ? 'Prioritize regression coverage and durable tests before implementation.'
+            : '',
+          options.bestEffort
+            ? 'Continue in best-effort mode and report blockers explicitly if the repository is inconsistent.'
+            : '',
+        ],
+        number: issue.number,
+        repository: selectedRepository.repository.full_name,
+        title: issue.title,
+      });
 
       const data = await apiCall(
         buildApiUrl(API.SESSIONS.EXECUTION, { sessionId: activeSessionId }),
         {
           method: 'POST',
-          body: JSON.stringify({ objective: objectiveParts.join('\n\n') }),
+          body: JSON.stringify({ objective }),
         }
       );
 
