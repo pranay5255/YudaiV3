@@ -36,6 +36,12 @@ def _install_import_stubs() -> None:
     fake_llm_service.LLMService = type("LLMService", (), {})
     sys.modules["yudai.daifuUserAgent.llm_service"] = fake_llm_service
 
+    fake_modal = types.ModuleType("modal")
+    fake_modal.App = type("App", (), {})
+    fake_modal.Image = type("Image", (), {})
+    fake_modal.Sandbox = type("Sandbox", (), {})
+    sys.modules["modal"] = fake_modal
+
 
 _install_import_stubs()
 
@@ -418,7 +424,10 @@ def test_create_github_issue_seeds_existing_issue_and_asks_before_execution(
         issue_id="issue_auto_start",
         title="Fix controller stream handoff",
         description="Execution should start after GitHub issue creation.",
-        issue_text_raw="The pipeline must run Architect, Tester, and Coder after issue creation.",
+        issue_text_raw=(
+            "The pipeline must run Architect, Tester, and Coder after issue creation. "
+            + ("Long issue body. " * 900)
+        ),
         issue_steps=["Create issue", "Run pipeline"],
         session_id=session.session_id,
         repo_owner="octocat",
@@ -493,9 +502,9 @@ def test_create_github_issue_seeds_existing_issue_and_asks_before_execution(
     assert session.architect_issue_url == "https://github.com/octocat/yudaiv3/issues/77"
     assert session.mode_status == "waiting_for_input"
     assert (session.mode_metadata or {}).get("pending_daifu_tool") == "run_architect_mode"
-    assert "GitHub issue URL: https://github.com/octocat/yudaiv3/issues/77" in (
-        session.mode_metadata or {}
-    ).get("pending_stage_tool_objective", "")
+    pending_objective = (session.mode_metadata or {}).get("pending_stage_tool_objective", "")
+    assert "GitHub issue URL: https://github.com/octocat/yudaiv3/issues/77" in pending_objective
+    assert len(pending_objective) <= 10000
     question = (
         db.query(UserQuestion)
         .filter(UserQuestion.question_id == response.confirmation_question_id)
