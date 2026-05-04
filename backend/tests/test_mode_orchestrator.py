@@ -25,6 +25,8 @@ from yudai.models import (  # noqa: E402
     SessionArtifact,
     SessionRuntime,
     User,
+    UserQuestion,
+    UserQuestionStatus,
 )
 from yudai.realtime import mode_orchestrator as mode_orchestrator_module  # noqa: E402
 from yudai.realtime.mode_orchestrator import (  # noqa: E402
@@ -35,6 +37,10 @@ from yudai.realtime.mode_orchestrator import (  # noqa: E402
     BROWSER_CHECK_SUMMARY_START,
     ExecutionConflictError,
     SessionExecutionOrchestrator,
+)
+from yudai.realtime.mode_contracts import (  # noqa: E402
+    CHANGED_FILES_END,
+    CHANGED_FILES_START,
 )
 
 
@@ -645,5 +651,344 @@ def test_browser_check_mocked_broker_failure_does_not_terminate_sandbox(tmp_path
         assert "exit_code=7" in execution.error_message
         assert db.query(SessionArtifact).filter(SessionArtifact.session_id == session.id).count() == 0
         assert sandbox_row.status == "running"
+    finally:
+        db.close()
+
+
+def _changed_files_output(files):
+    return f"{CHANGED_FILES_START}\n{json.dumps(files)}\n{CHANGED_FILES_END}\n"
+
+
+def _create_runtime_backed_session(db, *, session_id, user_suffix="contract"):
+    user_number = sum(ord(char) for char in user_suffix)
+    user = User(
+        github_username=f"{user_suffix}-user",
+        github_user_id=f"91{user_number}",
+        email=f"{user_suffix}@example.com",
+        display_name=f"{user_suffix.title()} User",
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    session = ChatSession(
+        user_id=user.id,
+        session_id=session_id,
+        title="MSWEA Contract Session",
+        repo_owner="pranay5255",
+        repo_name="YudaiV3",
+        repo_branch="main",
+        repo_url="https://github.com/pranay5255/YudaiV3.git",
+        runtime_workspace_path="/workspace/repo",
+        architect_issue_number=175,
+        architect_issue_url="https://github.com/pranay5255/YudaiV3/issues/175",
+        is_active=True,
+        total_messages=0,
+        total_tokens=0,
+        mode_metadata={},
+    )
+    db.add(session)
+    db.flush()
+    sandbox = Sandbox(
+        id=f"sbx_{session_id}",
+        identity_key=f"identity-{session_id}",
+        org_slug="org",
+        repo_owner="pranay5255",
+        repo_name="YudaiV3",
+        environment="main",
+        repo_branch="main",
+        status="running",
+        active_session_id=session.id,
+        tunnel_url=f"http://sandbox.local/{session_id}",
+        lifecycle_metadata={},
+    )
+    db.add(sandbox)
+    db.flush()
+    db.add(
+        SessionRuntime(
+            runtime_id=f"rt_{session_id}",
+            session_id=session.id,
+            sandbox_id=sandbox.id,
+            status="running",
+            tunnel_url=sandbox.tunnel_url,
+        )
+    )
+    db.commit()
+    db.refresh(session)
+    return user, session
+
+
+class ContractLifecycle:
+    def __init__(self):
+        self.issue_created = None
+        self.pr_created = None
+        self.finalized = None
+
+    async def create_runtime_for_session(self, *args, **kwargs):  # pragma: no cover
+        raise AssertionError("runtime should already exist")
+
+    def _get_latest_runtime(self, db, *, session_id=None, sandbox_id=None):
+        query = db.query(SessionRuntime)
+        if session_id is not None:
+            query = query.filter(SessionRuntime.session_id == session_id)
+        if sandbox_id is not None:
+            query = query.filter(SessionRuntime.sandbox_id == sandbox_id)
+        return query.order_by(SessionRuntime.id.desc()).first()
+
+    def get_sandbox_or_404(self, db, sandbox_id):
+        return db.query(Sandbox).filter(Sandbox.id == sandbox_id).one()
+
+    def mark_issue_created(self, db, *, session_public_id, user_id, issue_url, issue_number):
+        self.issue_created = {
+            "session_public_id": session_public_id,
+            "user_id": user_id,
+            "issue_url": issue_url,
+            "issue_number": issue_number,
+        }
+
+    def mark_pr_created(self, db, *, session_db_id, session_public_id, user_id, pr_url, pr_number):
+        self.pr_created = {
+            "session_db_id": session_db_id,
+            "session_public_id": session_public_id,
+            "user_id": user_id,
+            "pr_url": pr_url,
+            "pr_number": pr_number,
+        }
+
+    async def finalize_session_execution(self, db, *, session, reason, execution_status, execution_id, artifact_source_paths):
+        self.finalized = {
+            "session_id": session.session_id,
+            "reason": reason,
+            "execution_status": execution_status,
+            "execution_id": execution_id,
+            "artifact_source_paths": list(artifact_source_paths),
+        }
+        return None
+
+
+class ContractBroker:
+    def __init__(self, *, architect_ready=True):
+        self.architect_ready = architect_ready
+        self.mode_calls = []
+        self.summary_commands = 0
+
+    async def run_command(self, db, *, session, command, cwd=None, env=None, timeout_seconds=1800, on_event=None):
+        if "summary_path" in command:
+            self.summary_commands += 1
+            return {"sandbox_id": "sbx_contract", "exit_code": 0, "stdout": "", "stderr": "", "duration_ms": 1}
+
+        if 'mode_name="architect"' in command:
+            self.mode_calls.append("architect")
+            payload = {
+                "mode": "architect",
+                "issue_number": 175,
+                "issue_url": "https://github.com/pranay5255/YudaiV3/issues/175",
+                "context_file": "/workspace/repo/.yudai/context.md",
+                "questions": []
+                if self.architect_ready
+                else [{"prompt": "Which handoff metadata should Tester treat as mandatory?"}],
+                "ready_for_tester": self.architect_ready,
+            }
+            return {
+                "sandbox_id": "sbx_contract",
+                "exit_code": 0,
+                "stdout": json.dumps(payload) + "\n" + _changed_files_output([".yudai/context.md"]),
+                "stderr": "",
+                "duration_ms": 11,
+            }
+
+        if 'mode_name="tester"' in command:
+            self.mode_calls.append("tester")
+            payload = {
+                "mode": "tester",
+                "issue_number": 175,
+                "context_file": "/workspace/repo/.yudai/context.md",
+                "test_branch": "yudai/issue-175-tests",
+                "tests_changed": ["backend/tests/test_mode_orchestrator.py"],
+                "expected_failures": ["test_contract_handoff_fails_before_implementation"],
+            }
+            return {
+                "sandbox_id": "sbx_contract",
+                "exit_code": 0,
+                "stdout": json.dumps(payload)
+                + "\n"
+                + _changed_files_output(["backend/tests/test_mode_orchestrator.py", ".yudai/context.md"]),
+                "stderr": "",
+                "duration_ms": 22,
+            }
+
+        if 'mode_name="coder"' in command:
+            self.mode_calls.append("coder")
+            payload = {
+                "mode": "coder",
+                "issue_number": 175,
+                "context_file": "/workspace/repo/.yudai/context.md",
+                "test_branch": "yudai/issue-175-tests",
+                "pr_url": "https://github.com/pranay5255/YudaiV3/pull/211",
+                "pr_number": 211,
+                "tests_run": ["PYTHONPATH=backend pytest -q backend/tests/test_mode_orchestrator.py"],
+            }
+            return {
+                "sandbox_id": "sbx_contract",
+                "exit_code": 0,
+                "stdout": json.dumps(payload)
+                + "\n"
+                + _changed_files_output(["backend/yudai/realtime/mode_orchestrator.py"]),
+                "stderr": "",
+                "duration_ms": 33,
+            }
+
+        raise AssertionError("unexpected command")
+
+
+def test_full_pipeline_persists_strict_mode_contracts(tmp_path, monkeypatch):
+    db_path = tmp_path / "contracts.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(mode_orchestrator_module, "SessionLocal", SessionLocal)
+
+    async def _healthy(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(mode_orchestrator_module, "wait_for_sandbox_healthcheck", _healthy)
+
+    db = SessionLocal()
+    try:
+        user, session = _create_runtime_backed_session(
+            db,
+            session_id="session_contract_success",
+            user_suffix="contract-success",
+        )
+        broker = ContractBroker()
+        lifecycle = ContractLifecycle()
+        orchestrator = SessionExecutionOrchestrator(
+            broker=broker,
+            lifecycle=lifecycle,
+            ws_hub=DummyHub(),
+        )
+
+        async def _run():
+            payload = await orchestrator.start_execution(
+                db,
+                session=session,
+                user_id=user.id,
+                objective="Harden the MSWEA contracts",
+            )
+            await orchestrator._session_tasks[session.session_id]
+            return payload
+
+        payload = asyncio.run(_run())
+        db.expire_all()
+        session_row = db.query(ChatSession).filter(ChatSession.id == session.id).one()
+        contracts = (session_row.mode_metadata or {})["workflow_contracts"]
+        mode_rows = (
+            db.query(AgentExecution)
+            .filter(
+                AgentExecution.session_id == session.id,
+                AgentExecution.id != payload["execution_id"],
+            )
+            .order_by(AgentExecution.created_at)
+            .all()
+        )
+
+        assert broker.mode_calls == ["architect", "tester", "coder"]
+        assert broker.summary_commands == 3
+        assert session_row.current_mode == "complete"
+        assert session_row.mode_status == "complete"
+        assert session_row.tester_completed_at is not None
+        assert session_row.coder_pr_number == 211
+        assert session_row.coder_pr_url == "https://github.com/pranay5255/YudaiV3/pull/211"
+        assert contracts["contract_version"] == "mswea-mode-contract-v1"
+        assert contracts["architect"]["ready_for_tester"] is True
+        assert contracts["tester"]["test_branch"] == "yudai/issue-175-tests"
+        assert contracts["coder"]["tests_run"]
+        assert {row.mode: row.output_summary["contract_version"] for row in mode_rows} == {
+            "architect": "mswea-mode-contract-v1",
+            "tester": "mswea-mode-contract-v1",
+            "coder": "mswea-mode-contract-v1",
+        }
+        assert lifecycle.pr_created["pr_number"] == 211
+        assert lifecycle.finalized["reason"] == "workflow_complete"
+    finally:
+        db.close()
+
+
+def test_architect_questions_pause_pipeline_and_resume_same_mode(tmp_path, monkeypatch):
+    db_path = tmp_path / "contracts-pause.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(mode_orchestrator_module, "SessionLocal", SessionLocal)
+
+    async def _healthy(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(mode_orchestrator_module, "wait_for_sandbox_healthcheck", _healthy)
+
+    db = SessionLocal()
+    try:
+        user, session = _create_runtime_backed_session(
+            db,
+            session_id="session_contract_pause",
+            user_suffix="contract-pause",
+        )
+        broker = ContractBroker(architect_ready=False)
+        orchestrator = SessionExecutionOrchestrator(
+            broker=broker,
+            lifecycle=ContractLifecycle(),
+            ws_hub=DummyHub(),
+        )
+
+        async def _run_until_pause():
+            payload = await orchestrator.start_execution(
+                db,
+                session=session,
+                user_id=user.id,
+                objective="Harden the MSWEA contracts",
+            )
+            await orchestrator._session_tasks[session.session_id]
+            return payload
+
+        payload = asyncio.run(_run_until_pause())
+        db.expire_all()
+        session_row = db.query(ChatSession).filter(ChatSession.id == session.id).one()
+        question = db.query(UserQuestion).filter(UserQuestion.session_id == session.id).one()
+        active_execution = (session_row.mode_metadata or {})["active_execution"]
+
+        assert broker.mode_calls == ["architect"]
+        assert session_row.current_mode == "architect"
+        assert session_row.mode_status == "waiting_for_input"
+        assert session_row.architect_completed_at is None
+        assert session_row.tester_completed_at is None
+        assert question.status == UserQuestionStatus.PENDING.value
+        assert question.question_metadata["origin"] == "mswea_architect_contract"
+        assert active_execution["waiting_for_input"] is True
+        assert active_execution["status"] == "waiting_for_input"
+
+        question.status = UserQuestionStatus.ANSWERED.value
+        question.answer_text = "Tester must treat test branch and expected failures as mandatory."
+        question.answered_at = mode_orchestrator_module.utc_now()
+        metadata = dict(session_row.mode_metadata or {})
+        metadata["pending_question_ids"] = []
+        session_row.mode_metadata = metadata
+        session_row.mode_status = "idle"
+        db.commit()
+
+        scheduled = {}
+        orchestrator._schedule_execution_task = lambda **kwargs: scheduled.update(kwargs)
+        resume_payload = asyncio.run(
+            orchestrator.resume_execution(
+                db,
+                session=session_row,
+                user_id=user.id,
+                objective="Continue after Architect clarification.",
+            )
+        )
+
+        assert resume_payload["mode"] == "architect"
+        assert scheduled["execution_id"] == payload["execution_id"]
+        assert scheduled.get("max_modes") is None
+        assert "Clarifications from Q&A" in scheduled["objective"]
     finally:
         db.close()
