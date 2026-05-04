@@ -14,6 +14,7 @@ import type {
   SessionContext,
   ChatMessage,
 } from '../types/apiContract';
+import { capExecutionObjective } from '../utils/workflowObjective';
 
 type QueryValue = string | number | boolean | null | undefined;
 
@@ -315,7 +316,10 @@ export const agentApi = {
     return requestJson<ContractExecutionResponse>(
       '/daifu/sessions/{session_id}/execution',
       {
-        body,
+        body: {
+          ...body,
+          objective: capExecutionObjective(body.objective),
+        },
         method: 'POST',
         pathParams: { session_id: sessionId },
         token,
