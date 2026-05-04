@@ -1,7 +1,7 @@
 FROM postgres:15
 
 # Set environment variables for database initialization
-ENV POSTGRES_DB=yudai_dev
+ENV POSTGRES_DB=yudai_db
 ENV POSTGRES_USER=yudai_user
 ENV POSTGRES_PASSWORD=yudai_password
 
