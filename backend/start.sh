@@ -3,6 +3,10 @@ set -e
 
 echo "🚀 Starting YudaiV3 Backend..."
 
+redact_database_url() {
+    echo "$DATABASE_URL" | sed -E 's#(://[^:/@]+:)[^@]+@#\1***@#'
+}
+
 # Extract database name from DATABASE_URL if POSTGRES_DB is not set
 if [ -z "$POSTGRES_DB" ] && [ -n "$DATABASE_URL" ]; then
     # Extract database name from DATABASE_URL (format: postgresql://user:pass@host:port/dbname)
@@ -18,7 +22,7 @@ fi
 
 # Initialize database tables (schema only, no sample data or external fetches)
 echo "🏗️  Initializing database tables..."
-if python db/init_db.py --init; then
+if python -m yudai.db.init_db --init; then
     echo "✅ Database tables initialized successfully!"
 else
     echo "❌ Failed to initialize database tables"
@@ -66,7 +70,7 @@ while [ $attempt -lt $max_attempts ]; do
         if [ $attempt -eq $max_attempts ]; then
             echo "❌ Failed to connect to database after $max_attempts attempts"
             echo "🔍 Debugging information:"
-            echo "  - DATABASE_URL: $DATABASE_URL"
+            echo "  - DATABASE_URL: $(redact_database_url)"
             echo "  - POSTGRES_DB: $POSTGRES_DB"
             echo "  - Network connectivity:"
             nc -zv db 5432 || echo "    Cannot reach db:5432"
