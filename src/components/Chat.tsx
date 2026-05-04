@@ -13,6 +13,7 @@ import { useRepository } from '../hooks/useRepository';
 import { useSessionStore } from '../stores/sessionStore';
 import { useAuthStore } from '../stores/authStore';
 import { API, buildApiUrl } from '../config/api';
+import { buildExecutionObjective } from '../utils/workflowObjective';
 
 // Types are now imported from '../types'
 
@@ -516,11 +517,13 @@ export const Chat: React.FC<ChatProps> = ({
         data: null,
       });
 
-      const executionObjective = [
-        `Resolve GitHub issue #${issueId}: ${issuePreviewModal.data.title}`,
-        issuePreviewModal.data.body ? `Issue details:\n${issuePreviewModal.data.body}` : '',
-        `Repository: ${selectedRepository.repository.full_name}@${selectedRepository.branch || 'main'}`,
-      ].filter(Boolean).join('\n\n');
+      const executionObjective = buildExecutionObjective({
+        body: issuePreviewModal.data.body,
+        branch: selectedRepository.branch || 'main',
+        number: issueId,
+        repository: selectedRepository.repository.full_name,
+        title: issuePreviewModal.data.title,
+      });
 
       const response = await fetch(buildApiUrl(API.SESSIONS.EXECUTION, { sessionId: activeSessionId }), {
         method: 'POST',
