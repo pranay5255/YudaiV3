@@ -41,6 +41,16 @@ from .modal_sandbox import (
     SANDBOX_MSWEA_CONFIG_ROOT,
     SANDBOX_WORKSPACE_PATH,
 )
+from .mode_contracts import (
+    CHANGED_FILES_END,
+    CHANGED_FILES_START,
+    CONTRACT_VERSION,
+    ModeContractError,
+    extract_changed_files_from_output,
+    normalize_changed_files,
+    parse_mode_contract,
+    validate_mode_changed_files,
+)
 from .ws_protocol import SessionWebSocketHub, WSMessageType, get_ws_hub
 
 MODE_ORDER: tuple[str, str, str] = (
@@ -159,6 +169,7 @@ class SessionExecutionOrchestrator:
                 "started_at": execution_started_at.isoformat(),
                 "completed_at": None,
                 "cancel_requested": False,
+                "waiting_for_input": False,
                 "current_mode_execution_id": None,
                 "artifact": None,
                 "detail": queued_detail,
@@ -353,6 +364,7 @@ class SessionExecutionOrchestrator:
                 "started_at": started_at,
                 "completed_at": None,
                 "cancel_requested": False,
+                "waiting_for_input": False,
                 "detail": "Pipeline resumed after question answer",
             },
         )
@@ -596,6 +608,39 @@ class SessionExecutionOrchestrator:
                             objective=objective,
                             pipeline_execution_id=execution_id,
                         )
+
+                    if result.get("waiting_for_input"):
+                        current_mode_execution.status = SessionModeStatus.WAITING_FOR_INPUT.value
+                        current_mode_execution.completed_at = utc_now()
+                        current_mode_execution.output_summary = result
+                        self._set_mode_state(
+                            session,
+                            mode=mode,
+                            mode_status=SessionModeStatus.WAITING_FOR_INPUT.value,
+                        )
+                        self._update_active_execution(
+                            session,
+                            execution_id=execution_id,
+                            mode=mode,
+                            status=SessionModeStatus.WAITING_FOR_INPUT.value,
+                            waiting_for_input=True,
+                            current_mode_execution_id=None,
+                            detail=result.get("detail") or f"{mode.capitalize()} mode is waiting for input",
+                        )
+                        db.commit()
+
+                        await self.ws_hub.send_to_session(
+                            session_public_id,
+                            WSMessageType.MODE_EVENT,
+                            {
+                                "mode": mode,
+                                "state": SessionModeStatus.WAITING_FOR_INPUT.value,
+                                "execution_id": execution_id,
+                                "mode_execution_id": current_mode_execution.id,
+                                "detail": result.get("detail"),
+                            },
+                        )
+                        return
 
                     current_mode_execution.status = SessionModeStatus.COMPLETE.value
                     current_mode_execution.completed_at = utc_now()
@@ -1210,6 +1255,122 @@ class SessionExecutionOrchestrator:
         session.mode_metadata = metadata
 
     @staticmethod
+    def _record_mode_contract(session: ChatSession, mode: str, result: Dict[str, Any]) -> None:
+        metadata = dict(session.mode_metadata or {})
+        workflow_contracts = metadata.get("workflow_contracts")
+        if not isinstance(workflow_contracts, dict):
+            workflow_contracts = {}
+
+        compact_keys = {
+            "mode",
+            "contract_version",
+            "issue_number",
+            "issue_url",
+            "context_file",
+            "questions",
+            "ready_for_tester",
+            "test_branch",
+            "tests_changed",
+            "expected_failures",
+            "pr_url",
+            "pr_number",
+            "tests_run",
+            "changed_files",
+            "config_path",
+            "exit_code",
+            "duration_ms",
+        }
+        workflow_contracts["contract_version"] = CONTRACT_VERSION
+        workflow_contracts[mode] = {
+            key: value
+            for key, value in result.items()
+            if key in compact_keys and value is not None
+        }
+        metadata["workflow_contracts"] = workflow_contracts
+        session.mode_metadata = metadata
+
+    async def _pause_for_architect_questions(
+        self,
+        db: Session,
+        *,
+        session: ChatSession,
+        execution: AgentExecution,
+        user_id: int,
+        objective: str,
+        result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        question_ids: List[str] = []
+        for question_payload in result.get("questions") or []:
+            if not isinstance(question_payload, dict):
+                continue
+            prompt = str(question_payload.get("prompt") or "").strip()
+            if not prompt:
+                continue
+            options = [
+                {"id": str(option.get("id")), "label": str(option.get("label"))}
+                for option in (question_payload.get("options") or [])
+                if isinstance(option, dict) and option.get("id") and option.get("label")
+            ]
+            question = UserQuestion(
+                question_id=f"q_{uuid.uuid4().hex[:10]}",
+                session_id=session.id,
+                user_id=user_id,
+                mode=SessionMode.ARCHITECT.value,
+                question_text=prompt,
+                options=options,
+                multi_select=bool(question_payload.get("multi_select")),
+                status=UserQuestionStatus.PENDING.value,
+                question_metadata={
+                    "origin": "mswea_architect_contract",
+                    "mode_execution_id": execution.id,
+                    "contract_version": CONTRACT_VERSION,
+                },
+            )
+            db.add(question)
+            db.flush()
+            question_ids.append(question.question_id)
+
+            await self.ws_hub.send_to_session(
+                session.session_id,
+                WSMessageType.AGENT_QUESTION,
+                {
+                    "question_id": question.question_id,
+                    "question_text": question.question_text,
+                    "multi_select": bool(question.multi_select),
+                    "options": options,
+                },
+            )
+
+        if not question_ids:
+            raise RuntimeError("Architect mode requested user input but produced no valid questions")
+
+        metadata = dict(session.mode_metadata or {})
+        pending_ids = [
+            str(item)
+            for item in (metadata.get("pending_question_ids") or [])
+            if str(item).strip()
+        ]
+        pending_ids.extend(question_id for question_id in question_ids if question_id not in pending_ids)
+        metadata["pending_question_ids"] = pending_ids
+        metadata["pending_resume_objective"] = objective
+        metadata["last_question_id"] = question_ids[-1]
+        metadata["architect_waiting_contract_execution_id"] = execution.id
+        session.mode_metadata = metadata
+        session.mode_status = SessionModeStatus.WAITING_FOR_INPUT.value
+        session.mode_updated_at = utc_now()
+        session.last_activity = utc_now()
+
+        paused_result = dict(result)
+        paused_result.update(
+            {
+                "waiting_for_input": True,
+                "question_ids": question_ids,
+                "detail": "Architect mode needs user input before Tester mode.",
+            }
+        )
+        return paused_result
+
+    @staticmethod
     def _infer_issue_url(session: ChatSession, issue_number: int) -> Optional[str]:
         if not session.repo_owner or not session.repo_name:
             return None
@@ -1389,6 +1550,11 @@ class SessionExecutionOrchestrator:
             'if [ "${repo_url#git@github.com:}" != "$repo_url" ]; then',
             '  repo_url="https://github.com/${repo_url#git@github.com:}"',
             'fi',
+            'preserved_context=""',
+            'if [ -f "$context_file" ]; then',
+            '  preserved_context="$(mktemp "${TMPDIR:-/tmp}/yudai-context.XXXXXX")"',
+            '  cp "$context_file" "$preserved_context"',
+            'fi',
             'if [ -d "$workspace/.git" ]; then',
             '  cd "$workspace"',
             '  git fetch --all --prune 2>/dev/null || true',
@@ -1404,6 +1570,13 @@ class SessionExecutionOrchestrator:
             '  cd "$workspace"',
             'fi',
             'mkdir -p "$execution_dir" "$(dirname "$context_file")"',
+            'if [ -n "$preserved_context" ] && [ -f "$preserved_context" ]; then',
+            '  cp "$preserved_context" "$context_file"',
+            'fi',
+            'if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then',
+            '  git rev-parse HEAD > "$execution_dir/base_commit.txt" 2>/dev/null || true',
+            '  git status --porcelain=v1 --untracked-files=all > "$execution_dir/git_status_before.txt" 2>/dev/null || true',
+            'fi',
             'export YUDAI_CONTEXT_FILE="$context_file"',
             'if [ ! -f "$context_file" ]; then',
             '  {',
@@ -1498,6 +1671,54 @@ class SessionExecutionOrchestrator:
                 'exit_code=$?',
                 'set -e',
                 'printf "%s" "$exit_code" > "$execution_dir/exit_code.txt"',
+                'if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then',
+                '  "$python_bin" - "$execution_dir/changed_files.json" "$execution_dir/base_commit.txt" <<\'PY\'',
+                'import json',
+                'import subprocess',
+                'import sys',
+                'from pathlib import Path',
+                '',
+                'out_path = Path(sys.argv[1])',
+                'base_path = Path(sys.argv[2])',
+                '',
+                'def run(args):',
+                '    completed = subprocess.run(args, capture_output=True, text=True)',
+                '    return completed.stdout if completed.returncode == 0 else ""',
+                '',
+                'files = []',
+                'base_commit = base_path.read_text(encoding="utf-8").strip() if base_path.exists() else ""',
+                'head_commit = run(["git", "rev-parse", "HEAD"]).strip()',
+                'if base_commit and head_commit:',
+                '    for line in run(["git", "diff", "--name-only", base_commit, head_commit]).splitlines():',
+                '        if line.strip():',
+                '            files.append(line.strip())',
+                '',
+                'for line in run(["git", "status", "--porcelain=v1", "--untracked-files=all"]).splitlines():',
+                '    if len(line) < 4:',
+                '        continue',
+                '    path = line[3:].strip()',
+                '    if " -> " in path:',
+                '        old_path, new_path = path.split(" -> ", 1)',
+                '        files.extend([old_path.strip(), new_path.strip()])',
+                '    elif path:',
+                '        files.append(path)',
+                '',
+                'deduped = []',
+                'seen = set()',
+                'for path in files:',
+                '    normalized = path.replace("\\\\", "/")',
+                '    while normalized.startswith("./"):',
+                '        normalized = normalized[2:]',
+                '    normalized = normalized.lstrip("/")',
+                '    if normalized and normalized not in seen:',
+                '        seen.add(normalized)',
+                '        deduped.append(normalized)',
+                'out_path.write_text(json.dumps(deduped, ensure_ascii=True) + "\\n", encoding="utf-8")',
+                'PY',
+                f'  printf "{CHANGED_FILES_START}\\n"',
+                '  cat "$execution_dir/changed_files.json"',
+                f'  printf "\\n{CHANGED_FILES_END}\\n"',
+                'fi',
                 'if [ "$exit_code" -ne 0 ]; then',
                 '  exit "$exit_code"',
                 'fi',
@@ -2196,19 +2417,41 @@ class SessionExecutionOrchestrator:
             raise RuntimeError(f"MSWEA {mode} mode failed with exit_code={result.get('exit_code')}")
 
         output_text = f"{result.get('stdout', '')}\n{result.get('stderr', '')}"
-        parsed = self.parse_mswea_output(output_text)
-        result.update(parsed)
-        result["config_path"] = MSWEA_CONFIG_PATHS[mode]
-        result["context_file"] = f"{session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH}/.yudai/context.md"
+        try:
+            contract = parse_mode_contract(mode, output_text)
+        except ModeContractError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+        changed_files = result.get("changed_files")
+        if not isinstance(changed_files, list):
+            changed_files = extract_changed_files_from_output(output_text)
+        try:
+            changed_files = validate_mode_changed_files(mode, changed_files)
+        except ModeContractError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+        normalized_result: Dict[str, Any] = {
+            "mode": mode,
+            "status": "complete",
+            "exit_code": result.get("exit_code"),
+            "duration_ms": result.get("duration_ms"),
+            "sandbox_id": result.get("sandbox_id"),
+            "config_path": MSWEA_CONFIG_PATHS[mode],
+            "context_file": contract.get("context_file")
+            or f"{session.runtime_workspace_path or SANDBOX_WORKSPACE_PATH}/.yudai/context.md",
+            "changed_files": normalize_changed_files(changed_files),
+            "contract_version": CONTRACT_VERSION,
+        }
+        normalized_result.update(contract)
 
         await self._write_mode_summary(
             db,
             session=session,
             mode=mode,
             pipeline_execution_id=pipeline_execution_id,
-            summary=result,
+            summary=normalized_result,
         )
-        return result
+        return normalized_result
 
     async def _run_architect(
         self,
@@ -2294,12 +2537,20 @@ class SessionExecutionOrchestrator:
             db.add(issue)
         issue.github_issue_number = issue_number
         issue.github_issue_url = issue_url
-        issue.status = "completed"
+        ready_for_tester = bool(result.get("ready_for_tester"))
+        issue.status = "completed" if ready_for_tester else "needs_input"
         db.flush()
 
         session.architect_issue_number = issue_number
         session.architect_issue_url = issue_url
-        session.architect_completed_at = utc_now()
+        result.update(
+            {
+                "issue_id": issue.issue_id,
+                "issue_number": issue_number,
+                "issue_url": issue_url,
+            }
+        )
+        self._record_mode_contract(session, SessionMode.ARCHITECT.value, result)
 
         self._merge_mode_metadata(
             session,
@@ -2329,6 +2580,32 @@ class SessionExecutionOrchestrator:
             issue_number=issue_number,
         )
 
+        if not ready_for_tester:
+            MemoryService.save_session_snapshot(
+                db,
+                session,
+                trigger="architect_waiting_for_input",
+            )
+            await self.ws_hub.send_to_session(
+                session.session_id,
+                WSMessageType.LLM_STREAM,
+                {
+                    "stream": "llm",
+                    "text": f"Architect mode needs user input before Tester mode for issue #{issue_number}.",
+                    "final": True,
+                },
+            )
+            return await self._pause_for_architect_questions(
+                db,
+                session=session,
+                execution=execution,
+                user_id=user_id,
+                objective=objective,
+                result=result,
+            )
+
+        session.architect_completed_at = utc_now()
+
         await self.ws_hub.send_to_session(
             session.session_id,
             WSMessageType.LLM_STREAM,
@@ -2339,13 +2616,6 @@ class SessionExecutionOrchestrator:
             },
         )
 
-        result.update(
-            {
-                "issue_id": issue.issue_id,
-                "issue_number": issue_number,
-                "issue_url": issue_url,
-            }
-        )
         return result
 
     async def _run_tester(
@@ -2375,6 +2645,7 @@ class SessionExecutionOrchestrator:
 
         session.tester_status = "complete"
         session.tester_completed_at = utc_now()
+        self._record_mode_contract(session, SessionMode.TESTER.value, result)
         self._merge_mode_metadata(
             session,
             {
@@ -2464,6 +2735,7 @@ class SessionExecutionOrchestrator:
         result["pr_url"] = pr_url
         result["pr_number"] = pr_number
         result["test_branch"] = test_branch
+        self._record_mode_contract(session, SessionMode.CODER.value, result)
         return result
 
     async def _finalize_runtime(
