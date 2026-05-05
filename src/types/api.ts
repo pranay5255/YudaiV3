@@ -39,30 +39,6 @@ export interface LoginUrlResponse {
   login_url: string;
 }
 
-// ============================================================================
-// CHAT API TYPES
-// ============================================================================
-
-export interface ChatRequest {
-  session_id?: string;
-  message: {
-    message_text: string;
-  };
-  repository?: {
-    owner: string;
-    name: string;
-    branch?: string;
-  };
-}
-
-export interface ChatResponse {
-  reply: string;
-  conversation: [string, string][];
-  message_id: string;
-  processing_time: number;
-  session_id?: string;
-}
-
 export interface ChatContextMessage {
   id: string;
   content: string;
