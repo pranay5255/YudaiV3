@@ -22,5 +22,5 @@
     }
   },
   "include": ["./**/*.ts", "./**/*.tsx"],
-  "exclude": ["dist", "node_modules"]
+  "exclude": ["api", "dist", "node_modules", "tests/frontend/vercelMiddleware.test.ts"]
 }
