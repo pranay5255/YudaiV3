@@ -1,8 +1,6 @@
 import { API_BASE } from '../config/api';
 import type {
   ApiSchema,
-  ChatRequest,
-  ChatResponse,
   CreateSessionRequest,
   ExecutionRequest,
   ExecutionResponse,
@@ -30,7 +28,6 @@ export type ContractBranch = GitHubBranch;
 export type ContractSession = Session;
 export type ContractSessionContext = SessionContext;
 export type ContractChatMessage = ChatMessage;
-export type ContractChatResponse = ChatResponse;
 export type ContractExecutionResponse = ExecutionResponse;
 export type ContractExecutionStatus = ExecutionStatus;
 export type ContractRuntime = Runtime;
@@ -218,22 +215,6 @@ export const agentApi = {
       pathParams: { session_id: sessionId },
       token,
     });
-  },
-
-  sendChatMessage(
-    sessionId: string,
-    body: ChatRequest,
-    token?: string | null
-  ): Promise<ContractChatResponse> {
-    return requestJson<ContractChatResponse>(
-      '/daifu/sessions/{session_id}/chat',
-      {
-        body,
-        method: 'POST',
-        pathParams: { session_id: sessionId },
-        token,
-      }
-    );
   },
 
   answerQuestion(
