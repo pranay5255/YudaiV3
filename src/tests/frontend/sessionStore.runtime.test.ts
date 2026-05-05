@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore } from '@/stores/authStore';
 import { useSessionStore } from '@/stores/sessionStore';
 import type {
-  ChatResponse,
   CreateIssueWithContextRequest,
   IssueCreationResponse,
   SelectedRepository,
@@ -74,14 +73,6 @@ const issueResponse: IssueCreationResponse = {
     },
   },
   message: 'Preview ready',
-};
-
-const chatResponse: ChatResponse = {
-  reply: 'Here is a plan.',
-  conversation: [['hello', 'Here is a plan.']],
-  message_id: 'assistant_1',
-  processing_time: 0.5,
-  session_id: 'session_123',
 };
 
 const jsonResponse = (body: unknown, status = 200): Response =>
@@ -243,40 +234,7 @@ describe('sessionStore runtime split', () => {
     expect(state.runtimeStatus).toBe('not_provisioned');
   });
 
-  it('sends chat messages without requiring a runtime', async () => {
-    const fetchMock = vi.mocked(fetch);
-    useSessionStore.setState({
-      activeSessionId: 'session_123',
-      currentSession: baseSession,
-      sessionInitialized: true,
-      sessionStatus: 'ready',
-      runtime: null,
-      runtimeStatus: 'not_provisioned',
-      runtimeError: null,
-    });
-
-    fetchMock.mockImplementation(async (input) => {
-      const url = String(input);
-      if (url.includes('/daifu/sessions/session_123/chat')) {
-        return jsonResponse(chatResponse);
-      }
-      if (url.includes('/daifu/sessions/session_123/messages')) {
-        return jsonResponse([]);
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    });
-
-    const response = await useSessionStore.getState().sendChatMessage(
-      'hello',
-      mockRepository
-    );
-
-    expect(response.reply).toBe('Here is a plan.');
-
-    const state = useSessionStore.getState();
-    expect(state.sessionStatus).toBe('ready');
-    expect(state.runtimeStatus).toBe('not_provisioned');
-    expect(state.messageError).toBeNull();
-    expect(state.messages).toHaveLength(2);
+  it('does not expose the removed legacy chat sender', () => {
+    expect('sendChatMessage' in useSessionStore.getState()).toBe(false);
   });
 });
