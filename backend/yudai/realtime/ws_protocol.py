@@ -16,7 +16,6 @@ from yudai.utils import utc_now
 
 class WSMessageType(str, Enum):
     # Client -> Server
-    CHAT_MESSAGE = "chat_message"
     USER_RESPONSE = "user_response"
     EXEC_START = "exec.start"
     EXEC_STDIN = "exec.stdin"
@@ -101,10 +100,6 @@ class ModeEventPayload(BaseModel):
 # ---------------------------------------------------------------------------
 # Typed payloads (client -> server)
 # ---------------------------------------------------------------------------
-
-
-class ChatMessagePayload(BaseModel):
-    content: str
 
 
 class UserResponsePayload(BaseModel):
