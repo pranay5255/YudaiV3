@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Optional
 
-from yudai.auth.github_oauth import get_current_user, validate_session_token
+from yudai.auth.github_oauth import get_current_user, validate_internal_middleware_user
 from yudai.config import get_sandbox_config
-from yudai.daifuUserAgent.ChatOps import ChatOps
 from yudai.db.database import get_db
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, WebSocket, status
 from yudai.models import AuthToken, ChatSession, SessionRuntime, User
@@ -343,13 +342,18 @@ def get_runtime_for_session(
 async def unified_session_websocket(
     websocket: WebSocket,
     session_id: str,
-    token: str = Query(...),
+    internal_secret: str = Query(...),
+    internal_user_id: str = Query(...),
     db: Session = Depends(get_db),
 ) -> None:
-    """Public unified websocket endpoint (controller only, no direct sandbox WS)."""
-    user = validate_session_token(db, token)
+    """Internal unified websocket endpoint for the Node SSE bridge."""
+    user = validate_internal_middleware_user(
+        db,
+        internal_secret=internal_secret,
+        internal_user_id=internal_user_id,
+    )
     if not user:
-        await websocket.close(code=4401, reason="invalid_session_token")
+        await websocket.close(code=4401, reason="invalid_internal_auth")
         return
 
     session_obj = (
@@ -396,18 +400,6 @@ async def unified_session_websocket(
                 shutdown.set()
                 return
 
-    async def send_llm_delta(chunk: str) -> None:
-        await websocket.send_text(
-            build_envelope(
-                WSMessageType.LLM_STREAM,
-                {
-                    "stream": "llm",
-                    "text": chunk,
-                    "final": False,
-                },
-            )
-        )
-
     async def receive_loop() -> None:
         while not shutdown.is_set():
             try:
@@ -428,72 +420,7 @@ async def unified_session_websocket(
                 continue
 
             msg_type = message.get("type")
-            if msg_type == WSMessageType.CHAT_MESSAGE.value:
-                payload = message.get("payload", {}) or {}
-                content = str(payload.get("content") or "").strip()
-                repository = payload.get("repository")
-                if not isinstance(repository, dict):
-                    repository = None
-
-                if not content:
-                    await websocket.send_text(
-                        build_envelope(
-                            WSMessageType.ERROR,
-                            {"message": "Missing chat content", "code": "CHAT_CONTENT_MISSING"},
-                        )
-                    )
-                    continue
-
-                await websocket.send_text(
-                    build_envelope(
-                        WSMessageType.STATUS,
-                        {"status": "chat_processing"},
-                    )
-                )
-
-                try:
-                    chat_ops = ChatOps(db)
-                    result = await chat_ops.process_chat_message_stream(
-                        session_id=session_id,
-                        user_id=user.id,
-                        message_text=content,
-                        on_chunk=send_llm_delta,
-                        repository=repository,
-                    )
-                    reply_text = str(result.get("reply") or "")
-                    message_id = str(result.get("message_id") or "").strip() or None
-                except Exception as chat_error:
-                    logger.error(
-                        "Unified websocket chat processing failed for session %s: %s",
-                        session_id,
-                        chat_error,
-                    )
-                    await websocket.send_text(
-                        build_envelope(
-                            WSMessageType.ERROR,
-                            {"message": "Chat processing failed", "code": "CHAT_PROCESSING_FAILED"},
-                        )
-                    )
-                    continue
-
-                final_payload: Dict[str, Any] = {
-                    "stream": "llm",
-                    "text": "",
-                    "final": True,
-                    "final_text": reply_text,
-                }
-                if message_id:
-                    final_payload["message_id"] = message_id
-                await websocket.send_text(
-                    build_envelope(WSMessageType.LLM_STREAM, final_payload)
-                )
-                await websocket.send_text(
-                    build_envelope(
-                        WSMessageType.STATUS,
-                        {"status": "chat_completed"},
-                    )
-                )
-            elif msg_type == WSMessageType.USER_RESPONSE.value:
+            if msg_type == WSMessageType.USER_RESPONSE.value:
                 await websocket.send_text(
                     build_envelope(
                         WSMessageType.STATUS,
