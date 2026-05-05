@@ -2,16 +2,16 @@
 set -uo pipefail
 
 # Backend E2E suite for deployed docker-compose backend.
-# Focus: auth, repo fetch, sessions/chat, and controller sandbox runtime.
+# Focus: auth, repo fetch, session context, AI middleware persistence, and
+# controller sandbox runtime.
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.backend-only.yml}"
 BASE_URL="${BASE_URL:-http://localhost:8000}"
 API_TIMEOUT="${API_TIMEOUT:-120}"
 POLL_TIMEOUT_SECONDS="${POLL_TIMEOUT_SECONDS:-240}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-5}"
-RUN_LLM_CHAT="${RUN_LLM_CHAT:-0}" # Set to 1 to include /daifu/sessions/{id}/chat (OpenRouter call)
 
-# Primary session scenario repo (chat/session/runtime checks)
+# Primary session scenario repo (session/runtime checks)
 REPO_OWNER="${REPO_OWNER:-pranay5255}"
 REPO_NAME="${REPO_NAME:-TrustlessLocalAgents}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
@@ -37,6 +37,7 @@ SESSION_DB_ID=""
 SANDBOX_ID=""
 RUNTIME_ID=""
 GH_TOKEN=""
+E2E_SESSION_TOKEN=""
 GH_USERNAME="${GH_USERNAME:-}"
 AUTH_USER_ID=""
 
@@ -83,7 +84,7 @@ api_request() {
   if [[ -n "$payload" ]]; then
     code="$(
       printf '%s' "$payload" | "${DC[@]}" exec -T \
-        -e GH_TOKEN="$GH_TOKEN" \
+        -e E2E_SESSION_TOKEN="$E2E_SESSION_TOKEN" \
         -e E2E_METHOD="$method" \
         -e E2E_PATH="$path" \
         -e E2E_TIMEOUT="$API_TIMEOUT" \
@@ -93,7 +94,7 @@ api_request() {
             -o /tmp/e2e_response.json \
             -w "%{http_code}" \
             -X "$E2E_METHOD" "http://localhost:8000$E2E_PATH" \
-            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Authorization: Bearer $E2E_SESSION_TOKEN" \
             -H "Content-Type: application/json" \
             --data-binary @/tmp/e2e_payload.json
         ' 2>"$TMP_DIR/api_err.log"
@@ -102,7 +103,7 @@ api_request() {
   else
     code="$(
       "${DC[@]}" exec -T \
-        -e GH_TOKEN="$GH_TOKEN" \
+        -e E2E_SESSION_TOKEN="$E2E_SESSION_TOKEN" \
         -e E2E_METHOD="$method" \
         -e E2E_PATH="$path" \
         -e E2E_TIMEOUT="$API_TIMEOUT" \
@@ -111,7 +112,7 @@ api_request() {
             -o /tmp/e2e_response.json \
             -w "%{http_code}" \
             -X "$E2E_METHOD" "http://localhost:8000$E2E_PATH" \
-            -H "Authorization: Bearer $GH_TOKEN"
+            -H "Authorization: Bearer $E2E_SESSION_TOKEN"
         ' 2>"$TMP_DIR/api_err.log"
     )"
     rc=$?
@@ -260,6 +261,7 @@ from datetime import timedelta
 import os
 
 from yudai.db.database import SessionLocal
+from yudai.auth.github_oauth import create_session_token
 from yudai.models import AuthToken, User
 from yudai.utils import utc_now
 
@@ -300,8 +302,10 @@ try:
             is_active=True,
         )
     )
-    db.commit()
+    db.flush()
+    session_token = create_session_token(db, user.id, expires_in_hours=2)
     print(f"USER_ID={user.id}")
+    print(f"SESSION_TOKEN={session_token.session_token}")
 except Exception as exc:
     db.rollback()
     print(f"ERROR={exc}")
@@ -313,7 +317,9 @@ PY
 
   if grep -q '^USER_ID=' <<<"$out"; then
     AUTH_USER_ID="$(sed -n 's/^USER_ID=//p' <<<"$out" | head -n1)"
-    return 0
+    E2E_SESSION_TOKEN="$(sed -n 's/^SESSION_TOKEN=//p' <<<"$out" | head -n1)"
+    [[ -n "$E2E_SESSION_TOKEN" ]]
+    return
   fi
   echo "$out" >&2
   return 1
@@ -373,9 +379,9 @@ if [[ -z "$GH_USERNAME" ]]; then
 fi
 
 if [[ -n "$GH_TOKEN" ]] && seed_auth_token; then
-  record_result "AUTH-002" "PASS" "Seed active AuthToken for default user in backend DB" "user_id=$AUTH_USER_ID username=$GH_USERNAME"
+  record_result "AUTH-002" "PASS" "Seed active AuthToken and disposable SessionToken for default user" "user_id=$AUTH_USER_ID username=$GH_USERNAME session_token_length=${#E2E_SESSION_TOKEN}"
 else
-  record_result "AUTH-002" "FAIL" "Seed active AuthToken for default user in backend DB" "Failed to seed auth token"
+  record_result "AUTH-002" "FAIL" "Seed active AuthToken and disposable SessionToken for default user" "Failed to seed auth token"
 fi
 
 if code="$(api_request GET "/auth/api/user")"; then
@@ -557,6 +563,50 @@ else
   record_result "SES-002" "SKIP" "Controller runtime lookup for session" "session creation failed"
 fi
 
+if [[ -n "$SESSION_ID" && -n "$AUTH_USER_ID" ]]; then
+  ws_out="$(
+    "${DC[@]}" exec -T \
+      -e E2E_SESSION_ID="$SESSION_ID" \
+      -e E2E_USER_ID="$AUTH_USER_ID" \
+      backend python - <<'PY' 2>"$TMP_DIR/ws_err.log"
+import asyncio
+import json
+import os
+from urllib.parse import urlencode
+
+import websockets
+
+
+async def main():
+    session_id = os.environ["E2E_SESSION_ID"]
+    user_id = os.environ["E2E_USER_ID"]
+    secret = (
+        os.getenv("YUDAI_INTERNAL_MIDDLEWARE_SECRET")
+        or os.getenv("INTERNAL_MIDDLEWARE_SECRET")
+        or ""
+    )
+    if not secret:
+        raise RuntimeError("YUDAI_INTERNAL_MIDDLEWARE_SECRET missing")
+    query = urlencode({"internal_secret": secret, "internal_user_id": user_id})
+    url = f"ws://localhost:8000/controller/sessions/{session_id}/ws/unified?{query}"
+    async with websockets.connect(url, open_timeout=10) as websocket:
+        first = json.loads(await asyncio.wait_for(websocket.recv(), timeout=10))
+        second = json.loads(await asyncio.wait_for(websocket.recv(), timeout=10))
+        print(f"WS_OK first={first.get('type')} second={second.get('type')}")
+
+
+asyncio.run(main())
+PY
+  )"
+  if grep -q '^WS_OK' <<<"$ws_out"; then
+    record_result "SES-005" "PASS" "Backend internal unified WebSocket accepts middleware identity" "$ws_out"
+  else
+    record_result "SES-005" "FAIL" "Backend internal unified WebSocket accepts middleware identity" "${ws_out:-$(cat "$TMP_DIR/ws_err.log")}"
+  fi
+else
+  record_result "SES-005" "SKIP" "Backend internal unified WebSocket accepts middleware identity" "session_id or user_id missing"
+fi
+
 if [[ -n "$SANDBOX_ID" ]]; then
   if code="$(api_request GET "/controller/sandboxes/$SANDBOX_ID")"; then
     if [[ "$code" == "200" ]]; then
@@ -584,7 +634,7 @@ else
   record_result "SES-004" "SKIP" "Resolve tunnel for sandbox" "sandbox_id missing from session create response"
 fi
 
-print_step "Chat + Context Endpoints"
+print_step "Session Context + AI Middleware Persistence"
 
 if [[ -n "$SESSION_ID" ]]; then
   add_msg_payload="$(jq -nc '{message_text:"e2e message 1", sender_type:"user", role:"user", tokens:3}')"
@@ -625,32 +675,36 @@ if [[ -n "$SESSION_ID" ]]; then
     record_result "CHAT-003" "FAIL" "List session messages" "$(cat "$TMP_DIR/api_err.log")"
   fi
 
-  conv_payload="$(jq -nc '{message:"Please focus on test coverage first"}')"
-  if code="$(api_request POST "/daifu/sessions/$SESSION_ID/conversation" "$conv_payload")"; then
+  ai_context_payload="$(jq -nc \
+    --arg owner "$REPO_OWNER" \
+    --arg repo "$REPO_NAME" \
+    --arg branch "$REPO_BRANCH" \
+    '{context_card_ids:[],messages:[],repository:{owner:$owner,name:$repo,branch:$branch}}'
+  )"
+  if code="$(api_request POST "/daifu/sessions/$SESSION_ID/ai-context" "$ai_context_payload")"; then
     if [[ "$code" == "200" ]]; then
-      mode_status="$(json_get '.mode_status')"
-      record_result "CHAT-006" "PASS" "Conversation endpoint" "mode_status=$mode_status body=$(cat "$TMP_DIR/response.json")"
+      context_session="$(json_get '.session.session_id')"
+      record_result "CHAT-006" "PASS" "AI middleware context endpoint" "session_id=$context_session"
     else
-      record_result "CHAT-006" "FAIL" "Conversation endpoint" "HTTP=$code body=$(cat "$TMP_DIR/response.json")"
+      record_result "CHAT-006" "FAIL" "AI middleware context endpoint" "HTTP=$code body=$(cat "$TMP_DIR/response.json")"
     fi
   else
-    record_result "CHAT-006" "FAIL" "Conversation endpoint" "$(cat "$TMP_DIR/api_err.log")"
+    record_result "CHAT-006" "FAIL" "AI middleware context endpoint" "$(cat "$TMP_DIR/api_err.log")"
   fi
 
-  if [[ "$RUN_LLM_CHAT" == "1" ]]; then
-    chat_payload="$(jq -nc --arg sid "$SESSION_ID" --arg owner "$REPO_OWNER" --arg repo "$REPO_NAME" --arg branch "$REPO_BRANCH" '{session_id:$sid,message:{message_text:"Say OK for backend e2e",is_code:false},repository:{owner:$owner,name:$repo,branch:$branch}}')"
-    if code="$(api_request POST "/daifu/sessions/$SESSION_ID/chat" "$chat_payload")"; then
-      if [[ "$code" == "200" ]]; then
-        reply="$(json_get '.reply')"
-        record_result "CHAT-007" "PASS" "LLM chat endpoint (/chat)" "reply_preview=${reply:0:120}"
-      else
-        record_result "CHAT-007" "FAIL" "LLM chat endpoint (/chat)" "HTTP=$code body=$(cat "$TMP_DIR/response.json")"
-      fi
+  ai_turn_payload="$(jq -nc \
+    '{user_text:"E2E user turn",assistant_text:"E2E assistant turn",user_message_id:"e2e_user_turn",assistant_message_id:"e2e_assistant_turn",context_card_ids:[],model_used:"backend-e2e"}'
+  )"
+  if code="$(api_request POST "/daifu/sessions/$SESSION_ID/ai-turns" "$ai_turn_payload")"; then
+    if [[ "$code" == "200" ]]; then
+      user_message_id="$(json_get '.user_message.message_id')"
+      assistant_message_id="$(json_get '.assistant_message.message_id')"
+      record_result "CHAT-007" "PASS" "AI middleware turn persistence endpoint" "user_message=$user_message_id assistant_message=$assistant_message_id"
     else
-      record_result "CHAT-007" "FAIL" "LLM chat endpoint (/chat)" "$(cat "$TMP_DIR/api_err.log")"
+      record_result "CHAT-007" "FAIL" "AI middleware turn persistence endpoint" "HTTP=$code body=$(cat "$TMP_DIR/response.json")"
     fi
   else
-    record_result "CHAT-007" "SKIP" "LLM chat endpoint (/chat)" "RUN_LLM_CHAT=0"
+    record_result "CHAT-007" "FAIL" "AI middleware turn persistence endpoint" "$(cat "$TMP_DIR/api_err.log")"
   fi
 
   if code="$(api_request GET "/daifu/sessions/$SESSION_ID")"; then
@@ -690,7 +744,6 @@ fi
   echo "- Compose file: \`$COMPOSE_FILE\`"
   echo "- Base URL (in-container): \`$BASE_URL\`"
   echo "- Primary repo: \`$REPO_OWNER/$REPO_NAME@$REPO_BRANCH\`"
-  echo "- RUN_LLM_CHAT: \`$RUN_LLM_CHAT\`"
   echo
   echo "## Summary"
   echo
