@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from pathlib import Path
 import sys
@@ -38,6 +39,7 @@ from yudai.realtime.controller_routes import (  # noqa: E402
     get_runtime_for_session,
     get_sandbox,
     resolve_tunnel,
+    unified_session_websocket,
 )
 from yudai.realtime.lifecycle import RealtimeLifecycleService  # noqa: E402
 import yudai.realtime.lifecycle as lifecycle_module  # noqa: E402
@@ -281,3 +283,77 @@ def test_runtime_detail_requires_session_owner(db_and_user):
         )
 
     assert exc.value.status_code == 404
+
+
+def test_unified_websocket_rejects_missing_internal_auth(db_and_user):
+    db, _user, session = db_and_user
+
+    class FakeWebSocket:
+        def __init__(self):
+            self.closed = []
+
+        async def close(self, code=None, reason=None):
+            self.closed.append((code, reason))
+
+    websocket = FakeWebSocket()
+
+    asyncio.run(
+        unified_session_websocket(
+            websocket=websocket,
+            session_id=session.session_id,
+            internal_secret="",
+            internal_user_id="",
+            db=db,
+        )
+    )
+
+    assert websocket.closed == [(4401, "invalid_internal_auth")]
+
+
+def test_unified_websocket_accepts_valid_internal_identity(
+    db_and_user,
+    monkeypatch,
+):
+    db, user, session = db_and_user
+    monkeypatch.setenv("YUDAI_INTERNAL_MIDDLEWARE_SECRET", "internal-test-secret")
+    original_sleep = asyncio.sleep
+
+    async def fast_sleep(_seconds):
+        await original_sleep(0)
+
+    monkeypatch.setattr("yudai.realtime.controller_routes.asyncio.sleep", fast_sleep)
+
+    class FakeWebSocket:
+        def __init__(self):
+            self.accepted = False
+            self.closed = []
+            self.sent = []
+
+        async def accept(self):
+            self.accepted = True
+
+        async def close(self, code=None, reason=None):
+            self.closed.append((code, reason))
+
+        async def send_text(self, text):
+            self.sent.append(text)
+
+        async def receive_text(self):
+            raise RuntimeError("client disconnected")
+
+    websocket = FakeWebSocket()
+
+    asyncio.run(
+        unified_session_websocket(
+            websocket=websocket,
+            session_id=session.session_id,
+            internal_secret="internal-test-secret",
+            internal_user_id=str(user.id),
+            db=db,
+        )
+    )
+
+    assert websocket.accepted is True
+    sent_types = [json.loads(message).get("type") for message in websocket.sent]
+    assert "status" in sent_types
+    assert "mode_event" in sent_types

@@ -30,7 +30,7 @@ BACKEND MODIFICATION PLAN FOR UNIFIED STATE MANAGEMENT:
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator, validator
 from sqlalchemy import (
@@ -1380,20 +1380,6 @@ class APIError(BaseModel):
 # ============================================================================
 
 
-# Core input models
-class ChatMessageInput(BaseModel):
-    message_text: str = Field(..., min_length=1, max_length=10000)
-    is_code: bool = Field(default=False)
-
-    @validator("message_text")
-    def validate_content(cls, v):
-        if not v.strip():
-            raise ValueError("Message content cannot be empty")
-        return v
-
-    model_config = ConfigDict(populate_by_name=True)
-
-
 # Chat Models
 class CreateChatMessageRequest(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=255)
@@ -1630,51 +1616,39 @@ class CreateGitHubIssueResponse(BaseModel):
     pending_tool: Optional[str] = None
 
 
-class ChatRequest(BaseModel):
-    session_id: str = Field(..., min_length=1, max_length=255)
-    message: ChatMessageInput
+class AIContextRequest(BaseModel):
+    context_card_ids: List[str] = Field(default_factory=list)
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
     repository: Optional[Dict[str, Any]] = None
-    model_config = ConfigDict(populate_by_name=True)
-
-    @validator("session_id")
-    def validate_session_id(cls, v):
-        if not v or not v.strip():
-            raise ValueError("session_id is required and cannot be empty")
-        return v.strip()
 
 
-class ChatResponse(BaseModel):
-    reply: str = Field(...)
-    conversation: List[Tuple[str, str]] = Field(...)
-    message_id: str = Field(...)
-    processing_time: float = Field(...)
-    session_id: str = Field(...)
-    model_config = ConfigDict(populate_by_name=True)
+class AIContextResponse(BaseModel):
+    session: SessionResponse
+    messages: List[ChatMessageResponse] = Field(default_factory=list)
+    context_cards: List[ContextCardResponse] = Field(default_factory=list)
+    repository_info: Optional[Dict[str, Any]] = None
+    pending_questions: List["UserQuestionResponse"] = Field(default_factory=list)
 
 
-class ConversationOption(BaseModel):
-    id: str = Field(..., min_length=1, max_length=128)
-    label: str = Field(..., min_length=1, max_length=255)
+class AITurnPersistRequest(BaseModel):
+    user_text: str = Field(..., min_length=1, max_length=10000)
+    assistant_text: str = Field(default="", max_length=30000)
+    user_message_id: Optional[str] = Field(None, max_length=255)
+    assistant_message_id: Optional[str] = Field(None, max_length=255)
+    context_card_ids: List[str] = Field(default_factory=list)
+    actions: Optional[List[ChatAction]] = None
+    data_parts: List[Dict[str, Any]] = Field(default_factory=list)
+    model_used: Optional[str] = Field(None, max_length=100)
+    processing_time: Optional[float] = Field(None, ge=0)
+    trigger: Optional[str] = None
+    ui_messages: List[Dict[str, Any]] = Field(default_factory=list)
 
 
-class ConversationQuestion(BaseModel):
-    question_id: str = Field(..., min_length=1, max_length=64)
-    prompt: str = Field(..., min_length=1)
-    multi_select: bool = False
-    options: List[ConversationOption] = Field(default_factory=list)
-
-
-class ConversationRequest(BaseModel):
-    message: str = Field(..., min_length=1, max_length=10000)
-    selected_option_ids: Optional[List[str]] = Field(default_factory=list)
-
-
-class ConversationResponse(BaseModel):
+class AITurnPersistResponse(BaseModel):
     session_id: str
-    reply: str
-    current_mode: str
-    mode_status: str
-    follow_up_question: Optional[ConversationQuestion] = None
+    user_message: ChatMessageResponse
+    assistant_message: ChatMessageResponse
+    pending_questions: List["UserQuestionResponse"] = Field(default_factory=list)
 
 
 class UserQuestionOption(BaseModel):

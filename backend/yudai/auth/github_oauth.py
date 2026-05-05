@@ -4,6 +4,7 @@ GitHub OAuth Authentication Module
 Simplified to match Ruby reference implementation
 """
 
+import hmac
 import os
 
 # Import auth utilities
@@ -17,7 +18,7 @@ from urllib.parse import urlencode
 import httpx
 from cryptography.hazmat.primitives import serialization
 from yudai.db.database import get_db
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import encode as jwt_encode
 from yudai.models import AuthToken, SessionToken, User
@@ -477,13 +478,59 @@ def deactivate_session_token(db: Session, session_token: str) -> bool:
 
 
 # FastAPI security scheme for Bearer token authentication
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
+
+
+def get_internal_middleware_secret() -> str:
+    return (
+        os.getenv("YUDAI_INTERNAL_MIDDLEWARE_SECRET")
+        or os.getenv("INTERNAL_MIDDLEWARE_SECRET")
+        or ""
+    )
+
+
+def validate_internal_middleware_user(
+    db: Session,
+    *,
+    internal_secret: Optional[str],
+    internal_user_id: Optional[str],
+) -> Optional[User]:
+    configured_secret = get_internal_middleware_secret()
+    if not configured_secret or not internal_secret or not internal_user_id:
+        return None
+
+    if not hmac.compare_digest(internal_secret, configured_secret):
+        return None
+
+    try:
+        user_id = int(internal_user_id)
+    except (TypeError, ValueError):
+        return None
+
+    return db.query(User).filter(User.id == user_id).first()
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
+    x_yudai_internal_secret: Optional[str] = Header(None),
+    x_yudai_user_id: Optional[str] = Header(None),
 ) -> User:
+    internal_user = validate_internal_middleware_user(
+        db,
+        internal_secret=x_yudai_internal_secret,
+        internal_user_id=x_yudai_user_id,
+    )
+    if internal_user:
+        return internal_user
+
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     token = credentials.credentials
 
     # Always try session token first (frontend sends this)

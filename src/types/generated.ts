@@ -362,6 +362,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/daifu/sessions/{session_id}/ai-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Get Session Ai Context */
+        post: operations["get_session_ai_context_daifu_sessions__session_id__ai_context_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/daifu/sessions/{session_id}/ai-turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Persist Session Ai Turn */
+        post: operations["persist_session_ai_turn_daifu_sessions__session_id__ai_turns_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/daifu/sessions/{session_id}/ask-question": {
         parameters: {
             query?: never;
@@ -382,29 +416,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/daifu/sessions/{session_id}/chat": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Chat In Session
-         * @description Chat Endpoint within Session Context - Uses ChatOps for unified chat handling
-         *
-         *     This endpoint processes chat messages within a specific session context using
-         *     the ChatOps class for consistent processing and response formatting.
-         */
-        post: operations["chat_in_session_daifu_sessions__session_id__chat_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/daifu/sessions/{session_id}/context-cards": {
         parameters: {
             query?: never;
@@ -414,15 +425,13 @@ export interface paths {
         };
         /**
          * Get Context Cards
-         * @description Get context cards for a session.
-         *     This is a HIGH priority endpoint for context display.
+         * @description Get active context cards for a session.
          */
         get: operations["get_context_cards_daifu_sessions__session_id__context_cards_get"];
         put?: never;
         /**
          * Add Context Card
-         * @description Add a context card to a session.
-         *     This is a HIGH priority endpoint for context management.
+         * @description Add a chat/upload context card to a session.
          */
         post: operations["add_context_card_daifu_sessions__session_id__context_cards_post"];
         delete?: never;
@@ -431,7 +440,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/daifu/sessions/{session_id}/conversation": {
+    "/daifu/sessions/{session_id}/context-cards/{card_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -440,12 +449,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        post?: never;
         /**
-         * Conversation In Session
-         * @description Conversation API: immediate natural-language response + optional follow-up question.
+         * Delete Context Card
+         * @description Soft-delete a context card from a session.
          */
-        post: operations["conversation_in_session_daifu_sessions__session_id__conversation_post"];
-        delete?: never;
+        delete: operations["delete_context_card_daifu_sessions__session_id__context_cards__card_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -483,6 +492,26 @@ export interface paths {
         put?: never;
         /** Cancel Session Execution */
         post: operations["cancel_session_execution_daifu_sessions__session_id__execution_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/daifu/sessions/{session_id}/execution/stage-tool": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Session Stage Tool
+         * @description Start exactly one legal Daifu stage tool: Architect, Tester, or Coder.
+         */
+        post: operations["execute_session_stage_tool_daifu_sessions__session_id__execution_stage_tool_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -676,6 +705,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/daifu/sessions/{session_id}/tools/create-github-issue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Create Github Issue Tool
+         * @description Run the Daifu create_github_issue tool for an existing drafted issue.
+         */
+        post: operations["execute_create_github_issue_tool_daifu_sessions__session_id__tools_create_github_issue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/daifu/sessions/{session_id}/tools/run-frontend-browser-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Frontend Browser Check Tool
+         * @description Run the manual Daifu frontend browser verifier sidecar.
+         */
+        post: operations["execute_frontend_browser_check_tool_daifu_sessions__session_id__tools_run_frontend_browser_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/daifu/sessions/{session_id}/trajectories": {
         parameters: {
             query?: never;
@@ -794,6 +863,33 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AIContextRequest */
+        AIContextRequest: {
+            /** Context Card Ids */
+            context_card_ids?: string[];
+            /** Messages */
+            messages?: {
+                [key: string]: unknown;
+            }[];
+            /** Repository */
+            repository?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** AIContextResponse */
+        AIContextResponse: {
+            /** Context Cards */
+            context_cards?: components["schemas"]["ContextCardResponse"][];
+            /** Messages */
+            messages?: components["schemas"]["ChatMessageResponse"][];
+            /** Pending Questions */
+            pending_questions?: components["schemas"]["UserQuestionResponse"][];
+            /** Repository Info */
+            repository_info?: {
+                [key: string]: unknown;
+            } | null;
+            session: components["schemas"]["SessionResponse"];
+        };
         /** AIModelResponse */
         AIModelResponse: {
             /** Description */
@@ -806,6 +902,47 @@ export interface components {
             name: string;
             /** Provider */
             provider: string;
+        };
+        /** AITurnPersistRequest */
+        AITurnPersistRequest: {
+            /** Actions */
+            actions?: components["schemas"]["ChatAction"][] | null;
+            /** Assistant Message Id */
+            assistant_message_id?: string | null;
+            /**
+             * Assistant Text
+             * @default
+             */
+            assistant_text: string;
+            /** Context Card Ids */
+            context_card_ids?: string[];
+            /** Data Parts */
+            data_parts?: {
+                [key: string]: unknown;
+            }[];
+            /** Model Used */
+            model_used?: string | null;
+            /** Processing Time */
+            processing_time?: number | null;
+            /** Trigger */
+            trigger?: string | null;
+            /** Ui Messages */
+            ui_messages?: {
+                [key: string]: unknown;
+            }[];
+            /** User Message Id */
+            user_message_id?: string | null;
+            /** User Text */
+            user_text: string;
+        };
+        /** AITurnPersistResponse */
+        AITurnPersistResponse: {
+            assistant_message: components["schemas"]["ChatMessageResponse"];
+            /** Pending Questions */
+            pending_questions?: components["schemas"]["UserQuestionResponse"][];
+            /** Session Id */
+            session_id: string;
+            user_message: components["schemas"]["ChatMessageResponse"];
         };
         /** AnswerQuestionRequest */
         AnswerQuestionRequest: {
@@ -895,22 +1032,10 @@ export interface components {
             /** Labels */
             labels?: string[] | null;
         };
-        /** ChatMessageInput */
-        ChatMessageInput: {
-            /**
-             * Is Code
-             * @default false
-             */
-            is_code: boolean;
-            /** Message Text */
-            message_text: string;
-        };
         /** ChatMessageResponse */
         ChatMessageResponse: {
             /** Actions */
             actions?: components["schemas"]["ChatAction"][] | null;
-            /** Context Cards */
-            context_cards?: string[] | null;
             /**
              * Created At
              * Format: date-time
@@ -941,34 +1066,6 @@ export interface components {
             /** Updated At */
             updated_at?: string | null;
         };
-        /** ChatRequest */
-        ChatRequest: {
-            /** Context Cards */
-            context_cards?: string[] | null;
-            message: components["schemas"]["ChatMessageInput"];
-            /** Repository */
-            repository?: {
-                [key: string]: unknown;
-            } | null;
-            /** Session Id */
-            session_id: string;
-        };
-        /** ChatResponse */
-        ChatResponse: {
-            /** Conversation */
-            conversation: [
-                string,
-                string
-            ][];
-            /** Message Id */
-            message_id: string;
-            /** Processing Time */
-            processing_time: number;
-            /** Reply */
-            reply: string;
-            /** Session Id */
-            session_id: string;
-        };
         /** CleanupResponse */
         CleanupResponse: {
             /** Scanned */
@@ -986,18 +1083,18 @@ export interface components {
              */
             created_at: string;
             /** Description */
-            description: string;
+            description?: string | null;
             /** Id */
             id: number;
-            /**
-             * Is Active
-             * @default true
-             */
+            /** Is Active */
             is_active: boolean;
             /** Session Id */
-            session_id?: number | null;
-            /** Source */
-            source: string;
+            session_id: number;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "chat" | "upload";
             /** Title */
             title: string;
             /** Tokens */
@@ -1005,54 +1102,18 @@ export interface components {
             /** Updated At */
             updated_at?: string | null;
         };
-        /** ConversationOption */
-        ConversationOption: {
-            /** Id */
-            id: string;
-            /** Label */
-            label: string;
-        };
-        /** ConversationQuestion */
-        ConversationQuestion: {
-            /**
-             * Multi Select
-             * @default false
-             */
-            multi_select: boolean;
-            /** Options */
-            options?: components["schemas"]["ConversationOption"][];
-            /** Prompt */
-            prompt: string;
-            /** Question Id */
-            question_id: string;
-        };
-        /** ConversationRequest */
-        ConversationRequest: {
-            /** Message */
-            message: string;
-            /** Selected Option Ids */
-            selected_option_ids?: string[] | null;
-        };
-        /** ConversationResponse */
-        ConversationResponse: {
-            /** Current Mode */
-            current_mode: string;
-            follow_up_question?: components["schemas"]["ConversationQuestion"] | null;
-            /** Mode Status */
-            mode_status: string;
-            /** Reply */
-            reply: string;
-            /** Session Id */
-            session_id: string;
-        };
         /** CreateContextCardRequest */
         CreateContextCardRequest: {
             /** Content */
             content: string;
             /** Description */
-            description: string;
-            /** Source */
-            source: string;
+            description?: string | null;
+            /**
+             * Source
+             * @default chat
+             * @enum {string}
+             */
+            source: "chat" | "upload";
             /** Title */
             title: string;
             /**
@@ -1066,6 +1127,8 @@ export interface components {
          * @description Response model for GitHub issue creation endpoint
          */
         CreateGitHubIssueResponse: {
+            /** Confirmation Question Id */
+            confirmation_question_id?: string | null;
             /** Execution Error */
             execution_error?: string | null;
             /** Execution Id */
@@ -1083,8 +1146,20 @@ export interface components {
             github_url: string;
             /** Message */
             message: string;
+            /** Pending Tool */
+            pending_tool?: string | null;
+            /**
+             * Requires Confirmation
+             * @default false
+             */
+            requires_confirmation: boolean;
             /** Success */
             success: boolean;
+        };
+        /** CreateGitHubIssueToolRequest */
+        CreateGitHubIssueToolRequest: {
+            /** Issue Id */
+            issue_id: string;
         };
         /** CreateSessionRequest */
         CreateSessionRequest: {
@@ -1186,6 +1261,11 @@ export interface components {
              * @default false
              */
             waiting_for_input: boolean;
+        };
+        /** FrontendBrowserCheckToolRequest */
+        FrontendBrowserCheckToolRequest: {
+            /** Objective */
+            objective: string;
         };
         /** GitHubBranchCommit */
         GitHubBranchCommit: {
@@ -1455,11 +1535,11 @@ export interface components {
         };
         /**
          * SessionContextResponse
-         * @description Complete session context including messages, context cards, and unified state
+         * @description Complete session context including messages and unified state
          */
         SessionContextResponse: {
             /** Context Cards */
-            context_cards?: string[];
+            context_cards?: components["schemas"]["ContextCardResponse"][] | null;
             /** Messages */
             messages: components["schemas"]["ChatMessageResponse"][];
             /** Pending Questions */
@@ -1561,6 +1641,16 @@ export interface components {
             /** Session Token */
             session_token: string;
         };
+        /** StageToolRequest */
+        StageToolRequest: {
+            /** Objective */
+            objective: string;
+            /**
+             * Tool Name
+             * @enum {string}
+             */
+            tool_name: "run_architect_mode" | "run_tester_mode" | "run_coder_mode";
+        };
         /** TrajectoryFileResponse */
         TrajectoryFileResponse: {
             /** Content */
@@ -1658,10 +1748,6 @@ export interface components {
         UserIssueResponse: {
             /** Agent Response */
             agent_response?: string | null;
-            /** Context Card Id */
-            context_card_id?: number | null;
-            /** Context Cards */
-            context_cards?: string[] | null;
             /**
              * Created At
              * Format: date-time
@@ -1853,7 +1939,10 @@ export interface operations {
     api_get_user_auth_api_user_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1866,6 +1955,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ValidateSessionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -1926,7 +2024,10 @@ export interface operations {
     create_sandbox_controller_sandboxes_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1961,7 +2062,10 @@ export interface operations {
             query?: {
                 stale_seconds?: number;
             };
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1990,7 +2094,10 @@ export interface operations {
     get_sandbox_controller_sandboxes__sandbox_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 sandbox_id: string;
             };
@@ -2021,7 +2128,10 @@ export interface operations {
     delete_sandbox_controller_sandboxes__sandbox_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 sandbox_id: string;
             };
@@ -2083,7 +2193,10 @@ export interface operations {
     resolve_tunnel_controller_sandboxes__sandbox_id__resolve_tunnel_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 sandbox_id: string;
             };
@@ -2114,7 +2227,10 @@ export interface operations {
     get_runtime_for_session_controller_sessions__session_id__runtime_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2145,7 +2261,10 @@ export interface operations {
     ensure_runtime_for_session_controller_sessions__session_id__runtime_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2180,7 +2299,10 @@ export interface operations {
     get_available_ai_models_daifu_ai_models_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2195,12 +2317,24 @@ export interface operations {
                     "application/json": components["schemas"]["AIModelResponse"][];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     daifu_github_list_user_repositories_daifu_github_repositories_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2215,12 +2349,24 @@ export interface operations {
                     "application/json": components["schemas"]["GitHubRepositoryResponse"][];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     daifu_github_list_repository_branches_daifu_github_repositories__owner___repo__branches_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 owner: string;
                 repo: string;
@@ -2254,7 +2400,10 @@ export interface operations {
             query?: {
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 owner: string;
                 repo: string;
@@ -2286,7 +2435,10 @@ export interface operations {
     create_session_daifu_sessions_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2319,7 +2471,10 @@ export interface operations {
     get_session_context_daifu_sessions__session_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2350,7 +2505,10 @@ export interface operations {
     update_session_daifu_sessions__session_id__put: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2382,10 +2540,89 @@ export interface operations {
             };
         };
     };
+    get_session_ai_context_daifu_sessions__session_id__ai_context_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIContextRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AIContextResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    persist_session_ai_turn_daifu_sessions__session_id__ai_turns_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AITurnPersistRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AITurnPersistResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     ask_question_for_session_daifu_sessions__session_id__ask_question_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2417,45 +2654,13 @@ export interface operations {
             };
         };
     };
-    chat_in_session_daifu_sessions__session_id__chat_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                session_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ChatRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ChatResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_context_cards_daifu_sessions__session_id__context_cards_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2486,7 +2691,10 @@ export interface operations {
     add_context_card_daifu_sessions__session_id__context_cards_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2518,20 +2726,20 @@ export interface operations {
             };
         };
     };
-    conversation_in_session_daifu_sessions__session_id__conversation_post: {
+    delete_context_card_daifu_sessions__session_id__context_cards__card_id__delete: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
+                card_id: number;
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ConversationRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -2539,7 +2747,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConversationResponse"];
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -2556,7 +2764,10 @@ export interface operations {
     get_session_execution_status_daifu_sessions__session_id__execution_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2587,7 +2798,10 @@ export interface operations {
     execute_session_pipeline_daifu_sessions__session_id__execution_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2622,7 +2836,10 @@ export interface operations {
     cancel_session_execution_daifu_sessions__session_id__execution_cancel_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2650,6 +2867,44 @@ export interface operations {
             };
         };
     };
+    execute_session_stage_tool_daifu_sessions__session_id__execution_stage_tool_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StageToolRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_issues_for_session_daifu_sessions__session_id__issues_get: {
         parameters: {
             query?: {
@@ -2657,7 +2912,10 @@ export interface operations {
                 priority?: string | null;
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2688,7 +2946,10 @@ export interface operations {
     create_issue_with_context_for_session_daifu_sessions__session_id__issues_create_with_context_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2725,7 +2986,10 @@ export interface operations {
     get_issue_for_session_daifu_sessions__session_id__issues__issue_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
                 issue_id: string;
@@ -2757,7 +3021,10 @@ export interface operations {
     create_github_issue_from_user_issue_for_session_daifu_sessions__session_id__issues__issue_id__create_github_issue_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
                 issue_id: string;
@@ -2794,7 +3061,10 @@ export interface operations {
                 processing_time?: number | null;
                 tokens_used?: number;
             };
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
                 issue_id: string;
@@ -2826,7 +3096,10 @@ export interface operations {
     get_session_memories_daifu_sessions__session_id__memories_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2859,7 +3132,10 @@ export interface operations {
             query?: {
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2890,7 +3166,10 @@ export interface operations {
     add_chat_message_daifu_sessions__session_id__messages_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2927,7 +3206,10 @@ export interface operations {
     add_bulk_chat_messages_daifu_sessions__session_id__messages_bulk_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -2964,7 +3246,10 @@ export interface operations {
     answer_session_question_daifu_sessions__session_id__questions__question_id__answer_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
                 question_id: string;
@@ -2997,10 +3282,89 @@ export interface operations {
             };
         };
     };
+    execute_create_github_issue_tool_daifu_sessions__session_id__tools_create_github_issue_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateGitHubIssueToolRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateGitHubIssueResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_frontend_browser_check_tool_daifu_sessions__session_id__tools_run_frontend_browser_check_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FrontendBrowserCheckToolRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_session_trajectories_daifu_sessions__session_id__trajectories_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -3031,7 +3395,10 @@ export interface operations {
     get_trajectory_file_daifu_sessions__session_id__trajectories__run_id__get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 session_id: string;
                 run_id: string;
@@ -3063,7 +3430,10 @@ export interface operations {
     list_user_repositories_github_repositories_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -3078,12 +3448,24 @@ export interface operations {
                     "application/json": components["schemas"]["GitHubRepositoryResponse"][];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     list_repository_branches_github_repositories__owner___repo__branches_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
             path: {
                 owner: string;
                 repo: string;

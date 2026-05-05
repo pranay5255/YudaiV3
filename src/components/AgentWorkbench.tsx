@@ -1,4 +1,15 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { useChat } from '@ai-sdk/react';
+import {
+  DefaultChatTransport,
+  getToolName,
+  isToolUIPart,
+} from 'ai';
+import type {
+  UIMessage,
+  UIMessagePart,
+  UITools,
+} from 'ai';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertCircle,
@@ -31,6 +42,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { API, buildApiUrl } from '../config/api';
 import {
   agentApi,
   AgentApiError,
@@ -60,15 +72,42 @@ type Notice = {
   tone: NoticeTone;
 };
 
-type WorkspaceMessage = {
-  content: string;
-  createdAt: string;
+type YudaiChatMessageMetadata = {
+  createdAt?: string;
   error?: boolean;
-  id: string;
-  pending?: boolean;
-  role: 'assistant' | 'system' | 'user';
+  errorMessage?: string | null;
   tokens?: number;
 };
+
+type YudaiStatusData = string | {
+  level?: NoticeTone | string;
+  message?: string;
+  status?: string;
+  tone?: NoticeTone | string;
+};
+
+type YudaiActionData = {
+  action_type: string;
+  label: string;
+  issue_description?: string | null;
+  issue_title?: string | null;
+  labels?: string[] | null;
+};
+
+type YudaiAgentQuestionData = Partial<AgentQuestionInfo> & {
+  multi_select?: boolean;
+  prompt?: string;
+  question_text?: string;
+};
+
+type YudaiDataParts = {
+  action: YudaiActionData;
+  'agent-question': YudaiAgentQuestionData;
+  status: YudaiStatusData;
+};
+
+type YudaiChatMessage = UIMessage<YudaiChatMessageMetadata, YudaiDataParts>;
+type YudaiMessagePart = UIMessagePart<YudaiDataParts, UITools>;
 
 type SessionStats = {
   contextCount: number;
@@ -142,18 +181,59 @@ function formatDateTime(value?: string | null): string {
   }).format(new Date(value));
 }
 
-function toMessage(message: ContractChatMessage): WorkspaceMessage {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function toOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function toStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+function toAiMessage(message: ContractChatMessage): YudaiChatMessage {
   const role = message.role === 'user' || message.role === 'system'
     ? message.role
     : 'assistant';
+  const parts: YudaiChatMessage['parts'] = [
+    {
+      text: message.message_text,
+      type: 'text',
+    },
+  ];
+
+  if (Array.isArray(message.actions)) {
+    message.actions.forEach((action, index) => {
+      parts.push({
+        data: {
+          action_type: action.action_type,
+          issue_description: action.issue_description,
+          issue_title: action.issue_title,
+          label: action.label,
+          labels: action.labels,
+        },
+        id: `${message.message_id}_action_${index}`,
+        type: 'data-action',
+      });
+    });
+  }
 
   return {
-    content: message.message_text,
-    createdAt: message.created_at,
-    error: Boolean(message.error_message),
     id: message.message_id,
+    metadata: {
+      createdAt: message.created_at,
+      error: Boolean(message.error_message),
+      errorMessage: message.error_message,
+      tokens: message.tokens,
+    },
+    parts,
     role,
-    tokens: message.tokens,
   };
 }
 
@@ -224,6 +304,34 @@ function getStatusIcon(status?: string | null): LucideIcon {
   }
 }
 
+function buildAiRepositoryPayload(
+  repository: ContractRepository | null,
+  branch: string
+): { branch: string; name: string; owner: string } | null {
+  if (!repository) {
+    return null;
+  }
+
+  return {
+    branch,
+    name: repository.name,
+    owner: getRepositoryOwner(repository),
+  };
+}
+
+function withAuthorizationHeader(
+  headers: HeadersInit | undefined,
+  token: string | null | undefined
+): Headers {
+  const nextHeaders = new Headers(headers);
+
+  if (token) {
+    nextHeaders.set('Authorization', `Bearer ${token}`);
+  }
+
+  return nextHeaders;
+}
+
 function getNoticeIcon(tone: NoticeTone): LucideIcon {
   switch (tone) {
     case 'success':
@@ -246,18 +354,93 @@ function getNoticeToneClass(tone: NoticeTone): string {
   }
 }
 
-function createLocalMessage(
-  role: WorkspaceMessage['role'],
-  content: string,
-  extras: Partial<WorkspaceMessage> = {}
-): WorkspaceMessage {
+function getMessageTokens(message: YudaiChatMessage): number {
+  return message.metadata?.tokens || 0;
+}
+
+function getStatusDataText(data: YudaiStatusData): string {
+  if (typeof data === 'string') {
+    return data;
+  }
+
+  return data.message || data.status || '';
+}
+
+function getStatusDataTone(data: YudaiStatusData): NoticeTone {
+  if (typeof data === 'string') {
+    return 'info';
+  }
+
+  const rawTone = data.tone || data.level;
+  return rawTone === 'success' || rawTone === 'error' ? rawTone : 'info';
+}
+
+function normalizeAgentQuestionInfo(data: YudaiAgentQuestionData): AgentQuestionInfo | null {
+  if (!isRecord(data)) {
+    return null;
+  }
+
+  const questionId = toOptionalString(data.question_id);
+  const questionText = toOptionalString(data.question_text) || toOptionalString(data.prompt);
+
+  if (!questionId || !questionText) {
+    return null;
+  }
+
+  const rawOptions = Array.isArray(data.options) ? data.options : [];
+  const options = rawOptions.flatMap((option) => {
+    if (!isRecord(option)) {
+      return [];
+    }
+
+    const id = toOptionalString(option.id);
+    const label = toOptionalString(option.label);
+    return id && label ? [{ id, label }] : [];
+  });
+
   return {
-    content,
-    createdAt: new Date().toISOString(),
-    id: `${role}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-    role,
-    ...extras,
+    multi_select: Boolean(data.multi_select),
+    options,
+    question_id: questionId,
+    question_text: questionText,
   };
+}
+
+function normalizeActionData(data: YudaiActionData): YudaiActionData | null {
+  if (!isRecord(data)) {
+    return null;
+  }
+
+  const actionType = toOptionalString(data.action_type);
+  const label = toOptionalString(data.label);
+
+  if (!actionType || !label) {
+    return null;
+  }
+
+  return {
+    action_type: actionType,
+    issue_description: toOptionalString(data.issue_description) || null,
+    issue_title: toOptionalString(data.issue_title) || null,
+    label,
+    labels: toStringArray(data.labels) || null,
+  };
+}
+
+function formatJsonPreview(value: unknown): string {
+  if (value === undefined) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }
 
 export function AgentWorkbench(): JSX.Element {
@@ -274,7 +457,6 @@ export function AgentWorkbench(): JSX.Element {
   const [isBusy, setIsBusy] = useState(false);
   const [isLoadingBranches, setIsLoadingBranches] = useState(false);
   const [isLoadingRepos, setIsLoadingRepos] = useState(true);
-  const [messages, setMessages] = useState<WorkspaceMessage[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [pendingQuestions, setPendingQuestions] = useState<ContractUserQuestion[]>([]);
   const [repositories, setRepositories] = useState<ContractRepository[]>([]);
@@ -282,7 +464,15 @@ export function AgentWorkbench(): JSX.Element {
   const [selectedBranch, setSelectedBranch] = useState('');
   const [selectedRepository, setSelectedRepository] = useState<ContractRepository | null>(null);
   const [sessionIssues, setSessionIssues] = useState<ContractIssue[]>([]);
+  const [streamStatus, setStreamStatus] = useState<string | null>(null);
   const [trajectories, setTrajectories] = useState<ContractTrajectory[]>([]);
+  const activeStreamSessionIdRef = useRef<string>('');
+  const contextCardsRef = useRef<ContractContextCard[]>(contextCards);
+  const currentSessionRef = useRef<ContractSession | null>(currentSession);
+  const pendingDraftRef = useRef('');
+  const selectedBranchRef = useRef(selectedBranch);
+  const selectedRepositoryRef = useRef<ContractRepository | null>(selectedRepository);
+  const sessionTokenRef = useRef<string | null | undefined>(sessionToken);
 
   const filteredRepositories = useMemo(() => {
     const query = repoSearch.trim().toLowerCase();
@@ -297,15 +487,6 @@ export function AgentWorkbench(): JSX.Element {
       || (repository.description || '').toLowerCase().includes(query)
     ));
   }, [repositories, repoSearch]);
-
-  const sessionStats = useMemo<SessionStats>(() => ({
-    contextCount: contextCards.length,
-    issueCount: sessionIssues.length || githubIssues.length,
-    messageCount: currentSession?.total_messages || messages.length,
-    tokenCount: currentSession?.total_tokens || messages.reduce((total, message) => (
-      total + (message.tokens || 0)
-    ), 0),
-  }), [contextCards.length, currentSession, githubIssues.length, messages, sessionIssues.length]);
 
   const selectedOwner = selectedRepository ? getRepositoryOwner(selectedRepository) : '';
   const selectedRepoName = selectedRepository?.name || '';
@@ -323,6 +504,104 @@ export function AgentWorkbench(): JSX.Element {
       tone,
     });
   }, []);
+
+  const aiTransport = useMemo(() => new DefaultChatTransport<YudaiChatMessage>({
+    api: buildApiUrl(API.AI.CHAT_STREAM, { sessionId: currentSessionRef.current?.session_id || 'pending' }),
+    headers: (): Record<string, string> => (
+      sessionTokenRef.current
+        ? { Authorization: `Bearer ${sessionTokenRef.current}` }
+        : {}
+    ),
+    prepareSendMessagesRequest: ({
+      body,
+      headers,
+      messageId,
+      messages: requestMessages,
+      trigger,
+    }) => {
+      const sessionId = isRecord(body) && typeof body.session_id === 'string'
+        ? body.session_id
+        : currentSessionRef.current?.session_id || activeStreamSessionIdRef.current;
+
+      if (!sessionId) {
+        throw new Error('Missing active session for AI stream');
+      }
+
+      return {
+        api: buildApiUrl(API.AI.CHAT_STREAM, { sessionId }),
+        body: {
+          context_card_ids: contextCardsRef.current.map((card) => String(card.id)),
+          messageId: messageId ?? null,
+          messages: requestMessages,
+          repository: buildAiRepositoryPayload(
+            selectedRepositoryRef.current,
+            selectedBranchRef.current
+          ),
+          session_id: sessionId,
+          trigger,
+        },
+        headers: withAuthorizationHeader(headers, sessionTokenRef.current),
+      };
+    },
+  }), []);
+
+  const {
+    messages: chatMessages,
+    sendMessage,
+    setMessages: setChatMessages,
+    status: chatStatus,
+  } = useChat<YudaiChatMessage>({
+    experimental_throttle: 40,
+    onData(dataPart) {
+      if (dataPart.type !== 'data-status') {
+        return;
+      }
+
+      const message = getStatusDataText(dataPart.data);
+      const tone = getStatusDataTone(dataPart.data);
+
+      setStreamStatus(message || null);
+      if (message && tone === 'error') {
+        pushNotice('error', message);
+      }
+    },
+    onError(error) {
+      setDraft(pendingDraftRef.current);
+      setStreamStatus(null);
+      pushNotice('error', getErrorText(error, 'Message failed'));
+    },
+    onFinish({ isAbort, isError }) {
+      const sessionId = activeStreamSessionIdRef.current;
+      pendingDraftRef.current = '';
+      setStreamStatus(null);
+
+      if (!sessionId || isAbort || isError) {
+        return;
+      }
+
+      void hydrateSession(sessionId).catch((error: unknown) => {
+        pushNotice('error', getErrorText(error, 'Failed to refresh workspace'));
+      });
+    },
+    transport: aiTransport,
+  });
+
+  const sessionStats = useMemo<SessionStats>(() => ({
+    contextCount: contextCards.length,
+    issueCount: sessionIssues.length || githubIssues.length,
+    messageCount: currentSession?.total_messages || chatMessages.length,
+    tokenCount: currentSession?.total_tokens || chatMessages.reduce((total, message) => (
+      total + getMessageTokens(message)
+    ), 0),
+  }), [chatMessages, contextCards.length, currentSession, githubIssues.length, sessionIssues.length]);
+
+  useEffect(() => {
+    contextCardsRef.current = contextCards;
+    currentSessionRef.current = currentSession;
+    selectedBranchRef.current = selectedBranch;
+    selectedRepositoryRef.current = selectedRepository;
+    sessionTokenRef.current = sessionToken;
+  }, [contextCards, currentSession, selectedBranch, selectedRepository, sessionToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -424,15 +703,18 @@ export function AgentWorkbench(): JSX.Element {
   }, [notice]);
 
   function handleRepositorySelect(repository: ContractRepository): void {
+    activeStreamSessionIdRef.current = '';
+    currentSessionRef.current = null;
     setSelectedRepository(repository);
     setSelectedBranch(getDefaultBranch(repository));
     setCurrentSession(null);
     setContextCards([]);
     setExecutionObjective('');
     setExecutionStatus(null);
-    setMessages([]);
+    setChatMessages([]);
     setPendingQuestions([]);
     setSessionIssues([]);
+    setStreamStatus(null);
     setTrajectories([]);
   }
 
@@ -456,8 +738,9 @@ export function AgentWorkbench(): JSX.Element {
     ]);
 
     if (context.status === 'fulfilled') {
+      activeStreamSessionIdRef.current = context.value.session.session_id;
       setCurrentSession(context.value.session);
-      setMessages(context.value.messages.map(toMessage));
+      setChatMessages(context.value.messages.map(toAiMessage));
       setPendingQuestions(context.value.pending_questions || []);
     }
 
@@ -534,7 +817,9 @@ export function AgentWorkbench(): JSX.Element {
       }, sessionToken);
 
       setCurrentSession(session);
-      setMessages([]);
+      activeStreamSessionIdRef.current = session.session_id;
+      currentSessionRef.current = session;
+      setChatMessages([]);
       setPendingQuestions([]);
       setContextCards([]);
       setSessionIssues([]);
@@ -593,63 +878,19 @@ export function AgentWorkbench(): JSX.Element {
       return;
     }
 
-    const assistantId = `assistant_pending_${Date.now()}`;
+    activeStreamSessionIdRef.current = session.session_id;
+    pendingDraftRef.current = content;
+    setStreamStatus(null);
     setDraft('');
-    setMessages((current) => [
-      ...current,
-      createLocalMessage('user', content),
-      createLocalMessage('assistant', 'Thinking...', {
-        id: assistantId,
-        pending: true,
-      }),
-    ]);
-    setIsBusy(true);
 
-    try {
-      const response = await agentApi.sendChatMessage(session.session_id, {
-        context_cards: contextCards.map((card) => String(card.id)),
-        message: {
-          is_code: false,
-          message_text: content,
-        },
-        repository: selectedRepository
-          ? {
-            branch: selectedBranch,
-            name: selectedRepository.name,
-            owner: getRepositoryOwner(selectedRepository),
-          }
-          : null,
+    await sendMessage({
+      metadata: { createdAt: new Date().toISOString() },
+      text: content,
+    }, {
+      body: {
         session_id: session.session_id,
-      }, sessionToken);
-
-      setMessages((current) => current.map((message) => (
-        message.id === assistantId
-          ? {
-            ...message,
-            content: response.reply,
-            id: response.message_id,
-            pending: false,
-            tokens: undefined,
-          }
-          : message
-      )));
-
-      await hydrateSession(session.session_id);
-    } catch (error) {
-      setMessages((current) => current.map((message) => (
-        message.id === assistantId
-          ? {
-            ...message,
-            content: getErrorText(error, 'Message failed'),
-            error: true,
-            pending: false,
-          }
-          : message
-      )));
-      pushNotice('error', getErrorText(error, 'Message failed'));
-    } finally {
-      setIsBusy(false);
-    }
+      },
+    });
   }
 
   async function handleAnswerQuestion(
@@ -803,9 +1044,23 @@ export function AgentWorkbench(): JSX.Element {
 
             {activeView === 'chat' && (
               <ChatPanel
+                chatStatus={chatStatus}
                 draft={draft}
                 isBusy={isBusy}
-                messages={messages}
+                messages={chatMessages}
+                onAction={(action) => {
+                  if (action.action_type.includes('execution') || action.action_type.includes('run')) {
+                    setActiveView('execution');
+                    return;
+                  }
+
+                  if (action.action_type.includes('context')) {
+                    setActiveView('context');
+                    return;
+                  }
+
+                  setActiveView('issues');
+                }}
                 onAnswerQuestion={(questionId, selectedOptionIds, answerText) => (
                   handleAnswerQuestion(questionId, selectedOptionIds, answerText)
                 )}
@@ -813,6 +1068,7 @@ export function AgentWorkbench(): JSX.Element {
                 onSubmit={(event) => void handleSendMessage(event)}
                 pendingQuestions={pendingQuestions}
                 selectedRepository={selectedRepository}
+                streamStatus={streamStatus}
               />
             )}
 
@@ -1092,18 +1348,23 @@ function WorkspaceTabs({
 }
 
 function ChatPanel({
+  chatStatus,
   draft,
   isBusy,
   messages,
+  onAction,
   onAnswerQuestion,
   onDraftChange,
   onSubmit,
   pendingQuestions,
   selectedRepository,
+  streamStatus,
 }: {
+  chatStatus: 'submitted' | 'streaming' | 'ready' | 'error';
   draft: string;
   isBusy: boolean;
-  messages: WorkspaceMessage[];
+  messages: YudaiChatMessage[];
+  onAction: (action: YudaiActionData) => void;
   onAnswerQuestion: (
     questionId: string,
     selectedOptionIds: string[],
@@ -1113,7 +1374,10 @@ function ChatPanel({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   pendingQuestions: ContractUserQuestion[];
   selectedRepository: ContractRepository | null;
+  streamStatus: string | null;
 }): JSX.Element {
+  const isChatBusy = chatStatus === 'submitted' || chatStatus === 'streaming';
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
@@ -1125,8 +1389,19 @@ function ChatPanel({
         ) : (
           <div className="grid gap-3">
             {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
+              <MessageBubble
+                key={message.id}
+                message={message}
+                onAction={onAction}
+                onAnswerQuestion={onAnswerQuestion}
+              />
             ))}
+            {streamStatus && (
+              <div className="inline-flex w-fit items-center gap-2 rounded-lg bg-cyan/10 px-3 py-2 text-xs text-cyan shadow-[0_0_0_1px_rgba(34,211,238,0.18)]">
+                <Loader2 aria-hidden="true" className="size-3 animate-spin" />
+                {streamStatus}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1161,10 +1436,10 @@ function ChatPanel({
           </p>
           <button
             className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-cyan px-4 pl-4 pr-3.5 text-sm font-semibold text-black transition-[background-color,scale] duration-150 ease-out hover:bg-sky-300 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100"
-            disabled={isBusy || !draft.trim()}
+            disabled={isBusy || isChatBusy || !draft.trim()}
             type="submit"
           >
-            {isBusy ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <Send aria-hidden="true" className="size-4" />}
+            {isBusy || isChatBusy ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <Send aria-hidden="true" className="size-4" />}
             Send
           </button>
         </div>
@@ -1173,7 +1448,19 @@ function ChatPanel({
   );
 }
 
-function MessageBubble({ message }: { message: WorkspaceMessage }): JSX.Element {
+function MessageBubble({
+  message,
+  onAction,
+  onAnswerQuestion,
+}: {
+  message: YudaiChatMessage;
+  onAction: (action: YudaiActionData) => void;
+  onAnswerQuestion: (
+    questionId: string,
+    selectedOptionIds: string[],
+    answerText?: string
+  ) => Promise<void>;
+}): JSX.Element {
   const isUser = message.role === 'user';
   const Icon = isUser ? Github : Bot;
 
@@ -1188,18 +1475,195 @@ function MessageBubble({ message }: { message: WorkspaceMessage }): JSX.Element 
       <div className={cx(
         'max-w-[min(720px,100%)] rounded-lg px-4 py-3 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]',
         isUser ? 'bg-amber/10' : 'bg-bg-secondary',
-        message.error && 'bg-red-500/10 shadow-[0_0_0_1px_rgba(239,68,68,0.26)]'
+        message.metadata?.error && 'bg-red-500/10 shadow-[0_0_0_1px_rgba(239,68,68,0.26)]'
       )}>
         <div className="mb-1 flex items-center gap-2 text-[11px] font-medium uppercase tracking-normal text-fg-muted">
           <span>{message.role}</span>
-          <span className="tabular-nums">{formatDateTime(message.createdAt)}</span>
-          {message.pending && <Loader2 aria-hidden="true" className="size-3 animate-spin" />}
+          <span className="tabular-nums">
+            {message.metadata?.createdAt ? formatDateTime(message.metadata.createdAt) : 'Now'}
+          </span>
         </div>
-        <p className="whitespace-pre-wrap text-pretty text-sm leading-6 text-fg-secondary">
-          {message.content}
-        </p>
+        <div className="grid gap-2">
+          {message.parts.map((part, index) => (
+            <MessagePart
+              key={`${message.id}_${index}_${part.type}`}
+              messageId={message.id}
+              onAction={onAction}
+              onAnswerQuestion={onAnswerQuestion}
+              part={part}
+            />
+          ))}
+        </div>
       </div>
     </article>
+  );
+}
+
+function MessagePart({
+  messageId,
+  onAction,
+  onAnswerQuestion,
+  part,
+}: {
+  messageId: string;
+  onAction: (action: YudaiActionData) => void;
+  onAnswerQuestion: (
+    questionId: string,
+    selectedOptionIds: string[],
+    answerText?: string
+  ) => Promise<void>;
+  part: YudaiMessagePart;
+}): JSX.Element | null {
+  if (part.type === 'text') {
+    return (
+      <p className="whitespace-pre-wrap text-pretty text-sm leading-6 text-fg-secondary">
+        {part.text}
+      </p>
+    );
+  }
+
+  if (part.type === 'data-status') {
+    const message = getStatusDataText(part.data);
+
+    if (!message) {
+      return null;
+    }
+
+    return (
+      <div className={cx('inline-flex w-fit items-center gap-2 rounded-lg px-3 py-2 text-xs', getNoticeToneClass(getStatusDataTone(part.data)))}>
+        <Activity aria-hidden="true" className="size-3.5" />
+        {message}
+      </div>
+    );
+  }
+
+  if (part.type === 'data-agent-question') {
+    const question = normalizeAgentQuestionInfo(part.data);
+
+    if (!question) {
+      return null;
+    }
+
+    return (
+      <UserQuestionPrompt
+        question={question}
+        onSubmit={(selectedOptionIds, answerText) => (
+          onAnswerQuestion(question.question_id, selectedOptionIds, answerText)
+        )}
+      />
+    );
+  }
+
+  if (part.type === 'data-action') {
+    const action = normalizeActionData(part.data);
+
+    if (!action) {
+      return null;
+    }
+
+    return (
+      <button
+        className="inline-flex min-h-9 w-fit items-center gap-2 rounded-lg bg-amber/14 px-3 text-xs font-semibold text-amber shadow-[0_0_0_1px_rgba(245,158,11,0.24)] transition-[background-color,scale] duration-150 ease-out hover:bg-amber/20 active:scale-[0.96]"
+        onClick={() => onAction(action)}
+        type="button"
+      >
+        <ArrowRight aria-hidden="true" className="size-3.5" />
+        {action.label}
+      </button>
+    );
+  }
+
+  if (isToolUIPart(part)) {
+    return <ToolActivityRow part={part} />;
+  }
+
+  if (part.type === 'reasoning' && part.text) {
+    return (
+      <details className="rounded-lg bg-bg-primary/70 px-3 py-2 text-xs text-fg-muted shadow-[0_0_0_1px_rgba(255,255,255,0.07)]">
+        <summary className="cursor-pointer text-fg-secondary">Reasoning</summary>
+        <p className="mt-2 whitespace-pre-wrap leading-5">{part.text}</p>
+      </details>
+    );
+  }
+
+  if (part.type === 'source-url') {
+    return (
+      <a
+        className="inline-flex min-h-9 w-fit items-center gap-2 rounded-lg bg-bg-primary px-3 text-xs text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.08)] transition-colors hover:text-fg"
+        href={part.url}
+        rel="noreferrer"
+        target="_blank"
+      >
+        <ExternalLink aria-hidden="true" className="size-3.5" />
+        {part.title || part.url}
+      </a>
+    );
+  }
+
+  if (part.type === 'source-document') {
+    return (
+      <div className="rounded-lg bg-bg-primary/70 px-3 py-2 text-xs text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.07)]">
+        {part.title || part.filename || part.mediaType}
+      </div>
+    );
+  }
+
+  if (part.type === 'file') {
+    return (
+      <a
+        className="inline-flex min-h-9 w-fit items-center gap-2 rounded-lg bg-bg-primary px-3 text-xs text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.08)] transition-colors hover:text-fg"
+        href={part.url}
+        rel="noreferrer"
+        target="_blank"
+      >
+        <ExternalLink aria-hidden="true" className="size-3.5" />
+        {part.filename || part.mediaType}
+      </a>
+    );
+  }
+
+  if (part.type === 'step-start') {
+    return (
+      <div className="text-[11px] uppercase tracking-normal text-fg-muted">
+        Step started
+      </div>
+    );
+  }
+
+  return (
+    <span className="sr-only">
+      Unrendered part for {messageId}
+    </span>
+  );
+}
+
+function ToolActivityRow({
+  part,
+}: {
+  part: Extract<YudaiMessagePart, { type: `tool-${string}` | 'dynamic-tool' }>;
+}): JSX.Element {
+  const toolName = getToolName(part);
+  const preview = part.state === 'output-available'
+    ? formatJsonPreview(part.output)
+    : part.state === 'output-error'
+      ? part.errorText
+      : formatJsonPreview(part.input);
+
+  return (
+    <div className="rounded-lg bg-bg-primary/70 px-3 py-2 text-xs shadow-[0_0_0_1px_rgba(255,255,255,0.07)]">
+      <div className="flex items-center justify-between gap-3 text-fg-secondary">
+        <span className="inline-flex min-w-0 items-center gap-2">
+          <TerminalSquare aria-hidden="true" className="size-3.5 shrink-0 text-cyan" />
+          <span className="truncate">{toolName}</span>
+        </span>
+        <span className="shrink-0 capitalize text-fg-muted">{part.state.replace(/-/g, ' ')}</span>
+      </div>
+      {preview && (
+        <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-fg-muted">
+          {preview}
+        </pre>
+      )}
+    </div>
   );
 }
 

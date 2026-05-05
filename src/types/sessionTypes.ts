@@ -327,31 +327,6 @@ export interface UpdateContextCardRequest {
   is_active?: boolean;
 }
 
-export interface ConversationOption {
-  id: string;
-  label: string;
-}
-
-export interface ConversationQuestion {
-  question_id: string;
-  prompt: string;
-  multi_select: boolean;
-  options: ConversationOption[];
-}
-
-export interface ConversationRequest {
-  message: string;
-  selected_option_ids?: string[];
-}
-
-export interface ConversationResponse {
-  session_id: string;
-  reply: string;
-  current_mode: string;
-  mode_status: string;
-  follow_up_question?: ConversationQuestion;
-}
-
 export interface UserQuestionOption {
   id: string;
   label: string;
@@ -456,18 +431,6 @@ export interface CancelExecutionResponse {
   message: string;
 }
 
-export interface ChatRequest {
-  session_id?: string;
-  message: {
-    message_text: string;
-  };
-  repository?: {
-    owner: string;
-    name: string;
-    branch?: string;
-  };
-}
-
 export interface CreateIssueWithContextRequest {
   title: string;
   description?: string;
@@ -490,14 +453,6 @@ export interface ChatContextMessage {
 // ============================================================================
 // RESPONSE TYPES
 // ============================================================================
-
-export interface ChatResponse {
-  reply: string;
-  conversation: [string, string][];
-  message_id: string;
-  processing_time: number;
-  session_id?: string;
-}
 
 export interface IssueCreationResponse {
   success: boolean;

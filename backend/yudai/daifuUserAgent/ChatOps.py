@@ -85,65 +85,6 @@ class ChatOps:
         self.logger = logging.getLogger(__name__)
         self.DAIFU_MAX_CONTINUATION_DEPTH = 3
 
-    async def process_chat_message(
-        self,
-        session_id: str,
-        user_id: int,
-        message_text: str,
-        repository: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Process a chat message and generate AI response with comprehensive error handling
-        """
-        try:
-            logger.info(f"Processing chat message for session {session_id}")
-            result = await self._process_daifu_chat_turn(
-                session_id=session_id,
-                user_id=user_id,
-                message_text=message_text,
-                repository=repository,
-                include_user_message=True,
-                reset_continuation=True,
-            )
-            logger.info(f"Successfully processed chat message for session {session_id}")
-            return result
-
-        except Exception as e:
-            logger.error(f"Failed to process chat message: {e}")
-            self.db.rollback()
-            raise ChatOpsError(f"Chat processing failed: {str(e)}")
-
-    async def process_chat_message_stream(
-        self,
-        session_id: str,
-        user_id: int,
-        message_text: str,
-        *,
-        on_chunk: Callable[[str], Awaitable[None]],
-        repository: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Process a chat message and stream provider deltas before persisting the final reply.
-        """
-        try:
-            logger.info(f"Streaming chat message for session {session_id}")
-            result = await self._process_daifu_chat_turn(
-                session_id=session_id,
-                user_id=user_id,
-                message_text=message_text,
-                repository=repository,
-                include_user_message=True,
-                reset_continuation=True,
-                on_chunk=on_chunk,
-            )
-            logger.info(f"Successfully streamed chat message for session {session_id}")
-            return result
-
-        except Exception as e:
-            logger.error(f"Failed to stream chat message: {e}")
-            self.db.rollback()
-            raise ChatOpsError(f"Chat streaming failed: {str(e)}")
-
     async def _process_daifu_chat_turn(
         self,
         *,

@@ -24,7 +24,6 @@ FRONTEND_DIR="$PROJECT_ROOT/src"
 BACKEND_DOMAIN="${BACKEND_DOMAIN:-api.yudai.app}"
 FRONTEND_DOMAIN="${FRONTEND_DOMAIN:-yudai.app}"
 BACKEND_IP="${BACKEND_IP:-}"
-WS_BASE_URL="${WS_BASE_URL:-}"
 VERCEL_TOKEN="${VERCEL_TOKEN:-}"
 VERCEL_ORG_ID="${VERCEL_ORG_ID:-}"
 VERCEL_PROJECT_ID="${VERCEL_PROJECT_ID:-}"
@@ -43,7 +42,6 @@ usage() {
     echo "  --backend-domain <domain>  Backend domain (default: api.yudai.app)"
     echo "  --backend-ip <ip>          Backend server IP (optional, used in DNS output)"
     echo "  --frontend-domain <domain> Frontend domain (default: yudai.app)"
-    echo "  --ws-base-url <url>        Secure frontend WS base URL (https://api.yudai.app or wss://api.yudai.app)"
     echo "  --vercel-token <token>     Vercel API token"
     echo "  --vercel-org-id <id>       Vercel organization ID"
     echo "  --vercel-project-id <id>   Vercel project ID"
@@ -52,7 +50,8 @@ usage() {
     echo "  --help                     Show this help message"
     echo ""
     echo "Environment Variables:"
-    echo "  BACKEND_DOMAIN, BACKEND_IP, FRONTEND_DOMAIN, WS_BASE_URL"
+    echo "  BACKEND_DOMAIN, BACKEND_IP, FRONTEND_DOMAIN"
+    echo "  YUDAI_INTERNAL_MIDDLEWARE_SECRET"
     echo "  VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID"
 }
 
@@ -72,10 +71,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --frontend-domain)
             FRONTEND_DOMAIN="$2"
-            shift 2
-            ;;
-        --ws-base-url)
-            WS_BASE_URL="$2"
             shift 2
             ;;
         --vercel-token)
@@ -130,25 +125,20 @@ upsert_env() {
     fi
 }
 
-validate_ws_base_url() {
-    local value="$1"
-
-    if [ -z "$value" ]; then
-        return
+read_env_value() {
+    local file="$1"
+    local key="$2"
+    local value
+    if [ ! -f "$file" ]; then
+        return 1
     fi
-
-    case "$value" in
-        https://*|wss://*)
-            ;;
-        http://*|ws://*)
-            log_error "Insecure VITE_WS_BASE_URL '$value'. Use https://$BACKEND_DOMAIN or wss://$BACKEND_DOMAIN."
-            exit 1
-            ;;
-        *)
-            log_error "Unsupported VITE_WS_BASE_URL '$value'. Use an absolute https:// or wss:// URL."
-            exit 1
-            ;;
-    esac
+    value="$(grep -E "^${key}=" "$file" | tail -n 1 | cut -d= -f2-)"
+    value="${value%$'\r'}"
+    value="${value%\"}"
+    value="${value#\"}"
+    value="${value%\'}"
+    value="${value#\'}"
+    printf '%s' "$value"
 }
 
 # Check prerequisites
@@ -180,8 +170,6 @@ check_prerequisites() {
         exit 1
     fi
 
-    validate_ws_base_url "$WS_BASE_URL"
-
     log_success "All prerequisites met"
 }
 
@@ -211,6 +199,10 @@ deploy_backend() {
     upsert_env "$env_file" "ALLOW_ORIGIN_REGEX" "^https://.*\\.vercel\\.app$"
     upsert_env "$env_file" "GITHUB_REDIRECT_URI" "https://api.yudai.app/auth/callback"
     upsert_env "$env_file" "CONTROLLER_BASE_URL" "https://$BACKEND_DOMAIN"
+    if [ -z "$(read_env_value "$env_file" "YUDAI_INTERNAL_MIDDLEWARE_SECRET")" ]; then
+        log_error "Missing YUDAI_INTERNAL_MIDDLEWARE_SECRET in $env_file"
+        exit 1
+    fi
 
     compose -f docker-compose.backend-only.yml pull 2>/dev/null || true
     compose -f docker-compose.backend-only.yml build --no-cache
@@ -238,28 +230,23 @@ deploy_backend() {
     exit 1
 }
 
-# Update src/vercel.json with shared frontend headers only.
+# Validate src/vercel.json is present. It contains the app middleware rewrites and
+# must not be rewritten by this deployment helper.
 update_vercel_config() {
-    log_info "Updating Vercel configuration..."
+    log_info "Validating Vercel configuration..."
 
     local vercel_json="$FRONTEND_DIR/vercel.json"
-    cat > "$vercel_json" << 'JSON'
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "X-XSS-Protection", "value": "1; mode=block" }
-      ]
-    }
-  ]
-}
-JSON
+    if [ ! -f "$vercel_json" ]; then
+        log_error "Missing Vercel config: $vercel_json"
+        exit 1
+    fi
 
-    log_success "Vercel configuration updated"
+    if ! grep -Fq '"/ai/:path*"' "$vercel_json" || ! grep -Fq '"/realtime/:path*"' "$vercel_json"; then
+        log_error "$vercel_json is missing AI or realtime middleware rewrites"
+        exit 1
+    fi
+
+    log_success "Vercel configuration is ready"
 }
 
 # Deploy frontend to Vercel
@@ -273,17 +260,21 @@ deploy_frontend() {
 
     cd "$FRONTEND_DIR"
 
-    local resolved_ws_base_url="${WS_BASE_URL:-https://$BACKEND_DOMAIN}"
-    local vercel_env_args=(
-        --env "VITE_API_BASE_URL=https://$BACKEND_DOMAIN"
-        --env "VITE_WS_BASE_URL=$resolved_ws_base_url"
-    )
-
-    if [ -n "$WS_BASE_URL" ]; then
-        log_info "Using explicit secure websocket base URL: $resolved_ws_base_url"
-    else
-        log_info "Defaulting VITE_WS_BASE_URL to https://$BACKEND_DOMAIN"
+    local env_file="$BACKEND_DIR/.env.prod"
+    local internal_secret="${YUDAI_INTERNAL_MIDDLEWARE_SECRET:-}"
+    if [ -z "$internal_secret" ]; then
+        internal_secret="$(read_env_value "$env_file" "YUDAI_INTERNAL_MIDDLEWARE_SECRET" || true)"
     fi
+    if [ -z "$internal_secret" ]; then
+        log_error "YUDAI_INTERNAL_MIDDLEWARE_SECRET must be available for Vercel middleware"
+        exit 1
+    fi
+
+    local vercel_env_args=(
+        --env "VITE_AUTH_API_BASE_URL=https://$BACKEND_DOMAIN"
+        --env "YUDAI_BACKEND_BASE_URL=https://$BACKEND_DOMAIN"
+        --env "YUDAI_INTERNAL_MIDDLEWARE_SECRET=$internal_secret"
+    )
 
     if [ -n "$VERCEL_TOKEN" ]; then
         log_info "Using Vercel token deployment"

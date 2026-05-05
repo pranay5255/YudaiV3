@@ -122,3 +122,43 @@ def test_api_user_accepts_session_token(db_session):
         "email": "session-user@example.com",
         "avatar_url": None,
     }
+
+
+def test_get_current_user_accepts_internal_middleware_identity(db_session, monkeypatch):
+    monkeypatch.setenv("YUDAI_INTERNAL_MIDDLEWARE_SECRET", "internal-test-secret")
+    user = User(
+        github_username="internal-user",
+        github_user_id="9002",
+        email="internal-user@example.com",
+        display_name="Internal User",
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    current_user = asyncio.run(
+        github_oauth.get_current_user(
+            credentials=None,
+            db=db_session,
+            x_yudai_internal_secret="internal-test-secret",
+            x_yudai_user_id=str(user.id),
+        )
+    )
+
+    assert current_user.id == user.id
+
+
+def test_get_current_user_rejects_invalid_internal_middleware_identity(db_session, monkeypatch):
+    monkeypatch.setenv("YUDAI_INTERNAL_MIDDLEWARE_SECRET", "internal-test-secret")
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(
+            github_oauth.get_current_user(
+                credentials=None,
+                db=db_session,
+                x_yudai_internal_secret="wrong-secret",
+                x_yudai_user_id="1",
+            )
+        )
+
+    assert getattr(exc_info.value, "status_code", None) == 401

@@ -2,11 +2,31 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
-      "source": "/api/:path*",
-      "destination": "https://api.yudai.app/:path*"
+      "source": "/auth/api/:path*",
+      "destination": "https://api.yudai.app/auth/api/:path*"
     },
     {
-      "source": "/((?!api/).*)",
+      "source": "/ai/:path*",
+      "destination": "/api/ai/:path*"
+    },
+    {
+      "source": "/daifu/:path*",
+      "destination": "/api/proxy/daifu/:path*"
+    },
+    {
+      "source": "/github/:path*",
+      "destination": "/api/proxy/github/:path*"
+    },
+    {
+      "source": "/controller/:path*",
+      "destination": "/api/proxy/controller/:path*"
+    },
+    {
+      "source": "/realtime/:path*",
+      "destination": "/api/realtime/:path*"
+    },
+    {
+      "source": "/((?!api/|ai/|daifu/|github/|controller/|realtime/|auth/api/).*)",
       "destination": "/index.html"
     }
   ],

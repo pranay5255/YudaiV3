@@ -1,7 +1,8 @@
 # Realtime Contract (Controller-Broker v2)
 
 This contract defines the controller-brokered realtime architecture.
-Browser clients must talk only to the controller host.
+Browser clients talk to the Node middleware for non-auth app traffic; the
+middleware validates auth through REST before opening backend realtime links.
 
 ## Controller Endpoints
 
@@ -13,18 +14,20 @@ Browser clients must talk only to the controller host.
 6. `POST /controller/sandboxes/cleanup`
 7. `POST /controller/sessions/{session_id}/runtime`
 8. `GET /controller/sessions/{session_id}/runtime`
-9. `WS /controller/sessions/{session_id}/ws/unified`
+9. `WS /controller/sessions/{session_id}/ws/unified` (internal Node middleware only)
 10. `GET /realtime/flags`
 
 Examples are defined in:
 `backend/docs/realtime_phase0/contracts-controller.openapi.yaml`.
 
-## Sessions API (Public Surface)
+## Sessions API (Middleware Surface)
 
-All end-user session APIs remain on the controller under `/daifu/*`, including:
+End-user session APIs are reached through Node middleware and forwarded to the
+controller under `/daifu/*`, including:
 
-1. `POST /daifu/sessions/{session_id}/conversation`
-2. `POST /daifu/sessions/{session_id}/execution`
+1. `POST /daifu/sessions/{session_id}/ai-context`
+2. `POST /daifu/sessions/{session_id}/ai-turns`
+3. `POST /daifu/sessions/{session_id}/execution`
 
 The server enforces fixed mode transitions:
 `architect -> tester -> coder`.
@@ -42,6 +45,6 @@ Examples are defined in:
 ## Contract-Level Decisions
 
 1. No browser traffic to sandbox tunnel/proxy routes.
-2. Controller unified WS carries LLM stream, sandbox execution stream, and mode/state events.
+2. Browser realtime uses Node SSE; controller unified WS is internal to Node.
 3. Sandbox WS is authenticated with controller-only internal secret.
 4. Session mode state is persisted server-side and cannot be user-forced.
