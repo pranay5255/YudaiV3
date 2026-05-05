@@ -45,6 +45,7 @@ from yudai.models import (  # noqa: E402
     Base,
     ChatMessage,
     ChatSession,
+    ContextCard,
     CreateGitHubIssueToolRequest,
     FrontendBrowserCheckToolRequest,
     User,
@@ -52,7 +53,12 @@ from yudai.models import (  # noqa: E402
     UserQuestion,
     UserQuestionStatus,
 )
-from yudai.types import AnswerQuestionRequest, AskQuestionRequest  # noqa: E402
+from yudai.types import (  # noqa: E402
+    AIContextRequest,
+    AITurnPersistRequest,
+    AnswerQuestionRequest,
+    AskQuestionRequest,
+)
 
 
 @pytest.fixture
@@ -146,6 +152,167 @@ def test_ask_question_persists_record_and_waiting_status(db_and_user):
     assert question.multi_select is True
     assert session.mode_status == "waiting_for_input"
     assert (session.mode_metadata or {}).get("pending_resume_objective") == "Fix login race condition"
+
+
+def test_ai_context_filters_requested_context_cards(db_and_user):
+    db, user, session = db_and_user
+    card_one = ContextCard(
+        user_id=user.id,
+        session_id=session.id,
+        title="Selected",
+        content="Selected context",
+        source="chat",
+        tokens=2,
+        is_active=True,
+    )
+    card_two = ContextCard(
+        user_id=user.id,
+        session_id=session.id,
+        title="Skipped",
+        content="Skipped context",
+        source="chat",
+        tokens=2,
+        is_active=True,
+    )
+    db.add_all([card_one, card_two])
+    db.commit()
+    db.refresh(card_one)
+
+    response = asyncio.run(
+        session_routes.get_session_ai_context(
+            session_id=session.session_id,
+            request=AIContextRequest(context_card_ids=[str(card_one.id)]),
+            current_user=user,
+            db=db,
+        )
+    )
+
+    assert [card.id for card in response.context_cards] == [card_one.id]
+
+
+def test_ai_context_requires_session_owner(db_and_user):
+    db, _user, session = db_and_user
+    other_user = User(
+        github_username="other",
+        github_user_id="7102",
+        email="other@example.com",
+        display_name="Other User",
+    )
+    db.add(other_user)
+    db.commit()
+    db.refresh(other_user)
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(
+            session_routes.get_session_ai_context(
+                session_id=session.session_id,
+                request=AIContextRequest(),
+                current_user=other_user,
+                db=db,
+            )
+        )
+
+    assert getattr(exc_info.value, "status_code", None) == 404
+
+
+def test_ai_turn_persistence_writes_user_and_assistant_messages(db_and_user):
+    db, user, session = db_and_user
+
+    response = asyncio.run(
+        session_routes.persist_session_ai_turn(
+            session_id=session.session_id,
+            request=AITurnPersistRequest(
+                user_message_id="user_ui_1",
+                user_text="What should we do?",
+                assistant_message_id="assistant_ui_1",
+                assistant_text="Start with tests.",
+                context_card_ids=["42"],
+                model_used="middleware-test",
+            ),
+            current_user=user,
+            db=db,
+        )
+    )
+
+    messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session.id)
+        .order_by(ChatMessage.created_at.asc())
+        .all()
+    )
+    assert [message.message_id for message in messages] == ["user_ui_1", "assistant_ui_1"]
+    assert messages[1].context_cards == ["42"]
+    assert response.assistant_message.model_used == "middleware-test"
+    db.refresh(session)
+    assert session.total_messages == 2
+
+
+def test_ai_turn_persistence_creates_pending_questions_from_stream_parts(db_and_user):
+    db, user, session = db_and_user
+
+    response = asyncio.run(
+        session_routes.persist_session_ai_turn(
+            session_id=session.session_id,
+            request=AITurnPersistRequest(
+                user_message_id="user_ui_question",
+                user_text="Ask me a question.",
+                assistant_message_id="assistant_ui_question",
+                assistant_text="I need a decision.",
+                data_parts=[
+                    {
+                        "type": "data-agent-question",
+                        "data": {
+                            "multi_select": False,
+                            "options": [{"id": "tests", "label": "Tests"}],
+                            "question_id": "q_ai_stream",
+                            "question_text": "What should we test?",
+                        },
+                    }
+                ],
+                model_used="middleware-test",
+            ),
+            current_user=user,
+            db=db,
+        )
+    )
+
+    question = (
+        db.query(UserQuestion)
+        .filter(UserQuestion.question_id == "q_ai_stream")
+        .one()
+    )
+    assert question.status == UserQuestionStatus.PENDING.value
+    assert question.question_text == "What should we test?"
+    assert response.pending_questions[0].question_id == "q_ai_stream"
+    assert response.pending_questions[0].options[0].id == "tests"
+
+
+def test_ai_turn_persistence_requires_session_owner(db_and_user):
+    db, _user, session = db_and_user
+    other_user = User(
+        github_username="other-turn",
+        github_user_id="7103",
+        email="other-turn@example.com",
+        display_name="Other Turn User",
+    )
+    db.add(other_user)
+    db.commit()
+    db.refresh(other_user)
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(
+            session_routes.persist_session_ai_turn(
+                session_id=session.session_id,
+                request=AITurnPersistRequest(
+                    user_text="Unauthorized",
+                    assistant_text="Unauthorized",
+                ),
+                current_user=other_user,
+                db=db,
+            )
+        )
+
+    assert getattr(exc_info.value, "status_code", None) == 404
 
 
 def test_session_context_includes_pending_questions(db_and_user):
