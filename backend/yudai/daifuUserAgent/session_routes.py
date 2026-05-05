@@ -64,8 +64,6 @@ CRITICAL ISSUES:
 import json
 import logging
 
-# Import chat functionality from chat_api
-import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -99,17 +97,17 @@ from yudai.models import (
 from yudai.types import (
     AIModelResponse,
     APIError,
+    AIContextRequest,
+    AIContextResponse,
+    AITurnPersistRequest,
+    AITurnPersistResponse,
     AnswerQuestionRequest,
     AnswerQuestionResponse,
     AskQuestionRequest,
     AskQuestionResponse,
     CancelExecutionResponse,
     ChatMessageResponse,
-    ChatRequest,
-    ChatResponse,
     ContextCardResponse,
-    ConversationRequest,
-    ConversationResponse,
     CreateContextCardRequest,
     CreateGitHubIssueResponse,
     CreateGitHubIssueToolRequest,
@@ -1070,6 +1068,225 @@ async def get_session_context(
         )
 
 
+def _to_chat_message_response(message: ChatMessage) -> ChatMessageResponse:
+    return ChatMessageResponse(
+        id=message.id,
+        message_id=message.message_id,
+        message_text=message.message_text,
+        sender_type=message.sender_type,
+        role=message.role,
+        is_code=message.is_code,
+        tokens=message.tokens,
+        model_used=message.model_used,
+        processing_time=message.processing_time,
+        referenced_files=message.referenced_files,
+        error_message=message.error_message,
+        actions=message.actions,
+        created_at=message.created_at,
+        updated_at=message.updated_at,
+    )
+
+
+def _persist_ai_message(
+    db: Session,
+    *,
+    db_session: ChatSession,
+    message_id: str,
+    text: str,
+    role: str,
+    context_card_ids: List[str],
+    model_used: Optional[str] = None,
+    processing_time: Optional[float] = None,
+    actions: Optional[List[Dict[str, Any]]] = None,
+) -> ChatMessage:
+    existing = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == db_session.id, ChatMessage.message_id == message_id)
+        .first()
+    )
+    tokens = max(1, len(text) // 4) if text else 0
+
+    if existing:
+        existing.message_text = text
+        existing.sender_type = role
+        existing.role = role
+        existing.tokens = tokens
+        existing.model_used = model_used
+        existing.processing_time = processing_time
+        existing.context_cards = context_card_ids
+        existing.actions = actions
+        existing.updated_at = utc_now()
+        return existing
+
+    message = ChatMessage(
+        session_id=db_session.id,
+        message_id=message_id,
+        message_text=text,
+        sender_type=role,
+        role=role,
+        is_code=False,
+        tokens=tokens,
+        model_used=model_used,
+        processing_time=processing_time,
+        context_cards=context_card_ids,
+        actions=actions,
+    )
+    db.add(message)
+    return message
+
+
+def _extract_ai_question_parts(parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    questions: List[Dict[str, Any]] = []
+    for part in parts:
+        if not isinstance(part, dict) or part.get("type") != "data-agent-question":
+            continue
+        data = part.get("data")
+        if isinstance(data, dict):
+            questions.append(data)
+    return questions
+
+
+@router.post("/sessions/{session_id}/ai-context", response_model=AIContextResponse)
+async def get_session_ai_context(
+    session_id: str,
+    request: AIContextRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    context = SessionService.get_context(db, db_session)
+    requested_card_ids = {str(card_id) for card_id in request.context_card_ids or []}
+    context_cards = context.context_cards or []
+    if requested_card_ids:
+        context_cards = [
+            card for card in context_cards if str(card.id) in requested_card_ids
+        ]
+
+    return AIContextResponse(
+        session=context.session,
+        messages=context.messages,
+        context_cards=context_cards,
+        repository_info=context.repository_info,
+        pending_questions=context.pending_questions or [],
+    )
+
+
+@router.post("/sessions/{session_id}/ai-turns", response_model=AITurnPersistResponse)
+async def persist_session_ai_turn(
+    session_id: str,
+    request: AITurnPersistRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    context_card_ids = [str(card_id) for card_id in request.context_card_ids or []]
+    actions = [
+        action.model_dump(exclude_none=True)
+        for action in (request.actions or [])
+    ] or None
+
+    try:
+        user_message = _persist_ai_message(
+            db,
+            db_session=db_session,
+            message_id=request.user_message_id or f"user_{uuid.uuid4().hex[:12]}",
+            text=request.user_text,
+            role="user",
+            context_card_ids=context_card_ids,
+        )
+        assistant_message = _persist_ai_message(
+            db,
+            db_session=db_session,
+            message_id=request.assistant_message_id or f"assistant_{uuid.uuid4().hex[:12]}",
+            text=request.assistant_text,
+            role="assistant",
+            context_card_ids=context_card_ids,
+            model_used=request.model_used,
+            processing_time=request.processing_time,
+            actions=actions,
+        )
+
+        pending_questions: List[UserQuestion] = []
+        for question_data in _extract_ai_question_parts(request.data_parts or []):
+            question_id = str(question_data.get("question_id") or f"q_{uuid.uuid4().hex[:10]}")
+            existing_question = (
+                db.query(UserQuestion)
+                .filter(
+                    UserQuestion.question_id == question_id,
+                    UserQuestion.session_id == db_session.id,
+                )
+                .first()
+            )
+            if existing_question:
+                pending_questions.append(existing_question)
+                continue
+
+            raw_options = question_data.get("options") or []
+            options = [
+                {
+                    "id": str(option.get("id")),
+                    "label": str(option.get("label")),
+                }
+                for option in raw_options
+                if isinstance(option, dict) and option.get("id") and option.get("label")
+            ]
+            question = UserQuestion(
+                question_id=question_id,
+                session_id=db_session.id,
+                user_id=current_user.id,
+                mode=db_session.current_mode,
+                question_text=str(
+                    question_data.get("question_text")
+                    or question_data.get("prompt")
+                    or "Clarification needed"
+                ),
+                options=options,
+                multi_select=bool(question_data.get("multi_select")),
+                selected_option_ids=[],
+                status=UserQuestionStatus.PENDING.value,
+                question_metadata={"origin": "ai_sdk_stream"},
+                asked_at=utc_now(),
+            )
+            db.add(question)
+            pending_questions.append(question)
+
+        db.flush()
+        db_session.total_messages = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == db_session.id)
+            .count()
+        )
+        db_session.total_tokens = sum(
+            token_count or 0
+            for (token_count,) in db.query(ChatMessage.tokens)
+            .filter(ChatMessage.session_id == db_session.id)
+            .all()
+        )
+        db_session.last_activity = utc_now()
+        db.commit()
+        db.refresh(user_message)
+        db.refresh(assistant_message)
+        for question in pending_questions:
+            db.refresh(question)
+
+        return AITurnPersistResponse(
+            session_id=session_id,
+            user_message=_to_chat_message_response(user_message),
+            assistant_message=_to_chat_message_response(assistant_message),
+            pending_questions=[
+                _to_user_question_response(question, session_public_id=session_id)
+                for question in pending_questions
+            ],
+        )
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to persist AI turn for session %s", session_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to persist AI turn",
+        )
+
+
 # HIGH PRIORITY ENDPOINTS
 
 
@@ -1384,110 +1601,6 @@ async def delete_context_card(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete context card: {str(e)}",
         )
-
-# CHAT ENDPOINTS - Consolidated from chat_api.py
-# =================================================================================
-
-
-@router.post("/sessions/{session_id}/conversation", response_model=ConversationResponse)
-async def conversation_in_session(
-    session_id: str,
-    request: ConversationRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Conversation API: immediate natural-language response + optional follow-up question."""
-    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
-
-    content = request.message.strip()
-    lower_content = content.lower()
-    follow_up_question = None
-
-    user_message = ChatMessage(
-        session_id=db_session.id,
-        message_id=f"msg_{uuid.uuid4().hex[:12]}",
-        message_text=content,
-        sender_type="user",
-        role="user",
-        tokens=0,
-    )
-    db.add(user_message)
-    db_session.total_messages = (db_session.total_messages or 0) + 1
-
-    # Lightweight ambiguity detector: ask for preference before execution when request is broad.
-    ambiguous_terms = ("auth", "authentication", "api", "database", "testing")
-    if not request.selected_option_ids and any(term in lower_content for term in ambiguous_terms):
-        question_options = [
-            {"id": "behavior", "label": "Behavioral change first"},
-            {"id": "tests", "label": "Test coverage first"},
-            {"id": "refactor", "label": "Refactor and structure first"},
-        ]
-        question = UserQuestion(
-            question_id=f"q_{uuid.uuid4().hex[:10]}",
-            session_id=db_session.id,
-            user_id=current_user.id,
-            mode=_next_mode_for_session(db_session),
-            question_text="Choose the primary implementation focus for this run.",
-            options=question_options,
-            multi_select=False,
-            status=UserQuestionStatus.PENDING.value,
-            question_metadata={"origin": "conversation_ambiguity"},
-        )
-        db.add(question)
-        follow_up_question = {
-            "question_id": question.question_id,
-            "prompt": question.question_text,
-            "multi_select": question.multi_select,
-            "options": question_options,
-        }
-        db_session.mode_status = SessionModeStatus.WAITING_FOR_INPUT.value
-    else:
-        db_session.mode_status = SessionModeStatus.IDLE.value
-
-    reply = (
-        "Captured your request. The execution pipeline remains fixed "
-        "at Architect -> Tester -> Coder and will continue from the next pending mode."
-    )
-    assistant_message = ChatMessage(
-        session_id=db_session.id,
-        message_id=f"msg_{uuid.uuid4().hex[:12]}",
-        message_text=reply,
-        sender_type="assistant",
-        role="assistant",
-        tokens=0,
-    )
-    db.add(assistant_message)
-    db_session.total_messages = (db_session.total_messages or 0) + 1
-    db_session.last_activity = utc_now()
-    db_session.mode_updated_at = utc_now()
-    db.commit()
-
-    ws_hub = get_ws_hub()
-    await ws_hub.send_to_session(
-        session_id,
-        WSMessageType.LLM_STREAM,
-        {"stream": "llm", "text": reply, "final": True},
-    )
-    if follow_up_question:
-        await ws_hub.send_to_session(
-            session_id,
-            WSMessageType.AGENT_QUESTION,
-            {
-                "question_id": follow_up_question["question_id"],
-                "question_text": follow_up_question["prompt"],
-                "multi_select": bool(follow_up_question["multi_select"]),
-                "options": follow_up_question["options"],
-            },
-        )
-
-    return ConversationResponse(
-        session_id=session_id,
-        reply=reply,
-        current_mode=db_session.current_mode,
-        mode_status=db_session.mode_status,
-        follow_up_question=follow_up_question,
-    )
-
 
 @router.post(
     "/sessions/{session_id}/ask-question",
@@ -1973,107 +2086,6 @@ async def cancel_session_execution(
         status=str(payload.get("status") or SessionModeStatus.CANCELLED.value),
         message="Execution cancelled",
     )
-
-
-@router.post("/sessions/{session_id}/chat", response_model=ChatResponse)
-async def chat_in_session(
-    session_id: str,
-    request: ChatRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Chat Endpoint within Session Context - Uses ChatOps for unified chat handling
-
-    This endpoint processes chat messages within a specific session context using
-    the ChatOps class for consistent processing and response formatting.
-    """
-    start_time = time.time()
-
-    # Validate session exists and belongs to user
-    db_session = (
-        db.query(ChatSession)
-        .filter(
-            ChatSession.session_id == session_id, ChatSession.user_id == current_user.id
-        )
-        .first()
-    )
-
-    if not db_session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
-        )
-
-    # Validate session_id matches request
-    if not request.session_id or request.session_id.strip() != session_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Session ID mismatch between URL and request body",
-        )
-
-    try:
-        # Import ChatOps for unified chat processing
-        from .ChatOps import ChatOps
-
-        # Initialize ChatOps instance
-        chat_ops = ChatOps(db)
-
-        # Prepare repository information for ChatOps
-        repository_info = None
-        if (
-            request.repository
-            and request.repository.get("owner")
-            and request.repository.get("name")
-        ):
-            repository_info = {
-                "owner": request.repository["owner"],
-                "name": request.repository["name"],
-                "branch": request.repository.get("branch", "main"),
-            }
-        elif db_session.repo_owner and db_session.repo_name:
-            # Fallback to session repository info
-            repository_info = {
-                "owner": db_session.repo_owner,
-                "name": db_session.repo_name,
-                "branch": "main",
-            }
-
-        # Process chat message using ChatOps
-        chat_response = await chat_ops.process_chat_message(
-            session_id=session_id,
-            user_id=current_user.id,
-            message_text=request.message.message_text,
-            repository=repository_info,
-        )
-
-        # Get updated conversation history for the response
-        raw_history = chat_ops._get_conversation_history(db_session.id, 50)
-        # Normalize to ("User"|"DAifu", text) for frontend compatibility
-        history = [
-            ("User" if s.lower() == "user" else "DAifu", t) for s, t in raw_history
-        ]
-
-        # Calculate processing time
-        processing_time = (time.time() - start_time) * 1000
-
-        # Map ChatOps response to ChatResponse format
-        return ChatResponse(
-            reply=chat_response["reply"],
-            conversation=history,
-            message_id=chat_response["message_id"],
-            processing_time=processing_time,
-            session_id=session_id,
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Chat processing failed for session {session_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Chat processing failed: {str(e)}",
-        )
 
 
 @router.get("/sessions/{session_id}/memories")
