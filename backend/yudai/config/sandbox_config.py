@@ -88,6 +88,7 @@ class SandboxConfig:
     default_org: str
     controller_base_url: str
     controller_internal_ws_secret: str | None
+    controller_callback_secret: str | None
     controller_heartbeat_secret: str | None
     heartbeat_interval_seconds: int
     allow_origins: tuple[str, ...]
@@ -123,6 +124,7 @@ class SandboxConfig:
             if (value := os.getenv(key)) is not None and value.strip()
         )
 
+        controller_internal_ws_secret = _optional_str("CONTROLLER_INTERNAL_WS_SECRET")
         return cls(
             provider="modal",
             workspace_path=_str(
@@ -132,7 +134,11 @@ class SandboxConfig:
             mswea_config_root=_str("MSWEA_CONFIG_ROOT", "/app/mswea_mode_configs"),
             default_org=_str("REALTIME_DEFAULT_ORG", "yudai"),
             controller_base_url=_str("CONTROLLER_BASE_URL", "http://localhost:8000"),
-            controller_internal_ws_secret=_optional_str("CONTROLLER_INTERNAL_WS_SECRET"),
+            controller_internal_ws_secret=controller_internal_ws_secret,
+            controller_callback_secret=(
+                _optional_str("CONTROLLER_CALLBACK_SECRET")
+                or controller_internal_ws_secret
+            ),
             controller_heartbeat_secret=_optional_str("CONTROLLER_HEARTBEAT_SECRET"),
             heartbeat_interval_seconds=_int("SANDBOX_HEARTBEAT_INTERVAL_SECONDS", 10),
             allow_origins=_csv("SANDBOX_ALLOW_ORIGINS", ("https://yudai.app",)),
