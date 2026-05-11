@@ -20,6 +20,7 @@ describe('authStore.initializeAuth', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     resetStore();
   });
@@ -55,7 +56,6 @@ describe('authStore.initializeAuth', () => {
       method: 'GET',
       headers: {
         Authorization: 'Bearer session-token',
-        'Content-Type': 'application/json',
       },
     });
     expect(useAuthStore.getState().isAuthenticated).toBe(true);
@@ -80,11 +80,40 @@ describe('authStore.initializeAuth', () => {
 
     expect(fetch).toHaveBeenCalledWith('/api/auth/api/login', {
       method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
     });
     expect(window.location.href).toBe(
       'https://github.com/login/oauth/authorize?client_id=test'
     );
+
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: originalLocation,
+    });
+  });
+
+  it('uses the configured production auth API base for login', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_AUTH_API_BASE_URL', 'https://api.yudai.app');
+    const { useAuthStore: configuredAuthStore } = await import('@/stores/authStore');
+
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      login_url: 'https://github.com/login/oauth/authorize?client_id=test',
+    }), {
+      headers: { 'content-type': 'application/json' },
+      status: 200,
+    }));
+    const originalLocation = window.location;
+    const locationStub = { ...originalLocation, href: '' } as Location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: locationStub,
+    });
+
+    await configuredAuthStore.getState().login();
+
+    expect(fetch).toHaveBeenCalledWith('https://api.yudai.app/auth/api/login', {
+      method: 'GET',
+    });
 
     Object.defineProperty(window, 'location', {
       configurable: true,
