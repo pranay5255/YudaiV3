@@ -15,6 +15,7 @@ import {
   AlertCircle,
   ArrowRight,
   Bot,
+  ChevronDown,
   CheckCircle2,
   CircleDot,
   Clock3,
@@ -53,6 +54,7 @@ import {
   ContractGitHubIssue,
   ContractIssue,
   ContractRepository,
+  ContractRuntime,
   ContractSession,
   ContractSessionContext,
   ContractTrajectory,
@@ -65,6 +67,7 @@ import { capExecutionObjective } from '../utils/workflowObjective';
 type WorkspaceView = 'chat' | 'context' | 'execution' | 'issues';
 type ExecutionMode = 'architect' | 'tester' | 'coder';
 type NoticeTone = 'info' | 'success' | 'error';
+type RuntimeProvisionStatus = 'failed' | 'not_provisioned' | 'provisioning' | 'running';
 
 type Notice = {
   id: string;
@@ -76,6 +79,7 @@ type YudaiChatMessageMetadata = {
   createdAt?: string;
   error?: boolean;
   errorMessage?: string | null;
+  modelUsed?: string | null;
   tokens?: number;
 };
 
@@ -128,13 +132,33 @@ const WORKSPACE_TABS: Array<{
 ];
 
 const EXECUTION_MODES: Array<{
+  description: string;
   icon: LucideIcon;
   id: ExecutionMode;
   label: string;
+  role: string;
 }> = [
-  { id: 'architect', label: 'Architect', icon: Sparkles },
-  { id: 'tester', label: 'Tester', icon: ShieldCheck },
-  { id: 'coder', label: 'Coder', icon: Code2 },
+  {
+    description: 'Frames the adversarial objective and selects the next legal move.',
+    icon: Sparkles,
+    id: 'architect',
+    label: 'Architect',
+    role: 'Orchestrator',
+  },
+  {
+    description: 'Validates evidence, regressions, and test boundaries before edits.',
+    icon: ShieldCheck,
+    id: 'tester',
+    label: 'Tester',
+    role: 'Validator',
+  },
+  {
+    description: 'Applies constrained code changes after the lifecycle gate opens.',
+    icon: Code2,
+    id: 'coder',
+    label: 'Coder',
+    role: 'Worker',
+  },
 ];
 
 function cx(...classes: Array<string | false | null | undefined>): string {
@@ -147,6 +171,12 @@ function getRepositoryOwner(repository: ContractRepository): string {
 
 function getDefaultBranch(repository: ContractRepository): string {
   return repository.default_branch || 'main';
+}
+
+function getRepositoryRuntimeUrl(repository: ContractRepository): string {
+  return repository.clone_url
+    || repository.html_url
+    || `https://github.com/${repository.full_name}.git`;
 }
 
 function getErrorText(error: unknown, fallback: string): string {
@@ -230,6 +260,7 @@ function toAiMessage(message: ContractChatMessage): YudaiChatMessage {
       createdAt: message.created_at,
       error: Boolean(message.error_message),
       errorMessage: message.error_message,
+      modelUsed: message.model_used,
       tokens: message.tokens,
     },
     parts,
@@ -281,8 +312,14 @@ function getStatusTone(status?: string | null): 'amber' | 'cyan' | 'emerald' | '
     case 'waiting_for_input':
     case 'provisioning':
     case 'pending':
+    case 'queued':
+    case 'deciding':
+    case 'cancelling':
       return 'amber';
+    case 'stalled':
+      return 'red';
     case 'idle':
+    case 'not_provisioned':
       return 'zinc';
     default:
       return 'cyan';
@@ -302,6 +339,29 @@ function getStatusIcon(status?: string | null): LucideIcon {
     default:
       return CircleDot;
   }
+}
+
+function normalizeRuntimeStatus(status?: string | null): RuntimeProvisionStatus {
+  switch ((status || '').toLowerCase()) {
+    case 'failed':
+    case 'error':
+    case 'terminated':
+      return 'failed';
+    case 'not_provisioned':
+    case 'idle':
+    case '':
+      return 'not_provisioned';
+    case 'pending':
+    case 'provisioning':
+    case 'starting':
+      return 'provisioning';
+    default:
+      return 'running';
+  }
+}
+
+function getRuntimeStatusLabel(status: RuntimeProvisionStatus): string {
+  return status.replace(/_/g, ' ');
 }
 
 function buildAiRepositoryPayload(
@@ -457,10 +517,14 @@ export function AgentWorkbench(): JSX.Element {
   const [isBusy, setIsBusy] = useState(false);
   const [isLoadingBranches, setIsLoadingBranches] = useState(false);
   const [isLoadingRepos, setIsLoadingRepos] = useState(true);
+  const [isRepositoryMenuOpen, setIsRepositoryMenuOpen] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [pendingQuestions, setPendingQuestions] = useState<ContractUserQuestion[]>([]);
   const [repositories, setRepositories] = useState<ContractRepository[]>([]);
   const [repoSearch, setRepoSearch] = useState('');
+  const [runtime, setRuntime] = useState<ContractRuntime | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeProvisionStatus>('not_provisioned');
   const [selectedBranch, setSelectedBranch] = useState('');
   const [selectedRepository, setSelectedRepository] = useState<ContractRepository | null>(null);
   const [sessionIssues, setSessionIssues] = useState<ContractIssue[]>([]);
@@ -707,12 +771,17 @@ export function AgentWorkbench(): JSX.Element {
     currentSessionRef.current = null;
     setSelectedRepository(repository);
     setSelectedBranch(getDefaultBranch(repository));
+    setIsRepositoryMenuOpen(false);
     setCurrentSession(null);
     setContextCards([]);
     setExecutionObjective('');
     setExecutionStatus(null);
     setChatMessages([]);
     setPendingQuestions([]);
+    setRepoSearch('');
+    setRuntime(null);
+    setRuntimeError(null);
+    setRuntimeStatus('not_provisioned');
     setSessionIssues([]);
     setStreamStatus(null);
     setTrajectories([]);
@@ -799,21 +868,63 @@ export function AgentWorkbench(): JSX.Element {
     }
   }
 
-  async function createSessionFromSelection(): Promise<ContractSession | null> {
+  async function prepareRuntimeForSession(
+    session: ContractSession,
+    repository: ContractRepository,
+    branch: string
+  ): Promise<boolean> {
+    if (!sessionToken) {
+      return false;
+    }
+
+    setRuntime(null);
+    setRuntimeError(null);
+    setRuntimeStatus('provisioning');
+
+    try {
+      const nextRuntime = await agentApi.ensureRuntime(session.session_id, {
+        environment: branch,
+        org: 'yudai',
+        repo_branch: branch,
+        repo_name: repository.name,
+        repo_owner: getRepositoryOwner(repository),
+        repo_url: getRepositoryRuntimeUrl(repository),
+      }, sessionToken);
+
+      setRuntime(nextRuntime);
+      setRuntimeStatus(normalizeRuntimeStatus(nextRuntime.status));
+      setRuntimeError(null);
+      return true;
+    } catch (error) {
+      const message = getErrorText(error, 'Runtime preparation failed');
+      setRuntime(null);
+      setRuntimeError(message);
+      setRuntimeStatus('failed');
+      return false;
+    }
+  }
+
+  async function createSessionFromSelection({
+    prepareRuntime = false,
+  }: {
+    prepareRuntime?: boolean;
+  } = {}): Promise<ContractSession | null> {
     if (!selectedRepository || !selectedBranch || !sessionToken) {
       pushNotice('error', 'Select a repository before starting a session.');
       return null;
     }
 
+    const repository = selectedRepository;
+    const branch = selectedBranch;
     setIsBusy(true);
 
     try {
       const session = await agentApi.createSession({
-        description: selectedRepository.description || null,
-        repo_branch: selectedBranch,
-        repo_name: selectedRepository.name,
-        repo_owner: getRepositoryOwner(selectedRepository),
-        title: `${selectedRepository.full_name}:${selectedBranch}`,
+        description: repository.description || null,
+        repo_branch: branch,
+        repo_name: repository.name,
+        repo_owner: getRepositoryOwner(repository),
+        title: `${repository.full_name}:${branch}`,
       }, sessionToken);
 
       setCurrentSession(session);
@@ -825,7 +936,20 @@ export function AgentWorkbench(): JSX.Element {
       setSessionIssues([]);
       setTrajectories([]);
       setExecutionStatus(null);
-      pushNotice('success', 'Session ready.');
+      setRuntime(null);
+      setRuntimeError(null);
+      setRuntimeStatus('not_provisioned');
+
+      if (prepareRuntime) {
+        const isRuntimeReady = await prepareRuntimeForSession(session, repository, branch);
+        pushNotice(
+          isRuntimeReady ? 'success' : 'error',
+          isRuntimeReady ? 'Session and runtime ready.' : 'Session ready, but runtime preparation failed.'
+        );
+      } else {
+        pushNotice('success', 'Chat session ready.');
+      }
+
       await refreshAfterDaifuActivity(session.session_id);
       return session;
     } catch (error) {
@@ -845,7 +969,31 @@ export function AgentWorkbench(): JSX.Element {
   }
 
   async function handleSessionSubmit(): Promise<void> {
-    await createSessionFromSelection();
+    await createSessionFromSelection({ prepareRuntime: true });
+  }
+
+  async function handleRuntimeRetry(): Promise<void> {
+    if (!currentSession || !selectedRepository || !selectedBranch) {
+      pushNotice('error', 'Start a session before preparing runtime.');
+      return;
+    }
+
+    setIsBusy(true);
+
+    try {
+      const isRuntimeReady = await prepareRuntimeForSession(
+        currentSession,
+        selectedRepository,
+        selectedBranch
+      );
+
+      pushNotice(
+        isRuntimeReady ? 'success' : 'error',
+        isRuntimeReady ? 'Runtime ready.' : 'Runtime preparation failed.'
+      );
+    } finally {
+      setIsBusy(false);
+    }
   }
 
   async function handleRefresh(): Promise<void> {
@@ -982,6 +1130,7 @@ export function AgentWorkbench(): JSX.Element {
           <div className="hidden min-w-0 items-center gap-2 md:flex">
             <StatusBadge label={currentSession?.mode_status || 'idle'} tone={getStatusTone(currentSession?.mode_status)} />
             <StatusBadge label={executionStatus?.status || 'no run'} tone={getStatusTone(executionStatus?.status)} />
+            <StatusBadge label={getRuntimeStatusLabel(runtimeStatus)} tone={getStatusTone(runtimeStatus)} />
           </div>
 
           <div className="flex items-center gap-2">
@@ -1009,112 +1158,123 @@ export function AgentWorkbench(): JSX.Element {
         </div>
       </header>
 
-      <main className="mx-auto grid w-full max-w-[1800px] gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[320px_minmax(0,1fr)_340px]">
-        <RepositoryPanel
+      <main className="mx-auto flex w-full max-w-[1800px] flex-col gap-4 px-4 py-4 sm:px-6">
+        <RepositoryControlBar
           branches={branches}
           canCreateSession={canCreateSession}
           filteredRepositories={filteredRepositories}
           isBusy={isBusy}
           isLoadingBranches={isLoadingBranches}
           isLoadingRepos={isLoadingRepos}
+          isRepositoryMenuOpen={isRepositoryMenuOpen}
           onBranchChange={setSelectedBranch}
           onCreateSession={() => void handleSessionSubmit()}
+          onRepositoryMenuChange={setIsRepositoryMenuOpen}
           onRepositorySelect={handleRepositorySelect}
+          onRetryRuntime={() => void handleRuntimeRetry()}
           onSearchChange={setRepoSearch}
           repositories={repositories}
           repoSearch={repoSearch}
+          runtime={runtime}
+          runtimeError={runtimeError}
+          runtimeStatus={runtimeStatus}
           selectedBranch={selectedBranch}
           selectedRepository={selectedRepository}
         />
 
-        <section className="min-h-[calc(100dvh-6rem)] min-w-0 rounded-lg bg-bg-secondary/72 p-2 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
-          <div className="flex h-full min-h-[calc(100dvh-7rem)] flex-col rounded-md bg-bg-primary/70 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
-            <div className="flex flex-col gap-3 border-b border-border/75 p-3 sm:flex-row sm:items-center sm:justify-between">
-              <WorkspaceTabs
-                activeView={activeView}
-                onViewChange={setActiveView}
-              />
-              <div className="grid grid-cols-4 gap-2 sm:flex">
-                <MetricTile icon={MessageSquareText} label="Msgs" value={formatCompactNumber(sessionStats.messageCount)} />
-                <MetricTile icon={Database} label="Tokens" value={formatCompactNumber(sessionStats.tokenCount)} />
-                <MetricTile icon={Layers3} label="Ctx" value={formatCompactNumber(sessionStats.contextCount)} />
-                <MetricTile icon={GitPullRequestArrow} label="Issues" value={formatCompactNumber(sessionStats.issueCount)} />
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <section className="min-h-[calc(100dvh-10rem)] min-w-0 rounded-lg bg-bg-secondary/72 p-2 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+            <div className="flex h-full min-h-[calc(100dvh-11rem)] flex-col rounded-md bg-bg-primary/70 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
+              <div className="flex flex-col gap-3 border-b border-border/75 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <WorkspaceTabs
+                  activeView={activeView}
+                  onViewChange={setActiveView}
+                />
+                <div className="grid grid-cols-4 gap-2 sm:flex">
+                  <MetricTile icon={MessageSquareText} label="Msgs" value={formatCompactNumber(sessionStats.messageCount)} />
+                  <MetricTile icon={Database} label="Tokens" value={formatCompactNumber(sessionStats.tokenCount)} />
+                  <MetricTile icon={Layers3} label="Ctx" value={formatCompactNumber(sessionStats.contextCount)} />
+                  <MetricTile icon={GitPullRequestArrow} label="Issues" value={formatCompactNumber(sessionStats.issueCount)} />
+                </div>
               </div>
+
+              {activeView === 'chat' && (
+                <ChatPanel
+                  chatStatus={chatStatus}
+                  draft={draft}
+                  isBusy={isBusy}
+                  messages={chatMessages}
+                  onAction={(action) => {
+                    if (action.action_type.includes('execution') || action.action_type.includes('run')) {
+                      setActiveView('execution');
+                      return;
+                    }
+
+                    if (action.action_type.includes('context')) {
+                      setActiveView('context');
+                      return;
+                    }
+
+                    setActiveView('issues');
+                  }}
+                  onAnswerQuestion={(questionId, selectedOptionIds, answerText) => (
+                    handleAnswerQuestion(questionId, selectedOptionIds, answerText)
+                  )}
+                  onDraftChange={setDraft}
+                  onSubmit={(event) => void handleSendMessage(event)}
+                  pendingQuestions={pendingQuestions}
+                  selectedRepository={selectedRepository}
+                  streamStatus={streamStatus}
+                />
+              )}
+
+              {activeView === 'context' && (
+                <ContextPanel
+                  contextCards={contextCards}
+                  currentSession={currentSession}
+                />
+              )}
+
+              {activeView === 'execution' && (
+                <ExecutionPanel
+                  currentSession={currentSession}
+                  executionMode={executionMode}
+                  executionObjective={executionObjective}
+                  executionStatus={executionStatus}
+                  isBusy={isBusy}
+                  onCancel={() => void handleCancelExecution()}
+                  onModeChange={setExecutionMode}
+                  onObjectiveChange={setExecutionObjective}
+                  onSubmit={(event) => void handleStartExecution(event)}
+                  trajectories={trajectories}
+                />
+              )}
+
+              {activeView === 'issues' && (
+                <IssuesPanel
+                  githubIssues={githubIssues}
+                  sessionIssues={sessionIssues}
+                  selectedRepository={selectedRepository}
+                />
+              )}
             </div>
+          </section>
 
-            {activeView === 'chat' && (
-              <ChatPanel
-                chatStatus={chatStatus}
-                draft={draft}
-                isBusy={isBusy}
-                messages={chatMessages}
-                onAction={(action) => {
-                  if (action.action_type.includes('execution') || action.action_type.includes('run')) {
-                    setActiveView('execution');
-                    return;
-                  }
-
-                  if (action.action_type.includes('context')) {
-                    setActiveView('context');
-                    return;
-                  }
-
-                  setActiveView('issues');
-                }}
-                onAnswerQuestion={(questionId, selectedOptionIds, answerText) => (
-                  handleAnswerQuestion(questionId, selectedOptionIds, answerText)
-                )}
-                onDraftChange={setDraft}
-                onSubmit={(event) => void handleSendMessage(event)}
-                pendingQuestions={pendingQuestions}
-                selectedRepository={selectedRepository}
-                streamStatus={streamStatus}
-              />
-            )}
-
-            {activeView === 'context' && (
-              <ContextPanel
-                contextCards={contextCards}
-                currentSession={currentSession}
-              />
-            )}
-
-            {activeView === 'execution' && (
-              <ExecutionPanel
-                currentSession={currentSession}
-                executionMode={executionMode}
-                executionObjective={executionObjective}
-                executionStatus={executionStatus}
-                isBusy={isBusy}
-                onCancel={() => void handleCancelExecution()}
-                onModeChange={setExecutionMode}
-                onObjectiveChange={setExecutionObjective}
-                onSubmit={(event) => void handleStartExecution(event)}
-                trajectories={trajectories}
-              />
-            )}
-
-            {activeView === 'issues' && (
-              <IssuesPanel
-                githubIssues={githubIssues}
-                sessionIssues={sessionIssues}
-                selectedRepository={selectedRepository}
-              />
-            )}
-          </div>
-        </section>
-
-        <aside className="grid auto-rows-max gap-4">
-          <SessionPanel
-            currentSession={currentSession}
-            executionStatus={executionStatus}
-            selectedBranch={selectedBranch}
-            selectedOwner={selectedOwner}
-            selectedRepoName={selectedRepoName}
-            userName={user?.display_name || user?.github_username || 'Agent'}
-          />
-          <WorkflowPanel currentSession={currentSession} executionStatus={executionStatus} />
-        </aside>
+          <aside className="grid auto-rows-max gap-4">
+            <SessionPanel
+              currentSession={currentSession}
+              executionStatus={executionStatus}
+              runtime={runtime}
+              runtimeError={runtimeError}
+              runtimeStatus={runtimeStatus}
+              selectedBranch={selectedBranch}
+              selectedOwner={selectedOwner}
+              selectedRepoName={selectedRepoName}
+              userName={user?.display_name || user?.github_username || 'Agent'}
+            />
+            <WorkflowPanel currentSession={currentSession} executionStatus={executionStatus} />
+          </aside>
+        </div>
       </main>
     </div>
   );
@@ -1175,19 +1335,25 @@ function MetricTile({
   );
 }
 
-function RepositoryPanel({
+function RepositoryControlBar({
   branches,
   canCreateSession,
   filteredRepositories,
   isBusy,
   isLoadingBranches,
   isLoadingRepos,
+  isRepositoryMenuOpen,
   onBranchChange,
   onCreateSession,
+  onRepositoryMenuChange,
   onRepositorySelect,
+  onRetryRuntime,
   onSearchChange,
   repositories,
   repoSearch,
+  runtime,
+  runtimeError,
+  runtimeStatus,
   selectedBranch,
   selectedRepository,
 }: {
@@ -1197,90 +1363,114 @@ function RepositoryPanel({
   isBusy: boolean;
   isLoadingBranches: boolean;
   isLoadingRepos: boolean;
+  isRepositoryMenuOpen: boolean;
   onBranchChange: (branch: string) => void;
   onCreateSession: () => void;
+  onRepositoryMenuChange: (open: boolean) => void;
   onRepositorySelect: (repository: ContractRepository) => void;
+  onRetryRuntime: () => void;
   onSearchChange: (value: string) => void;
   repositories: ContractRepository[];
   repoSearch: string;
+  runtime: ContractRuntime | null;
+  runtimeError: string | null;
+  runtimeStatus: RuntimeProvisionStatus;
   selectedBranch: string;
   selectedRepository: ContractRepository | null;
 }): JSX.Element {
+  const RuntimeIcon = getStatusIcon(runtimeStatus);
+  const runtimeLabel = getRuntimeStatusLabel(runtimeStatus);
+
   return (
-    <aside className="grid auto-rows-max gap-4">
-      <section className="rounded-lg bg-bg-secondary/72 p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-balance text-sm font-semibold">Repository</h2>
-            <p className="text-xs text-fg-muted">{formatCompactNumber(repositories.length)} available</p>
-          </div>
-          <Github aria-hidden="true" className="size-5 text-fg-secondary" />
-        </div>
+    <section className="rounded-lg bg-bg-secondary/72 p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+      <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_220px_auto_minmax(220px,0.7fr)] xl:items-end">
+        <div className="relative min-w-0">
+          <span className="mb-1.5 block text-xs font-medium text-fg-secondary">Repository</span>
+          <button
+            aria-controls="repository-switcher-menu"
+            aria-expanded={isRepositoryMenuOpen}
+            aria-label={`Selected repository ${selectedRepository?.full_name || 'none'}`}
+            className="grid min-h-11 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-lg bg-bg-primary px-3 text-left shadow-[0_0_0_1px_rgba(255,255,255,0.09)] transition-[background-color,box-shadow,scale] duration-150 ease-out hover:bg-bg-tertiary hover:shadow-[0_0_0_1px_rgba(255,255,255,0.14)] active:scale-[0.96]"
+            onClick={() => onRepositoryMenuChange(!isRepositoryMenuOpen)}
+            type="button"
+          >
+            <FolderGit2 aria-hidden="true" className="size-4 text-cyan" />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-semibold text-fg">
+                {selectedRepository?.full_name || 'Select repository'}
+              </span>
+              <span className="block truncate text-xs text-fg-muted">
+                {formatCompactNumber(repositories.length)} repositories
+              </span>
+            </span>
+            <ChevronDown aria-hidden="true" className={cx(
+              'size-4 text-fg-muted transition-transform duration-150 ease-out',
+              isRepositoryMenuOpen && 'rotate-180'
+            )} />
+          </button>
 
-        <label className="relative block">
-          <span className="sr-only">Search repositories</span>
-          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
-          <input
-            className="min-h-11 w-full rounded-lg bg-bg-primary pl-10 pr-3 text-sm text-fg shadow-[0_0_0_1px_rgba(255,255,255,0.09)] outline-none transition-[box-shadow,background-color] duration-150 ease-out placeholder:text-fg-muted focus:shadow-[0_0_0_2px_rgba(34,211,238,0.45)]"
-            onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="Search"
-            value={repoSearch}
-          />
-        </label>
+          {isRepositoryMenuOpen && (
+            <div
+              className="absolute left-0 top-[calc(100%+0.5rem)] z-40 w-full min-w-[320px] max-w-[calc(100vw-2rem)] rounded-lg bg-bg-secondary p-3 shadow-[0_24px_70px_rgba(0,0,0,0.48),0_0_0_1px_rgba(255,255,255,0.1)]"
+              id="repository-switcher-menu"
+            >
+              <label className="relative block">
+                <span className="sr-only">Search repositories</span>
+                <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-muted" />
+                <input
+                  className="min-h-11 w-full rounded-lg bg-bg-primary pl-10 pr-3 text-sm text-fg shadow-[0_0_0_1px_rgba(255,255,255,0.09)] outline-none transition-[box-shadow,background-color] duration-150 ease-out placeholder:text-fg-muted focus:shadow-[0_0_0_2px_rgba(34,211,238,0.45)]"
+                  onChange={(event) => onSearchChange(event.target.value)}
+                  placeholder="Search repositories"
+                  value={repoSearch}
+                />
+              </label>
 
-        <div className="mt-3 grid max-h-[360px] gap-2 overflow-y-auto pr-1">
-          {isLoadingRepos && (
-            <LoadingRow label="Loading repositories" />
-          )}
-
-          {!isLoadingRepos && filteredRepositories.length === 0 && (
-            <EmptyState icon={FolderGit2} title="No repositories found" />
-          )}
-
-          {filteredRepositories.map((repository) => {
-            const isActive = selectedRepository?.id === repository.id;
-
-            return (
-              <button
-                className={cx(
-                  'min-h-16 rounded-lg p-3 text-left shadow-[0_0_0_1px_rgba(255,255,255,0.08)] transition-[background-color,box-shadow,scale] duration-150 ease-out active:scale-[0.96]',
-                  isActive
-                    ? 'bg-cyan/10 shadow-[0_0_0_1px_rgba(34,211,238,0.28)]'
-                    : 'bg-bg-primary/82 hover:bg-bg-tertiary hover:shadow-[0_0_0_1px_rgba(255,255,255,0.13)]'
+              <div className="mt-3 grid max-h-80 gap-2 overflow-y-auto pr-1">
+                {isLoadingRepos && (
+                  <LoadingRow label="Loading repositories" />
                 )}
-                key={repository.id}
-                onClick={() => onRepositorySelect(repository)}
-                type="button"
-              >
-                <div className="flex items-start gap-2">
-                  <FolderGit2 aria-hidden="true" className={cx('mt-0.5 size-4 shrink-0', isActive ? 'text-cyan' : 'text-fg-secondary')} />
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-fg">
-                      {repository.full_name}
-                    </div>
-                    <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-fg-muted">
-                      <span>{repository.private ? 'Private' : 'Public'}</span>
-                      {repository.language && <span>{repository.language}</span>}
-                      <span>{formatCompactNumber(repository.open_issues_count)} issues</span>
-                    </div>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </section>
 
-      <section className="rounded-lg bg-bg-secondary/72 p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-balance text-sm font-semibold">Session</h2>
-            <p className="text-xs text-fg-muted">{selectedRepository?.full_name || 'No repository selected'}</p>
-          </div>
-          <Zap aria-hidden="true" className="size-5 text-amber" />
+                {!isLoadingRepos && filteredRepositories.length === 0 && (
+                  <EmptyState icon={FolderGit2} title="No repositories found" />
+                )}
+
+                {filteredRepositories.map((repository) => {
+                  const isActive = selectedRepository?.id === repository.id;
+
+                  return (
+                    <button
+                      className={cx(
+                        'min-h-16 rounded-lg p-3 text-left shadow-[0_0_0_1px_rgba(255,255,255,0.08)] transition-[background-color,box-shadow,scale] duration-150 ease-out active:scale-[0.96]',
+                        isActive
+                          ? 'bg-cyan/10 shadow-[0_0_0_1px_rgba(34,211,238,0.28)]'
+                          : 'bg-bg-primary/82 hover:bg-bg-tertiary hover:shadow-[0_0_0_1px_rgba(255,255,255,0.13)]'
+                      )}
+                      key={repository.id}
+                      onClick={() => onRepositorySelect(repository)}
+                      type="button"
+                    >
+                      <div className="flex items-start gap-2">
+                        <FolderGit2 aria-hidden="true" className={cx('mt-0.5 size-4 shrink-0', isActive ? 'text-cyan' : 'text-fg-secondary')} />
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium text-fg">
+                            {repository.full_name}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-fg-muted">
+                            <span>{repository.private ? 'Private' : 'Public'}</span>
+                            {repository.language && <span>{repository.language}</span>}
+                            <span>{formatCompactNumber(repository.open_issues_count)} issues</span>
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
-        <label className="block">
+        <label className="block min-w-0">
           <span className="mb-1.5 block text-xs font-medium text-fg-secondary">Branch</span>
           <select
             className="min-h-11 w-full rounded-lg bg-bg-primary px-3 text-sm text-fg shadow-[0_0_0_1px_rgba(255,255,255,0.09)] outline-none transition-[box-shadow,background-color] duration-150 ease-out focus:shadow-[0_0_0_2px_rgba(34,211,238,0.45)]"
@@ -1300,16 +1490,58 @@ function RepositoryPanel({
         </label>
 
         <button
-          className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-amber px-4 text-sm font-semibold text-black transition-[background-color,scale] duration-150 ease-out hover:bg-yellow-400 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100"
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-amber px-4 pl-4 pr-3.5 text-sm font-semibold text-black transition-[background-color,scale] duration-150 ease-out hover:bg-yellow-400 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100"
           disabled={!canCreateSession}
           onClick={onCreateSession}
           type="button"
         >
-          {isBusy ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <ArrowRight aria-hidden="true" className="size-4" />}
-          Start session
+          {isBusy ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <Zap aria-hidden="true" className="size-4" />}
+          Start session & prepare runtime
         </button>
-      </section>
-    </aside>
+
+        <div className="grid min-h-11 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-lg bg-bg-primary px-3 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+          <RuntimeIcon aria-hidden="true" className={cx(
+            'size-4',
+            runtimeStatus === 'failed' && 'text-red-200',
+            runtimeStatus === 'not_provisioned' && 'text-fg-muted',
+            runtimeStatus === 'provisioning' && 'text-amber',
+            runtimeStatus === 'running' && 'text-emerald-200'
+          )} />
+          <div className="min-w-0">
+            <div className="truncate text-xs font-semibold capitalize text-fg">
+              Runtime {runtimeLabel}
+            </div>
+            <div className="truncate text-[11px] text-fg-muted">
+              {runtime?.sandbox_id || runtime?.runtime_id || 'Controller sandbox'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 text-xs text-fg-muted md:grid-cols-2">
+        <div className="rounded-lg bg-bg-primary/68 px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
+          Chat is answered by Daifu AI middleware through OpenRouter using OPENROUTER_MODEL, falling back to MSWEA_MODEL_NAME.
+        </div>
+        <div className="rounded-lg bg-bg-primary/68 px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
+          Manual runs use Modal-backed mini-swe-agent execution; the backend planner decides safe next actions after each sandbox result.
+        </div>
+      </div>
+
+      {runtimeStatus === 'failed' && runtimeError && (
+        <div className="mt-3 flex flex-col gap-3 rounded-lg bg-red-500/10 px-3 py-3 text-sm text-red-100 shadow-[0_0_0_1px_rgba(239,68,68,0.26)] sm:flex-row sm:items-center sm:justify-between" role="alert">
+          <span className="text-pretty">{runtimeError}</span>
+          <button
+            className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-red-200 px-3 text-xs font-semibold text-red-950 transition-[background-color,scale] duration-150 ease-out hover:bg-red-100 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isBusy}
+            onClick={onRetryRuntime}
+            type="button"
+          >
+            {isBusy ? <Loader2 aria-hidden="true" className="size-3.5 animate-spin" /> : <RefreshCw aria-hidden="true" className="size-3.5" />}
+            Retry runtime
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1482,6 +1714,11 @@ function MessageBubble({
           <span className="tabular-nums">
             {message.metadata?.createdAt ? formatDateTime(message.metadata.createdAt) : 'Now'}
           </span>
+          {!isUser && message.metadata?.modelUsed && (
+            <span className="truncate normal-case text-cyan">
+              {message.metadata.modelUsed}
+            </span>
+          )}
         </div>
         <div className="grid gap-2">
           {message.parts.map((part, index) => (
@@ -1741,7 +1978,7 @@ function ExecutionPanel({
       <form className="rounded-lg bg-bg-secondary p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]" onSubmit={onSubmit}>
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-balance text-base font-semibold">Agent run</h2>
+            <h2 className="text-balance text-base font-semibold">Lifecycle run</h2>
             <p className="text-xs text-fg-muted">{currentSession?.session_id || 'No active session'}</p>
           </div>
           {executionStatus && (
@@ -1768,6 +2005,7 @@ function ExecutionPanel({
               >
                 <Icon aria-hidden="true" className="size-4" />
                 <span className="hidden sm:inline">{mode.label}</span>
+                <span className="sr-only">{mode.role}</span>
               </button>
             );
           })}
@@ -1907,6 +2145,9 @@ function IssuesPanel({
 function SessionPanel({
   currentSession,
   executionStatus,
+  runtime,
+  runtimeError,
+  runtimeStatus,
   selectedBranch,
   selectedOwner,
   selectedRepoName,
@@ -1914,6 +2155,9 @@ function SessionPanel({
 }: {
   currentSession: ContractSession | null;
   executionStatus: ContractExecutionStatus | null;
+  runtime: ContractRuntime | null;
+  runtimeError: string | null;
+  runtimeStatus: RuntimeProvisionStatus;
   selectedBranch: string;
   selectedOwner: string;
   selectedRepoName: string;
@@ -1937,7 +2181,20 @@ function SessionPanel({
         <InfoRow icon={GitBranch} label="Branch" value={selectedBranch || 'Unselected'} />
         <InfoRow icon={Activity} label="Mode" value={currentSession?.current_mode || 'pending'} />
         <InfoRow icon={TerminalSquare} label="Run" value={executionStatus?.status || 'idle'} />
+        <InfoRow icon={Zap} label="Runtime" value={getRuntimeStatusLabel(runtimeStatus)} />
       </div>
+
+      {runtime?.sandbox_id && (
+        <p className="mt-3 truncate rounded-lg bg-bg-primary px-3 py-2 text-xs text-fg-muted shadow-[0_0_0_1px_rgba(255,255,255,0.07)]">
+          Sandbox {runtime.sandbox_id}
+        </p>
+      )}
+
+      {runtimeError && (
+        <p className="mt-3 text-pretty rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-100 shadow-[0_0_0_1px_rgba(239,68,68,0.22)]">
+          {runtimeError}
+        </p>
+      )}
 
       {currentSession?.repo_url && (
         <a
@@ -1967,8 +2224,8 @@ function WorkflowPanel({
     <section className="rounded-lg bg-bg-secondary/72 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-balance text-sm font-semibold">Workflow</h2>
-          <p className="text-xs text-fg-muted">Agent framework</p>
+          <h2 className="text-balance text-sm font-semibold">Adversarial Lifecycle</h2>
+          <p className="text-xs text-fg-muted">Backend-enforced legal progression</p>
         </div>
         <Sparkles aria-hidden="true" className="size-5 text-amber" />
       </div>
@@ -1991,17 +2248,23 @@ function WorkflowPanel({
                   <p className="text-sm font-medium">{mode.label}</p>
                   <span className="tabular-nums text-xs text-fg-muted">0{index + 1}</span>
                 </div>
+                <p className="mt-0.5 truncate text-xs text-fg-muted">{mode.role}</p>
                 <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-bg-primary">
                   <div className={cx(
                     'h-full rounded-full transition-[width,background-color] duration-200 ease-out',
                     isActive ? 'w-3/4 bg-amber' : 'w-1/4 bg-white/12'
                   )} />
                 </div>
+                <p className="mt-1 text-pretty text-[11px] leading-4 text-fg-muted">{mode.description}</p>
               </div>
             </div>
           );
         })}
       </div>
+
+      <p className="mt-4 rounded-lg bg-bg-primary/70 px-3 py-2 text-xs leading-5 text-fg-muted shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
+        Architect -&gt; Tester -&gt; Coder is controlled by the backend; manual run requests are rejected unless the requested mode is the next legal mode.
+      </p>
     </section>
   );
 }
