@@ -21,8 +21,8 @@ export interface Session {
   is_active: boolean;
   total_messages: number;
   total_tokens: number;
-  current_mode?: 'pending' | 'architect' | 'tester' | 'coder' | 'complete' | 'failed';
-  mode_status?: 'idle' | 'running' | 'waiting_for_input' | 'complete' | 'failed' | 'cancelled';
+  current_mode?: 'pending' | 'architect' | 'tester' | 'coder' | 'browser_check' | 'complete' | 'failed';
+  mode_status?: 'idle' | 'queued' | 'running' | 'deciding' | 'cancelling' | 'stalled' | 'waiting_for_input' | 'complete' | 'failed' | 'cancelled';
   mode_updated_at?: string;
   architect_issue_url?: string;
   architect_issue_number?: number;
