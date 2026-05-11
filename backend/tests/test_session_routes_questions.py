@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from pathlib import Path
 import sys
@@ -54,6 +55,7 @@ from yudai.models import (  # noqa: E402
     ContextCard,
     CreateGitHubIssueToolRequest,
     FrontendBrowserCheckToolRequest,
+    StageToolRequest,
     User,
     UserIssue,
     UserQuestion,
@@ -798,6 +800,7 @@ def test_create_github_issue_tool_wraps_issue_ops_and_emits_tool_call(
     assert session.architect_issue_number == 88
     assert (session.mode_metadata or {}).get("pending_daifu_tool") == "run_architect_mode"
     assert lifecycle_calls[0]["issue_number"] == 88
+    assert json.loads(json.dumps(response.model_dump(mode="json")))["github_issue_number"] == 88
 
 
 def test_create_github_issue_tool_rejects_issue_from_other_session_before_issue_ops(
@@ -915,6 +918,67 @@ def test_frontend_browser_check_tool_wraps_mode_service(db_and_user, monkeypatch
         "session_id": session.session_id,
         "user_id": user.id,
         "objective": "Verify the login page visually",
+    }
+
+
+def test_stage_tool_returns_json_safe_execution_response(db_and_user, monkeypatch):
+    db, user, session = db_and_user
+    monkeypatch.setattr(
+        session_routes,
+        "get_realtime_feature_flags",
+        lambda: _flags(orchestrator_enabled=True),
+    )
+    captured: dict[str, object] = {}
+
+    class DummyModeToolService:
+        async def run_stage_tool(self, db, *, session, user_id, tool_name, objective):
+            captured["call"] = {
+                "session_id": session.session_id,
+                "tool_name": tool_name,
+                "user_id": user_id,
+                "objective": objective,
+            }
+            return {
+                "execution_id": "exec_architect_tool",
+                "session_id": session.session_id,
+                "mode": "architect",
+                "status": "running",
+                "plan": ["Run Architect"],
+                "started_at": session_routes.utc_now(),
+                "completed_at": None,
+                "cancel_requested": False,
+                "waiting_for_input": False,
+                "current_mode_execution_id": "exec_architect_tool",
+                "artifact": None,
+                "detail": "Architect queued",
+            }
+
+    monkeypatch.setattr(
+        session_routes,
+        "get_daifu_mode_tool_service",
+        lambda: DummyModeToolService(),
+    )
+
+    response = asyncio.run(
+        session_routes.execute_session_stage_tool(
+            session_id=session.session_id,
+            request=StageToolRequest(
+                tool_name="run_architect_mode",
+                objective="Resolve issue #42 with Architect",
+            ),
+            db=db,
+            current_user=user,
+        )
+    )
+
+    payload = json.loads(json.dumps(response.model_dump(mode="json")))
+    assert payload["execution_id"] == "exec_architect_tool"
+    assert payload["started_at"]
+    assert captured["call"] == {
+        "session_id": session.session_id,
+        "tool_name": "run_architect_mode",
+        "user_id": user.id,
+        "objective": "Resolve issue #42 with Architect",
     }
 
 
