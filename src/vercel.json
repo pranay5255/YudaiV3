@@ -11,15 +11,15 @@
     },
     {
       "source": "/daifu/:path*",
-      "destination": "/api/proxy/daifu/:path*"
+      "destination": "https://api.yudai.app/daifu/:path*"
     },
     {
       "source": "/github/:path*",
-      "destination": "/api/proxy/github/:path*"
+      "destination": "https://api.yudai.app/github/:path*"
     },
     {
       "source": "/controller/:path*",
-      "destination": "/api/proxy/controller/:path*"
+      "destination": "https://api.yudai.app/controller/:path*"
     },
     {
       "source": "/realtime/:path*",
