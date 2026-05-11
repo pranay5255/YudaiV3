@@ -32,6 +32,7 @@ vi.mock('@/services/agentApi', () => {
       answerQuestion: vi.fn(),
       cancelExecution: vi.fn(),
       createSession: vi.fn(),
+      ensureRuntime: vi.fn(),
       getExecutionStatus: vi.fn(),
       getSessionContext: vi.fn(),
       listBranches: vi.fn(),
@@ -46,9 +47,11 @@ vi.mock('@/services/agentApi', () => {
 });
 
 const repo = {
+  clone_url: 'https://github.com/octocat/yudaiv3.git',
   default_branch: 'main',
   description: 'Repository for question tests',
   full_name: 'octocat/yudaiv3',
+  html_url: 'https://github.com/octocat/yudaiv3',
   id: 1,
   language: 'TypeScript',
   name: 'yudaiv3',
@@ -94,6 +97,20 @@ const executionStatus = {
   started_at: '2026-04-28T00:00:05Z',
   status: 'idle',
   waiting_for_input: false,
+};
+
+const runtime = {
+  completion_detected: false,
+  completion_issue_created: false,
+  completion_pr_created: false,
+  identity_key: 'runtime_identity',
+  metadata: {},
+  runtime_id: 'runtime_1',
+  sandbox_id: 'sandbox_1',
+  status: 'ready',
+  token_ttl_seconds: null,
+  tunnel_expires_at: null,
+  tunnel_url: null,
 };
 
 const emptySessionContext = {
@@ -191,6 +208,7 @@ describe('AgentWorkbench pending questions', () => {
     }]);
     vi.mocked(agentApi.listRepositoryIssues).mockResolvedValue([]);
     vi.mocked(agentApi.createSession).mockResolvedValue(session);
+    vi.mocked(agentApi.ensureRuntime).mockResolvedValue(runtime);
     vi.mocked(agentApi.getSessionContext).mockResolvedValue(emptySessionContext);
     vi.mocked(agentApi.listContextCards).mockResolvedValue([contextCard]);
     vi.mocked(agentApi.listSessionIssues).mockResolvedValue([]);
@@ -243,6 +261,40 @@ describe('AgentWorkbench pending questions', () => {
         'test-token'
       );
     });
+  });
+
+  it('uses top repository controls and prepares runtime on explicit start', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<AgentWorkbench />);
+
+    expect(await screen.findByRole('button', { name: /selected repository octocat\/yudaiv3/i }))
+      .toBeInTheDocument();
+    expect(container.querySelector('main')?.className).not.toContain('320px');
+
+    await user.click(screen.getByRole('button', { name: /start session & prepare runtime/i }));
+
+    await waitFor(() => {
+      expect(agentApi.createSession).toHaveBeenCalledWith({
+        description: 'Repository for question tests',
+        repo_branch: 'main',
+        repo_name: 'yudaiv3',
+        repo_owner: 'octocat',
+        title: 'octocat/yudaiv3:main',
+      }, 'test-token');
+      expect(agentApi.ensureRuntime).toHaveBeenCalledWith(
+        session.session_id,
+        {
+          environment: 'main',
+          org: 'yudai',
+          repo_branch: 'main',
+          repo_name: 'yudaiv3',
+          repo_owner: 'octocat',
+          repo_url: 'https://github.com/octocat/yudaiv3.git',
+        },
+        'test-token'
+      );
+    });
+    expect(await screen.findAllByText(/Runtime running/i)).not.toHaveLength(0);
   });
 
   it('caps a long run objective before starting execution', async () => {
@@ -304,6 +356,7 @@ describe('AgentWorkbench pending questions', () => {
     await user.click(screen.getByRole('button', { name: /^send$/i }));
 
     await screen.findByText('Streamed hello');
+    expect(await screen.findByText('test-model')).toBeInTheDocument();
 
     const fetchMock = vi.mocked(fetch);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -336,6 +389,21 @@ describe('AgentWorkbench pending questions', () => {
     await waitFor(() => {
       expect(agentApi.getSessionContext).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it('auto-creates a chat session without preparing runtime', async () => {
+    const user = userEvent.setup();
+    render(<AgentWorkbench />);
+
+    await screen.findByRole('button', { name: /selected repository octocat\/yudaiv3/i });
+    await user.type(screen.getByLabelText('Message'), 'chat only');
+    await user.click(screen.getByRole('button', { name: /^send$/i }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalled();
+    });
+    expect(agentApi.createSession).toHaveBeenCalledTimes(1);
+    expect(agentApi.ensureRuntime).not.toHaveBeenCalled();
   });
 
   it('renders streamed data agent questions with the existing prompt component', async () => {
