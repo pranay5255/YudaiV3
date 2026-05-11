@@ -103,7 +103,7 @@ def test_start_execution_returns_non_null_execution_id_and_started_at():
 
         assert payload["execution_id"].startswith("exec_")
         assert payload["started_at"] is not None
-        assert payload["status"] == "running"
+        assert payload["status"] == "queued"
         assert execution.session_id == session.id
         assert execution.execution_metadata["trigger"] == "execution_api"
         active_execution = (session.mode_metadata or {}).get("active_execution") or {}
@@ -150,9 +150,6 @@ def test_start_stage_execution_schedules_one_mode_with_stage_trigger():
             lifecycle=object(),
             ws_hub=DummyHub(),
         )
-        scheduled: dict[str, object] = {}
-        orchestrator._schedule_execution_task = lambda **kwargs: scheduled.update(kwargs)
-
         payload = asyncio.run(
             orchestrator.start_stage_execution(
                 db,
@@ -168,15 +165,17 @@ def test_start_stage_execution_schedules_one_mode_with_stage_trigger():
         execution = db.query(AgentExecution).filter(AgentExecution.id == payload["execution_id"]).one()
 
         assert payload["detail"] == "Stage queued"
-        assert scheduled["max_modes"] == 1
+        assert payload["status"] == "queued"
         assert execution.execution_metadata["trigger"] == "daifu_tool:run_architect_mode"
         assert execution.execution_metadata["max_modes"] == 1
+        assert execution.status == "queued"
         assert (session.mode_metadata or {})["active_execution"]["max_modes"] == 1
     finally:
         db.close()
 
 
 def test_build_mswea_command_uses_official_mini_cli_probe(tmp_path, monkeypatch):
+    monkeypatch.setenv("MSWEA_MODEL_NAME", "openrouter/x-ai/grok-4-fast")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     mini = bin_dir / "mini"
@@ -237,7 +236,8 @@ def test_build_mswea_command_uses_official_mini_cli_probe(tmp_path, monkeypatch)
     assert (workspace / ".yudai" / "context.md").is_file()
 
 
-def test_build_browser_check_command_probe_preserves_existing_workspace(tmp_path):
+def test_build_browser_check_command_probe_preserves_existing_workspace(tmp_path, monkeypatch):
+    monkeypatch.setenv("MSWEA_MODEL_NAME", "openrouter/x-ai/grok-4-fast")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     mini = bin_dir / "mini"
@@ -363,6 +363,8 @@ def test_start_browser_check_rejects_active_execution_task():
 
 def test_browser_check_mocked_broker_success_persists_artifact_and_context(tmp_path, monkeypatch):
     db_path = tmp_path / "browser-success.db"
+    monkeypatch.setenv("YUDAI_IN_PROCESS_EXECUTION_FALLBACK", "true")
+    monkeypatch.setenv("MSWEA_MODEL_NAME", "openrouter/x-ai/grok-4-fast")
     engine = create_engine(f"sqlite:///{db_path}")
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     Base.metadata.create_all(engine)
@@ -540,6 +542,8 @@ def test_browser_check_mocked_broker_success_persists_artifact_and_context(tmp_p
 
 def test_browser_check_mocked_broker_failure_does_not_terminate_sandbox(tmp_path, monkeypatch):
     db_path = tmp_path / "browser-failure.db"
+    monkeypatch.setenv("YUDAI_IN_PROCESS_EXECUTION_FALLBACK", "true")
+    monkeypatch.setenv("MSWEA_MODEL_NAME", "openrouter/x-ai/grok-4-fast")
     engine = create_engine(f"sqlite:///{db_path}")
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     Base.metadata.create_all(engine)
@@ -843,6 +847,8 @@ class ContractBroker:
 
 def test_full_pipeline_persists_strict_mode_contracts(tmp_path, monkeypatch):
     db_path = tmp_path / "contracts.db"
+    monkeypatch.setenv("YUDAI_IN_PROCESS_EXECUTION_FALLBACK", "true")
+    monkeypatch.setenv("MSWEA_MODEL_NAME", "openrouter/x-ai/grok-4-fast")
     engine = create_engine(f"sqlite:///{db_path}")
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     Base.metadata.create_all(engine)
@@ -916,6 +922,8 @@ def test_full_pipeline_persists_strict_mode_contracts(tmp_path, monkeypatch):
 
 def test_architect_questions_pause_pipeline_and_resume_same_mode(tmp_path, monkeypatch):
     db_path = tmp_path / "contracts-pause.db"
+    monkeypatch.setenv("YUDAI_IN_PROCESS_EXECUTION_FALLBACK", "true")
+    monkeypatch.setenv("MSWEA_MODEL_NAME", "openrouter/x-ai/grok-4-fast")
     engine = create_engine(f"sqlite:///{db_path}")
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     Base.metadata.create_all(engine)
