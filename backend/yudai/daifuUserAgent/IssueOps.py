@@ -46,6 +46,7 @@ from yudai.models import (
     ChatSession,
     UserIssue,
 )
+from yudai.config import get_model_config
 from yudai.types import CreateUserIssueRequest
 from sqlalchemy.orm import Session
 
@@ -255,7 +256,7 @@ class IssueService:
                         "generated_by_llm": True,
                         "processing_time": llm_generated_issue["processing_time"],
                         "tokens_used": llm_generated_issue["tokens_used"],
-                        "llm_model": "x-ai/grok-4-fast",
+                        "llm_model": get_model_config().model_name,
                         "generated_at": utc_now().isoformat(),
                         "generation_method": "create-with-context",
                     },
@@ -444,8 +445,6 @@ class IssueService:
             start_time = time.time()
             llm_response = await LLMService.generate_response(
                 prompt=prompt,
-                model="x-ai/grok-4-fast",  # Use the same model as chat
-                temperature=0.3,  # Lower temperature for more focused issue generation
                 max_tokens=2000,
                 timeout=120,
             )
