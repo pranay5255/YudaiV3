@@ -38,6 +38,35 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
+def _apply_schema_compatibility_migrations() -> None:
+    """Repair known drift in long-lived Postgres volumes."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'chat_sessions'
+                      AND column_name = 'generate_embeddings'
+                ) THEN
+                    ALTER TABLE chat_sessions
+                        ALTER COLUMN generate_embeddings SET DEFAULT FALSE;
+                END IF;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'chat_sessions'
+                      AND column_name = 'generate_facts_memories'
+                ) THEN
+                    ALTER TABLE chat_sessions
+                        ALTER COLUMN generate_facts_memories SET DEFAULT FALSE;
+                END IF;
+            END $$;
+        """))
+
+
 def get_db():
     """
     Dependency function to get database session
@@ -61,6 +90,7 @@ def init_db():
 
         # Create all tables
         Base.metadata.create_all(bind=engine)
+        _apply_schema_compatibility_migrations()
         print("✓ Database initialized successfully with SQLAlchemy models")
         return True
     except Exception as e:
