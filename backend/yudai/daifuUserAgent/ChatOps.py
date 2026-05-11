@@ -265,8 +265,6 @@ class ChatOps:
                     file_contexts=context_inputs,
                     probe_context=probe_context,
                     fallback_repo_summary=fallback_repo_summary,
-                    model="x-ai/grok-4-fast",
-                    temperature=0.2,
                     max_tokens=2500,
                     timeout=55,
                 )
@@ -291,8 +289,6 @@ class ChatOps:
                 raw_parts: List[str] = []
                 async for chunk in LLMService.stream_response(
                     prompt=prompt,
-                    model="x-ai/grok-4-fast",
-                    temperature=0.2,
                     max_tokens=2500,
                     timeout=55,
                 ):
