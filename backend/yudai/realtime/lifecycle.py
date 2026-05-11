@@ -18,12 +18,15 @@ from yudai.config import get_sandbox_config
 from yudai.config.realtime_identity import build_sandbox_identity
 from yudai.db.database import SessionLocal
 from yudai.models import (
+    AgentExecution,
     ChatSession,
     Sandbox,
+    SandboxExecutionRun,
     SandboxStatus,
     SessionArtifact,
     SessionAuditEvent,
     SessionAuditEventName,
+    SessionModeStatus,
     SessionRuntime,
     SessionRuntimeStatus,
     Solve,
@@ -31,6 +34,7 @@ from yudai.models import (
 )
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from yudai.utils import utc_now
 
@@ -1099,6 +1103,20 @@ class SandboxExecBroker:
         on_event: Optional[SandboxEventCallback] = None,
     ) -> Dict[str, Any]:
         sandbox, tunnel_url = self._resolve_runtime(db, session)
+        mode_execution_id = str((env or {}).get("YUDAI_MODE_EXECUTION_ID") or "").strip()
+        if mode_execution_id:
+            return await self._run_command_with_callbacks(
+                db,
+                session=session,
+                sandbox=sandbox,
+                tunnel_url=tunnel_url,
+                mode_execution_id=mode_execution_id,
+                command=command,
+                cwd=cwd,
+                env=env,
+                timeout_seconds=timeout_seconds,
+            )
+
         result = await run_sandbox_command(
             tunnel_url=tunnel_url,
             session_public_id=session.session_id,
@@ -1115,6 +1133,172 @@ class SandboxExecBroker:
             "stderr": result.stderr,
             "duration_ms": result.duration_ms,
         }
+
+    def _internal_headers(self) -> Dict[str, str]:
+        secret = get_sandbox_config().controller_internal_ws_secret
+        return {"X-Controller-Internal-Secret": secret} if secret else {}
+
+    async def _run_command_with_callbacks(
+        self,
+        db: Session,
+        *,
+        session: ChatSession,
+        sandbox: Sandbox,
+        tunnel_url: str,
+        mode_execution_id: str,
+        command: str,
+        cwd: Optional[str],
+        env: Optional[Dict[str, str]],
+        timeout_seconds: int,
+    ) -> Dict[str, Any]:
+        execution = (
+            db.query(AgentExecution)
+            .filter(AgentExecution.id == mode_execution_id)
+            .first()
+        )
+        execution_metadata = execution.execution_metadata if execution and isinstance(execution.execution_metadata, dict) else {}
+        run = (
+            db.query(SandboxExecutionRun)
+            .filter(
+                SandboxExecutionRun.mode_execution_id == mode_execution_id,
+                SandboxExecutionRun.status.in_(["starting", "running", "complete", "cancelled"]),
+            )
+            .order_by(SandboxExecutionRun.created_at.desc())
+            .first()
+        )
+        if run and run.status in {"complete", "cancelled"} and run.sandbox_job_id:
+            return {
+                "sandbox_id": sandbox.id,
+                "sandbox_job_id": run.sandbox_job_id,
+                "exit_code": int(run.exit_code or 0),
+                "stdout": run.stdout_tail or "",
+                "stderr": run.stderr_tail or "",
+                "duration_ms": int(run.duration_ms or 0),
+            }
+        if run is None:
+            run = SandboxExecutionRun(
+                controller_job_id=f"ctrljob_{uuid.uuid4().hex[:24]}",
+                session_id=session.id,
+                pipeline_execution_id=execution_metadata.get("pipeline_execution_id"),
+                mode_execution_id=mode_execution_id,
+                mode=execution.mode if execution else None,
+                attempt=1,
+                status="starting",
+                command=command,
+                cwd=cwd,
+                started_at=utc_now(),
+                heartbeat_at=utc_now(),
+                run_metadata={"timeout_seconds": timeout_seconds},
+            )
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+
+        start_url = (
+            f"{tunnel_url.rstrip('/')}/internal/sessions/{session.session_id}/executions"
+        )
+        if not run.sandbox_job_id:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    start_url,
+                    headers=self._internal_headers(),
+                    json={
+                        "command": command,
+                        "cwd": cwd,
+                        "env": env or {},
+                        "mode_execution_id": mode_execution_id,
+                        "controller_job_id": run.controller_job_id,
+                        "attempt": run.attempt,
+                        "timeout_seconds": timeout_seconds,
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+            sandbox_job_id = str(payload.get("sandbox_job_id") or "")
+        else:
+            sandbox_job_id = str(run.sandbox_job_id)
+        if not sandbox_job_id:
+            raise RuntimeError("Sandbox async execution did not return a sandbox_job_id")
+
+        controller_job_id = run.controller_job_id
+        run.sandbox_job_id = sandbox_job_id
+        run.status = "running"
+        run.heartbeat_at = utc_now()
+        db.commit()
+
+        if execution:
+            metadata = dict(execution.execution_metadata or {})
+            metadata["controller_job_id"] = run.controller_job_id
+            metadata["sandbox_job_id"] = sandbox_job_id
+            execution.execution_metadata = metadata
+            flag_modified(execution, "execution_metadata")
+            db.commit()
+
+        deadline = time.monotonic() + max(timeout_seconds, 1)
+        while time.monotonic() < deadline:
+            db.expire_all()
+            execution = (
+                db.query(AgentExecution)
+                .filter(AgentExecution.id == mode_execution_id)
+                .first()
+            )
+            if not execution:
+                raise RuntimeError(f"Execution {mode_execution_id} disappeared while waiting")
+
+            current_run = (
+                db.query(SandboxExecutionRun)
+                .filter(SandboxExecutionRun.controller_job_id == controller_job_id)
+                .first()
+            )
+            if current_run and current_run.status in {"complete", "cancelled"} and current_run.sandbox_job_id == sandbox_job_id:
+                return {
+                    "sandbox_id": sandbox.id,
+                    "sandbox_job_id": sandbox_job_id,
+                    "exit_code": int(current_run.exit_code or 0),
+                    "stdout": current_run.stdout_tail or "",
+                    "stderr": current_run.stderr_tail or "",
+                    "duration_ms": int(current_run.duration_ms or 0),
+                }
+            metadata = execution.execution_metadata if isinstance(execution.execution_metadata, dict) else {}
+            completion = metadata.get("sandbox_completion")
+            if isinstance(completion, dict) and completion.get("sandbox_job_id") == sandbox_job_id:
+                return {
+                    "sandbox_id": sandbox.id,
+                    "sandbox_job_id": sandbox_job_id,
+                    "exit_code": int(completion.get("exit_code") or 0),
+                    "stdout": str(completion.get("stdout") or ""),
+                    "stderr": str(completion.get("stderr") or ""),
+                    "duration_ms": int(completion.get("duration_ms") or 0),
+                }
+            if execution.status == SessionModeStatus.CANCELLED.value:
+                await self.cancel_job(
+                    db,
+                    session=session,
+                    sandbox_job_id=sandbox_job_id,
+                )
+                raise asyncio.CancelledError()
+            await asyncio.sleep(1)
+
+        await self.cancel_job(db, session=session, sandbox_job_id=sandbox_job_id)
+        raise RuntimeError("Sandbox execution timed out")
+
+    async def cancel_job(
+        self,
+        db: Session,
+        *,
+        session: ChatSession,
+        sandbox_job_id: str,
+    ) -> None:
+        if not sandbox_job_id:
+            return
+        _sandbox, tunnel_url = self._resolve_runtime(db, session)
+        cancel_url = (
+            f"{tunnel_url.rstrip('/')}/internal/sessions/{session.session_id}/executions/{sandbox_job_id}/cancel"
+        )
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(cancel_url, headers=self._internal_headers())
+            if response.status_code not in {200, 202, 404}:
+                response.raise_for_status()
 
 
 _exec_broker_singleton: Optional[SandboxExecBroker] = None
