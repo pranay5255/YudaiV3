@@ -52,4 +52,26 @@ describe('LoginPage', () => {
       expect(screen.getByText('missing auth data')).toBeInTheDocument();
     });
   });
+
+  it('renders adversarial lifecycle copy with contained primary video and enlarged logo', () => {
+    const { container } = render(<LoginPage />);
+
+    expect(screen.getByRole('heading', {
+      name: /Yudai Agent Console for adversarial GitHub workflows/i,
+    })).toBeInTheDocument();
+    expect(screen.getByText('Lifecycle roles')).toBeInTheDocument();
+    expect(screen.queryByText('Planning modes')).not.toBeInTheDocument();
+
+    const videos = container.querySelectorAll('video');
+    expect(videos).toHaveLength(2);
+    expect(videos[1]).toHaveClass('object-contain');
+    expect(videos[1]).not.toHaveClass('object-cover');
+    expect(videos[1].parentElement).toHaveClass('aspect-video');
+
+    const logo = container.querySelector(`img[src="/assets/baseLogo.png"]`);
+    expect(logo).not.toBeNull();
+    expect(logo?.parentElement).not.toBeNull();
+    expect(logo?.parentElement).toHaveClass('size-12');
+    expect(logo).toHaveClass('size-9');
+  });
 });
