@@ -20,6 +20,7 @@
     "test:realtime": "vitest run tests/frontend/realtimeRouting.test.ts tests/frontend/sessionWebSocket.sse.test.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.47",
     "@ai-sdk/react": "^3.0.177",
     "@tanstack/react-query": "^5.85.5",
     "@tanstack/react-query-devtools": "^5.85.5",
