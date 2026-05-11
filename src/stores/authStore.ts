@@ -17,8 +17,17 @@ interface AuthState {
   clearAuth: () => void;
 }
 
-const getAuthHeaders = (sessionToken?: string): HeadersInit => {
-  const headers: HeadersInit = { 'Content-Type': 'application/json' };
+const getAuthHeaders = ({
+  includeJsonContentType = false,
+  sessionToken,
+}: {
+  includeJsonContentType?: boolean;
+  sessionToken?: string;
+} = {}): HeadersInit => {
+  const headers: Record<string, string> = {};
+  if (includeJsonContentType) {
+    headers['Content-Type'] = 'application/json';
+  }
   if (sessionToken) {
     headers['Authorization'] = `Bearer ${sessionToken}`;
   }
@@ -53,7 +62,7 @@ export const useAuthStore = create<AuthState>()(
         try {
           const response = await fetch(buildApiUrl(API.AUTH.USER), {
             method: 'GET',
-            headers: getAuthHeaders(existingToken || undefined),
+            headers: getAuthHeaders({ sessionToken: existingToken }),
           });
 
           if (!response.ok) {
@@ -111,7 +120,6 @@ export const useAuthStore = create<AuthState>()(
 
           const response = await fetch(buildApiUrl(API.AUTH.LOGIN), {
             method: 'GET',
-            headers: getAuthHeaders(),
           });
 
           if (!response.ok) {
@@ -134,7 +142,10 @@ export const useAuthStore = create<AuthState>()(
           if (sessionToken) {
             await fetch(buildApiUrl(API.AUTH.LOGOUT), {
               method: 'POST',
-              headers: getAuthHeaders(sessionToken),
+              headers: getAuthHeaders({
+                includeJsonContentType: true,
+                sessionToken,
+              }),
               body: JSON.stringify({ session_token: sessionToken }),
             });
           }
