@@ -1,0 +1,1 @@
+{"root":["./vite.config.ts","./vitest.config.ts","./api/_lib/backend.ts","./api/ai/_lib/daifu-tools.ts","./api/ai/_lib/prompt-builder.ts","./api/ai/_lib/provider.ts","./api/ai/_lib/schema.ts","./api/ai/sessions/[sessionId]/stream.ts","./api/proxy/[...path].ts","./api/realtime/sessions/[sessionId]/events.ts","./tests/frontend/vercelMiddleware.test.ts"],"version":"5.8.3"}
