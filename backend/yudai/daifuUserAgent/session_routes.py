@@ -10,10 +10,11 @@ TODO: Complete Implementation Tasks
 
 CRITICAL ISSUES:
 1. LLM Service Integration
-   - Chat endpoint uses ChatOps.process_chat_message() with LLMService.generate_response_with_stored_context()
-   - Issue endpoints use IssueOps.create_issue_with_context() with LLMService.generate_response()
-   - Add proper error handling for LLM service failures
-   - Implement streaming responses for real-time chat
+   - Active Agent Workbench chat uses the Vercel AI SDK route at
+     /ai/sessions/{session_id}/stream.
+   - This module owns authenticated context, turn persistence, and backend tool
+     endpoints consumed by AI SDK execute() functions.
+   - ChatOps and LLMService remain legacy/non-active paths during migration.
 
 2. Frontend Integration (@Chat.tsx compatibility)
    - Ensure all API responses match frontend expectations
@@ -81,6 +82,10 @@ from yudai.realtime.mode_orchestrator import (
 )
 from yudai.realtime.ws_protocol import get_ws_hub
 from yudai.realtime.ws_protocol import WSMessageType
+from .message_persistence import (
+    persist_ai_message,
+    refresh_session_message_counts,
+)
 
 from yudai.models import (
     AgentExecution,
@@ -1098,40 +1103,17 @@ def _persist_ai_message(
     processing_time: Optional[float] = None,
     actions: Optional[List[Dict[str, Any]]] = None,
 ) -> ChatMessage:
-    existing = (
-        db.query(ChatMessage)
-        .filter(ChatMessage.session_id == db_session.id, ChatMessage.message_id == message_id)
-        .first()
-    )
-    tokens = max(1, len(text) // 4) if text else 0
-
-    if existing:
-        existing.message_text = text
-        existing.sender_type = role
-        existing.role = role
-        existing.tokens = tokens
-        existing.model_used = model_used
-        existing.processing_time = processing_time
-        existing.context_cards = context_card_ids
-        existing.actions = actions
-        existing.updated_at = utc_now()
-        return existing
-
-    message = ChatMessage(
-        session_id=db_session.id,
+    return persist_ai_message(
+        db,
+        db_session=db_session,
         message_id=message_id,
-        message_text=text,
-        sender_type=role,
+        text=text,
         role=role,
-        is_code=False,
-        tokens=tokens,
+        context_card_ids=context_card_ids,
         model_used=model_used,
         processing_time=processing_time,
-        context_cards=context_card_ids,
         actions=actions,
     )
-    db.add(message)
-    return message
 
 
 def _extract_ai_question_parts(parts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1250,18 +1232,7 @@ async def persist_session_ai_turn(
             pending_questions.append(question)
 
         db.flush()
-        db_session.total_messages = (
-            db.query(ChatMessage)
-            .filter(ChatMessage.session_id == db_session.id)
-            .count()
-        )
-        db_session.total_tokens = sum(
-            token_count or 0
-            for (token_count,) in db.query(ChatMessage.tokens)
-            .filter(ChatMessage.session_id == db_session.id)
-            .all()
-        )
-        db_session.last_activity = utc_now()
+        refresh_session_message_counts(db, db_session)
         db.commit()
         db.refresh(user_message)
         db.refresh(assistant_message)
