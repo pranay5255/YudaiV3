@@ -39,9 +39,11 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -135,7 +137,11 @@ class SessionMode(str, Enum):
 
 class SessionModeStatus(str, Enum):
     IDLE = "idle"
+    QUEUED = "queued"
     RUNNING = "running"
+    DECIDING = "deciding"
+    CANCELLING = "cancelling"
+    STALLED = "stalled"
     WAITING_FOR_INPUT = "waiting_for_input"
     COMPLETE = "complete"
     FAILED = "failed"
@@ -1211,6 +1217,120 @@ class AgentExecution(Base):
     )
 
     session: Mapped["ChatSession"] = relationship(back_populates="executions")
+
+
+class AgentExecutionLease(Base):
+    """Durable worker lease for a queued or running agent execution."""
+
+    __tablename__ = "agent_execution_leases"
+
+    lease_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    execution_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_executions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    worker_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    lease_token: Mapped[str] = mapped_column(String(128), nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    released_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    release_reason: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+
+class SandboxExecutionRun(Base):
+    """Controller-side durable record for one sandbox background command."""
+
+    __tablename__ = "sandbox_execution_runs"
+    __table_args__ = (
+        UniqueConstraint("controller_job_id", name="uq_sandbox_execution_runs_controller_job_id"),
+        Index("idx_sandbox_runs_mode_execution", "mode_execution_id"),
+        Index("idx_sandbox_runs_sandbox_job", "sandbox_job_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    controller_job_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    sandbox_job_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    pipeline_execution_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    mode_execution_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_executions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    mode: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="starting", index=True)
+    command: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cwd: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    heartbeat_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    exit_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    stdout_tail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    stderr_tail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    parsed_payload: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=True)
+    run_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())
+
+
+class SandboxExecutionEvent(Base):
+    """Durable sandbox stream event for reconnect and recovery."""
+
+    __tablename__ = "sandbox_execution_events"
+    __table_args__ = (
+        UniqueConstraint("controller_job_id", "sequence", name="uq_sandbox_execution_events_job_sequence"),
+        Index("idx_sandbox_events_mode_execution", "mode_execution_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    controller_job_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    sandbox_job_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    mode_execution_id: Mapped[str] = mapped_column(
+        ForeignKey("agent_executions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    stream: Mapped[str] = mapped_column(String(32), nullable=False, default="sandbox")
+    event: Mapped[str] = mapped_column(String(64), nullable=False)
+    data: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    event_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class AgentDecisionStep(Base):
+    """Worker-side planner decision after a sandbox result."""
+
+    __tablename__ = "agent_decision_steps"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_agent_decision_steps_idempotency_key"),
+        Index("idx_agent_decision_steps_pipeline", "pipeline_execution_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    pipeline_execution_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    mode_execution_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    step_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="complete", index=True)
+    selected_action: Mapped[str] = mapped_column(String(64), nullable=False)
+    objective: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    planner_input: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=True)
+    planner_output: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=True)
+    linked_execution_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    user_message_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
 
 
 # ============================================================================
