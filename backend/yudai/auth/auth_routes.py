@@ -59,7 +59,7 @@ def get_frontend_base_url() -> str:
 
     # Otherwise, determine based on NODE_ENV
     if node_env == 'production':
-        return 'https://yudai.app'
+        return 'https://www.yudai.app'
     else:
         # Default to development (localhost:3000)
         return 'http://localhost:3000'
