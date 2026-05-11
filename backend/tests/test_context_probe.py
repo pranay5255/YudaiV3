@@ -96,7 +96,8 @@ def test_format_as_context_includes_successful_probe_outputs_only():
     assert "failing query" not in context
 
 
-def test_build_probe_command_uses_probe_config_and_query(tmp_path):
+def test_build_probe_command_uses_probe_config_and_query(tmp_path, monkeypatch):
+    monkeypatch.setenv("MSWEA_MODEL_NAME", "openrouter/x-ai/grok-4-fast")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     mini = bin_dir / "mini"
