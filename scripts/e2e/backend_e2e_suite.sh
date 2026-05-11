@@ -36,7 +36,7 @@ SESSION_ID=""
 SESSION_DB_ID=""
 SANDBOX_ID=""
 RUNTIME_ID=""
-GH_TOKEN=""
+GH_TOKEN="${GH_TOKEN:-}"
 E2E_SESSION_TOKEN=""
 GH_USERNAME="${GH_USERNAME:-}"
 AUTH_USER_ID=""
@@ -325,6 +325,29 @@ PY
   return 1
 }
 
+load_active_backend_auth_token() {
+  local out
+  out="$(
+    "${DC[@]}" exec -T backend sh -lc 'PGOPTIONS="-c client_min_messages=error" psql "$DATABASE_URL" -Atq' <<'SQL'
+SELECT u.github_username || E'\t' || a.access_token
+FROM auth_tokens a
+JOIN users u ON u.id = a.user_id
+WHERE a.is_active IS TRUE
+ORDER BY a.id DESC
+LIMIT 1;
+SQL
+  )"
+
+  if [[ "$out" == *$'\t'* ]]; then
+    GH_USERNAME="${out%%$'\t'*}"
+    GH_TOKEN="${out#*$'\t'}"
+    [[ -n "$GH_TOKEN" ]]
+    return
+  fi
+
+  return 1
+}
+
 print_step "Prerequisites and Health"
 
 if "${DC[@]}" ps >/dev/null 2>&1; then
@@ -361,12 +384,16 @@ fi
 
 print_step "Auth Bootstrap"
 
-if GH_TOKEN="$(gh auth token 2>/dev/null)"; then
+if [[ -n "$GH_TOKEN" ]]; then
+  record_result "AUTH-001" "PASS" "GitHub token available (GH_TOKEN env)" "token_length=${#GH_TOKEN}"
+elif GH_TOKEN="$(gh auth token 2>/dev/null)"; then
   if [[ -n "$GH_TOKEN" ]]; then
     record_result "AUTH-001" "PASS" "GitHub CLI token available (gh auth token)" "token_length=${#GH_TOKEN}"
   else
     record_result "AUTH-001" "FAIL" "GitHub CLI token available (gh auth token)" "Token was empty"
   fi
+elif load_active_backend_auth_token; then
+  record_result "AUTH-001" "PASS" "GitHub token available from active backend AuthToken" "token_length=${#GH_TOKEN}"
 else
   record_result "AUTH-001" "FAIL" "GitHub CLI token available (gh auth token)" "gh auth token failed"
 fi
