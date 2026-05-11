@@ -30,8 +30,7 @@ class DaifuParsedResponse:
 class LLMService:
     """Centralized service for LLM interactions"""
 
-    # Standard model configuration
-    DEFAULT_MODEL = "x-ai/grok-4-fast"
+    # Standard generation defaults; model names come from typed env config.
     DEFAULT_TEMPERATURE = 0.6
     DEFAULT_MAX_TOKENS = 4000
     DEFAULT_TIMEOUT = 30
@@ -470,7 +469,7 @@ class LLMService:
 
         Args:
             prompt: The prompt to send to the LLM
-            model: Model to use (defaults to DEFAULT_MODEL)
+            model: Model to use (defaults to configured model env)
             temperature: Temperature for generation (defaults to DEFAULT_TEMPERATURE)
             max_tokens: Maximum tokens to generate (defaults to DEFAULT_MAX_TOKENS)
             timeout: Request timeout in seconds (defaults to DEFAULT_TIMEOUT)
