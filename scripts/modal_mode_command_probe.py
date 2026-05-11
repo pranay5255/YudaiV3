@@ -109,7 +109,17 @@ async def _run(args: argparse.Namespace) -> int:
     session_public_id = args.session_id or f"probe_session_{uuid.uuid4().hex[:12]}"
     sandbox_db_id = args.sandbox_id or f"sbx_probe_{uuid.uuid4().hex[:12]}"
     pipeline_execution_id = args.pipeline_execution_id or f"probe_{uuid.uuid4().hex[:10]}"
-    model_name = args.model_name or os.getenv("MSWEA_MODEL_NAME") or "openrouter/x-ai/grok-4-fast"
+    model_name = args.model_name or os.getenv("MSWEA_MODEL_NAME")
+    if not model_name:
+        openrouter_model = os.getenv("OPENROUTER_MODEL", "").strip()
+        if openrouter_model:
+            model_name = (
+                openrouter_model
+                if openrouter_model.startswith("openrouter/")
+                else f"openrouter/{openrouter_model}"
+            )
+    if not model_name:
+        raise RuntimeError("Set MSWEA_MODEL_NAME or OPENROUTER_MODEL before running mode probe")
     github_token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
 
     print(f"[mode-probe] env_file={args.env_file}")
