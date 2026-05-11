@@ -31,13 +31,18 @@ def _install_import_stubs() -> None:
 _install_import_stubs()
 
 from yudai.config.realtime_flags import RealtimeFeatureFlags  # noqa: E402
-from yudai.models import AuthToken, Base, ChatSession, User  # noqa: E402
+from yudai.config import get_sandbox_config  # noqa: E402
+from yudai.models import AgentExecution, AuthToken, Base, ChatSession, SandboxExecutionEvent, SandboxExecutionRun, User  # noqa: E402
 from yudai.realtime.cache_store import SessionCacheStore  # noqa: E402
 from yudai.realtime.controller_routes import (  # noqa: E402
+    SandboxEventRequest,
+    SandboxCompletionRequest,
+    complete_sandbox_execution,
     delete_sandbox,
     ensure_runtime_for_session,
     get_runtime_for_session,
     get_sandbox,
+    record_sandbox_event,
     resolve_tunnel,
     unified_session_websocket,
 )
@@ -204,6 +209,128 @@ def test_runtime_detail_returns_not_provisioned_when_runtime_absent(db_and_user)
     assert runtime_response.runtime_id is None
     assert runtime_response.sandbox_id is None
     assert runtime_response.identity_key is None
+
+
+def test_sandbox_completion_callback_validates_secret_and_is_idempotent(db_and_user, monkeypatch):
+    db, user, session = db_and_user
+    monkeypatch.setenv("CONTROLLER_CALLBACK_SECRET", "callback-secret")
+    get_sandbox_config.cache_clear()
+
+    execution = AgentExecution(
+        id="exec_callback_mode",
+        session_id=session.id,
+        mode="architect",
+        status="running",
+        execution_plan=["Run Architect"],
+        execution_metadata={"pipeline_execution_id": "exec_pipeline"},
+    )
+    db.add(execution)
+    db.commit()
+
+    request = SandboxCompletionRequest(
+        session_id=session.session_id,
+        sandbox_job_id="sbjob_1",
+        mode_execution_id=execution.id,
+        status="complete",
+        exit_code=0,
+        stdout='{"status":"complete","issue_number":42}\n',
+        stderr="",
+        duration_ms=25,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        complete_sandbox_execution(
+            mode_execution_id=execution.id,
+            request=request,
+            db=db,
+            x_controller_callback_secret="wrong",
+        )
+    assert exc_info.value.status_code == 401
+
+    accepted = complete_sandbox_execution(
+        mode_execution_id=execution.id,
+        request=request,
+        db=db,
+        x_controller_callback_secret="callback-secret",
+    )
+    assert accepted["status"] == "accepted"
+
+    db.expire_all()
+    updated = db.query(AgentExecution).filter(AgentExecution.id == execution.id).one()
+    completion = updated.execution_metadata["sandbox_completion"]
+    assert completion["exit_code"] == 0
+    assert completion["parsed_payload"]["issue_number"] == 42
+
+    duplicate = complete_sandbox_execution(
+        mode_execution_id=execution.id,
+        request=request,
+        db=db,
+        x_controller_callback_secret="callback-secret",
+    )
+    assert duplicate["status"] == "duplicate"
+
+
+def test_sandbox_callbacks_persist_run_and_events(db_and_user, monkeypatch):
+    db, user, session = db_and_user
+    monkeypatch.setenv("CONTROLLER_CALLBACK_SECRET", "callback-secret")
+    get_sandbox_config.cache_clear()
+
+    execution = AgentExecution(
+        id="exec_callback_durable",
+        session_id=session.id,
+        mode="tester",
+        status="running",
+        execution_plan=["Run Tester"],
+        execution_metadata={"pipeline_execution_id": "exec_pipeline_durable"},
+    )
+    db.add(execution)
+    db.commit()
+
+    event_request = SandboxEventRequest(
+        session_id=session.session_id,
+        controller_job_id="ctrljob_durable",
+        sandbox_job_id="sbjob_durable",
+        mode_execution_id=execution.id,
+        attempt=1,
+        sequence=1,
+        event="stdout",
+        data="hello",
+    )
+    accepted = asyncio.run(
+        record_sandbox_event(
+            request=event_request,
+            db=db,
+            x_controller_callback_secret="callback-secret",
+        )
+    )
+    assert accepted["status"] == "accepted"
+
+    completion_request = SandboxCompletionRequest(
+        session_id=session.session_id,
+        controller_job_id="ctrljob_durable",
+        sandbox_job_id="sbjob_durable",
+        mode_execution_id=execution.id,
+        status="complete",
+        exit_code=0,
+        stdout='{"status":"complete","test_branch":"tests"}',
+        stderr="",
+        duration_ms=12,
+        sequence=2,
+    )
+    complete_sandbox_execution(
+        mode_execution_id=execution.id,
+        request=completion_request,
+        db=db,
+        x_controller_callback_secret="callback-secret",
+    )
+
+    run = db.query(SandboxExecutionRun).filter(SandboxExecutionRun.controller_job_id == "ctrljob_durable").one()
+    assert run.status == "complete"
+    assert run.exit_code == 0
+    assert run.parsed_payload["test_branch"] == "tests"
+    event = db.query(SandboxExecutionEvent).filter(SandboxExecutionEvent.controller_job_id == "ctrljob_durable").one()
+    assert event.sequence == 1
+    assert event.data == "hello"
 
 
 def test_terminated_sandbox_returns_hard_error(db_and_user):
