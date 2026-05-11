@@ -41,6 +41,17 @@ def test_sandbox_config_coerces_env(monkeypatch):
     assert config.liveness_timeout_seconds == 2.5
     assert config.env_passthrough_keys == ("OPENROUTER_API_KEY", "MSWEA_MODEL_NAME")
     assert config.env_passthrough_values == (("OPENROUTER_API_KEY", "secret"),)
+    assert config.controller_callback_secret == config.controller_internal_ws_secret
+
+
+def test_sandbox_config_uses_explicit_callback_secret(monkeypatch):
+    monkeypatch.setenv("CONTROLLER_INTERNAL_WS_SECRET", "internal")
+    monkeypatch.setenv("CONTROLLER_CALLBACK_SECRET", "callback")
+
+    config = get_sandbox_config()
+
+    assert config.controller_internal_ws_secret == "internal"
+    assert config.controller_callback_secret == "callback"
 
 
 def test_sandbox_config_rejects_unknown_provider(monkeypatch):
@@ -70,6 +81,24 @@ def test_model_config_uses_openrouter_and_agent_defaults(monkeypatch):
     assert config.agent_model_name == "openrouter/x-ai/test-model"
     assert config.supports_vision is True
     assert config.supports_thinking is False
+
+
+def test_model_config_can_derive_openrouter_model_from_agent_env(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+    monkeypatch.setenv("MSWEA_MODEL_NAME", "openrouter/x-ai/agent-model")
+
+    config = get_model_config()
+
+    assert config.model_name == "x-ai/agent-model"
+    assert config.agent_model_name == "openrouter/x-ai/agent-model"
+
+
+def test_model_config_requires_model_env(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+    monkeypatch.delenv("MSWEA_MODEL_NAME", raising=False)
+
+    with pytest.raises(ValueError, match="OPENROUTER_MODEL or MSWEA_MODEL_NAME"):
+        get_model_config()
 
 
 def test_agent_config_exposes_mode_timeouts(monkeypatch):
