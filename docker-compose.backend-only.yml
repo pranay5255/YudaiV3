@@ -42,6 +42,7 @@ services:
       - DOCKER_COMPOSE=true
       - PYTHONPATH=/app
       - PORT=8000
+      - GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/github_app_private_key
       # Realtime/cache directories must be writable by appuser in-container
       - SANDBOX_GIT_ROOT=/tmp/sandbox_repos
       - SANDBOX_CACHE_ROOT=/tmp/sandbox_cache
@@ -62,6 +63,8 @@ services:
       - huggingface_cache:/tmp/huggingface_cache
     tmpfs:
       - /tmp/github_context_cache:mode=1777
+    secrets:
+      - github_app_private_key
     networks:
       - yudai-network
     healthcheck:
@@ -82,6 +85,57 @@ services:
         max-size: "10m"
         max-file: "3"
         labels: "service=backend,version=v2.0.0"
+    security_opt:
+      - no-new-privileges:true
+
+  # Backend Worker Service
+  backend-worker:
+    build: *backend-build
+    image: yudai-backend:local
+    container_name: yudai-be-worker
+    restart: unless-stopped
+    env_file:
+      - ./backend/docker-compose.defaults.env
+      - path: ./backend/.env.prod
+        required: false
+    environment:
+      - DOCKER_COMPOSE=true
+      - PYTHONPATH=/app
+      - GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/github_app_private_key
+      - SANDBOX_GIT_ROOT=/tmp/sandbox_repos
+      - SANDBOX_CACHE_ROOT=/tmp/sandbox_cache
+      - SANDBOX_ARTIFACT_ROOT=/data/sandbox_artifacts
+    command: ["python", "-m", "yudai.realtime.execution_worker"]
+    depends_on:
+      db:
+        condition: service_healthy
+      modal-preflight:
+        condition: service_completed_successfully
+    volumes:
+      - app_logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - swe_runs:/data/swe_runs
+      - sandbox_artifacts:/data/sandbox_artifacts
+      - transformers_cache:/tmp/transformers_cache
+      - huggingface_cache:/tmp/huggingface_cache
+    tmpfs:
+      - /tmp/github_context_cache:mode=1777
+    secrets:
+      - github_app_private_key
+    networks:
+      - yudai-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import pathlib,sys; sys.exit(0 if b'yudai.realtime.execution_worker' in pathlib.Path('/proc/1/cmdline').read_bytes() else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=backend-worker,version=v2.0.0"
     security_opt:
       - no-new-privileges:true
 
@@ -128,3 +182,7 @@ volumes:
 networks:
   yudai-network:
     driver: bridge
+
+secrets:
+  github_app_private_key:
+    file: ./backend/yudaiv3.2025-09-07.private-key.pem
