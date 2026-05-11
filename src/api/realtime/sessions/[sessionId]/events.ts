@@ -4,7 +4,7 @@ import {
   getRequiredInternalSecretResponse,
   isAuthResult,
   requireAuthenticatedUser,
-} from '../../../_lib/backend';
+} from '../../../_lib/backend.js';
 
 const encoder = new TextEncoder();
 
