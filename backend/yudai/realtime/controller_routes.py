@@ -3,15 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from yudai.auth.github_oauth import get_current_user, validate_internal_middleware_user
 from yudai.config import get_sandbox_config
 from yudai.db.database import get_db
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, WebSocket, status
-from yudai.models import AuthToken, ChatSession, SessionRuntime, User
+from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.attributes import flag_modified
+from yudai.models import (
+    AgentExecution,
+    AuthToken,
+    ChatSession,
+    SandboxExecutionEvent,
+    SandboxExecutionRun,
+    SessionRuntime,
+    User,
+)
+from yudai.utils import utc_now
 from yudai.types import (
     CleanupResponse,
     HeartbeatResponse,
@@ -30,6 +43,38 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["realtime-controller"])
 RUNTIME_STATUS_NOT_PROVISIONED = "not_provisioned"
+_CALLBACK_CHUNK_LIMIT = 16_000
+_CALLBACK_OUTPUT_LIMIT = 64_000
+
+
+class SandboxEventRequest(BaseModel):
+    session_id: str
+    controller_job_id: Optional[str] = None
+    sandbox_job_id: str
+    mode_execution_id: str
+    attempt: int = 1
+    sequence: Optional[int] = None
+    stream: str = "sandbox"
+    event: str
+    data: Optional[str] = None
+    exit_code: Optional[int] = None
+    pid: Optional[int] = None
+    command: Optional[str] = None
+
+
+class SandboxCompletionRequest(BaseModel):
+    session_id: str
+    controller_job_id: Optional[str] = None
+    sandbox_job_id: str
+    mode_execution_id: str
+    attempt: int = 1
+    sequence: Optional[int] = None
+    status: str = "complete"
+    exit_code: int
+    stdout: str = Field(default="")
+    stderr: str = Field(default="")
+    duration_ms: int = 0
+    parsed_payload: Optional[Dict[str, Any]] = None
 
 
 def _to_sandbox_response(sandbox) -> SandboxResponse:
@@ -71,6 +116,87 @@ def _not_provisioned_runtime_response() -> RuntimeResponse:
         completion_detected=False,
         metadata={},
     )
+
+
+def _bounded_text(value: Optional[str], limit: int) -> str:
+    text = value or ""
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+
+def _validate_callback_secret(secret: Optional[str]) -> None:
+    expected_secret = get_sandbox_config().controller_callback_secret
+    if expected_secret and not (
+        secret and hmac.compare_digest(secret, expected_secret)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized sandbox callback",
+        )
+
+
+def _parse_completion_payload(stdout: str, stderr: str) -> Optional[Dict[str, Any]]:
+    for line in reversed(f"{stdout}\n{stderr}".splitlines()):
+        raw = line.strip()
+        if not raw or not raw.startswith("{"):
+            continue
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _controller_job_id_for(mode_execution_id: str, sandbox_job_id: str) -> str:
+    return f"ctrljob_legacy_{mode_execution_id}_{sandbox_job_id}"[:64]
+
+
+def _upsert_sandbox_run_for_callback(
+    db: Session,
+    *,
+    execution: AgentExecution,
+    session_public_id: str,
+    controller_job_id: str,
+    sandbox_job_id: str,
+    attempt: int,
+    status_value: str,
+    sequence: Optional[int],
+) -> Optional[SandboxExecutionRun]:
+    session_obj = execution.session
+    if not isinstance(session_obj, ChatSession):
+        return None
+    metadata = execution.execution_metadata if isinstance(execution.execution_metadata, dict) else {}
+    run = (
+        db.query(SandboxExecutionRun)
+        .filter(SandboxExecutionRun.controller_job_id == controller_job_id)
+        .first()
+    )
+    now = utc_now()
+    if run is None:
+        run = SandboxExecutionRun(
+            controller_job_id=controller_job_id,
+            sandbox_job_id=sandbox_job_id,
+            session_id=session_obj.id,
+            pipeline_execution_id=metadata.get("pipeline_execution_id"),
+            mode_execution_id=execution.id,
+            mode=execution.mode,
+            attempt=max(1, int(attempt or 1)),
+            status=status_value,
+            started_at=now,
+            heartbeat_at=now,
+            last_sequence=int(sequence or 0),
+        )
+        db.add(run)
+        db.flush()
+    else:
+        run.sandbox_job_id = run.sandbox_job_id or sandbox_job_id
+        run.status = status_value
+        run.heartbeat_at = now
+        run.last_sequence = max(run.last_sequence or 0, int(sequence or 0))
+    return run
 
 
 def _get_user_github_token(db: Session, user_id: int) -> Optional[str]:
@@ -336,6 +462,184 @@ def get_runtime_for_session(
         response.identity_key = sandbox.identity_key
         response.token_ttl_seconds = sandbox.tunnel_token_ttl_seconds or 3600
     return response
+
+
+@router.post("/controller/internal/sandbox-events", status_code=status.HTTP_202_ACCEPTED)
+async def record_sandbox_event(
+    request: SandboxEventRequest,
+    db: Session = Depends(get_db),
+    x_controller_callback_secret: Optional[str] = Header(default=None),
+) -> Dict[str, str]:
+    _validate_callback_secret(x_controller_callback_secret)
+
+    execution = (
+        db.query(AgentExecution)
+        .filter(AgentExecution.id == request.mode_execution_id)
+        .first()
+    )
+    session_public_id = request.session_id
+    mode = None
+    pipeline_execution_id = None
+    controller_job_id = request.controller_job_id or _controller_job_id_for(
+        request.mode_execution_id,
+        request.sandbox_job_id,
+    )
+    if execution:
+        mode = execution.mode
+        if isinstance(execution.execution_metadata, dict):
+            pipeline_execution_id = execution.execution_metadata.get("pipeline_execution_id")
+        if execution.session and execution.session.session_id:
+            session_public_id = execution.session.session_id
+        run = _upsert_sandbox_run_for_callback(
+            db,
+            execution=execution,
+            session_public_id=session_public_id,
+            controller_job_id=controller_job_id,
+            sandbox_job_id=request.sandbox_job_id,
+            attempt=request.attempt,
+            status_value="running" if request.event != "exit" else "exiting",
+            sequence=request.sequence,
+        )
+        if run is not None and request.sequence is not None:
+            db.add(
+                SandboxExecutionEvent(
+                    controller_job_id=controller_job_id,
+                    sandbox_job_id=request.sandbox_job_id,
+                    session_id=run.session_id,
+                    mode_execution_id=request.mode_execution_id,
+                    sequence=request.sequence,
+                    stream=request.stream,
+                    event=request.event,
+                    data=_bounded_text(request.data, _CALLBACK_CHUNK_LIMIT) if request.data else None,
+                    event_metadata={
+                        "exit_code": request.exit_code,
+                        "pid": request.pid,
+                        "command": request.command,
+                    },
+                )
+            )
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+        else:
+            db.commit()
+
+    payload: Dict[str, Any] = {
+        "stream": request.stream,
+        "event": request.event,
+        "controller_job_id": controller_job_id,
+        "mode_execution_id": request.mode_execution_id,
+        "execution_id": request.mode_execution_id,
+        "sandbox_job_id": request.sandbox_job_id,
+    }
+    if request.sequence is not None:
+        payload["sequence"] = request.sequence
+    if mode:
+        payload["mode"] = mode
+    if pipeline_execution_id:
+        payload["pipeline_execution_id"] = pipeline_execution_id
+    if request.data:
+        payload["data"] = _bounded_text(request.data, _CALLBACK_CHUNK_LIMIT)
+    if request.exit_code is not None:
+        payload["exit_code"] = request.exit_code
+    if request.pid is not None:
+        payload["pid"] = request.pid
+    if request.command:
+        payload["command"] = request.command
+
+    await get_ws_hub().send_to_session(
+        session_public_id,
+        WSMessageType.SANDBOX_STREAM,
+        payload,
+    )
+    return {"status": "accepted"}
+
+
+@router.post(
+    "/controller/internal/sandbox-executions/{mode_execution_id}/complete",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def complete_sandbox_execution(
+    mode_execution_id: str,
+    request: SandboxCompletionRequest,
+    db: Session = Depends(get_db),
+    x_controller_callback_secret: Optional[str] = Header(default=None),
+) -> Dict[str, str]:
+    _validate_callback_secret(x_controller_callback_secret)
+    if request.mode_execution_id != mode_execution_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="mode_execution_id mismatch",
+        )
+
+    execution = (
+        db.query(AgentExecution)
+        .filter(AgentExecution.id == mode_execution_id)
+        .first()
+    )
+    if not execution:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Execution not found",
+        )
+
+    stdout = _bounded_text(request.stdout, _CALLBACK_OUTPUT_LIMIT)
+    stderr = _bounded_text(request.stderr, _CALLBACK_OUTPUT_LIMIT)
+    parsed_payload = request.parsed_payload or _parse_completion_payload(stdout, stderr)
+    controller_job_id = request.controller_job_id or _controller_job_id_for(
+        mode_execution_id,
+        request.sandbox_job_id,
+    )
+
+    metadata = dict(execution.execution_metadata or {})
+    existing_completion = metadata.get("sandbox_completion")
+    if isinstance(existing_completion, dict) and existing_completion.get("sandbox_job_id") == request.sandbox_job_id:
+        return {"status": "duplicate", "sandbox_job_id": request.sandbox_job_id}
+
+    run = _upsert_sandbox_run_for_callback(
+        db,
+        execution=execution,
+        session_public_id=request.session_id,
+        controller_job_id=controller_job_id,
+        sandbox_job_id=request.sandbox_job_id,
+        attempt=request.attempt,
+        status_value=request.status,
+        sequence=request.sequence,
+    )
+    if run is not None:
+        if run.completed_at is not None and run.sandbox_job_id == request.sandbox_job_id:
+            return {"status": "duplicate", "sandbox_job_id": request.sandbox_job_id}
+        run.status = request.status
+        run.completed_at = utc_now()
+        run.exit_code = request.exit_code
+        run.duration_ms = request.duration_ms
+        run.stdout_tail = stdout
+        run.stderr_tail = stderr
+        run.parsed_payload = parsed_payload
+        run.last_sequence = max(run.last_sequence or 0, int(request.sequence or 0))
+        run.run_metadata = {
+            **(run.run_metadata or {}),
+            "completion_callback_at": utc_now().isoformat(),
+        }
+
+    metadata["sandbox_completion"] = {
+        "session_id": request.session_id,
+        "controller_job_id": controller_job_id,
+        "sandbox_job_id": request.sandbox_job_id,
+        "mode_execution_id": mode_execution_id,
+        "status": request.status,
+        "exit_code": request.exit_code,
+        "stdout": stdout,
+        "stderr": stderr,
+        "duration_ms": request.duration_ms,
+        "parsed_payload": parsed_payload,
+    }
+    metadata["sandbox_job_id"] = request.sandbox_job_id
+    execution.execution_metadata = metadata
+    flag_modified(execution, "execution_metadata")
+    db.commit()
+    return {"status": "accepted", "sandbox_job_id": request.sandbox_job_id}
 
 
 @router.websocket("/controller/sessions/{session_id}/ws/unified")
