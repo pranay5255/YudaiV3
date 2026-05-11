@@ -20,7 +20,7 @@ export const getBackendBaseUrl = (): string => (
     process.env.VITE_AUTH_API_BASE_URL ||
     process.env.VITE_API_BASE_URL ||
     DEFAULT_BACKEND_BASE_URL
-  ).replace(/\/+$/, '')
+  ).trim().replace(/\/+$/, '')
 );
 
 export const getInternalMiddlewareSecret = (): string => (
@@ -72,11 +72,6 @@ export const isAuthResult = (
   value: AuthenticatedRequest | Response
 ): value is AuthenticatedRequest => !(value instanceof Response);
 
-const appendSearch = (path: string, sourceUrl: string): string => {
-  const search = new URL(sourceUrl).search;
-  return search ? `${path}${search}` : path;
-};
-
 export const buildBackendHttpHeaders = (
   auth: AuthenticatedRequest,
   request: Request,
@@ -98,34 +93,6 @@ export const buildBackendHttpHeaders = (
   }
 
   return headers;
-};
-
-export const proxyBackendRequest = async (
-  request: Request,
-  backendPath?: string
-): Promise<Response> => {
-  const auth = await requireAuthenticatedUser(request);
-  if (!isAuthResult(auth)) {
-    return auth;
-  }
-
-  const url = new URL(request.url);
-  const path = backendPath || url.pathname.replace(/^\/api\/proxy/, '') || '/';
-  const target = `${getBackendBaseUrl()}${appendSearch(path, request.url)}`;
-  const method = request.method.toUpperCase();
-  const hasBody = !['GET', 'HEAD'].includes(method);
-  const response = await fetch(target, {
-    method,
-    headers: buildBackendHttpHeaders(auth, request, hasBody),
-    body: hasBody ? request.body : undefined,
-    duplex: hasBody ? 'half' : undefined,
-  } as RequestInit & { duplex?: 'half' });
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: response.headers,
-  });
 };
 
 export const getRequiredInternalSecretResponse = (): Response | null => {
