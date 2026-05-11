@@ -25,6 +25,28 @@ def _str(name: str, default: str) -> str:
     return value or default
 
 
+def _strip_openrouter_prefix(value: str) -> str:
+    return value.removeprefix("openrouter/")
+
+
+def _as_openrouter_agent_model(value: str) -> str:
+    return value if value.startswith("openrouter/") else f"openrouter/{value}"
+
+
+def _resolve_model_names() -> tuple[str, str]:
+    openrouter_model = _optional_str("OPENROUTER_MODEL")
+    agent_model = _optional_str("MSWEA_MODEL_NAME")
+
+    if openrouter_model:
+        model_name = _strip_openrouter_prefix(openrouter_model)
+        return model_name, agent_model or _as_openrouter_agent_model(model_name)
+
+    if agent_model:
+        return _strip_openrouter_prefix(agent_model), agent_model
+
+    raise ValueError("OPENROUTER_MODEL or MSWEA_MODEL_NAME must be set")
+
+
 def _int(name: str, default: int, *, minimum: int = 1) -> int:
     value = os.getenv(name)
     if value is None or not value.strip():
@@ -74,10 +96,9 @@ class ModelConfig:
 
     @classmethod
     def from_env(cls) -> "ModelConfig":
-        default_model = _str("OPENROUTER_MODEL", "x-ai/grok-4-fast")
-        agent_model = _str("MSWEA_MODEL_NAME", f"openrouter/{default_model}")
+        model_name, agent_model = _resolve_model_names()
         return cls(
-            model_name=default_model,
+            model_name=model_name,
             agent_model_name=agent_model,
             supports_thinking=_bool("MODEL_SUPPORTS_THINKING", False),
             supports_vision=_bool("MODEL_SUPPORTS_VISION", False),
