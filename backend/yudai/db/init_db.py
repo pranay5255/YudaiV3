@@ -511,6 +511,84 @@ def create_tables_standalone(engine):
             updated_at TIMESTAMP WITH TIME ZONE
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS agent_execution_leases (
+            lease_id VARCHAR(64) PRIMARY KEY,
+            execution_id VARCHAR(64) NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
+            worker_id VARCHAR(255) NOT NULL,
+            lease_token VARCHAR(128) NOT NULL,
+            attempt INTEGER NOT NULL DEFAULT 1,
+            acquired_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            heartbeat_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            released_at TIMESTAMP WITH TIME ZONE,
+            release_reason VARCHAR(64)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS sandbox_execution_runs (
+            id SERIAL PRIMARY KEY,
+            controller_job_id VARCHAR(64) NOT NULL UNIQUE,
+            sandbox_job_id VARCHAR(64),
+            session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+            pipeline_execution_id VARCHAR(64),
+            mode_execution_id VARCHAR(64) NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
+            mode VARCHAR(32),
+            attempt INTEGER NOT NULL DEFAULT 1,
+            status VARCHAR(32) NOT NULL DEFAULT 'starting',
+            command TEXT,
+            cwd VARCHAR(1024),
+            started_at TIMESTAMP WITH TIME ZONE NOT NULL,
+            heartbeat_at TIMESTAMP WITH TIME ZONE,
+            completed_at TIMESTAMP WITH TIME ZONE,
+            last_sequence INTEGER NOT NULL DEFAULT 0,
+            exit_code INTEGER,
+            duration_ms INTEGER,
+            stdout_tail TEXT,
+            stderr_tail TEXT,
+            parsed_payload JSONB,
+            run_metadata JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS sandbox_execution_events (
+            id SERIAL PRIMARY KEY,
+            controller_job_id VARCHAR(64) NOT NULL,
+            sandbox_job_id VARCHAR(64) NOT NULL,
+            session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+            mode_execution_id VARCHAR(64) NOT NULL REFERENCES agent_executions(id) ON DELETE CASCADE,
+            sequence INTEGER NOT NULL,
+            stream VARCHAR(32) NOT NULL DEFAULT 'sandbox',
+            event VARCHAR(64) NOT NULL,
+            data TEXT,
+            event_metadata JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(controller_job_id, sequence)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS agent_decision_steps (
+            id VARCHAR(64) PRIMARY KEY,
+            session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+            pipeline_execution_id VARCHAR(64) NOT NULL,
+            mode_execution_id VARCHAR(64),
+            step_index INTEGER NOT NULL,
+            idempotency_key VARCHAR(128) NOT NULL UNIQUE,
+            status VARCHAR(32) NOT NULL DEFAULT 'complete',
+            selected_action VARCHAR(64) NOT NULL,
+            objective TEXT,
+            reason TEXT,
+            confidence FLOAT,
+            planner_input JSONB,
+            planner_output JSONB,
+            linked_execution_id VARCHAR(64),
+            user_message_id VARCHAR(255),
+            error_message TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+        """,
     ]
 
     # Indexes matching models.py relationships and performance requirements
@@ -638,6 +716,23 @@ def create_tables_standalone(engine):
         "CREATE INDEX IF NOT EXISTS idx_agent_executions_mode ON agent_executions(mode)",
         "CREATE INDEX IF NOT EXISTS idx_agent_executions_status ON agent_executions(status)",
         "CREATE INDEX IF NOT EXISTS idx_agent_executions_created_at ON agent_executions(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_execution_leases_execution_id ON agent_execution_leases(execution_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_execution_leases_worker_id ON agent_execution_leases(worker_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_execution_leases_expires_at ON agent_execution_leases(expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_sandbox_runs_session_id ON sandbox_execution_runs(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sandbox_runs_pipeline_execution_id ON sandbox_execution_runs(pipeline_execution_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sandbox_runs_mode_execution_id ON sandbox_execution_runs(mode_execution_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sandbox_runs_sandbox_job_id ON sandbox_execution_runs(sandbox_job_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sandbox_runs_status ON sandbox_execution_runs(status)",
+        "CREATE INDEX IF NOT EXISTS idx_sandbox_events_controller_job_id ON sandbox_execution_events(controller_job_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sandbox_events_sandbox_job_id ON sandbox_execution_events(sandbox_job_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sandbox_events_session_id ON sandbox_execution_events(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sandbox_events_mode_execution_id ON sandbox_execution_events(mode_execution_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sandbox_events_created_at ON sandbox_execution_events(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_decision_steps_session_id ON agent_decision_steps(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_decision_steps_pipeline_execution_id ON agent_decision_steps(pipeline_execution_id)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_decision_steps_status ON agent_decision_steps(status)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_decision_steps_created_at ON agent_decision_steps(created_at)",
     ]
 
     with engine.connect() as conn:
