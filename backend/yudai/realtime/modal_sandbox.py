@@ -225,6 +225,10 @@ class RealtimeModalSandbox:
             sandbox_env["CONTROLLER_INTERNAL_WS_SECRET"] = (
                 sandbox_config.controller_internal_ws_secret
             )
+        if sandbox_config.controller_callback_secret:
+            sandbox_env["CONTROLLER_CALLBACK_SECRET"] = (
+                sandbox_config.controller_callback_secret
+            )
 
         # GitHub token is passed at sandbox creation for repo cloning.
         # Per-solve tokens are forwarded via the exec broker env dict.
