@@ -679,7 +679,8 @@ def test_create_github_issue_seeds_existing_issue_and_asks_before_execution(
         .filter(UserQuestion.question_id == response.confirmation_question_id)
         .one()
     )
-    assert question.question_metadata["origin"] == "github_issue_created_confirmation"
+    assert question.question_metadata["origin"] == "stage_gate"
+    assert question.question_metadata["next_mode"] == "architect"
     assert lifecycle_calls[0]["issue_number"] == 77
 
 
@@ -873,6 +874,14 @@ def test_frontend_browser_check_tool_wraps_mode_service(db_and_user, monkeypatch
         "get_realtime_feature_flags",
         lambda: _flags(orchestrator_enabled=True),
     )
+    session.mode_metadata = {
+        "approved_stage_tool": {
+            "question_id": "q_approved_architect",
+            "tool_name": "run_architect_mode",
+            "objective": "Resolve issue #42 with Architect",
+        }
+    }
+    db.commit()
     captured: dict[str, object] = {}
 
     class DummyModeToolService:
@@ -928,6 +937,14 @@ def test_stage_tool_returns_json_safe_execution_response(db_and_user, monkeypatc
         "get_realtime_feature_flags",
         lambda: _flags(orchestrator_enabled=True),
     )
+    session.mode_metadata = {
+        "approved_stage_tool": {
+            "question_id": "q_approved_architect",
+            "tool_name": "run_architect_mode",
+            "objective": "Resolve issue #42 with Architect",
+        }
+    }
+    db.commit()
     captured: dict[str, object] = {}
 
     class DummyModeToolService:
@@ -980,6 +997,31 @@ def test_stage_tool_returns_json_safe_execution_response(db_and_user, monkeypatc
         "user_id": user.id,
         "objective": "Resolve issue #42 with Architect",
     }
+
+
+def test_stage_tool_rejects_without_answered_approval(db_and_user, monkeypatch):
+    db, user, session = db_and_user
+    monkeypatch.setattr(
+        session_routes,
+        "get_realtime_feature_flags",
+        lambda: _flags(orchestrator_enabled=True),
+    )
+
+    with pytest.raises(session_routes.HTTPException) as exc_info:
+        asyncio.run(
+            session_routes.execute_session_stage_tool(
+                session_id=session.session_id,
+                request=StageToolRequest(
+                    tool_name="run_architect_mode",
+                    objective="Resolve issue #42 with Architect",
+                ),
+                db=db,
+                current_user=user,
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "approval card" in str(exc_info.value.detail)
 
 
 def test_create_github_issue_tool_requires_pending_issue_questions_answered(
@@ -1059,14 +1101,16 @@ def test_answer_issue_confirmation_starts_daifu_stage_tool_sequence(db_and_user,
         mode="architect",
         question_text="Start workflow?",
         options=[
-            {"id": "start_workflow", "label": "Start workflow"},
-            {"id": "not_now", "label": "Not now"},
+            {"id": "start_next_stage", "label": "Start Architect"},
+            {"id": "stop_here", "label": "Stop here"},
         ],
         multi_select=False,
         status=UserQuestionStatus.PENDING.value,
         question_metadata={
-            "origin": "github_issue_created_confirmation",
+            "origin": "stage_gate",
             "pending_tool": "run_architect_mode",
+            "next_mode": "architect",
+            "objective": objective,
         },
     )
     session.mode_status = "waiting_for_input"
@@ -1089,10 +1133,11 @@ def test_answer_issue_confirmation_starts_daifu_stage_tool_sequence(db_and_user,
     captured: dict[str, object] = {}
 
     class DummyModeToolService:
-        async def run_all_stage_tools(self, db, *, session, user_id, objective):
+        async def run_stage_tool(self, db, *, session, user_id, tool_name, objective):
             session.mode_status = "running"
-            captured["run_all_stage_tools"] = {
+            captured["run_stage_tool"] = {
                 "session_id": session.session_id,
+                "tool_name": tool_name,
                 "user_id": user_id,
                 "objective": objective,
             }
@@ -1113,7 +1158,7 @@ def test_answer_issue_confirmation_starts_daifu_stage_tool_sequence(db_and_user,
             session_id=session.session_id,
             question_id=question.question_id,
             request=AnswerQuestionRequest(
-                selected_option_ids=["start_workflow"],
+                selected_option_ids=["start_next_stage"],
                 resume_execution=True,
             ),
             db=db,
@@ -1126,4 +1171,96 @@ def test_answer_issue_confirmation_starts_daifu_stage_tool_sequence(db_and_user,
     assert response.resumed_mode == "architect"
     assert response.mode_status == "running"
     assert question.status == UserQuestionStatus.ANSWERED.value
-    assert captured["run_all_stage_tools"]["objective"] == objective
+    assert captured["run_stage_tool"]["tool_name"] == "run_architect_mode"
+    assert captured["run_stage_tool"]["objective"] == objective
+
+
+def test_answer_tester_stage_gate_runs_only_tester(db_and_user, monkeypatch):
+    db, user, session = db_and_user
+    session.architect_completed_at = session_routes.utc_now()
+    session.current_mode = "tester"
+    session.mode_status = "waiting_for_input"
+    objective = "Continue issue #77 into Tester."
+    question = UserQuestion(
+        question_id="q_start_tester",
+        session_id=session.id,
+        user_id=user.id,
+        mode="tester",
+        question_text="Architect completed. Start Tester?",
+        options=[
+            {"id": "start_next_stage", "label": "Start Tester"},
+            {"id": "add_notes", "label": "Add notes or constraints"},
+            {"id": "stop_here", "label": "Stop here"},
+        ],
+        multi_select=False,
+        status=UserQuestionStatus.PENDING.value,
+        question_metadata={
+            "origin": "stage_gate",
+            "from_mode": "architect",
+            "next_mode": "tester",
+            "pending_tool": "run_tester_mode",
+            "objective": objective,
+        },
+    )
+    session.mode_metadata = {
+        "pending_question_ids": [question.question_id],
+        "pending_daifu_tool": "run_tester_mode",
+        "pending_stage_tool_objective": objective,
+    }
+    db.add(question)
+    db.commit()
+
+    monkeypatch.setattr(
+        session_routes,
+        "get_realtime_feature_flags",
+        lambda: _flags(orchestrator_enabled=True),
+    )
+
+    calls: list[dict[str, object]] = []
+
+    class DummyModeToolService:
+        async def run_stage_tool(self, db, *, session, user_id, tool_name, objective):
+            calls.append(
+                {
+                    "session_id": session.session_id,
+                    "tool_name": tool_name,
+                    "user_id": user_id,
+                    "objective": objective,
+                }
+            )
+            session.mode_status = "running"
+            return {
+                "execution_id": "exec_tester_only",
+                "mode": "tester",
+                "status": "running",
+            }
+
+    monkeypatch.setattr(
+        session_routes,
+        "get_daifu_mode_tool_service",
+        lambda: DummyModeToolService(),
+    )
+
+    response = asyncio.run(
+        session_routes.answer_session_question(
+            session_id=session.session_id,
+            question_id=question.question_id,
+            request=AnswerQuestionRequest(
+                selected_option_ids=["start_next_stage"],
+                resume_execution=True,
+            ),
+            db=db,
+            current_user=user,
+        )
+    )
+
+    assert response.resumed is True
+    assert response.resumed_mode == "tester"
+    assert calls == [
+        {
+            "session_id": session.session_id,
+            "tool_name": "run_tester_mode",
+            "user_id": user.id,
+            "objective": objective,
+        }
+    ]
