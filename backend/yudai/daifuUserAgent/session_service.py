@@ -185,6 +185,11 @@ class SessionService:
                     status=question.status,
                     asked_at=question.asked_at,
                     answered_at=question.answered_at,
+                    question_metadata=(
+                        question.question_metadata
+                        if isinstance(question.question_metadata, dict)
+                        else None
+                    ),
                 )
             )
 
