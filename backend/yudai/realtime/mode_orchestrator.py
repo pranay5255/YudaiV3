@@ -31,6 +31,11 @@ from yudai.models import (
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
+from yudai.daifuUserAgent.stage_gates import (
+    ensure_stage_gate_question,
+    stage_gate_payload,
+    summarize_stage_result,
+)
 from yudai.utils import utc_now
 
 from .lifecycle import (
@@ -39,7 +44,7 @@ from .lifecycle import (
     get_realtime_lifecycle_service,
     get_sandbox_exec_broker,
 )
-from .autonomy_planner import AutonomyDecision, get_daifu_autonomy_planner
+from .autonomy_planner import AutonomyDecision
 from .modal_preflight import wait_for_sandbox_healthcheck
 from .modal_sandbox import (
     SANDBOX_MSWEA_CONFIG_ROOT,
@@ -451,6 +456,8 @@ class SessionExecutionOrchestrator:
         db: Session,
         *,
         session: ChatSession,
+        source: str = "emergency_cancel",
+        reason: Optional[str] = None,
     ) -> Dict[str, Any]:
         active_execution = self._get_active_execution(session)
         task = self._session_tasks.get(session.session_id)
@@ -466,7 +473,13 @@ class SessionExecutionOrchestrator:
                 "status": SessionModeStatus.CANCELLED.value,
                 "completed_at": utc_now().isoformat(),
                 "cancel_requested": True,
-                "detail": "Execution cancellation requested",
+                "cancel_source": source,
+                "cancel_reason": reason,
+                "detail": reason or (
+                    "Emergency cancellation requested"
+                    if source == "emergency_cancel"
+                    else "Execution cancellation requested"
+                ),
             },
         )
         session.mode_status = SessionModeStatus.CANCELLED.value
@@ -481,6 +494,12 @@ class SessionExecutionOrchestrator:
         if execution_row:
             execution_row.status = SessionModeStatus.CANCELLED.value
             execution_row.completed_at = utc_now()
+            execution_metadata = dict(execution_row.execution_metadata or {})
+            execution_metadata["cancel_source"] = source
+            execution_metadata["cancel_reason"] = reason
+            execution_metadata["cancel_requested_at"] = utc_now().isoformat()
+            execution_row.execution_metadata = execution_metadata
+            flag_modified(execution_row, "execution_metadata")
 
         sandbox_job_id = None
         mode_execution_id = str((active_execution or {}).get("current_mode_execution_id") or "")
@@ -492,8 +511,13 @@ class SessionExecutionOrchestrator:
         if mode_execution:
             mode_execution.status = SessionModeStatus.CANCELLED.value
             mode_execution.completed_at = utc_now()
-            if isinstance(mode_execution.execution_metadata, dict):
-                sandbox_job_id = mode_execution.execution_metadata.get("sandbox_job_id")
+            mode_metadata = dict(mode_execution.execution_metadata or {})
+            sandbox_job_id = mode_metadata.get("sandbox_job_id")
+            mode_metadata["cancel_source"] = source
+            mode_metadata["cancel_reason"] = reason
+            mode_metadata["cancel_requested_at"] = utc_now().isoformat()
+            mode_execution.execution_metadata = mode_metadata
+            flag_modified(mode_execution, "execution_metadata")
         if not sandbox_job_id and execution_row and isinstance(execution_row.execution_metadata, dict):
             sandbox_job_id = execution_row.execution_metadata.get("sandbox_job_id")
         db.commit()
@@ -514,7 +538,12 @@ class SessionExecutionOrchestrator:
                 "mode": session.current_mode or self._next_mode_for_session(session),
                 "state": SessionModeStatus.CANCELLED.value,
                 "execution_id": execution_id or None,
-                "detail": "Execution cancelled",
+                "detail": reason or (
+                    "Emergency cancellation requested"
+                    if source == "emergency_cancel"
+                    else "Execution cancelled"
+                ),
+                "source": source,
             },
         )
         return self.get_execution_status(db, session=session)
@@ -564,7 +593,6 @@ class SessionExecutionOrchestrator:
         objective: str,
         max_modes: Optional[int] = None,
     ) -> None:
-        del max_modes  # Stage tools now auto-chain through the backend autonomy planner.
         lock = self._session_locks.setdefault(session_public_id, asyncio.Lock())
         async with lock:
             db = SessionLocal()
@@ -573,7 +601,6 @@ class SessionExecutionOrchestrator:
             pipeline_execution: Optional[AgentExecution] = None
             completed_modes: List[str] = []
             step_index = 0
-            action_history: List[str] = []
             max_steps = max(1, int(os.getenv("DAIFU_AUTONOMY_MAX_STEPS", "8")))
             max_seconds = max(60, int(os.getenv("DAIFU_AUTONOMY_MAX_SECONDS", "14400")))
             deadline = asyncio.get_running_loop().time() + max_seconds
@@ -810,257 +837,32 @@ class SessionExecutionOrchestrator:
                         },
                     )
 
-                    remaining_after_run = self._remaining_modes(session)
-                    self._set_mode_state(
-                        session,
-                        mode=remaining_after_run[0] if remaining_after_run else SessionMode.COMPLETE.value,
-                        mode_status=SessionModeStatus.DECIDING.value,
-                    )
-                    self._update_active_execution(
-                        session,
-                        execution_id=execution_id,
-                        mode=mode,
-                        status=SessionModeStatus.DECIDING.value,
-                        current_mode_execution_id=None,
-                        detail=f"{mode.capitalize()} mode complete; deciding next action",
-                    )
-                    if pipeline_execution:
-                        pipeline_execution.status = SessionModeStatus.DECIDING.value
-                    db.commit()
-
-                    await self.ws_hub.send_to_session(
-                        session_public_id,
-                        WSMessageType.MODE_EVENT,
-                        {
-                            "mode": mode,
-                            "state": SessionModeStatus.DECIDING.value,
-                            "execution_id": execution_id,
-                            "mode_execution_id": current_mode_execution.id,
-                            "detail": "Deciding next action",
-                        },
-                    )
-
-                    decision = await get_daifu_autonomy_planner().decide_next_action(
-                        db,
-                        session=session,
-                        pipeline_execution_id=execution_id,
-                        objective=objective,
-                        completed_mode=mode,
-                        result=result,
-                        remaining_modes=remaining_after_run,
-                        step_index=step_index,
-                    )
-                    action_history.append(decision.action)
-                    if len(action_history) >= 3 and len(set(action_history[-3:])) == 1:
-                        decision = AutonomyDecision(
-                            action="stop",
-                            objective=decision.objective,
-                            reason="Stopped after repeated identical planner actions.",
-                            user_visible_summary="I stopped the autonomous loop because the planner repeated the same action.",
-                            questions=[],
-                            todo_items=decision.todo_items,
-                            confidence=1.0,
-                            raw_output={"forced_stop": "repeated_action", "last_decision": decision.raw_output},
-                            source="safety",
-                        )
-                    decision = self._validate_autonomy_decision(
-                        decision,
-                        remaining_modes=remaining_after_run,
-                        objective=objective,
-                    )
-                    self._record_autonomy_decision(
-                        db,
-                        session=session,
-                        pipeline_execution_id=execution_id,
-                        mode_execution_id=current_mode_execution.id,
-                        step_index=step_index,
-                        decision=decision,
-                    )
-                    if pipeline_execution:
-                        pipeline_metadata = dict(pipeline_execution.execution_metadata or {})
-                        pipeline_metadata["last_autonomy_decision"] = decision.raw_output
-                        pipeline_metadata["last_autonomy_action"] = decision.action
-                        pipeline_execution.execution_metadata = pipeline_metadata
-                        flag_modified(pipeline_execution, "execution_metadata")
-                    db.commit()
-
-                    if decision.action == "ask_user":
-                        question_ids: List[str] = []
-                        for prompt in decision.questions:
-                            prompt_text = str(prompt).strip()
-                            if not prompt_text:
-                                continue
-                            question = UserQuestion(
-                                question_id=f"q_{uuid.uuid4().hex[:10]}",
-                                session_id=session.id,
-                                user_id=user_id,
-                                mode=mode,
-                                question_text=prompt_text,
-                                options=[],
-                                multi_select=False,
-                                status=UserQuestionStatus.PENDING.value,
-                                question_metadata={
-                                    "origin": "autonomy_planner",
-                                    "mode_execution_id": current_mode_execution.id,
-                                    "pipeline_execution_id": execution_id,
-                                },
-                            )
-                            db.add(question)
-                            db.flush()
-                            question_ids.append(question.question_id)
-                            await self.ws_hub.send_to_session(
-                                session.session_id,
-                                WSMessageType.AGENT_QUESTION,
-                                {
-                                    "question_id": question.question_id,
-                                    "question_text": question.question_text,
-                                    "multi_select": False,
-                                    "options": [],
-                                },
-                            )
-                        metadata = dict(session.mode_metadata or {})
-                        if question_ids:
-                            pending_ids = [
-                                str(item)
-                                for item in (metadata.get("pending_question_ids") or [])
-                                if str(item).strip()
-                            ]
-                            pending_ids.extend(question_id for question_id in question_ids if question_id not in pending_ids)
-                            metadata["pending_question_ids"] = pending_ids
-                            metadata["last_question_id"] = question_ids[-1]
-                        metadata["pending_resume_objective"] = objective
-                        pending_next_mode = self._next_mode_for_session(session)
-                        if pending_next_mode != SessionMode.COMPLETE.value:
-                            metadata["pending_daifu_tool"] = f"run_{pending_next_mode}_mode"
-                        session.mode_metadata = metadata
-                        flag_modified(session, "mode_metadata")
-                        self._set_mode_state(
-                            session,
-                            mode=mode,
-                            mode_status=SessionModeStatus.WAITING_FOR_INPUT.value,
-                        )
-                        self._update_active_execution(
-                            session,
-                            execution_id=execution_id,
-                            status=SessionModeStatus.WAITING_FOR_INPUT.value,
-                            waiting_for_input=True,
-                            current_mode_execution_id=None,
-                            detail=decision.user_visible_summary,
-                        )
-                        if pipeline_execution:
-                            pipeline_execution.status = SessionModeStatus.WAITING_FOR_INPUT.value
-                            pipeline_execution.output_summary = {
-                                "status": SessionModeStatus.WAITING_FOR_INPUT.value,
-                                "questions": decision.questions,
-                            }
-                        db.commit()
-                        await self._generate_execution_followup(
-                            db,
-                            session=session,
-                            execution=current_mode_execution,
-                            mode=mode,
-                            status=SessionModeStatus.WAITING_FOR_INPUT.value,
-                            result={"questions": decision.questions, "todo_items": decision.todo_items},
-                            detail=decision.user_visible_summary,
-                            pipeline_execution_id=execution_id,
-                        )
-                        return
-
-                    if decision.action == "stop":
-                        await self._complete_pipeline(
+                    remaining_after_stage = self._remaining_modes(session)
+                    if remaining_after_stage:
+                        await self._pause_for_stage_gate(
                             db,
                             session=session,
                             pipeline_execution=pipeline_execution,
-                            execution_id=execution_id,
-                            completed_modes=completed_modes,
-                            detail=decision.user_visible_summary or "Workflow complete",
-                        )
-                        break
-
-                    if decision.action == BROWSER_CHECK_TOOL_NAME:
-                        browser_execution = self._create_execution_row(
-                            db,
-                            session=session,
-                            mode=BROWSER_CHECK_MODE,
-                            objective=decision.objective or objective,
+                            mode_execution=current_mode_execution,
                             pipeline_execution_id=execution_id,
+                            user_id=user_id,
+                            completed_mode=mode,
+                            next_mode=remaining_after_stage[0],
+                            objective=objective,
+                            result=result,
+                            detail=f"{mode.capitalize()} mode complete",
                         )
-                        current_mode_execution = browser_execution
-                        self._set_mode_state(
-                            session,
-                            mode=BROWSER_CHECK_MODE,
-                            mode_status=SessionModeStatus.RUNNING.value,
-                        )
-                        self._update_active_execution(
-                            session,
-                            execution_id=execution_id,
-                            mode=BROWSER_CHECK_MODE,
-                            status=SessionModeStatus.RUNNING.value,
-                            plan=browser_execution.execution_plan or [],
-                            current_mode_execution_id=browser_execution.id,
-                            detail="Browser check running",
-                        )
-                        db.commit()
-                        browser_result = await self._execute_browser_check(
-                            db,
-                            session=session,
-                            execution=browser_execution,
-                            objective=decision.objective or objective,
-                        )
-                        if browser_result.get("exit_code", 1) != 0:
-                            raise RuntimeError(
-                                "Browser check failed with "
-                                f"exit_code={browser_result.get('exit_code')}"
-                            )
-                        artifact = await self._export_browser_check_artifact(
-                            db,
-                            session=session,
-                            execution_id=browser_execution.id,
-                            result=browser_result,
-                        )
-                        if artifact:
-                            browser_result["artifact"] = artifact
-                        browser_execution.status = SessionModeStatus.COMPLETE.value
-                        browser_execution.completed_at = utc_now()
-                        browser_execution.output_summary = browser_result
-                        self._record_browser_check_metadata(
-                            session,
-                            execution_id=browser_execution.id,
-                            status=SessionModeStatus.COMPLETE.value,
-                            objective=decision.objective or objective,
-                            result=browser_result,
-                            artifact=artifact,
-                        )
-                        self._create_browser_check_context_card(
-                            db,
-                            session=session,
-                            result=browser_result,
-                            artifact=artifact,
-                        )
-                        self._update_active_execution(
-                            session,
-                            execution_id=execution_id,
-                            mode=BROWSER_CHECK_MODE,
-                            status=SessionModeStatus.RUNNING.value,
-                            current_mode_execution_id=None,
-                            detail="Browser check complete",
-                        )
-                        db.commit()
-                        completed_modes.append(BROWSER_CHECK_MODE)
-                        await self._generate_execution_followup(
-                            db,
-                            session=session,
-                            execution=browser_execution,
-                            mode=BROWSER_CHECK_MODE,
-                            status=SessionModeStatus.COMPLETE.value,
-                            result=browser_result,
-                            detail="Browser check complete",
-                            pipeline_execution_id=execution_id,
-                        )
-                        next_mode = SessionMode.COMPLETE.value
-                        continue
+                        return
 
-                    next_mode = decision.workflow_mode or (remaining_after_run[0] if remaining_after_run else SessionMode.COMPLETE.value)
+                    await self._complete_pipeline(
+                        db,
+                        session=session,
+                        pipeline_execution=pipeline_execution,
+                        execution_id=execution_id,
+                        completed_modes=completed_modes,
+                        detail="Workflow complete",
+                    )
+                    break
 
                 else:
                     raise RuntimeError("Autonomous workflow stopped after reaching the configured step or time budget")
@@ -3291,6 +3093,71 @@ class SessionExecutionOrchestrator:
                 },
                 planner_output=decision.raw_output,
             )
+        )
+
+    async def _pause_for_stage_gate(
+        self,
+        db: Session,
+        *,
+        session: ChatSession,
+        pipeline_execution: Optional[AgentExecution],
+        mode_execution: AgentExecution,
+        pipeline_execution_id: str,
+        user_id: int,
+        completed_mode: str,
+        next_mode: str,
+        objective: str,
+        result: Dict[str, Any],
+        detail: str,
+    ) -> None:
+        summary = summarize_stage_result(completed_mode, result, detail=detail)
+        question = ensure_stage_gate_question(
+            db,
+            session=session,
+            user_id=user_id,
+            from_mode=completed_mode,
+            next_mode=next_mode,
+            objective=objective,
+            execution_id=pipeline_execution_id,
+            mode_execution_id=mode_execution.id,
+            summary=summary,
+        )
+        self._update_active_execution(
+            session,
+            execution_id=pipeline_execution_id,
+            mode=next_mode,
+            status=SessionModeStatus.WAITING_FOR_INPUT.value,
+            waiting_for_input=True,
+            current_mode_execution_id=None,
+            detail=summary,
+        )
+        if pipeline_execution:
+            pipeline_execution.status = SessionModeStatus.WAITING_FOR_INPUT.value
+            pipeline_execution.completed_at = utc_now()
+            pipeline_execution.output_summary = {
+                "status": SessionModeStatus.WAITING_FOR_INPUT.value,
+                "completed_mode": completed_mode,
+                "next_mode": next_mode,
+                "question_id": question.question_id,
+                "summary": summary,
+            }
+        db.commit()
+
+        await self.ws_hub.send_to_session(
+            session.session_id,
+            WSMessageType.AGENT_QUESTION,
+            stage_gate_payload(question),
+        )
+        await self.ws_hub.send_to_session(
+            session.session_id,
+            WSMessageType.MODE_EVENT,
+            {
+                "mode": next_mode,
+                "state": SessionModeStatus.WAITING_FOR_INPUT.value,
+                "execution_id": pipeline_execution_id,
+                "mode_execution_id": mode_execution.id,
+                "detail": summary,
+            },
         )
 
     async def _complete_pipeline(
