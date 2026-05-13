@@ -344,6 +344,7 @@ export interface UserQuestionResponse {
   status: string;
   asked_at: string;
   answered_at?: string;
+  question_metadata?: Record<string, unknown>;
 }
 
 export interface AskQuestionRequest {
@@ -429,6 +430,19 @@ export interface CancelExecutionResponse {
   session_id: string;
   status: string;
   message: string;
+}
+
+export interface ExecutionTraceEvent {
+  id: string;
+  type: string;
+  ts: string;
+  payload: Record<string, unknown>;
+  execution_id?: string | null;
+  mode_execution_id?: string | null;
+  mode?: string | null;
+  stream?: string | null;
+  severity: string;
+  sequence: number;
 }
 
 export interface CreateIssueWithContextRequest {
@@ -724,6 +738,7 @@ export interface AgentQuestionInfo {
   question_text: string;
   options: UserQuestionOption[];
   multi_select?: boolean;
+  question_metadata?: Record<string, unknown>;
 }
 
 // ============================================================================
