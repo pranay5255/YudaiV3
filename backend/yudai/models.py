@@ -1803,6 +1803,7 @@ class UserQuestionResponse(BaseModel):
     status: str
     asked_at: datetime
     answered_at: Optional[datetime] = None
+    question_metadata: Optional[Dict[str, Any]] = None
 
 
 class AskQuestionResponse(BaseModel):
@@ -1833,6 +1834,10 @@ class FrontendBrowserCheckToolRequest(BaseModel):
 
 class CreateGitHubIssueToolRequest(BaseModel):
     issue_id: str = Field(..., min_length=1, max_length=255)
+
+
+class StopExecutionRequest(BaseModel):
+    reason: str = Field(default="User asked Daifu to stop execution.", max_length=1000)
 
 
 class ExecutionArtifactResponse(BaseModel):
@@ -1867,6 +1872,19 @@ class CancelExecutionResponse(BaseModel):
     session_id: str
     status: str
     message: str
+
+
+class ExecutionTraceEventResponse(BaseModel):
+    id: str
+    type: str
+    ts: datetime
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    execution_id: Optional[str] = None
+    mode_execution_id: Optional[str] = None
+    mode: Optional[str] = None
+    stream: Optional[str] = None
+    severity: str = "info"
+    sequence: int = 0
 
 
 # ============================================================================
