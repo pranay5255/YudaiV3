@@ -26,6 +26,12 @@ export const UserQuestionPrompt: React.FC<UserQuestionPromptProps> = ({
     setSubmitError(null);
   }, [question.question_id]);
 
+  const metadata = question.question_metadata || {};
+  const isStageGate = metadata.origin === 'stage_gate';
+  const summary = typeof metadata.summary === 'string' ? metadata.summary : '';
+  const recommendation = typeof metadata.recommendation === 'string' ? metadata.recommendation : '';
+  const nextMode = typeof metadata.next_mode === 'string' ? metadata.next_mode : '';
+
   const toggleOption = (optionId: string) => {
     setSubmitError(null);
     setSelectedOptionIds((previous) => {
@@ -58,13 +64,27 @@ export const UserQuestionPrompt: React.FC<UserQuestionPromptProps> = ({
   };
 
   return (
-    <div className="mx-4 mt-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+    <div className="mx-4 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
       <div className="flex items-center gap-2 mb-2">
         <HelpCircle className="w-4 h-4 text-amber-400" />
-        <p className="text-sm font-medium text-amber-300">Agent Question</p>
+        <p className="text-sm font-medium text-amber-300">
+          {isStageGate ? 'Stage Gate' : 'Agent Question'}
+        </p>
+        {isStageGate && nextMode && (
+          <span className="rounded-md border border-amber-500/30 px-2 py-0.5 text-[11px] uppercase text-amber-200">
+            {nextMode}
+          </span>
+        )}
       </div>
 
       <p className="text-sm text-fg mb-3">{question.question_text}</p>
+
+      {isStageGate && (summary || recommendation) && (
+        <div className="mb-3 grid gap-2 rounded-md border border-amber-500/20 bg-black/20 p-3 text-xs leading-5 text-amber-50/90">
+          {summary && <p>{summary}</p>}
+          {recommendation && <p className="text-amber-200">{recommendation}</p>}
+        </div>
+      )}
 
       {question.options.length > 0 && (
         <div className="space-y-2 mb-3">
@@ -96,7 +116,7 @@ export const UserQuestionPrompt: React.FC<UserQuestionPromptProps> = ({
           setSubmitError(null);
         }}
         rows={2}
-        placeholder="Optional additional context"
+        placeholder={isStageGate ? 'Notes or constraints' : 'Optional additional context'}
         className="w-full mb-3 px-3 py-2 text-sm rounded-md bg-zinc-900 border border-zinc-700 text-fg placeholder:text-fg/40"
       />
 
