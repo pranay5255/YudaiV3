@@ -1056,6 +1056,10 @@ export function AgentWorkbench(): JSX.Element {
     await createSessionFromSelection({ prepareRuntime: true });
   }
 
+  async function handleChatSessionSubmit(): Promise<void> {
+    await createSessionFromSelection();
+  }
+
   async function handleRuntimeRetry(): Promise<void> {
     if (!currentSession || !selectedRepository || !selectedBranch) {
       pushNotice('error', 'Start a session before preparing runtime.');
@@ -1222,6 +1226,7 @@ export function AgentWorkbench(): JSX.Element {
           isLoadingRepos={isLoadingRepos}
           isRepositoryMenuOpen={isRepositoryMenuOpen}
           onBranchChange={setSelectedBranch}
+          onCreateChatSession={() => void handleChatSessionSubmit()}
           onCreateSession={() => void handleSessionSubmit()}
           onRepositoryMenuChange={setIsRepositoryMenuOpen}
           onRepositorySelect={handleRepositorySelect}
@@ -1399,6 +1404,7 @@ function RepositoryControlBar({
   isLoadingRepos,
   isRepositoryMenuOpen,
   onBranchChange,
+  onCreateChatSession,
   onCreateSession,
   onRepositoryMenuChange,
   onRepositorySelect,
@@ -1420,6 +1426,7 @@ function RepositoryControlBar({
   isLoadingRepos: boolean;
   isRepositoryMenuOpen: boolean;
   onBranchChange: (branch: string) => void;
+  onCreateChatSession: () => void;
   onCreateSession: () => void;
   onRepositoryMenuChange: (open: boolean) => void;
   onRepositorySelect: (repository: ContractRepository) => void;
@@ -1438,7 +1445,7 @@ function RepositoryControlBar({
 
   return (
     <section className="rounded-lg bg-bg-secondary/72 p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
-      <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_220px_auto_minmax(220px,0.7fr)] xl:items-end">
+      <div className="grid gap-3 xl:grid-cols-[minmax(260px,1fr)_220px_minmax(320px,auto)_minmax(220px,0.7fr)] xl:items-end">
         <div className="relative min-w-0">
           <span className="mb-1.5 block text-xs font-medium text-fg-secondary">Repository</span>
           <button
@@ -1544,15 +1551,26 @@ function RepositoryControlBar({
           </select>
         </label>
 
-        <button
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-amber px-4 pl-4 pr-3.5 text-sm font-semibold text-black transition-[background-color,scale] duration-150 ease-out hover:bg-yellow-400 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100"
-          disabled={!canCreateSession}
-          onClick={onCreateSession}
-          type="button"
-        >
-          {isBusy ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <Zap aria-hidden="true" className="size-4" />}
-          Start session & prepare runtime
-        </button>
+        <div className="grid gap-2">
+          <button
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-bg-primary px-4 text-sm font-semibold text-fg shadow-[0_0_0_1px_rgba(255,255,255,0.1)] transition-[background-color,box-shadow,scale] duration-150 ease-out hover:bg-bg-tertiary hover:shadow-[0_0_0_1px_rgba(255,255,255,0.16)] active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100"
+            disabled={!canCreateSession}
+            onClick={onCreateChatSession}
+            type="button"
+          >
+            {isBusy ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <MessageSquareText aria-hidden="true" className="size-4" />}
+            Start chat session
+          </button>
+          <button
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-amber px-4 pl-4 pr-3.5 text-sm font-semibold text-black transition-[background-color,scale] duration-150 ease-out hover:bg-yellow-400 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100"
+            disabled={!canCreateSession}
+            onClick={onCreateSession}
+            type="button"
+          >
+            {isBusy ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <Zap aria-hidden="true" className="size-4" />}
+            Start session & prepare runtime
+          </button>
+        </div>
 
         <div className="grid min-h-11 grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-lg bg-bg-primary px-3 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
           <RuntimeIcon aria-hidden="true" className={cx(
