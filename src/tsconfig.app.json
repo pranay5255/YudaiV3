@@ -22,5 +22,12 @@
     }
   },
   "include": ["./**/*.ts", "./**/*.tsx"],
-  "exclude": ["api", "dist", "node_modules", "tests/frontend/vercelMiddleware.test.ts"]
+  "exclude": [
+    "api",
+    "dist",
+    "e2e",
+    "node_modules",
+    "playwright.config.ts",
+    "tests/frontend/vercelMiddleware.test.ts"
+  ]
 }
