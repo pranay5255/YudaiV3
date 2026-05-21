@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -210,6 +210,11 @@ def ensure_stage_gate_question(
 
     metadata = {
         "origin": STAGE_GATE_ORIGIN,
+        "approval_scope": "session_execution",
+        "target_type": "agent_stage",
+        "target_mode": next_mode,
+        "required_actor": "session_user",
+        "admin_required": False,
         "from_mode": from_mode,
         "next_mode": next_mode,
         "pending_tool": pending_tool,

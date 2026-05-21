@@ -913,6 +913,11 @@ def test_architect_completion_creates_tester_stage_gate(tmp_path, monkeypatch):
         assert "tester" not in contracts
         assert question.status == UserQuestionStatus.PENDING.value
         assert question.question_metadata["origin"] == "stage_gate"
+        assert question.question_metadata["approval_scope"] == "session_execution"
+        assert question.question_metadata["target_type"] == "agent_stage"
+        assert question.question_metadata["target_mode"] == "tester"
+        assert question.question_metadata["required_actor"] == "session_user"
+        assert question.question_metadata["admin_required"] is False
         assert question.question_metadata["from_mode"] == "architect"
         assert question.question_metadata["next_mode"] == "tester"
         assert question.question_metadata["pending_tool"] == "run_tester_mode"

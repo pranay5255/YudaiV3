@@ -680,6 +680,11 @@ def test_create_github_issue_seeds_existing_issue_and_asks_before_execution(
         .one()
     )
     assert question.question_metadata["origin"] == "stage_gate"
+    assert question.question_metadata["approval_scope"] == "session_execution"
+    assert question.question_metadata["target_type"] == "agent_stage"
+    assert question.question_metadata["target_mode"] == "architect"
+    assert question.question_metadata["required_actor"] == "session_user"
+    assert question.question_metadata["admin_required"] is False
     assert question.question_metadata["next_mode"] == "architect"
     assert lifecycle_calls[0]["issue_number"] == 77
 

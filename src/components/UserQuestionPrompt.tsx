@@ -68,7 +68,7 @@ export const UserQuestionPrompt: React.FC<UserQuestionPromptProps> = ({
       <div className="flex items-center gap-2 mb-2">
         <HelpCircle className="w-4 h-4 text-amber-400" />
         <p className="text-sm font-medium text-amber-300">
-          {isStageGate ? 'Stage Gate' : 'Agent Question'}
+          {isStageGate ? 'Stage approval' : 'Agent Question'}
         </p>
         {isStageGate && nextMode && (
           <span className="rounded-md border border-amber-500/30 px-2 py-0.5 text-[11px] uppercase text-amber-200">

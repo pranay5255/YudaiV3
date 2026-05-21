@@ -411,6 +411,36 @@ describe('AgentWorkbench pending questions', () => {
     expect(screen.getByRole('button', { name: /submit answer/i })).toBeInTheDocument();
   });
 
+  it('labels stage gate questions as stage approvals', async () => {
+    vi.mocked(agentApi.getSessionContext).mockResolvedValue({
+      ...emptySessionContext,
+      pending_questions: [{
+        ...question,
+        options: [
+          { id: 'start_next_stage', label: 'Start Architect' },
+          { id: 'stop_here', label: 'Stop here' },
+        ],
+        question_metadata: {
+          admin_required: false,
+          approval_scope: 'session_execution',
+          origin: 'stage_gate',
+          recommendation: 'Daifu recommends starting Architect first.',
+          required_actor: 'session_user',
+          summary: 'Issue #77 is ready for execution.',
+          target_mode: 'architect',
+          target_type: 'agent_stage',
+        },
+        question_id: 'q_stage_approval',
+      }],
+    });
+
+    await renderStartedWorkbench();
+
+    expect(await screen.findByText('Stage approval')).toBeInTheDocument();
+    expect(screen.getByText('Issue #77 is ready for execution.')).toBeInTheDocument();
+    expect(screen.getByText('Daifu recommends starting Architect first.')).toBeInTheDocument();
+  });
+
   it('keeps the draft recoverable and shows a notice when the stream fails', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response('stream exploded', { status: 500 }));
     const user = await renderStartedWorkbench();

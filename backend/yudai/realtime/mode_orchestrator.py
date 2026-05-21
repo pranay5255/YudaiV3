@@ -3025,7 +3025,7 @@ class SessionExecutionOrchestrator:
             return AutonomyDecision(
                 action=f"run_{selected_mode}_mode",
                 objective=objective,
-                reason=f"Planner action was reordered to preserve Architect -> Tester -> Coder dependencies.",
+                reason="Planner action was reordered to preserve Architect -> Tester -> Coder dependencies.",
                 user_visible_summary=f"Continuing to {selected_mode}.",
                 questions=[],
                 todo_items=decision.todo_items,
