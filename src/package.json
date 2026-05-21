@@ -16,6 +16,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:auth": "vitest run tests/frontend/loginPage.test.tsx tests/frontend/authStore.test.ts tests/frontend/authSuccess.test.tsx",
+    "test:e2e": "playwright test --config=playwright.config.ts",
     "test:middleware": "vitest run tests/frontend/vercelMiddleware.test.ts",
     "test:realtime": "vitest run tests/frontend/realtimeRouting.test.ts tests/frontend/sessionWebSocket.sse.test.ts"
   },
@@ -37,6 +38,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",
+    "@playwright/test": "^1.60.0",
     "@remotion/cli": "^4.0.433",
     "@testing-library/jest-dom": "^6.4.2",
     "@testing-library/react": "^14.2.1",
