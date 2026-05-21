@@ -9,7 +9,7 @@ import type {
   UIMessagePart,
   UITools,
 } from 'ai';
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertCircle,
@@ -30,7 +30,6 @@ import {
   Loader2,
   LogOut,
   MessageSquareText,
-  Play,
   RefreshCw,
   Search,
   Send,
@@ -43,6 +42,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import { useSessionWebSocket } from '../hooks/useSessionWebSocket';
 import { API, buildApiUrl } from '../config/api';
 import {
   agentApi,
@@ -51,6 +51,7 @@ import {
   ContractChatMessage,
   ContractContextCard,
   ContractExecutionStatus,
+  ContractExecutionTraceEvent,
   ContractGitHubIssue,
   ContractIssue,
   ContractRepository,
@@ -61,8 +62,7 @@ import {
   ContractUserQuestion,
 } from '../services/agentApi';
 import { UserQuestionPrompt } from './UserQuestionPrompt';
-import type { AgentQuestionInfo } from '../types/sessionTypes';
-import { capExecutionObjective } from '../utils/workflowObjective';
+import type { AgentQuestionInfo, ToolCallInfo, TrajectoryData } from '../types/sessionTypes';
 
 type WorkspaceView = 'chat' | 'context' | 'execution' | 'issues';
 type ExecutionMode = 'architect' | 'tester' | 'coder';
@@ -139,25 +139,25 @@ const EXECUTION_MODES: Array<{
   role: string;
 }> = [
   {
-    description: 'Frames the adversarial objective and selects the next legal move.',
+    description: 'Frames the issue and records the handoff context.',
     icon: Sparkles,
     id: 'architect',
     label: 'Architect',
-    role: 'Orchestrator',
+    role: 'Planning gate',
   },
   {
-    description: 'Validates evidence, regressions, and test boundaries before edits.',
+    description: 'Builds evidence, regression coverage, and test branch context.',
     icon: ShieldCheck,
     id: 'tester',
     label: 'Tester',
-    role: 'Validator',
+    role: 'Validation gate',
   },
   {
-    description: 'Applies constrained code changes after the lifecycle gate opens.',
+    description: 'Implements the approved change and opens the pull request.',
     icon: Code2,
     id: 'coder',
     label: 'Coder',
-    role: 'Worker',
+    role: 'Implementation gate',
   },
 ];
 
@@ -269,11 +269,14 @@ function toAiMessage(message: ContractChatMessage): YudaiChatMessage {
 }
 
 function toAgentQuestionInfo(question: ContractUserQuestion): AgentQuestionInfo {
+  const questionMetadata = (question as unknown as { question_metadata?: Record<string, unknown> })
+    .question_metadata;
   return {
     multi_select: question.multi_select,
     options: question.options || [],
     question_id: question.question_id,
     question_text: question.prompt,
+    question_metadata: questionMetadata,
   };
 }
 
@@ -463,6 +466,7 @@ function normalizeAgentQuestionInfo(data: YudaiAgentQuestionData): AgentQuestion
     options,
     question_id: questionId,
     question_text: questionText,
+    question_metadata: isRecord(data.question_metadata) ? data.question_metadata : undefined,
   };
 }
 
@@ -510,9 +514,8 @@ export function AgentWorkbench(): JSX.Element {
   const [contextCards, setContextCards] = useState<ContractContextCard[]>([]);
   const [currentSession, setCurrentSession] = useState<ContractSession | null>(null);
   const [draft, setDraft] = useState('');
-  const [executionMode, setExecutionMode] = useState<ExecutionMode>('architect');
-  const [executionObjective, setExecutionObjective] = useState('');
   const [executionStatus, setExecutionStatus] = useState<ContractExecutionStatus | null>(null);
+  const [executionEvents, setExecutionEvents] = useState<ContractExecutionTraceEvent[]>([]);
   const [githubIssues, setGithubIssues] = useState<ContractGitHubIssue[]>([]);
   const [isBusy, setIsBusy] = useState(false);
   const [isLoadingBranches, setIsLoadingBranches] = useState(false);
@@ -650,6 +653,132 @@ export function AgentWorkbench(): JSX.Element {
     transport: aiTransport,
   });
 
+  const hydrateSession = useCallback(async (sessionId: string): Promise<ContractSessionContext | null> => {
+    if (!sessionToken) {
+      return null;
+    }
+
+    const [
+      context,
+      cards,
+      issues,
+      execution,
+      executionTrace,
+      nextTrajectories,
+    ] = await Promise.allSettled([
+      agentApi.getSessionContext(sessionId, sessionToken),
+      agentApi.listContextCards(sessionId, sessionToken),
+      agentApi.listSessionIssues(sessionId, sessionToken, 20),
+      agentApi.getExecutionStatus(sessionId, sessionToken),
+      agentApi.getExecutionEvents(sessionId, sessionToken),
+      agentApi.listTrajectories(sessionId, sessionToken),
+    ]);
+
+    if (context.status === 'fulfilled') {
+      activeStreamSessionIdRef.current = context.value.session.session_id;
+      setCurrentSession(context.value.session);
+      setChatMessages(context.value.messages.map(toAiMessage));
+      setPendingQuestions(context.value.pending_questions || []);
+    }
+
+    if (cards.status === 'fulfilled') {
+      setContextCards(cards.value);
+    }
+
+    if (issues.status === 'fulfilled') {
+      setSessionIssues(issues.value);
+    }
+
+    if (execution.status === 'fulfilled') {
+      setExecutionStatus(execution.value);
+    }
+
+    if (executionTrace.status === 'fulfilled') {
+      setExecutionEvents(executionTrace.value);
+    }
+
+    if (nextTrajectories.status === 'fulfilled') {
+      setTrajectories(nextTrajectories.value);
+    }
+
+    return context.status === 'fulfilled' ? context.value : null;
+  }, [sessionToken, setChatMessages]);
+
+  const handleRealtimeAssistantMessage = useCallback((message: {
+    executionId?: string;
+    messageId?: string;
+    mode?: string;
+    text: string;
+  }): void => {
+    const text = message.text.trim();
+    if (!text) {
+      return;
+    }
+
+    const messageId = message.messageId
+      || `execution_followup_${message.executionId || Date.now()}`;
+
+    setChatMessages((currentMessages) => {
+      if (currentMessages.some((currentMessage) => currentMessage.id === messageId)) {
+        return currentMessages;
+      }
+
+      return [
+        ...currentMessages,
+        {
+          id: messageId,
+          metadata: {
+            createdAt: new Date().toISOString(),
+            modelUsed: message.mode ? `${message.mode} follow-up` : 'execution follow-up',
+          },
+          parts: [{ text, type: 'text' }],
+          role: 'assistant',
+        },
+      ];
+    });
+
+    const sessionId = currentSessionRef.current?.session_id;
+    if (sessionId) {
+      void hydrateSession(sessionId).catch((error: unknown) => {
+        pushNotice('error', getErrorText(error, 'Failed to refresh workspace'));
+      });
+    }
+  }, [hydrateSession, pushNotice, setChatMessages]);
+
+  const realtimeStream = useSessionWebSocket({
+    enabled: Boolean(currentSession?.session_id && sessionToken),
+    onAssistantMessage: handleRealtimeAssistantMessage,
+    sessionId: currentSession?.session_id || '',
+  });
+
+  useEffect(() => {
+    const question = realtimeStream.agentQuestion;
+    if (!question || !currentSession?.session_id) {
+      return;
+    }
+
+    setPendingQuestions((currentQuestions) => {
+      if (currentQuestions.some((item) => item.question_id === question.question_id)) {
+        return currentQuestions;
+      }
+
+      return [
+        ...currentQuestions,
+        {
+          asked_at: new Date().toISOString(),
+          multi_select: Boolean(question.multi_select),
+          options: question.options || [],
+          prompt: question.question_text,
+          question_id: question.question_id,
+          question_metadata: question.question_metadata,
+          selected_option_ids: [],
+          session_id: currentSession.session_id,
+          status: 'pending',
+        } as unknown as ContractUserQuestion,
+      ];
+    });
+  }, [currentSession?.session_id, realtimeStream.agentQuestion]);
+
   const sessionStats = useMemo<SessionStats>(() => ({
     contextCount: contextCards.length,
     issueCount: sessionIssues.length || githubIssues.length,
@@ -774,8 +903,8 @@ export function AgentWorkbench(): JSX.Element {
     setIsRepositoryMenuOpen(false);
     setCurrentSession(null);
     setContextCards([]);
-    setExecutionObjective('');
     setExecutionStatus(null);
+    setExecutionEvents([]);
     setChatMessages([]);
     setPendingQuestions([]);
     setRepoSearch('');
@@ -785,51 +914,6 @@ export function AgentWorkbench(): JSX.Element {
     setSessionIssues([]);
     setStreamStatus(null);
     setTrajectories([]);
-  }
-
-  async function hydrateSession(sessionId: string): Promise<ContractSessionContext | null> {
-    if (!sessionToken) {
-      return null;
-    }
-
-    const [
-      context,
-      cards,
-      issues,
-      execution,
-      nextTrajectories,
-    ] = await Promise.allSettled([
-      agentApi.getSessionContext(sessionId, sessionToken),
-      agentApi.listContextCards(sessionId, sessionToken),
-      agentApi.listSessionIssues(sessionId, sessionToken, 20),
-      agentApi.getExecutionStatus(sessionId, sessionToken),
-      agentApi.listTrajectories(sessionId, sessionToken),
-    ]);
-
-    if (context.status === 'fulfilled') {
-      activeStreamSessionIdRef.current = context.value.session.session_id;
-      setCurrentSession(context.value.session);
-      setChatMessages(context.value.messages.map(toAiMessage));
-      setPendingQuestions(context.value.pending_questions || []);
-    }
-
-    if (cards.status === 'fulfilled') {
-      setContextCards(cards.value);
-    }
-
-    if (issues.status === 'fulfilled') {
-      setSessionIssues(issues.value);
-    }
-
-    if (execution.status === 'fulfilled') {
-      setExecutionStatus(execution.value);
-    }
-
-    if (nextTrajectories.status === 'fulfilled') {
-      setTrajectories(nextTrajectories.value);
-    }
-
-    return context.status === 'fulfilled' ? context.value : null;
   }
 
   async function refreshAfterDaifuActivity(sessionId: string): Promise<void> {
@@ -1059,36 +1143,6 @@ export function AgentWorkbench(): JSX.Element {
     await refreshAfterDaifuActivity(currentSession.session_id);
   }
 
-  async function handleStartExecution(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-
-    const objective = capExecutionObjective(executionObjective);
-    if (!objective || !sessionToken) {
-      return;
-    }
-
-    const session = await ensureSession();
-    if (!session) {
-      return;
-    }
-
-    setIsBusy(true);
-
-    try {
-      const response = await agentApi.startExecution(session.session_id, {
-        force_mode: executionMode,
-        objective,
-      }, sessionToken);
-
-      setExecutionStatus(response);
-      pushNotice('success', `${executionMode} run started.`);
-    } catch (error) {
-      pushNotice('error', getErrorText(error, 'Failed to start run'));
-    } finally {
-      setIsBusy(false);
-    }
-  }
-
   async function handleCancelExecution(): Promise<void> {
     if (!currentSession || !sessionToken) {
       return;
@@ -1238,14 +1292,15 @@ export function AgentWorkbench(): JSX.Element {
               {activeView === 'execution' && (
                 <ExecutionPanel
                   currentSession={currentSession}
-                  executionMode={executionMode}
-                  executionObjective={executionObjective}
+                  executionEvents={executionEvents}
                   executionStatus={executionStatus}
                   isBusy={isBusy}
+                  liveMessageCount={realtimeStream.messageCount}
+                  liveToolCalls={realtimeStream.toolCalls}
+                  liveTrajectory={realtimeStream.trajectory}
                   onCancel={() => void handleCancelExecution()}
-                  onModeChange={setExecutionMode}
-                  onObjectiveChange={setExecutionObjective}
-                  onSubmit={(event) => void handleStartExecution(event)}
+                  realtimeError={realtimeStream.error}
+                  realtimeStatus={realtimeStream.status}
                   trajectories={trajectories}
                 />
               )}
@@ -1523,7 +1578,7 @@ function RepositoryControlBar({
           Chat is answered by Daifu AI middleware through OpenRouter using OPENROUTER_MODEL, falling back to MSWEA_MODEL_NAME.
         </div>
         <div className="rounded-lg bg-bg-primary/68 px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
-          Manual runs use Modal-backed mini-swe-agent execution; the backend planner decides safe next actions after each sandbox result.
+          Daifu-mediated stages use Modal-backed mini-swe-agent execution; approval cards control each stage transition.
         </div>
       </div>
 
@@ -1952,120 +2007,271 @@ function ContextPanel({
 
 function ExecutionPanel({
   currentSession,
-  executionMode,
-  executionObjective,
+  executionEvents,
   executionStatus,
   isBusy,
+  liveMessageCount,
+  liveToolCalls,
+  liveTrajectory,
   onCancel,
-  onModeChange,
-  onObjectiveChange,
-  onSubmit,
+  realtimeError,
+  realtimeStatus,
   trajectories,
 }: {
   currentSession: ContractSession | null;
-  executionMode: ExecutionMode;
-  executionObjective: string;
+  executionEvents: ContractExecutionTraceEvent[];
   executionStatus: ContractExecutionStatus | null;
   isBusy: boolean;
+  liveMessageCount: number;
+  liveToolCalls: ToolCallInfo[];
+  liveTrajectory: TrajectoryData | null;
   onCancel: () => void;
-  onModeChange: (mode: ExecutionMode) => void;
-  onObjectiveChange: (value: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  realtimeError: string | null;
+  realtimeStatus: 'idle' | 'connecting' | 'connected' | 'streaming' | 'completed' | 'error';
   trajectories: ContractTrajectory[];
 }): JSX.Element {
+  const sessionMetadata = isRecord(currentSession?.mode_metadata) ? currentSession.mode_metadata : {};
+  const pendingStageGate = isRecord(sessionMetadata.pending_stage_gate)
+    ? sessionMetadata.pending_stage_gate
+    : null;
+  const recommendation = typeof pendingStageGate?.recommendation === 'string'
+    ? pendingStageGate.recommendation
+    : executionStatus?.detail || 'Idle';
+  const currentStage = executionStatus?.mode || currentSession?.current_mode || 'pending';
+  const activeStatus = (executionStatus?.status || currentSession?.mode_status || 'idle').toLowerCase();
+  const canEmergencyCancel = Boolean(
+    executionStatus?.execution_id
+    && ['queued', 'running', 'deciding', 'stalled', 'cancelling'].includes(activeStatus)
+  );
+
   return (
-    <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto p-3 sm:p-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <form className="rounded-lg bg-bg-secondary p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]" onSubmit={onSubmit}>
+    <div className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto p-3 sm:p-4">
+      <section className="rounded-lg bg-bg-secondary p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-balance text-base font-semibold">Lifecycle run</h2>
+            <h2 className="text-balance text-base font-semibold">Run monitor</h2>
             <p className="text-xs text-fg-muted">{currentSession?.session_id || 'No active session'}</p>
           </div>
-          {executionStatus && (
-            <StatusBadge label={executionStatus.status} tone={getStatusTone(executionStatus.status)} />
-          )}
+          <StatusBadge label={activeStatus} tone={getStatusTone(activeStatus)} />
         </div>
 
-        <div className="mb-4 grid grid-cols-3 gap-2">
-          {EXECUTION_MODES.map((mode) => {
-            const Icon = mode.icon;
-            const isActive = executionMode === mode.id;
-
-            return (
-              <button
-                className={cx(
-                  'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition-[background-color,color,scale] duration-150 ease-out active:scale-[0.96]',
-                  isActive
-                    ? 'bg-amber/14 text-amber shadow-[0_0_0_1px_rgba(245,158,11,0.25)]'
-                    : 'bg-bg-primary text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.08)] hover:bg-bg-tertiary hover:text-fg'
-                )}
-                key={mode.id}
-                onClick={() => onModeChange(mode.id)}
-                type="button"
-              >
-                <Icon aria-hidden="true" className="size-4" />
-                <span className="hidden sm:inline">{mode.label}</span>
-                <span className="sr-only">{mode.role}</span>
-              </button>
-            );
-          })}
+        <div className="grid gap-3 rounded-lg bg-bg-primary p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.07)]">
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <InfoRow icon={TerminalSquare} label="Stage" value={currentStage} />
+            <InfoRow icon={Activity} label="Trace" value={`${executionEvents.length + liveMessageCount} events`} />
+          </div>
+          <p className="text-sm leading-6 text-fg-secondary">{recommendation}</p>
         </div>
 
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-medium text-fg-secondary">Objective</span>
-          <textarea
-            className="min-h-44 w-full resize-none rounded-lg bg-bg-primary p-3 text-sm leading-6 text-fg shadow-[0_0_0_1px_rgba(255,255,255,0.08)] outline-none transition-[box-shadow,background-color] duration-150 ease-out placeholder:text-fg-muted focus:shadow-[0_0_0_2px_rgba(245,158,11,0.38)]"
-            onChange={(event) => onObjectiveChange(event.target.value)}
-            placeholder="Fix the selected issue and open a PR"
-            value={executionObjective}
-          />
-        </label>
-
-        <div className="mt-4 flex flex-wrap gap-2">
+        {canEmergencyCancel && (
           <button
-            className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-amber px-4 pl-4 pr-3.5 text-sm font-semibold text-black transition-[background-color,scale] duration-150 ease-out hover:bg-yellow-400 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100"
-            disabled={isBusy || !executionObjective.trim()}
-            type="submit"
-          >
-            {isBusy ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <Play aria-hidden="true" className="size-4" />}
-            Start run
-          </button>
-          <button
-            className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-bg-primary px-4 text-sm font-medium text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.09)] transition-[background-color,color,scale] duration-150 ease-out hover:bg-bg-tertiary hover:text-fg active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100"
-            disabled={!executionStatus || isBusy}
+            className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-lg bg-red-500/10 px-4 text-sm font-medium text-red-100 shadow-[0_0_0_1px_rgba(239,68,68,0.28)] transition-[background-color,color,scale] duration-150 ease-out hover:bg-red-500/16 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-45 disabled:active:scale-100"
+            disabled={isBusy}
             onClick={onCancel}
             type="button"
           >
-            <Square aria-hidden="true" className="size-4" />
-            Cancel
+            {isBusy ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <Square aria-hidden="true" className="size-4" />}
+            Emergency cancel
           </button>
-        </div>
-      </form>
+        )}
+      </section>
 
       <div className="grid content-start gap-3">
-        {trajectories.length === 0 ? (
-          <EmptyState icon={Activity} title="No trajectories" />
+        <LiveExecutionTracePanel
+          executionEvents={executionEvents}
+          liveMessageCount={liveMessageCount}
+          liveToolCalls={liveToolCalls}
+          liveTrajectory={liveTrajectory}
+          realtimeError={realtimeError}
+          realtimeStatus={realtimeStatus}
+        />
+
+        {trajectories.length > 0 && (
+          <div className="grid gap-3">
+            <h3 className="text-xs font-medium uppercase tracking-normal text-fg-muted">Saved trajectories</h3>
+            {trajectories.map((trajectory) => (
+              <article
+                className="rounded-lg bg-bg-secondary p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
+                key={trajectory.id}
+              >
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <h3 className="truncate text-sm font-semibold">{trajectory.run_id}</h3>
+                  <StatusBadge label={trajectory.status} tone={getStatusTone(trajectory.status)} />
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs text-fg-muted">
+                  <span>{trajectory.model_name || trajectory.model}</span>
+                  <span className="text-right tabular-nums">{formatCompactNumber(trajectory.total_messages)} msgs</span>
+                  <span>{formatDateTime(trajectory.created_at)}</span>
+                  <span className="text-right tabular-nums">${formatCompactNumber(trajectory.instance_cost)}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LiveExecutionTracePanel({
+  executionEvents,
+  liveMessageCount,
+  liveToolCalls,
+  liveTrajectory,
+  realtimeError,
+  realtimeStatus,
+}: {
+  executionEvents: ContractExecutionTraceEvent[];
+  liveMessageCount: number;
+  liveToolCalls: ToolCallInfo[];
+  liveTrajectory: TrajectoryData | null;
+  realtimeError: string | null;
+  realtimeStatus: 'idle' | 'connecting' | 'connected' | 'streaming' | 'completed' | 'error';
+}): JSX.Element {
+  const [traceFilter, setTraceFilter] = useState<'all' | 'mode' | 'sandbox' | 'tool' | 'error'>('all');
+  const messages = useMemo(() => liveTrajectory?.messages || [], [liveTrajectory]);
+  const traceItems = useMemo(() => {
+    const persisted = executionEvents.map((event) => {
+      const payload = event.payload || {};
+      const label = [
+        event.type.replace(/_/g, ' '),
+        event.mode || payload.mode,
+        event.stream || payload.stream || payload.state,
+      ].filter(Boolean).join(' / ');
+      let content = '';
+      if (event.type === 'tool_call') {
+        content = `${String(payload.tool_name || 'tool')}\n${formatJsonPreview(payload.tool_input || {})}`;
+      } else if (event.type === 'sandbox_stream') {
+        content = String(payload.data || payload.event || '');
+      } else if (event.type === 'agent_question') {
+        const metadata = isRecord(payload.question_metadata) ? payload.question_metadata : {};
+        content = [
+          String(payload.question_text || 'Stage question'),
+          typeof metadata.summary === 'string' ? metadata.summary : '',
+          typeof metadata.recommendation === 'string' ? metadata.recommendation : '',
+        ].filter(Boolean).join('\n');
+      } else if (event.type === 'artifact') {
+        content = formatJsonPreview(payload);
+      } else {
+        content = String(payload.detail || payload.summary || payload.state || '')
+          || formatJsonPreview(payload);
+      }
+
+      return {
+        content,
+        id: `persisted_${event.id}`,
+        label: label || event.type,
+        severity: event.severity,
+        type: event.type,
+      };
+    });
+
+    const liveTools = liveToolCalls.map((toolCall, index) => ({
+      content: formatJsonPreview(toolCall.tool_input || {}),
+      id: `live_tool_${toolCall.call_id || index}`,
+      label: `tool call / ${toolCall.tool_name}`,
+      severity: 'info',
+      type: 'tool_call',
+    }));
+
+    const liveMessages = messages.map((message, index) => {
+      const extra = message.extra || {};
+      const mode = typeof extra.mode === 'string' ? extra.mode : undefined;
+      const stream = typeof extra.stream === 'string' ? extra.stream : undefined;
+      const state = typeof extra.state === 'string' ? extra.state : undefined;
+      return {
+        content: message.content,
+        id: `live_message_${index}_${message.content.slice(0, 18)}`,
+        label: [message.role, mode, stream || state].filter(Boolean).join(' / ') || 'event',
+        severity: stream === 'stderr' ? 'error' : 'info',
+        type: stream ? 'sandbox_stream' : state ? 'mode_event' : 'llm_stream',
+      };
+    });
+
+    return [...persisted, ...liveTools, ...liveMessages].slice(-100);
+  }, [executionEvents, liveToolCalls, messages]);
+
+  const filteredTraceItems = traceItems.filter((item) => {
+    if (traceFilter === 'all') {
+      return true;
+    }
+    if (traceFilter === 'error') {
+      return item.severity === 'error';
+    }
+    return item.type.includes(traceFilter);
+  });
+  const visibleTraceItems = filteredTraceItems.slice(-40);
+  const totalEventCount = Math.max(traceItems.length, executionEvents.length + liveMessageCount);
+
+  return (
+    <section className="rounded-lg bg-bg-secondary p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-balance text-sm font-semibold">Execution trace</h3>
+          <p className="mt-1 text-xs text-fg-muted">
+            <span className="tabular-nums">{totalEventCount}</span> events
+          </p>
+        </div>
+        <StatusBadge
+          label={realtimeError ? 'stream error' : realtimeStatus}
+          tone={realtimeError ? 'red' : getStatusTone(realtimeStatus)}
+        />
+      </div>
+
+      {realtimeError && (
+        <div className="mb-3 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-100 shadow-[0_0_0_1px_rgba(239,68,68,0.22)]">
+          {realtimeError}
+        </div>
+      )}
+
+      <div className="mb-3 grid grid-cols-5 gap-1 rounded-lg bg-bg-primary p-1">
+        {(['all', 'mode', 'sandbox', 'tool', 'error'] as const).map((filter) => (
+          <button
+            className={cx(
+              'min-h-8 rounded-md px-2 text-[11px] font-medium capitalize transition-colors',
+              traceFilter === filter
+                ? 'bg-bg-tertiary text-fg'
+                : 'text-fg-muted hover:bg-bg-secondary hover:text-fg-secondary'
+            )}
+            key={filter}
+            onClick={() => setTraceFilter(filter)}
+            type="button"
+          >
+            {filter}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid max-h-[28rem] gap-2 overflow-y-auto pr-1">
+        {visibleTraceItems.length === 0 ? (
+          <div className="grid min-h-32 place-items-center rounded-lg bg-bg-primary/70 px-3 py-6 text-center text-sm text-fg-muted shadow-[0_0_0_1px_rgba(255,255,255,0.06)]">
+            Waiting for execution events
+          </div>
         ) : (
-          trajectories.map((trajectory) => (
+          visibleTraceItems.map((item, index) => (
             <article
-              className="rounded-lg bg-bg-secondary p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
-              key={trajectory.id}
+              className="rounded-lg bg-bg-primary px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.07)]"
+              key={`${item.id}_${index}`}
             >
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <h3 className="truncate text-sm font-semibold">{trajectory.run_id}</h3>
-                <StatusBadge label={trajectory.status} tone={getStatusTone(trajectory.status)} />
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className={cx(
+                  'truncate text-[11px] font-medium uppercase tracking-normal',
+                  item.severity === 'error' ? 'text-red-300' : 'text-cyan'
+                )}>
+                  {item.label}
+                </span>
+                <span className="shrink-0 text-[11px] tabular-nums text-fg-muted">
+                  {traceItems.length - visibleTraceItems.length + index + 1}
+                </span>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-xs text-fg-muted">
-                <span>{trajectory.model_name || trajectory.model}</span>
-                <span className="text-right tabular-nums">{formatCompactNumber(trajectory.total_messages)} msgs</span>
-                <span>{formatDateTime(trajectory.created_at)}</span>
-                <span className="text-right tabular-nums">${formatCompactNumber(trajectory.instance_cost)}</span>
-              </div>
+              <pre className="max-h-28 overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-fg-secondary">
+                {item.content}
+              </pre>
             </article>
           ))
         )}
       </div>
-    </div>
+    </section>
   );
 }
 

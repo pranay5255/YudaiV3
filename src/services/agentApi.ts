@@ -12,6 +12,7 @@ import type {
   SessionContext,
   ChatMessage,
 } from '../types/apiContract';
+import type { ExecutionTraceEvent } from '../types/sessionTypes';
 import { capExecutionObjective } from '../utils/workflowObjective';
 
 type QueryValue = string | number | boolean | null | undefined;
@@ -39,6 +40,7 @@ export type ContractContextCard = ApiSchema<'ContextCardResponse'>;
 export type ContractUserQuestion = ApiSchema<'UserQuestionResponse'>;
 export type ContractAnswerQuestionRequest = ApiSchema<'AnswerQuestionRequest'>;
 export type ContractAnswerQuestionResponse = ApiSchema<'AnswerQuestionResponse'>;
+export type ContractExecutionTraceEvent = ExecutionTraceEvent;
 
 export class AgentApiError extends Error {
   status: number;
@@ -289,6 +291,19 @@ export const agentApi = {
     );
   },
 
+  getExecutionEvents(
+    sessionId: string,
+    token?: string | null
+  ): Promise<ContractExecutionTraceEvent[]> {
+    return requestJson<ContractExecutionTraceEvent[]>(
+      '/daifu/sessions/{session_id}/execution/events',
+      {
+        pathParams: { session_id: sessionId },
+        token,
+      }
+    );
+  },
+
   startExecution(
     sessionId: string,
     body: ExecutionRequest,
@@ -313,8 +328,24 @@ export const agentApi = {
     token?: string | null
   ): Promise<ApiSchema<'CancelExecutionResponse'>> {
     return requestJson<ApiSchema<'CancelExecutionResponse'>>(
-      '/daifu/sessions/{session_id}/execution/cancel',
+      '/daifu/sessions/{session_id}/execution/cancel?source=emergency_cancel',
       {
+        method: 'POST',
+        pathParams: { session_id: sessionId },
+        token,
+      }
+    );
+  },
+
+  stopExecution(
+    sessionId: string,
+    reason: string,
+    token?: string | null
+  ): Promise<ApiSchema<'CancelExecutionResponse'>> {
+    return requestJson<ApiSchema<'CancelExecutionResponse'>>(
+      '/daifu/sessions/{session_id}/execution/stop',
+      {
+        body: { reason },
         method: 'POST',
         pathParams: { session_id: sessionId },
         token,

@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AgentWorkbench } from '@/components/AgentWorkbench';
 import { agentApi } from '@/services/agentApi';
-import { EXECUTION_OBJECTIVE_MAX_CHARS } from '@/utils/workflowObjective';
 
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: () => ({
@@ -34,6 +33,7 @@ vi.mock('@/services/agentApi', () => {
       createSession: vi.fn(),
       ensureRuntime: vi.fn(),
       getExecutionStatus: vi.fn(),
+      getExecutionEvents: vi.fn(),
       getSessionContext: vi.fn(),
       listBranches: vi.fn(),
       listContextCards: vi.fn(),
@@ -213,6 +213,7 @@ describe('AgentWorkbench pending questions', () => {
     vi.mocked(agentApi.listContextCards).mockResolvedValue([contextCard]);
     vi.mocked(agentApi.listSessionIssues).mockResolvedValue([]);
     vi.mocked(agentApi.getExecutionStatus).mockResolvedValue(executionStatus);
+    vi.mocked(agentApi.getExecutionEvents).mockResolvedValue([]);
     vi.mocked(agentApi.listTrajectories).mockResolvedValue([]);
     vi.mocked(agentApi.answerQuestion).mockResolvedValue({
       mode_status: 'idle',
@@ -297,41 +298,15 @@ describe('AgentWorkbench pending questions', () => {
     expect(await screen.findAllByText(/Runtime running/i)).not.toHaveLength(0);
   });
 
-  it('caps a long run objective before starting execution', async () => {
-    const user = userEvent.setup();
-    vi.mocked(agentApi.getSessionContext).mockResolvedValue({
-      messages: [],
-      pending_questions: [],
-      session,
-      statistics: { total_messages: 0, total_tokens: 0 },
-      user_issues: [],
-    });
-    vi.mocked(agentApi.startExecution).mockResolvedValue({
-      cancel_requested: false,
-      execution_id: 'exec_long_objective',
-      mode: 'architect',
-      plan: [],
-      session_id: session.session_id,
-      started_at: '2026-04-28T00:00:04Z',
-      status: 'running',
-      waiting_for_input: false,
-    });
-    render(<AgentWorkbench />);
+  it('shows the run monitor without direct start controls', async () => {
+    const user = await renderStartedWorkbench();
 
-    await user.click(await screen.findByRole('button', { name: /start session/i }));
     await user.click(screen.getByRole('button', { name: /runs/i }));
 
-    fireEvent.change(screen.getByLabelText(/objective/i), {
-      target: { value: `Fix the workflow boundary\n${'x'.repeat(12000)}` },
-    });
-    await user.click(screen.getByRole('button', { name: /start run/i }));
-
-    await waitFor(() => {
-      expect(agentApi.startExecution).toHaveBeenCalled();
-    });
-    const request = vi.mocked(agentApi.startExecution).mock.calls[0][1];
-    expect(request.objective.length).toBeLessThanOrEqual(EXECUTION_OBJECTIVE_MAX_CHARS);
-    expect(request.objective).toContain('Fix the workflow boundary');
+    expect(screen.getByText('Run monitor')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /start run/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/objective/i)).not.toBeInTheDocument();
+    expect(agentApi.startExecution).not.toHaveBeenCalled();
   });
 
   it('sends chat through the AI SDK stream endpoint with auth and Yudai context', async () => {
@@ -436,6 +411,36 @@ describe('AgentWorkbench pending questions', () => {
     expect(screen.getByRole('button', { name: /submit answer/i })).toBeInTheDocument();
   });
 
+  it('labels stage gate questions as stage approvals', async () => {
+    vi.mocked(agentApi.getSessionContext).mockResolvedValue({
+      ...emptySessionContext,
+      pending_questions: [{
+        ...question,
+        options: [
+          { id: 'start_next_stage', label: 'Start Architect' },
+          { id: 'stop_here', label: 'Stop here' },
+        ],
+        question_metadata: {
+          admin_required: false,
+          approval_scope: 'session_execution',
+          origin: 'stage_gate',
+          recommendation: 'Daifu recommends starting Architect first.',
+          required_actor: 'session_user',
+          summary: 'Issue #77 is ready for execution.',
+          target_mode: 'architect',
+          target_type: 'agent_stage',
+        },
+        question_id: 'q_stage_approval',
+      }],
+    });
+
+    await renderStartedWorkbench();
+
+    expect(await screen.findByText('Stage approval')).toBeInTheDocument();
+    expect(screen.getByText('Issue #77 is ready for execution.')).toBeInTheDocument();
+    expect(screen.getByText('Daifu recommends starting Architect first.')).toBeInTheDocument();
+  });
+
   it('keeps the draft recoverable and shows a notice when the stream fails', async () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response('stream exploded', { status: 500 }));
     const user = await renderStartedWorkbench();
@@ -447,35 +452,21 @@ describe('AgentWorkbench pending questions', () => {
     expect(await screen.findByText('stream exploded')).toBeInTheDocument();
   });
 
-  it('keeps execution start and cancel on the Python execution endpoints', async () => {
-    vi.mocked(agentApi.startExecution).mockResolvedValue({
-      ...executionStatus,
-      mode: 'architect',
-      status: 'running',
-    });
+  it('keeps emergency cancel on the Python execution endpoint', async () => {
     vi.mocked(agentApi.cancelExecution).mockResolvedValue({
       message: 'Run cancelled',
       session_id: session.session_id,
       status: 'cancelled',
     });
+    vi.mocked(agentApi.getExecutionStatus).mockResolvedValue({
+      ...executionStatus,
+      mode: 'architect',
+      status: 'running',
+    });
     const user = await renderStartedWorkbench();
 
     await user.click(screen.getByRole('button', { name: /runs/i }));
-    await user.type(screen.getByLabelText('Objective'), 'fix the failing test');
-    await user.click(screen.getByRole('button', { name: /start run/i }));
-
-    await waitFor(() => {
-      expect(agentApi.startExecution).toHaveBeenCalledWith(
-        session.session_id,
-        {
-          force_mode: 'architect',
-          objective: 'fix the failing test',
-        },
-        'test-token'
-      );
-    });
-
-    await user.click(screen.getByRole('button', { name: /cancel/i }));
+    await user.click(screen.getByRole('button', { name: /emergency cancel/i }));
 
     await waitFor(() => {
       expect(agentApi.cancelExecution).toHaveBeenCalledWith(session.session_id, 'test-token');

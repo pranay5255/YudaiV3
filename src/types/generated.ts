@@ -130,6 +130,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/controller/internal/sandbox-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Sandbox Event */
+        post: operations["record_sandbox_event_controller_internal_sandbox_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/controller/internal/sandbox-executions/{mode_execution_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Complete Sandbox Execution */
+        post: operations["complete_sandbox_execution_controller_internal_sandbox_executions__mode_execution_id__complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/controller/sandboxes": {
         parameters: {
             query?: never;
@@ -498,6 +532,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/daifu/sessions/{session_id}/execution/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Execution Events
+         * @description Replay persisted Daifu execution trace events for reconnect/refresh.
+         */
+        get: operations["get_session_execution_events_daifu_sessions__session_id__execution_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/daifu/sessions/{session_id}/execution/stage-tool": {
         parameters: {
             query?: never;
@@ -512,6 +566,23 @@ export interface paths {
          * @description Start exactly one legal Daifu stage tool: Architect, Tester, or Coder.
          */
         post: operations["execute_session_stage_tool_daifu_sessions__session_id__execution_stage_tool_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/daifu/sessions/{session_id}/execution/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Session Execution */
+        post: operations["stop_session_execution_daifu_sessions__session_id__execution_stop_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1262,6 +1333,40 @@ export interface components {
              */
             waiting_for_input: boolean;
         };
+        /** ExecutionTraceEventResponse */
+        ExecutionTraceEventResponse: {
+            /** Execution Id */
+            execution_id?: string | null;
+            /** Id */
+            id: string;
+            /** Mode */
+            mode?: string | null;
+            /** Mode Execution Id */
+            mode_execution_id?: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Sequence
+             * @default 0
+             */
+            sequence: number;
+            /**
+             * Severity
+             * @default info
+             */
+            severity: string;
+            /** Stream */
+            stream?: string | null;
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /** Type */
+            type: string;
+        };
         /** FrontendBrowserCheckToolRequest */
         FrontendBrowserCheckToolRequest: {
             /** Objective */
@@ -1493,6 +1598,50 @@ export interface components {
             /** Tunnel Url */
             tunnel_url?: string | null;
         };
+        /** SandboxCompletionRequest */
+        SandboxCompletionRequest: {
+            /**
+             * Attempt
+             * @default 1
+             */
+            attempt: number;
+            /** Controller Job Id */
+            controller_job_id?: string | null;
+            /**
+             * Duration Ms
+             * @default 0
+             */
+            duration_ms: number;
+            /** Exit Code */
+            exit_code: number;
+            /** Mode Execution Id */
+            mode_execution_id: string;
+            /** Parsed Payload */
+            parsed_payload?: {
+                [key: string]: unknown;
+            } | null;
+            /** Sandbox Job Id */
+            sandbox_job_id: string;
+            /** Sequence */
+            sequence?: number | null;
+            /** Session Id */
+            session_id: string;
+            /**
+             * Status
+             * @default complete
+             */
+            status: string;
+            /**
+             * Stderr
+             * @default
+             */
+            stderr: string;
+            /**
+             * Stdout
+             * @default
+             */
+            stdout: string;
+        };
         /** SandboxCreateRequest */
         SandboxCreateRequest: {
             /** Environment */
@@ -1510,6 +1659,39 @@ export interface components {
             repo_owner: string;
             /** Session Id */
             session_id?: string | null;
+        };
+        /** SandboxEventRequest */
+        SandboxEventRequest: {
+            /**
+             * Attempt
+             * @default 1
+             */
+            attempt: number;
+            /** Command */
+            command?: string | null;
+            /** Controller Job Id */
+            controller_job_id?: string | null;
+            /** Data */
+            data?: string | null;
+            /** Event */
+            event: string;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Mode Execution Id */
+            mode_execution_id: string;
+            /** Pid */
+            pid?: number | null;
+            /** Sandbox Job Id */
+            sandbox_job_id: string;
+            /** Sequence */
+            sequence?: number | null;
+            /** Session Id */
+            session_id: string;
+            /**
+             * Stream
+             * @default sandbox
+             */
+            stream: string;
         };
         /** SandboxResponse */
         SandboxResponse: {
@@ -1650,6 +1832,14 @@ export interface components {
              * @enum {string}
              */
             tool_name: "run_architect_mode" | "run_tester_mode" | "run_coder_mode";
+        };
+        /** StopExecutionRequest */
+        StopExecutionRequest: {
+            /**
+             * Reason
+             * @default User asked Daifu to stop execution.
+             */
+            reason: string;
         };
         /** TrajectoryFileResponse */
         TrajectoryFileResponse: {
@@ -1823,6 +2013,10 @@ export interface components {
             prompt: string;
             /** Question Id */
             question_id: string;
+            /** Question Metadata */
+            question_metadata?: {
+                [key: string]: unknown;
+            } | null;
             /** Selected Option Ids */
             selected_option_ids?: string[];
             /** Session Id */
@@ -2017,6 +2211,82 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuthHealthResponse"];
+                };
+            };
+        };
+    };
+    record_sandbox_event_controller_internal_sandbox_events_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-controller-callback-secret"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SandboxEventRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    complete_sandbox_execution_controller_internal_sandbox_executions__mode_execution_id__complete_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-controller-callback-secret"?: string | null;
+            };
+            path: {
+                mode_execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SandboxCompletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -2835,7 +3105,10 @@ export interface operations {
     };
     cancel_session_execution_daifu_sessions__session_id__execution_cancel_post: {
         parameters: {
-            query?: never;
+            query?: {
+                source?: string;
+                reason?: string | null;
+            };
             header?: {
                 "x-yudai-internal-secret"?: string | null;
                 "x-yudai-user-id"?: string | null;
@@ -2854,6 +3127,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CancelExecutionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_execution_events_daifu_sessions__session_id__execution_events_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionTraceEventResponse"][];
                 };
             };
             /** @description Validation Error */
@@ -2892,6 +3201,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExecutionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_session_execution_daifu_sessions__session_id__execution_stop_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-yudai-internal-secret"?: string | null;
+                "x-yudai-user-id"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StopExecutionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CancelExecutionResponse"];
                 };
             };
             /** @description Validation Error */

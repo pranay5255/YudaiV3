@@ -4,19 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from yudai.models import ChatSession, SessionMode, UserIssue
+from yudai.models import ChatSession, UserIssue
 from yudai.realtime.mode_orchestrator import (
     SessionExecutionOrchestrator,
     get_session_execution_orchestrator,
 )
 from sqlalchemy.orm import Session
 
-
-STAGE_TOOL_TO_MODE = {
-    "run_architect_mode": SessionMode.ARCHITECT.value,
-    "run_tester_mode": SessionMode.TESTER.value,
-    "run_coder_mode": SessionMode.CODER.value,
-}
+from .stage_gates import STAGE_TOOL_TO_MODE
 
 
 class DaifuModeToolService:

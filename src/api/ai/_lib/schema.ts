@@ -40,6 +40,10 @@ export const StageToolInputSchema = z.object({
   objective: z.string().min(1).max(10000).describe('The concrete objective for this Daifu stage run.'),
 });
 
+export const StopExecutionInputSchema = z.object({
+  reason: z.string().min(1).max(1000).describe('User-facing reason for stopping the active execution.'),
+});
+
 export const CreateGitHubIssueToolOutputSchema = z.object({
   success: z.boolean(),
   github_url: z.string(),
@@ -68,9 +72,17 @@ export const StageToolOutputSchema = z.object({
   detail: z.string().nullable().optional(),
 }).passthrough();
 
+export const StopExecutionToolOutputSchema = z.object({
+  execution_id: z.string().nullable().optional(),
+  session_id: z.string(),
+  status: z.string(),
+  message: z.string(),
+}).passthrough();
+
 export type DaifuAction = z.infer<typeof DaifuActionSchema>;
 export type DaifuProbe = z.infer<typeof DaifuProbeSchema>;
 export type DaifuQuestion = z.infer<typeof DaifuQuestionSchema>;
 export type DaifuResponse = z.infer<typeof DaifuResponseSchema>;
 export type CreateGitHubIssueToolOutput = z.infer<typeof CreateGitHubIssueToolOutputSchema>;
 export type StageToolOutput = z.infer<typeof StageToolOutputSchema>;
+export type StopExecutionToolOutput = z.infer<typeof StopExecutionToolOutputSchema>;

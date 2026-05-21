@@ -16,6 +16,13 @@ interface UseSessionWebSocketParams {
   solveId?: string;
   runId?: string;
   enabled: boolean;
+  onAssistantMessage?: (message: {
+    executionId?: string;
+    final: boolean;
+    messageId?: string;
+    mode?: string;
+    text: string;
+  }) => void;
 }
 
 interface UseSessionWebSocketResult {
@@ -64,6 +71,7 @@ export function useSessionWebSocket({
   solveId,
   runId,
   enabled,
+  onAssistantMessage,
 }: UseSessionWebSocketParams): UseSessionWebSocketResult {
   const [trajectory, setTrajectory] = useState<TrajectoryData | null>(null);
   const [status, setStatus] = useState<StreamStatus>('idle');
@@ -79,6 +87,7 @@ export function useSessionWebSocket({
   const shouldReconnectRef = useRef(false);
   const activeLlmMessageIdRef = useRef<string | null>(null);
   const activeSandboxMessageIdsRef = useRef<Record<string, string>>({});
+  const onAssistantMessageRef = useRef(onAssistantMessage);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,6 +96,10 @@ export function useSessionWebSocket({
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
+
+  useEffect(() => {
+    onAssistantMessageRef.current = onAssistantMessage;
+  }, [onAssistantMessage]);
 
   const matchesSolveTarget = useCallback(
     (payload: Record<string, unknown>, requireScopedPayload = false) => {
@@ -249,10 +262,12 @@ export function useSessionWebSocket({
         }
         setStatus('streaming');
         const payload = envelope.payload as {
+          execution_id?: string;
           text?: string;
           final?: boolean;
           final_text?: string;
           message_id?: string;
+          mode?: string;
         };
         const hasFinalText = typeof payload.final_text === 'string';
         const text = hasFinalText ? payload.final_text || '' : payload.text || '';
@@ -311,6 +326,16 @@ export function useSessionWebSocket({
         }
 
         if (payload.final) {
+          const finalText = hasFinalText ? text : text.trim() ? text : '';
+          if (finalText) {
+            onAssistantMessageRef.current?.({
+              executionId: typeof payload.execution_id === 'string' ? payload.execution_id : undefined,
+              final: true,
+              messageId: payload.message_id,
+              mode: typeof payload.mode === 'string' ? payload.mode : undefined,
+              text: finalText,
+            });
+          }
           activeLlmMessageIdRef.current = null;
         }
         break;
@@ -468,6 +493,7 @@ export function useSessionWebSocket({
           multi_select?: boolean;
           options?: Array<string | { id?: string; label?: string }>;
           option_ids?: string[];
+          question_metadata?: Record<string, unknown>;
         };
         const rawOptions = payload.options || [];
         const optionIds = payload.option_ids || [];
@@ -493,6 +519,7 @@ export function useSessionWebSocket({
           question_text: String(payload.question_text || ''),
           multi_select: Boolean(payload.multi_select),
           options: normalizedOptions,
+          question_metadata: payload.question_metadata,
         });
         break;
       }

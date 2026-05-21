@@ -55,6 +55,8 @@ export const API = {
     CONTEXT_CARD_DETAIL: `${API_BASE}/daifu/sessions/{sessionId}/context-cards/{cardId}`,
     EXECUTION: `${API_BASE}/daifu/sessions/{sessionId}/execution`,
     EXECUTION_CANCEL: `${API_BASE}/daifu/sessions/{sessionId}/execution/cancel`,
+    EXECUTION_EVENTS: `${API_BASE}/daifu/sessions/{sessionId}/execution/events`,
+    EXECUTION_STOP: `${API_BASE}/daifu/sessions/{sessionId}/execution/stop`,
     CREATE_GITHUB_ISSUE_TOOL: `${API_BASE}/daifu/sessions/{sessionId}/tools/create-github-issue`,
     ASK_QUESTION: `${API_BASE}/daifu/sessions/{sessionId}/ask-question`,
     ANSWER_QUESTION: `${API_BASE}/daifu/sessions/{sessionId}/questions/{questionId}/answer`,

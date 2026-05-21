@@ -845,7 +845,7 @@ class ContractBroker:
         raise AssertionError("unexpected command")
 
 
-def test_full_pipeline_persists_strict_mode_contracts(tmp_path, monkeypatch):
+def test_architect_completion_creates_tester_stage_gate(tmp_path, monkeypatch):
     db_path = tmp_path / "contracts.db"
     monkeypatch.setenv("YUDAI_IN_PROCESS_EXECUTION_FALLBACK", "true")
     monkeypatch.setenv("MSWEA_MODEL_NAME", "openrouter/x-ai/grok-4-fast")
@@ -898,24 +898,36 @@ def test_full_pipeline_persists_strict_mode_contracts(tmp_path, monkeypatch):
             .all()
         )
 
-        assert broker.mode_calls == ["architect", "tester", "coder"]
-        assert broker.summary_commands == 3
-        assert session_row.current_mode == "complete"
-        assert session_row.mode_status == "complete"
-        assert session_row.tester_completed_at is not None
-        assert session_row.coder_pr_number == 211
-        assert session_row.coder_pr_url == "https://github.com/pranay5255/YudaiV3/pull/211"
+        question = db.query(UserQuestion).filter(UserQuestion.session_id == session.id).one()
+        active_execution = (session_row.mode_metadata or {})["active_execution"]
+
+        assert broker.mode_calls == ["architect"]
+        assert broker.summary_commands == 1
+        assert session_row.current_mode == "tester"
+        assert session_row.mode_status == "waiting_for_input"
+        assert session_row.architect_completed_at is not None
+        assert session_row.tester_completed_at is None
+        assert session_row.coder_pr_number is None
         assert contracts["contract_version"] == "mswea-mode-contract-v1"
         assert contracts["architect"]["ready_for_tester"] is True
-        assert contracts["tester"]["test_branch"] == "yudai/issue-175-tests"
-        assert contracts["coder"]["tests_run"]
+        assert "tester" not in contracts
+        assert question.status == UserQuestionStatus.PENDING.value
+        assert question.question_metadata["origin"] == "stage_gate"
+        assert question.question_metadata["approval_scope"] == "session_execution"
+        assert question.question_metadata["target_type"] == "agent_stage"
+        assert question.question_metadata["target_mode"] == "tester"
+        assert question.question_metadata["required_actor"] == "session_user"
+        assert question.question_metadata["admin_required"] is False
+        assert question.question_metadata["from_mode"] == "architect"
+        assert question.question_metadata["next_mode"] == "tester"
+        assert question.question_metadata["pending_tool"] == "run_tester_mode"
+        assert active_execution["waiting_for_input"] is True
+        assert active_execution["status"] == "waiting_for_input"
         assert {row.mode: row.output_summary["contract_version"] for row in mode_rows} == {
             "architect": "mswea-mode-contract-v1",
-            "tester": "mswea-mode-contract-v1",
-            "coder": "mswea-mode-contract-v1",
         }
-        assert lifecycle.pr_created["pr_number"] == 211
-        assert lifecycle.finalized["reason"] == "workflow_complete"
+        assert lifecycle.pr_created is None
+        assert lifecycle.finalized is None
     finally:
         db.close()
 

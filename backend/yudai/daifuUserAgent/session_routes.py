@@ -89,9 +89,13 @@ from .message_persistence import (
 
 from yudai.models import (
     AgentExecution,
+    AgentDecisionStep,
     ChatMessage,
     ChatSession,
     ContextCard,
+    SandboxExecutionEvent,
+    SandboxExecutionRun,
+    SessionArtifact,
     SessionMode,
     SessionModeStatus,
     User,
@@ -120,6 +124,7 @@ from yudai.types import (
     ExecutionRequest,
     ExecutionResponse,
     ExecutionStatusResponse,
+    ExecutionTraceEventResponse,
     FrontendBrowserCheckToolRequest,
     GitHubBranchResponse,
     GitHubIssueResponse,
@@ -128,6 +133,7 @@ from yudai.types import (
     SessionContextResponse,
     SessionResponse,
     StageToolRequest,
+    StopExecutionRequest,
     TrajectoryFileResponse,
     TrajectorySummaryResponse,
     UpdateSessionRequest,
@@ -142,6 +148,20 @@ from yudai.utils import utc_now
 
 from .mode_tools import get_daifu_issue_tool_service, get_daifu_mode_tool_service
 from .session_service import MemoryService, SessionService
+from .stage_gates import (
+    append_stage_notes,
+    approve_stage_tool,
+    clear_stage_gate_metadata,
+    ensure_stage_gate_question,
+    is_stage_gate_question,
+    mode_for_stage_tool,
+    next_mode_for_session,
+    stage_gate_payload,
+    stage_tool_for_mode,
+    wants_stage_execution,
+    wants_stage_notes,
+    wants_stage_stop,
+)
 from .workflow_state import build_execution_objective, select_workflow_issue
 
 router = APIRouter(tags=["sessions"])
@@ -149,9 +169,6 @@ router = APIRouter(tags=["sessions"])
 # Configure logging
 logger = logging.getLogger(__name__)
 
-DAIFU_STAGE_CONFIRMATION_ORIGIN = "github_issue_created_confirmation"
-DAIFU_STAGE_START_OPTION_ID = "start_workflow"
-DAIFU_STAGE_DECLINE_OPTION_ID = "not_now"
 DAIFU_STAGE_SEQUENCE_TOOL = "run_architect_mode"
 USER_ISSUE_CREATION_QUESTION_ORIGINS = {
     "user_issue_creation",
@@ -162,16 +179,11 @@ USER_ISSUE_CREATION_QUESTION_ORIGINS = {
 
 
 def _is_stage_confirmation_question(question: UserQuestion) -> bool:
-    metadata = question.question_metadata if isinstance(question.question_metadata, dict) else {}
-    return metadata.get("origin") == DAIFU_STAGE_CONFIRMATION_ORIGIN
+    return is_stage_gate_question(question)
 
 
 def _wants_stage_execution(request: AnswerQuestionRequest) -> bool:
-    selected = {str(item).strip().lower() for item in request.selected_option_ids or []}
-    if DAIFU_STAGE_START_OPTION_ID in selected or "start" in selected:
-        return True
-    answer_text = (request.answer_text or "").strip().lower()
-    return answer_text in {"yes", "y", "start", "start workflow", "run it", "go ahead"}
+    return wants_stage_execution(request)
 
 
 def _question_references_user_issue(question: UserQuestion, issue_id: str) -> bool:
@@ -320,52 +332,21 @@ async def _prepare_github_issue_created_response(
         if result.github_issue_number is not None
         else result.github_issue_url
     )
-    confirmation_question = (
-        db.query(UserQuestion)
-        .filter(
-            UserQuestion.session_id == db_session.id,
-            UserQuestion.user_id == current_user.id,
-            UserQuestion.status == UserQuestionStatus.PENDING.value,
-        )
-        .all()
+    confirmation_question = ensure_stage_gate_question(
+        db,
+        session=db_session,
+        user_id=current_user.id,
+        from_mode=None,
+        next_mode=SessionMode.ARCHITECT.value,
+        objective=execution_objective,
+        execution_id=None,
+        summary=f"GitHub issue {issue_label} is ready: {result.github_issue_url}",
+        recommendation="Daifu recommends starting Architect first.",
+        extra_metadata={
+            "issue_number": result.github_issue_number,
+            "issue_url": result.github_issue_url,
+        },
     )
-    confirmation_question = next(
-        (
-            question
-            for question in confirmation_question
-            if _is_stage_confirmation_question(question)
-            and isinstance(question.question_metadata, dict)
-            and (
-                question.question_metadata.get("issue_url") == result.github_issue_url
-                or question.question_metadata.get("issue_number")
-                == result.github_issue_number
-            )
-        ),
-        None,
-    )
-    if confirmation_question is None:
-        confirmation_question = UserQuestion(
-            question_id=f"q_{uuid.uuid4().hex[:10]}",
-            session_id=db_session.id,
-            user_id=current_user.id,
-            mode=SessionMode.ARCHITECT.value,
-            question_text=(
-                f"Start the Architect -> Tester -> Coder workflow for GitHub issue {issue_label}?"
-            ),
-            options=[
-                {"id": DAIFU_STAGE_START_OPTION_ID, "label": "Start workflow"},
-                {"id": DAIFU_STAGE_DECLINE_OPTION_ID, "label": "Not now"},
-            ],
-            multi_select=False,
-            status=UserQuestionStatus.PENDING.value,
-            question_metadata={
-                "origin": DAIFU_STAGE_CONFIRMATION_ORIGIN,
-                "pending_tool": DAIFU_STAGE_SEQUENCE_TOOL,
-                "issue_number": result.github_issue_number,
-                "issue_url": result.github_issue_url,
-            },
-        )
-        db.add(confirmation_question)
     confirmation_question_id = confirmation_question.question_id
 
     mode_metadata = dict(db_session.mode_metadata or {})
@@ -383,6 +364,8 @@ async def _prepare_github_issue_created_response(
             "pending_stage_tool_objective": execution_objective,
             "pending_stage_tool_issue_url": result.github_issue_url,
             "pending_stage_tool_issue_number": result.github_issue_number,
+            "pending_stage_gate_question_id": confirmation_question_id,
+            "pending_stage_gate": confirmation_question.question_metadata,
         }
     )
     db_session.mode_metadata = mode_metadata
@@ -395,17 +378,12 @@ async def _prepare_github_issue_created_response(
     await get_ws_hub().send_to_session(
         session_id,
         WSMessageType.AGENT_QUESTION,
-        {
-            "question_id": confirmation_question_id,
-            "question_text": confirmation_question.question_text,
-            "multi_select": False,
-            "options": confirmation_question.options,
-        },
+        stage_gate_payload(confirmation_question),
     )
 
     message = (
         f"GitHub issue created successfully: {result.github_issue_url}. "
-        "Confirm when you want Daifu to start the 3-mode workflow."
+        "Confirm when you want Daifu to start Architect."
     )
 
     return CreateGitHubIssueResponse(
@@ -487,13 +465,7 @@ def create_standardized_error(
 
 
 def _next_mode_for_session(session: ChatSession) -> str:
-    if not session.architect_completed_at:
-        return SessionMode.ARCHITECT.value
-    if not session.tester_completed_at:
-        return SessionMode.TESTER.value
-    if not session.coder_completed_at:
-        return SessionMode.CODER.value
-    return SessionMode.COMPLETE.value
+    return next_mode_for_session(session)
 
 
 def _build_mode_plan(mode: str, objective: str) -> List[str]:
@@ -550,6 +522,11 @@ def _to_user_question_response(
         status=question.status,
         asked_at=question.asked_at,
         answered_at=question.answered_at,
+        question_metadata=(
+            question.question_metadata
+            if isinstance(question.question_metadata, dict)
+            else None
+        ),
     )
 
 
@@ -1631,6 +1608,7 @@ async def ask_question_for_session(
             "question_text": question.question_text,
             "multi_select": bool(question.multi_select),
             "options": options,
+            "question_metadata": question.question_metadata or {},
         },
     )
 
@@ -1733,42 +1711,136 @@ async def answer_session_question(
         or original_gathering_state in {"active", "probes_done", "complete"}
     )
     if is_stage_confirmation and not pending_question_ids:
-        if request.resume_execution and _wants_stage_execution(request):
+        pending_tool = str(
+            question_metadata.get("pending_tool")
+            or mode_metadata.get("pending_daifu_tool")
+            or ""
+        ).strip()
+        next_stage_mode = str(
+            question_metadata.get("next_mode")
+            or mode_for_stage_tool(pending_tool)
+            or next_mode
+        ).strip()
+        expected_next_mode = _next_mode_for_session(db_session)
+        if next_stage_mode != expected_next_mode:
+            clear_stage_gate_metadata(db_session)
+            db_session.mode_status = SessionModeStatus.IDLE.value
+            db_session.mode_updated_at = utc_now()
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Stage gate is stale. Expected next mode "
+                    f"'{expected_next_mode}', got '{next_stage_mode}'."
+                ),
+            )
+        pending_tool = pending_tool or stage_tool_for_mode(next_stage_mode) or ""
+        objective_seed = (
+            str(question_metadata.get("objective") or "").strip()
+            or str(mode_metadata.get("pending_stage_tool_objective") or "").strip()
+            or str(mode_metadata.get("pending_resume_objective") or "").strip()
+            or "Continue the current GitHub issue workflow."
+        )
+        if answer_text and not wants_stage_notes(request):
+            objective_seed = append_stage_notes(
+                objective_seed,
+                next_mode=next_stage_mode,
+                notes=answer_text,
+            )
+
+        if wants_stage_stop(request):
+            active_execution = dict((mode_metadata.get("active_execution") or {}))
+            if active_execution:
+                active_execution.update(
+                    {
+                        "status": SessionModeStatus.COMPLETE.value,
+                        "waiting_for_input": False,
+                        "detail": "Daifu stopped at the stage gate.",
+                        "completed_at": utc_now().isoformat(),
+                    }
+                )
+                mode_metadata["active_execution"] = active_execution
+                db_session.mode_metadata = mode_metadata
+                flag_modified(db_session, "mode_metadata")
+            clear_stage_gate_metadata(db_session)
+            db_session.mode_status = SessionModeStatus.IDLE.value
+            db_session.mode_updated_at = utc_now()
+            db_session.last_activity = utc_now()
+            db.commit()
+        elif wants_stage_notes(request) and not _wants_stage_execution(request):
+            updated_objective = append_stage_notes(
+                objective_seed,
+                next_mode=next_stage_mode,
+                notes=answer_text,
+            )
+            notes = [
+                str(item)
+                for item in (mode_metadata.get("stage_gate_notes") or [])
+                if str(item).strip()
+            ]
+            if answer_text:
+                notes.append(answer_text)
+            mode_metadata["stage_gate_notes"] = notes
+            db_session.mode_metadata = mode_metadata
+            flag_modified(db_session, "mode_metadata")
+            next_question = ensure_stage_gate_question(
+                db,
+                session=db_session,
+                user_id=current_user.id,
+                from_mode=question_metadata.get("from_mode"),
+                next_mode=next_stage_mode,
+                objective=updated_objective,
+                execution_id=question_metadata.get("execution_id"),
+                mode_execution_id=question_metadata.get("mode_execution_id"),
+                summary=question_metadata.get("summary"),
+                recommendation=question_metadata.get("recommendation"),
+            )
+            db.commit()
+            await get_ws_hub().send_to_session(
+                session_id,
+                WSMessageType.AGENT_QUESTION,
+                stage_gate_payload(next_question),
+            )
+        elif request.resume_execution and _wants_stage_execution(request):
             if not realtime_flags.mode_orchestrator_enabled:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Mode orchestrator is disabled by feature flags",
                 )
-            objective_seed = (
-                str(mode_metadata.get("pending_stage_tool_objective") or "").strip()
-                or str(mode_metadata.get("pending_resume_objective") or "").strip()
-                or "Continue the current GitHub issue workflow."
+            if not pending_tool:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Stage gate is missing the pending Daifu tool",
+                )
+            approve_stage_tool(
+                db_session,
+                question=question,
+                tool_name=pending_tool,
+                objective=objective_seed,
             )
-            mode_metadata["pending_resume_objective"] = objective_seed
-            mode_metadata["pending_daifu_tool"] = DAIFU_STAGE_SEQUENCE_TOOL
-            db_session.mode_metadata = mode_metadata
-            flag_modified(db_session, "mode_metadata")
             db.commit()
             try:
-                execution_status = await get_daifu_mode_tool_service().run_all_stage_tools(
+                execution_status = await get_daifu_mode_tool_service().run_stage_tool(
                     db,
                     session=db_session,
                     user_id=current_user.id,
+                    tool_name=pending_tool,
                     objective=objective_seed,
                 )
             except ExecutionConflictError as exc:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
             except ValueError as exc:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            latest_metadata = dict(db_session.mode_metadata or {})
+            latest_metadata["approved_stage_tool_consumed_at"] = utc_now().isoformat()
+            latest_metadata.pop("approved_stage_tool", None)
+            db_session.mode_metadata = latest_metadata
+            flag_modified(db_session, "mode_metadata")
+            db.commit()
             resumed = True
             resumed_mode = str(execution_status.get("mode") or next_mode)
         else:
-            mode_metadata.pop("pending_daifu_tool", None)
-            mode_metadata.pop("pending_stage_tool_objective", None)
-            mode_metadata.pop("pending_stage_tool_issue_url", None)
-            mode_metadata.pop("pending_stage_tool_issue_number", None)
-            db_session.mode_metadata = mode_metadata
-            flag_modified(db_session, "mode_metadata")
+            clear_stage_gate_metadata(db_session)
             db.commit()
     elif (
         request.resume_execution
@@ -1876,63 +1948,11 @@ async def execute_session_pipeline(
             detail="Mode orchestrator is disabled by feature flags",
         )
 
-    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
-    next_mode = _next_mode_for_session(db_session)
-
-    if next_mode == SessionMode.COMPLETE.value:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Session workflow already complete",
-        )
-
-    if request.force_mode and request.force_mode != next_mode:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Mode switching is server-controlled. Expected next mode "
-                f"'{next_mode}', got '{request.force_mode}'."
-            ),
-        )
-
-    db_session.mode_metadata = {
-        **(db_session.mode_metadata or {}),
-        "pending_resume_objective": request.objective,
-    }
-    db.commit()
-
-    try:
-        status_payload = await get_session_execution_orchestrator().start_execution(
-            db,
-            session=db_session,
-            user_id=current_user.id,
-            objective=request.objective,
-            force_mode=request.force_mode,
-        )
-    except ExecutionConflictError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).exception(
-            "Unhandled error in execute_session_pipeline for session %s", session_id
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Execution failed: {type(exc).__name__}: {exc}",
-        ) from exc
-
-    try:
-        return ExecutionResponse(**status_payload)
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).exception(
-            "Response serialization failed for session %s: payload=%r", session_id, status_payload
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Response serialization failed: {type(exc).__name__}: {exc}",
-        ) from exc
+    SessionService.ensure_owned_session(db, current_user.id, session_id)
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Direct execution starts are disabled. Daifu starts stages from approval cards.",
+    )
 
 
 @router.post(
@@ -1955,9 +1975,41 @@ async def execute_session_stage_tool(
         )
 
     db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    requested_mode = mode_for_stage_tool(request.tool_name)
+    expected_mode = _next_mode_for_session(db_session)
+    if requested_mode != expected_mode:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Illegal Daifu stage tool. Expected "
+                f"'{stage_tool_for_mode(expected_mode)}', got '{request.tool_name}'."
+            ),
+        )
+
     mode_metadata = dict(db_session.mode_metadata or {})
-    mode_metadata["pending_resume_objective"] = request.objective
+    approved_stage_tool = mode_metadata.get("approved_stage_tool")
+    if not isinstance(approved_stage_tool, dict):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stage tool calls require a matching answered Daifu approval card",
+        )
+    if approved_stage_tool.get("tool_name") != request.tool_name:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stage tool call does not match the approved Daifu stage",
+        )
+
+    objective = str(approved_stage_tool.get("objective") or request.objective).strip()
+    if not objective:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Approved stage objective is empty",
+        )
+    mode_metadata["pending_resume_objective"] = objective
     mode_metadata["pending_daifu_tool"] = request.tool_name
+    mode_metadata["pending_stage_tool_objective"] = objective
+    mode_metadata.pop("approved_stage_tool", None)
+    mode_metadata["approved_stage_tool_consumed_at"] = utc_now().isoformat()
     db_session.mode_metadata = mode_metadata
     flag_modified(db_session, "mode_metadata")
     db.commit()
@@ -1968,7 +2020,7 @@ async def execute_session_stage_tool(
             session=db_session,
             user_id=current_user.id,
             tool_name=request.tool_name,
-            objective=request.objective,
+            objective=objective,
         )
     except ExecutionConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -2032,12 +2084,309 @@ async def get_session_execution_status(
     )
 
 
+def _execution_trace_event(
+    *,
+    event_id: str,
+    event_type: str,
+    ts: Optional[datetime],
+    payload: Dict[str, Any],
+    execution_id: Optional[str] = None,
+    mode_execution_id: Optional[str] = None,
+    mode: Optional[str] = None,
+    stream: Optional[str] = None,
+    severity: str = "info",
+    sequence: int = 0,
+) -> ExecutionTraceEventResponse:
+    return ExecutionTraceEventResponse(
+        id=event_id,
+        type=event_type,
+        ts=ts or utc_now(),
+        payload=payload,
+        execution_id=execution_id,
+        mode_execution_id=mode_execution_id,
+        mode=mode,
+        stream=stream,
+        severity=severity,
+        sequence=sequence,
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/execution/events",
+    response_model=List[ExecutionTraceEventResponse],
+)
+async def get_session_execution_events(
+    session_id: str,
+    limit: int = Query(500, ge=1, le=2000),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Replay persisted Daifu execution trace events for reconnect/refresh."""
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    trace_events: List[ExecutionTraceEventResponse] = []
+
+    executions = (
+        db.query(AgentExecution)
+        .filter(AgentExecution.session_id == db_session.id)
+        .order_by(AgentExecution.created_at.asc(), AgentExecution.id.asc())
+        .all()
+    )
+    for execution in executions:
+        metadata = execution.execution_metadata if isinstance(execution.execution_metadata, dict) else {}
+        pipeline_execution_id = metadata.get("pipeline_execution_id")
+        trace_events.append(
+            _execution_trace_event(
+                event_id=f"{execution.id}:mode:{execution.status}",
+                event_type="mode_event",
+                ts=execution.started_at or execution.created_at,
+                execution_id=str(pipeline_execution_id or execution.id),
+                mode_execution_id=execution.id if pipeline_execution_id else None,
+                mode=execution.mode,
+                payload={
+                    "mode": execution.mode,
+                    "state": execution.status,
+                    "execution_id": str(pipeline_execution_id or execution.id),
+                    "mode_execution_id": execution.id if pipeline_execution_id else None,
+                    "plan": execution.execution_plan or [],
+                    "detail": execution.error_message,
+                },
+                severity="error" if execution.status == SessionModeStatus.FAILED.value else "info",
+            )
+        )
+        if pipeline_execution_id:
+            trace_events.append(
+                _execution_trace_event(
+                    event_id=f"{execution.id}:tool_call",
+                    event_type="tool_call",
+                    ts=execution.started_at or execution.created_at,
+                    execution_id=str(pipeline_execution_id),
+                    mode_execution_id=execution.id,
+                    mode=execution.mode,
+                    payload={
+                        "tool_name": f"run_{execution.mode}_mode",
+                        "tool_input": {
+                            "session_id": session_id,
+                            "mode": execution.mode,
+                            "issue_number": db_session.architect_issue_number,
+                            "issue_url": db_session.architect_issue_url,
+                        },
+                        "call_id": execution.id,
+                    },
+                )
+            )
+        if execution.completed_at:
+            trace_events.append(
+                _execution_trace_event(
+                    event_id=f"{execution.id}:completed",
+                    event_type="mode_event",
+                    ts=execution.completed_at,
+                    execution_id=str(pipeline_execution_id or execution.id),
+                    mode_execution_id=execution.id if pipeline_execution_id else None,
+                    mode=execution.mode,
+                    payload={
+                        "mode": execution.mode,
+                        "state": execution.status,
+                        "execution_id": str(pipeline_execution_id or execution.id),
+                        "mode_execution_id": execution.id if pipeline_execution_id else None,
+                        "summary": execution.output_summary or {},
+                        "detail": execution.error_message,
+                    },
+                    severity="error" if execution.status == SessionModeStatus.FAILED.value else "info",
+                )
+            )
+
+    sandbox_events = (
+        db.query(SandboxExecutionEvent)
+        .filter(SandboxExecutionEvent.session_id == db_session.id)
+        .order_by(
+            SandboxExecutionEvent.created_at.asc(),
+            SandboxExecutionEvent.controller_job_id.asc(),
+            SandboxExecutionEvent.sequence.asc(),
+        )
+        .all()
+    )
+    for event in sandbox_events:
+        metadata = event.event_metadata if isinstance(event.event_metadata, dict) else {}
+        trace_events.append(
+            _execution_trace_event(
+                event_id=f"sandbox:{event.controller_job_id}:{event.sequence}",
+                event_type="sandbox_stream",
+                ts=event.created_at,
+                mode_execution_id=event.mode_execution_id,
+                stream=event.stream,
+                sequence=event.sequence,
+                payload={
+                    "controller_job_id": event.controller_job_id,
+                    "sandbox_job_id": event.sandbox_job_id,
+                    "mode_execution_id": event.mode_execution_id,
+                    "sequence": event.sequence,
+                    "stream": event.stream,
+                    "event": event.event,
+                    "data": event.data,
+                    **metadata,
+                },
+                severity="error" if event.stream == "stderr" else "info",
+            )
+        )
+
+    sandbox_runs = (
+        db.query(SandboxExecutionRun)
+        .filter(SandboxExecutionRun.session_id == db_session.id)
+        .order_by(SandboxExecutionRun.created_at.asc(), SandboxExecutionRun.id.asc())
+        .all()
+    )
+    for run in sandbox_runs:
+        trace_events.append(
+            _execution_trace_event(
+                event_id=f"sandbox_run:{run.id}",
+                event_type="sandbox_run",
+                ts=run.started_at or run.created_at,
+                execution_id=run.pipeline_execution_id,
+                mode_execution_id=run.mode_execution_id,
+                mode=run.mode,
+                payload={
+                    "controller_job_id": run.controller_job_id,
+                    "sandbox_job_id": run.sandbox_job_id,
+                    "status": run.status,
+                    "command": run.command,
+                    "cwd": run.cwd,
+                    "exit_code": run.exit_code,
+                    "duration_ms": run.duration_ms,
+                    "stdout_tail": run.stdout_tail,
+                    "stderr_tail": run.stderr_tail,
+                    "parsed_payload": run.parsed_payload,
+                },
+                severity="error" if run.exit_code not in {None, 0} else "info",
+            )
+        )
+
+    decisions = (
+        db.query(AgentDecisionStep)
+        .filter(AgentDecisionStep.session_id == db_session.id)
+        .order_by(AgentDecisionStep.created_at.asc(), AgentDecisionStep.id.asc())
+        .all()
+    )
+    for decision in decisions:
+        trace_events.append(
+            _execution_trace_event(
+                event_id=f"decision:{decision.id}",
+                event_type="mode_event",
+                ts=decision.created_at,
+                execution_id=decision.pipeline_execution_id,
+                mode_execution_id=decision.mode_execution_id,
+                payload={
+                    "state": "deciding",
+                    "selected_action": decision.selected_action,
+                    "reason": decision.reason,
+                    "confidence": decision.confidence,
+                    "user_message_id": decision.user_message_id,
+                },
+                severity="error" if decision.status == "failed" else "info",
+            )
+        )
+
+    questions = (
+        db.query(UserQuestion)
+        .filter(UserQuestion.session_id == db_session.id)
+        .order_by(UserQuestion.asked_at.asc(), UserQuestion.id.asc())
+        .all()
+    )
+    for question in questions:
+        if not _is_stage_confirmation_question(question):
+            continue
+        metadata = question.question_metadata if isinstance(question.question_metadata, dict) else {}
+        trace_events.append(
+            _execution_trace_event(
+                event_id=f"question:{question.question_id}",
+                event_type="agent_question",
+                ts=question.asked_at or question.created_at,
+                execution_id=metadata.get("execution_id"),
+                mode_execution_id=metadata.get("mode_execution_id"),
+                mode=question.mode,
+                payload=stage_gate_payload(question),
+            )
+        )
+
+    artifacts = (
+        db.query(SessionArtifact)
+        .filter(SessionArtifact.session_id == db_session.id)
+        .order_by(SessionArtifact.created_at.asc(), SessionArtifact.id.asc())
+        .all()
+    )
+    for artifact in artifacts:
+        trace_events.append(
+            _execution_trace_event(
+                event_id=f"artifact:{artifact.id}",
+                event_type="artifact",
+                ts=artifact.exported_at or artifact.created_at,
+                payload={
+                    "artifact_key": artifact.artifact_key,
+                    "artifact_type": artifact.artifact_type,
+                    "bundle_path": artifact.bundle_path,
+                    "cache_manifest_path": artifact.cache_manifest_path,
+                    "checksum_sha256": artifact.checksum_sha256,
+                    "byte_size": artifact.byte_size,
+                    "metadata": artifact.artifact_metadata or {},
+                },
+            )
+        )
+
+    return sorted(
+        trace_events,
+        key=lambda item: (item.ts, item.sequence, item.id),
+    )[-limit:]
+
+
+async def _emit_stop_summary(
+    db: Session,
+    *,
+    db_session: ChatSession,
+    execution_id: Optional[str],
+    source: str,
+    reason: Optional[str],
+) -> None:
+    if source != "daifu_stop":
+        return
+    message_id = f"execution_stop_{execution_id or uuid.uuid4().hex[:10]}"
+    text = f"Daifu stopped the active execution. Reason: {reason or 'No reason provided.'}"
+    existing = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == db_session.id, ChatMessage.message_id == message_id)
+        .first()
+    )
+    if not existing:
+        _persist_ai_message(
+            db,
+            db_session=db_session,
+            message_id=message_id,
+            text=text,
+            role="assistant",
+            context_card_ids=[],
+            model_used="daifu-stop",
+        )
+        refresh_session_message_counts(db, db_session)
+        db.commit()
+    await get_ws_hub().send_to_session(
+        db_session.session_id,
+        WSMessageType.LLM_STREAM,
+        {
+            "stream": "llm",
+            "message_id": message_id,
+            "final_text": text,
+            "final": True,
+            "execution_id": execution_id,
+            "mode": db_session.current_mode,
+        },
+    )
+
+
 @router.post(
-    "/sessions/{session_id}/execution/cancel",
+    "/sessions/{session_id}/execution/stop",
     response_model=CancelExecutionResponse,
 )
-async def cancel_session_execution(
+async def stop_session_execution(
     session_id: str,
+    request: StopExecutionRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2046,15 +2395,66 @@ async def cancel_session_execution(
         payload = await get_session_execution_orchestrator().cancel_execution(
             db,
             session=db_session,
+            source="daifu_stop",
+            reason=request.reason,
         )
     except ExecutionNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    await _emit_stop_summary(
+        db,
+        db_session=db_session,
+        execution_id=payload.get("execution_id"),
+        source="daifu_stop",
+        reason=request.reason,
+    )
+    return CancelExecutionResponse(
+        execution_id=payload.get("execution_id"),
+        session_id=session_id,
+        status=str(payload.get("status") or SessionModeStatus.CANCELLED.value),
+        message="Daifu stopped execution",
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/execution/cancel",
+    response_model=CancelExecutionResponse,
+)
+async def cancel_session_execution(
+    session_id: str,
+    source: str = Query("emergency_cancel"),
+    reason: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    db_session = SessionService.ensure_owned_session(db, current_user.id, session_id)
+    try:
+        payload = await get_session_execution_orchestrator().cancel_execution(
+            db,
+            session=db_session,
+            source=source,
+            reason=reason,
+        )
+    except ExecutionNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    await _emit_stop_summary(
+        db,
+        db_session=db_session,
+        execution_id=payload.get("execution_id"),
+        source=source,
+        reason=reason,
+    )
 
     return CancelExecutionResponse(
         execution_id=payload.get("execution_id"),
         session_id=session_id,
         status=str(payload.get("status") or SessionModeStatus.CANCELLED.value),
-        message="Execution cancelled",
+        message=(
+            "Emergency cancellation requested"
+            if source == "emergency_cancel"
+            else "Execution cancelled"
+        ),
     )
 
 

@@ -4,8 +4,11 @@ import {
   CreateGitHubIssueToolOutputSchema,
   StageToolInputSchema,
   StageToolOutputSchema,
+  StopExecutionInputSchema,
+  StopExecutionToolOutputSchema,
   type CreateGitHubIssueToolOutput,
   type StageToolOutput,
+  type StopExecutionToolOutput,
 } from './schema.js';
 
 type FetchBackendJson = <T>(path: string, body: unknown) => Promise<T>;
@@ -75,6 +78,18 @@ export const createDaifuTools = (
     execute: (input): Promise<StageToolOutput> => {
       const parsed = parseStageToolInput(input);
       return executeStageTool(fetchBackendJson, sessionId, 'run_coder_mode', parsed);
+    },
+  }),
+  stopExecution: tool({
+    description: 'Ask the backend Daifu controller to stop the active execution normally. Use for chat requests like "please stop".',
+    inputSchema: StopExecutionInputSchema,
+    outputSchema: StopExecutionToolOutputSchema,
+    execute: (input): Promise<StopExecutionToolOutput> => {
+      const parsed = StopExecutionInputSchema.parse(input);
+      return fetchBackendJson<StopExecutionToolOutput>(
+        `/daifu/sessions/${encodeURIComponent(sessionId)}/execution/stop`,
+        { reason: parsed.reason }
+      );
     },
   }),
 });
