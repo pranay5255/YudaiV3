@@ -1,6 +1,7 @@
 import {
   authenticateViaCallback,
   expect,
+  installRepositoryApiMocks,
   responseJson,
   selectConfiguredRepository,
   test,
@@ -15,6 +16,18 @@ type CreateSessionPayload = {
 
 type ExecutionEventPayload = unknown[];
 
+type QuestionPayload = {
+  question?: {
+    question_id?: unknown;
+  };
+};
+
+type SessionContextPayload = {
+  pending_questions?: Array<{
+    question_id?: unknown;
+  }>;
+};
+
 function extractSessionId(payload: CreateSessionPayload): string {
   if (typeof payload.session_id === 'string' && payload.session_id) {
     return payload.session_id;
@@ -27,16 +40,36 @@ function extractSessionId(payload: CreateSessionPayload): string {
   throw new Error('Create session response did not include a session_id.');
 }
 
+function extractQuestionId(payload: QuestionPayload): string {
+  if (typeof payload.question?.question_id === 'string' && payload.question.question_id) {
+    return payload.question.question_id;
+  }
+
+  throw new Error('Question response did not include a question_id.');
+}
+
+function extractPendingQuestionId(payload: SessionContextPayload): string {
+  const questionId = payload.pending_questions?.[0]?.question_id;
+  if (typeof questionId === 'string' && questionId) {
+    return questionId;
+  }
+
+  throw new Error('Session context did not include a pending question_id.');
+}
+
 test.describe('real-site AgentWorkbench control flow', () => {
   test('validates PR 193 session execution gates without starting runtime', async ({
     authApi,
     e2eConfig,
     page,
   }) => {
+    let pendingQuestionId: string | undefined;
     let sessionId: string | undefined;
     let failure: unknown;
 
     try {
+      await installRepositoryApiMocks(page, e2eConfig);
+
       await test.step('authenticate through the real callback route', async () => {
         await authenticateViaCallback(page, e2eConfig);
         await expect(page.getByRole('button', { name: /selected repository/i }))
@@ -123,24 +156,30 @@ test.describe('real-site AgentWorkbench control flow', () => {
           prompt: 'Start Architect?',
         });
         expect(seedResponse.status(), 'seed stage approval status').toBe(201);
+        pendingQuestionId = extractQuestionId(await responseJson<QuestionPayload>(
+          seedResponse,
+          'Seed stage approval response'
+        ));
 
-        await page.getByRole('button', { name: 'Chat' }).click();
+        await page.getByRole('button', { exact: true, name: 'Chat' }).click();
         await page.getByRole('button', { name: 'Refresh workspace' }).click();
 
-        await expect(page.getByText('Stage approval')).toBeVisible();
-        await expect(page.getByText('Real-site PR 193 control-flow gate is ready for approval.'))
+        const approvalCard = page.locator(`[data-question-id="${pendingQuestionId}"]`);
+        await expect(approvalCard.getByText('Stage approval')).toBeVisible();
+        await expect(approvalCard.getByText('Real-site PR 193 control-flow gate is ready for approval.'))
           .toBeVisible();
-        await expect(page.getByText('Daifu recommends starting Architect first.')).toBeVisible();
-        await expect(page.getByLabel('Start Architect')).toBeVisible();
-        await expect(page.getByLabel('Add notes or constraints')).toBeVisible();
-        await expect(page.getByLabel('Stop here')).toBeVisible();
+        await expect(approvalCard.getByText('Daifu recommends starting Architect first.')).toBeVisible();
+        await expect(approvalCard.getByLabel('Start Architect')).toBeVisible();
+        await expect(approvalCard.getByLabel('Add notes or constraints')).toBeVisible();
+        await expect(approvalCard.getByLabel('Stop here')).toBeVisible();
       });
 
       await test.step('submit notes and keep the approval card usable', async () => {
-        if (!sessionId) {
+        if (!sessionId || !pendingQuestionId) {
           throw new Error('Missing session_id before answering stage approval with notes.');
         }
 
+        const approvalCard = page.locator(`[data-question-id="${pendingQuestionId}"]`);
         const answerResponse = page.waitForResponse((response) => {
           const url = new URL(response.url());
           return response.request().method() === 'POST'
@@ -148,23 +187,33 @@ test.describe('real-site AgentWorkbench control flow', () => {
             && url.pathname.endsWith('/answer');
         });
 
-        await page.getByLabel('Add notes or constraints').check();
-        await page.getByPlaceholder('Notes or constraints')
+        await approvalCard.getByLabel('Add notes or constraints').check();
+        await approvalCard.getByPlaceholder('Notes or constraints')
           .fill('Keep this as a control-flow-only E2E check.');
-        await page.getByRole('button', { name: /submit answer/i }).click();
+        await approvalCard.getByRole('button', { name: /submit answer/i }).click();
 
         const response = await answerResponse;
         expect(response.ok(), 'add-notes answer response').toBe(true);
+        const contextResponse = await authApi.get(`/daifu/sessions/${sessionId}`);
+        expect(contextResponse.ok(), 'post-notes context refresh response').toBe(true);
+        const nextContext = await responseJson<SessionContextPayload>(
+          contextResponse,
+          'Post-notes context refresh response'
+        );
+        pendingQuestionId = extractPendingQuestionId(nextContext);
 
-        await expect(page.getByText('Stage approval')).toBeVisible();
-        await expect(page.getByLabel('Stop here')).toBeEnabled();
+        const nextApprovalCard = page.locator(`[data-question-id="${pendingQuestionId}"]`);
+        await page.getByRole('button', { name: 'Refresh workspace' }).click();
+        await expect(nextApprovalCard.getByText('Stage approval')).toBeVisible();
+        await expect(nextApprovalCard.getByLabel('Stop here')).toBeEnabled();
       });
 
       await test.step('stop at the stage gate and clear the pending approval', async () => {
-        if (!sessionId) {
+        if (!sessionId || !pendingQuestionId) {
           throw new Error('Missing session_id before stopping at stage gate.');
         }
 
+        const approvalCard = page.locator(`[data-question-id="${pendingQuestionId}"]`);
         const answerResponse = page.waitForResponse((response) => {
           const url = new URL(response.url());
           return response.request().method() === 'POST'
@@ -172,12 +221,22 @@ test.describe('real-site AgentWorkbench control flow', () => {
             && url.pathname.endsWith('/answer');
         });
 
-        await page.getByLabel('Stop here').check();
-        await page.getByRole('button', { name: /submit answer/i }).click();
+        await approvalCard.getByLabel('Stop here').check();
+        await expect(approvalCard.getByLabel('Stop here')).toBeChecked();
+        await expect(approvalCard.getByRole('button', { name: /submit answer/i })).toBeEnabled();
+        await approvalCard.getByRole('button', { name: /submit answer/i }).click();
 
         const response = await answerResponse;
         expect(response.ok(), 'stop-here answer response').toBe(true);
-        await expect(page.getByText('Stage approval')).toHaveCount(0);
+        const refreshedContext = await authApi.get(`/daifu/sessions/${sessionId}`);
+        expect(refreshedContext.ok(), 'post-stop context refresh response').toBe(true);
+        const contextPayload = await responseJson<SessionContextPayload>(
+          refreshedContext,
+          'Post-stop context refresh response'
+        );
+        expect(contextPayload.pending_questions || []).toHaveLength(0);
+        await page.getByRole('button', { name: 'Refresh workspace' }).click();
+        await expect(approvalCard).toHaveCount(0);
       });
     } catch (error) {
       failure = error;
