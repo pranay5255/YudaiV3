@@ -184,6 +184,8 @@ def ensure_stage_gate_question(
     if not pending_tool:
         raise ValueError(f"No Daifu stage tool exists for mode {next_mode!r}")
 
+    db.flush()
+
     pending_questions = (
         db.query(UserQuestion)
         .filter(
