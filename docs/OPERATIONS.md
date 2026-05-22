@@ -105,13 +105,9 @@ Vercel, and points direct test helper API calls at the local backend port:
 
 ```bash
 docker compose -f docker-compose.backend-only.yml up -d db backend
-PLAYWRIGHT_BASE_URL=https://yudai.app \
-PLAYWRIGHT_API_BASE_URL=http://localhost:8000 \
-E2E_USERNAME=<backend-user-with-active-github-oauth> \
-E2E_REPO_OWNER=<repo-owner> \
-E2E_REPO_NAME=<repo-name> \
-E2E_REPO_BRANCH=<repo-branch> \
-scripts/e2e/run_real_site_playwright_from_backend_host.sh
+cp scripts/e2e/real-site-playwright.env.example .env.e2e.real-site
+$EDITOR .env.e2e.real-site
+scripts/e2e/run_real_site_playwright_from_backend_host.sh --env-file .env.e2e.real-site
 ```
 
 If `E2E_USERNAME` is omitted, the launcher uses the most recently updated
@@ -135,6 +131,28 @@ requests. External fork PRs do not receive `E2E_SESSION_TOKEN`.
 A future nightly or manually dispatched deep-runtime Playwright suite can cover
 the full Modal path by explicitly clicking `Start Architect`; keep that separate
 from this blocking CI gate.
+
+For server-only E2E runs, do not set `E2E_SESSION_TOKEN`, `E2E_USER_ID`,
+`E2E_USER_DISPLAY_NAME`, or `E2E_USER_EMAIL` in `.env.e2e.real-site`. The
+launcher creates those values from the running backend container at test time.
+Keep stable settings in the env file instead:
+
+```bash
+COMPOSE_FILE=docker-compose.backend-only.yml
+PLAYWRIGHT_BASE_URL=https://yudai.app
+PLAYWRIGHT_API_BASE_URL=http://localhost:8000
+E2E_USERNAME=<backend-user-with-active-github-oauth>
+E2E_REPO_OWNER=<repo-owner>
+E2E_REPO_NAME=<repo-name>
+E2E_REPO_BRANCH=<repo-branch>
+E2E_MOCK_REPOSITORY_API=1
+E2E_SESSION_TOKEN_HOURS=2
+```
+
+`E2E_MOCK_REPOSITORY_API=1` is recommended for backend-host control-flow E2E
+runs. It keeps repository, branch, and issue-list responses deterministic from
+the env file while auth, session creation, execution events, question seeding,
+question answers, and cleanup still hit the real backend.
 
 ## Required Environment
 
