@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useState } from 'react';
 import { HelpCircle } from 'lucide-react';
 import type { AgentQuestionInfo } from '../types/sessionTypes';
 
@@ -20,7 +20,7 @@ export const UserQuestionPrompt: React.FC<UserQuestionPromptProps> = ({
     return selectedOptionIds.length > 0 || answerText.trim().length > 0;
   }, [answerText, selectedOptionIds]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setSelectedOptionIds([]);
     setAnswerText('');
     setSubmitError(null);
@@ -64,7 +64,11 @@ export const UserQuestionPrompt: React.FC<UserQuestionPromptProps> = ({
   };
 
   return (
-    <div className="mx-4 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+    <div
+      className="mx-4 mt-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3"
+      data-question-id={question.question_id}
+      data-testid="user-question-prompt"
+    >
       <div className="flex items-center gap-2 mb-2">
         <HelpCircle className="w-4 h-4 text-amber-400" />
         <p className="text-sm font-medium text-amber-300">
