@@ -24,9 +24,11 @@ export const getBackendBaseUrl = (): string => (
 );
 
 export const getInternalMiddlewareSecret = (): string => (
-  process.env.YUDAI_INTERNAL_MIDDLEWARE_SECRET ||
-  process.env.INTERNAL_MIDDLEWARE_SECRET ||
-  ''
+  (
+    process.env.YUDAI_INTERNAL_MIDDLEWARE_SECRET ||
+    process.env.INTERNAL_MIDDLEWARE_SECRET ||
+    ''
+  ).trim()
 );
 
 export const jsonResponse = (status: number, body: unknown): Response => (
