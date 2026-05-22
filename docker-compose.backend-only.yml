@@ -19,6 +19,7 @@ services:
         required: false
     environment:
       - DOCKER_COMPOSE=true
+      - DB_ECHO=false
       - PYTHONPATH=/app
     command: ["python", "-m", "yudai.realtime.modal_preflight"]
     networks:
@@ -40,6 +41,7 @@ services:
     environment:
       # Ensure Docker-specific settings
       - DOCKER_COMPOSE=true
+      - DB_ECHO=false
       - PYTHONPATH=/app
       - PORT=8000
       - GITHUB_APP_PRIVATE_KEY_PATH=/run/secrets/github_app_private_key
