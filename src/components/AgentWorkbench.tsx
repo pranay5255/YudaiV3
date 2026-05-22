@@ -658,28 +658,26 @@ export function AgentWorkbench(): JSX.Element {
       return null;
     }
 
+    const context = await agentApi.getSessionContext(sessionId, sessionToken);
+
+    activeStreamSessionIdRef.current = context.session.session_id;
+    setCurrentSession(context.session);
+    setChatMessages(context.messages.map(toAiMessage));
+    setPendingQuestions(context.pending_questions || []);
+
     const [
-      context,
       cards,
       issues,
       execution,
       executionTrace,
       nextTrajectories,
     ] = await Promise.allSettled([
-      agentApi.getSessionContext(sessionId, sessionToken),
       agentApi.listContextCards(sessionId, sessionToken),
       agentApi.listSessionIssues(sessionId, sessionToken, 20),
       agentApi.getExecutionStatus(sessionId, sessionToken),
       agentApi.getExecutionEvents(sessionId, sessionToken),
       agentApi.listTrajectories(sessionId, sessionToken),
     ]);
-
-    if (context.status === 'fulfilled') {
-      activeStreamSessionIdRef.current = context.value.session.session_id;
-      setCurrentSession(context.value.session);
-      setChatMessages(context.value.messages.map(toAiMessage));
-      setPendingQuestions(context.value.pending_questions || []);
-    }
 
     if (cards.status === 'fulfilled') {
       setContextCards(cards.value);
@@ -701,7 +699,7 @@ export function AgentWorkbench(): JSX.Element {
       setTrajectories(nextTrajectories.value);
     }
 
-    return context.status === 'fulfilled' ? context.value : null;
+    return context;
   }, [sessionToken, setChatMessages]);
 
   const handleRealtimeAssistantMessage = useCallback((message: {
