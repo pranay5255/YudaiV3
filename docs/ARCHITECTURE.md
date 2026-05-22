@@ -13,8 +13,9 @@ The two retained historical docs are intentionally separate:
 ## System Map
 
 YudaiV3 is a Vite React frontend on Vercel plus a Python FastAPI backend that
-owns auth, repository/session persistence, GitHub operations, Modal sandbox
-lifecycle, and Architect -> Tester -> Coder execution.
+owns auth, organization and repository access, session persistence, GitHub
+operations, Modal sandbox lifecycle, runtime profile versions, and
+Architect -> Tester -> Coder execution.
 
 ```mermaid
 flowchart LR
@@ -33,6 +34,9 @@ flowchart LR
     Backend --> GitHub[GitHub API]
     AiRoute --> Model[OpenRouter-compatible model provider]
 
+    Backend --> Org[Organization model]
+    Org --> Profile[Runtime profile version]
+    Profile --> Modal
     Modal --> Repo[Cloned repo workspace]
     Modal --> Mini[mini-swe-agent modes]
 ```
@@ -110,11 +114,61 @@ Authorization: Bearer <session_token>
 Vercel middleware routes authenticate by calling backend auth/user endpoints and
 then forward requests to protected Python endpoints with the user identity.
 
+## Organization And Access Model
+
+The default product model is organization-first:
+
+```text
+organization -> repositories -> runtime profiles -> user sessions -> Modal executions
+```
+
+A user creates or joins an organization before starting meaningful work. The
+user who creates an organization becomes `owner` by default. An organization owns
+repositories, runtime profiles, env/secret bindings, tool manifests, sessions,
+executions, and audit events.
+
+Human identity and repository capability are separate:
+
+- Human identity comes from GitHub OAuth today and should support Google/Gmail
+  after the auth decision in `#205`.
+- Repository capability comes from a GitHub App installation, a user GitHub
+  token where still required, or a future Yudai-managed repository under an org.
+- Google-authenticated users do not automatically have personal GitHub repo
+  capability; onboarding must either invite them into an organization with
+  existing repo access or create a managed repository path.
+
+Initial roles:
+
+| Role | Intended access |
+| --- | --- |
+| `owner` | Full organization control, including deleting the organization and assigning admins. |
+| `admin` | Manage members, repositories, runtime profiles, tools, env vars, secrets, validation, and audit review. |
+| `maintainer` | Create sessions, run agents, view profile details, and request profile changes for allowed repositories. |
+| `member` | Create sessions on allowed repositories and use approved runtime profiles. |
+| `viewer` | Read-only access to allowed sessions, runs, profile metadata, and artifacts. |
+
+Access rules:
+
+- Admin-only changes include member management, repo connection, secret writes,
+  tool manifest changes, runtime profile draft edits, validation, publish, and
+  rollback.
+- Maintainers and members may request Agent Evolution suggestions but cannot
+  publish runtime profile versions.
+- Maintainers and members may submit approval requests for harness, config,
+  tool, env, secret binding, runtime reprovision, and generated-artifact changes.
+- Non-admin users never see raw secret values.
+- Every new session must be scoped to one organization, one organization
+  repository, and one published runtime profile version.
+- Every execution must keep the same immutable profile version as the session
+  unless an explicit admin-mediated reprovision creates a new session/runtime.
+
 ## Active Product Surface
 
 `AgentWorkbench` is the active app shell. It owns the current user workflow:
 
+- organization selection and organization dashboard access
 - repository and branch selection
+- runtime profile selection or defaulting
 - session creation
 - AI chat stream
 - pending clarification questions
@@ -123,6 +177,26 @@ then forward requests to protected Python endpoints with the user identity.
 - execution status
 - trajectory summaries
 - workflow/mode progress
+
+Admins should see an organization dashboard inside the main app. The dashboard
+contains:
+
+- overview
+- members and roles
+- repositories
+- runtime profiles
+- secrets and env bindings
+- tool manifests and validation runs
+- approval requests
+- Agent Evolution suggestions
+- audit log
+
+Non-admin users see a limited dashboard for repositories they can access,
+approved runtime profiles, their sessions, run history, and read-only profile
+metadata. They can submit approval requests with evidence from their sessions or
+GitHub artifacts, and they can track admin feedback/status. Admin mutation
+controls must be hidden or disabled based on backend authorization, not frontend
+state alone.
 
 Several older components still exist for compatibility or secondary paths:
 
@@ -202,6 +276,73 @@ backend/yudai/realtime/mswea_mode_configs/probe/config.yaml
 Probe agents are read-only. They may write only their probe output file under the
 sandbox workspace.
 
+## Runtime Profiles And Agent Evolution
+
+A runtime profile is the organization/repository-specific harness definition for
+agents. It contains:
+
+- mode configs or config overlays for Architect, Tester, Coder, Browser, and
+  Probe
+- tool manifest entries for apt, pip, npm, and custom bash tools
+- non-secret env vars
+- secret binding names
+- sandbox image/build metadata
+- validation and smoke-check status
+- publish metadata and author
+
+Profiles have mutable drafts and immutable published versions. Sessions and
+executions may only use published versions. Draft edits must not affect running
+or historical sessions.
+
+Runtime profile lifecycle:
+
+```text
+draft profile
+  -> validate config and tool manifest
+  -> run sandbox/profile smoke checks
+  -> publish immutable profile version
+  -> assign as organization repository default
+  -> new sessions use the published version
+```
+
+Modal sandbox env vars are start-time inputs. Changes to tools, secrets, env
+vars, or profile versions require a new sandbox or explicit runtime reprovision.
+
+Agent Evolution is the evidence loop that improves repo-specific agent harnesses
+over time:
+
+```text
+session history + sandbox traces + GitHub artifacts + repo manifests
+  -> evidence records
+  -> evolution suggestions
+  -> admin review
+  -> validation sandbox
+  -> immutable runtime profile version
+  -> better future sessions
+```
+
+Evidence sources include previous messages, execution traces, failed commands,
+missing package errors, repeated manual setup commands, generated GitHub issues,
+generated PRs, CI failures, dependency manifests, Dockerfiles, Makefiles, and
+workflow YAML. Suggestions may propose packages, bash helpers, env bindings,
+secret bindings, config guidance, timeout/step-limit changes, or smoke checks.
+
+Suggestions and user-submitted changes are never applied automatically. They
+become approval requests. Admins approve, validate, publish, reject, request
+changes, and roll back runtime profile versions.
+
+Approval request lifecycle:
+
+```text
+draft -> submitted -> needs_changes -> approved -> validated -> published
+                                  \-> rejected
+                                  \-> superseded
+```
+
+Approval requests should record requester, target organization, target
+repository, target runtime profile, requested change payload, evidence links,
+risk, validation status, admin decision, and audit metadata.
+
 ## Runtime And Realtime
 
 The backend owns sandbox runtime state. The browser does not talk directly to the
@@ -280,6 +421,19 @@ Core tables:
 
 - `users`
 - `auth_tokens`
+- `organizations`
+- `organization_members`
+- `organization_repositories`
+- `runtime_profiles`
+- `runtime_profile_versions`
+- `runtime_profile_tools`
+- `runtime_profile_env_bindings`
+- `profile_validation_runs`
+- `approval_requests`
+- `approval_request_evidence`
+- `approval_decisions`
+- `agent_evolution_suggestions`
+- `agent_evolution_evidence`
 - `chat_sessions`
 - `chat_messages`
 - `user_questions`
@@ -289,6 +443,15 @@ Core tables:
 - `session_artifacts`
 - `session_audit_events`
 - `agent_executions`
+
+Important session scoping fields to add or preserve:
+
+- `organization_id`
+- `organization_repository_id`
+- `runtime_profile_version_id`
+- `repo_branch`
+- `repo_commit_sha`
+- `user_id`
 
 Important `ChatSession` workflow fields:
 
@@ -359,13 +522,19 @@ that as legacy unless the component is intentionally retained.
 Before editing architecture-sensitive code:
 
 1. Confirm whether the active path goes through `AgentWorkbench`.
-2. Confirm whether the endpoint is same-origin Vercel middleware or direct
+2. Confirm the organization, repository, role, and runtime profile version
+   boundaries for the change.
+3. Confirm whether the endpoint is same-origin Vercel middleware or direct
    Python backend auth.
-3. Keep bearer tokens in headers, not query params or request bodies, unless a
+4. Keep bearer tokens in headers, not query params or request bodies, unless a
    legacy realtime path explicitly requires otherwise.
-4. Keep execution mode transitions server-controlled.
-5. Prefer structured mode results and typed tool output over parsing free text.
-6. Preserve sandbox cleanup and artifact export behavior when touching runtime
+5. Keep execution mode transitions server-controlled.
+6. Prefer structured mode results and typed tool output over parsing free text.
+7. Keep runtime profile published versions immutable.
+8. Do not expose raw secret values through frontend-visible metadata, logs, or
+   artifacts.
+9. Preserve sandbox cleanup and artifact export behavior when touching runtime
    lifecycle code.
-7. Update this file when changing the active frontend route, API routing,
-   execution flow, sandbox lifecycle, or mode contracts.
+10. Update this file when changing the active frontend route, API routing,
+    organization model, execution flow, sandbox lifecycle, runtime profile
+    contract, or mode contracts.

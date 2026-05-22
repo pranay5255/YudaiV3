@@ -81,6 +81,61 @@ logs/e2e/prod_frontend_middleware_report_*.md
 The smoke script validates auth-sensitive middleware, Vercel rewrites, backend
 proxying, realtime bridge behavior, and the AI stream route.
 
+## Real-Site Playwright Gate
+
+Run the blocking browser gate from `src/` with a disposable production session
+token for a test user:
+
+```bash
+PLAYWRIGHT_BASE_URL=https://yudai.app \
+E2E_SESSION_TOKEN=<disposable-session-token> \
+E2E_USER_ID=<test-user-id> \
+E2E_USERNAME=<test-github-username> \
+E2E_USER_EMAIL=<test-user-email> \
+E2E_REPO_OWNER=<repo-owner> \
+E2E_REPO_NAME=<repo-name> \
+E2E_REPO_BRANCH=<repo-branch> \
+npm run test:e2e
+```
+
+On the backend host, prefer the launcher below. It assumes
+`docker-compose.backend-only.yml` is already running, mints a short-lived
+Yudai session token inside the `backend` container, keeps the frontend pointed at
+Vercel, and points direct test helper API calls at the local backend port:
+
+```bash
+docker compose -f docker-compose.backend-only.yml up -d db backend
+PLAYWRIGHT_BASE_URL=https://yudai.app \
+PLAYWRIGHT_API_BASE_URL=http://localhost:8000 \
+E2E_USERNAME=<backend-user-with-active-github-oauth> \
+E2E_REPO_OWNER=<repo-owner> \
+E2E_REPO_NAME=<repo-name> \
+E2E_REPO_BRANCH=<repo-branch> \
+scripts/e2e/run_real_site_playwright_from_backend_host.sh
+```
+
+If `E2E_USERNAME` is omitted, the launcher uses the most recently updated
+backend user with an active GitHub OAuth token. If repo env is omitted, it
+defaults owner/name from `remote.origin.url` and branch to `main`.
+The Vercel frontend still calls its configured auth/API backend, so
+`https://api.yudai.app` or the deployed Vercel env must point to this same
+Docker backend for the browser flow to authenticate.
+
+This Playwright suite uses the real deployed frontend and backend. It is a
+control-flow gate only: it creates a chat-only session, checks the run monitor,
+verifies direct execution start is blocked, seeds a stage approval card through
+`/daifu/sessions/{session_id}/ask-question`, submits approval answers, and marks
+the disposable session inactive. It must not click `Start Architect`,
+`Start session & prepare runtime`, or any other control that starts live Modal
+agent execution.
+
+GitHub Actions runs this gate only for `main` pushes and first-party pull
+requests. External fork PRs do not receive `E2E_SESSION_TOKEN`.
+
+A future nightly or manually dispatched deep-runtime Playwright suite can cover
+the full Modal path by explicitly clicking `Start Architect`; keep that separate
+from this blocking CI gate.
+
 ## Required Environment
 
 Backend:
@@ -108,6 +163,21 @@ Vercel:
 
 `YUDAI_INTERNAL_MIDDLEWARE_SECRET` must match between Vercel and the backend.
 
+Real-site Playwright:
+
+- `E2E_SESSION_TOKEN` as a disposable test-user session token
+- `E2E_USER_ID`
+- `E2E_USERNAME`
+- `E2E_USER_EMAIL`
+- optional `E2E_USER_DISPLAY_NAME`
+- `E2E_REPO_OWNER`
+- `E2E_REPO_NAME`
+- `E2E_REPO_BRANCH`
+- optional `PLAYWRIGHT_BASE_URL`, defaulting to `https://yudai.app`
+- optional `PLAYWRIGHT_API_BASE_URL`, defaulting to `PLAYWRIGHT_BASE_URL`; use
+  `http://localhost:8000` on the backend host when direct helper calls should
+  target the local Docker backend
+
 ## Common Failure Signals
 
 | Area | Signal | Likely Fix |
@@ -122,6 +192,8 @@ Vercel:
 | AI stream | `AI-001` fails or no `x-vercel-ai-ui-message-stream: v1` header | Check Vercel AI route deployment and backend `/ai-context` and `/ai-turns`. |
 | AI fallback | Stream says to configure `OPENROUTER_API_KEY` | Middleware works, but real model output is disabled until model env is set. |
 | Disposable token | smoke script fails at `ENV-001` | Provide a disposable `E2E_SESSION_TOKEN`. Do not print production tokens in reports. |
+| Real-site Playwright | `Missing required real-site E2E environment variable` | Set the required `E2E_*` GitHub secret/vars or local env before running `npm run test:e2e`. |
+| Backend-host Playwright | `No backend user with an active GitHub OAuth token was found` | Open `https://yudai.app/auth/login` once for the test user so the backend stores a GitHub OAuth token, then rerun the launcher. |
 | Modal/runtime | backend E2E fails during runtime creation | Inspect `modal-preflight`, Modal secrets, repo access, sandbox env, and volume permissions. |
 | Cleanup | `CLN-001` fails | Delete the sandbox through `/controller/sandboxes/{sandbox_id}` or clean DB state before rerunning. |
 
