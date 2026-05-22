@@ -2,6 +2,38 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+env_file="${E2E_ENV_FILE:-}"
+if [ "${1:-}" = "--env-file" ]; then
+  if [ -z "${2:-}" ]; then
+    printf 'Usage: %s [--env-file PATH] [playwright args...]\n' "$0" >&2
+    exit 1
+  fi
+  env_file="$2"
+  shift 2
+fi
+
+if [ -z "$env_file" ] && [ -f "$ROOT_DIR/.env.e2e.real-site" ]; then
+  env_file="$ROOT_DIR/.env.e2e.real-site"
+fi
+
+if [ -n "$env_file" ]; then
+  case "$env_file" in
+    /*) ;;
+    *) env_file="$ROOT_DIR/$env_file" ;;
+  esac
+
+  if [ ! -f "$env_file" ]; then
+    printf 'E2E env file not found: %s\n' "$env_file" >&2
+    exit 1
+  fi
+
+  set -a
+  # shellcheck disable=SC1090
+  . "$env_file"
+  set +a
+fi
+
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.backend-only.yml}"
 PLAYWRIGHT_BASE_URL="${PLAYWRIGHT_BASE_URL:-https://yudai.app}"
 PLAYWRIGHT_API_BASE_URL="${PLAYWRIGHT_API_BASE_URL:-http://localhost:${PORT:-8000}}"
@@ -53,6 +85,7 @@ token_payload="$(
   docker compose -f "$ROOT_DIR/$COMPOSE_FILE" exec -T \
     -e E2E_USERNAME="${E2E_USERNAME:-}" \
     -e E2E_SESSION_TOKEN_HOURS="$E2E_SESSION_TOKEN_HOURS" \
+    -e DB_ECHO=false \
     backend python - <<'PY'
 import json
 import os
