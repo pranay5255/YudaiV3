@@ -1,5 +1,5 @@
 import { expect, test as base } from '@playwright/test';
-import type { APIResponse, Page } from '@playwright/test';
+import type { APIRequestContext, APIResponse, Page, Response } from '@playwright/test';
 
 type UserConfig = {
   displayName: string;
@@ -17,6 +17,7 @@ type RepositoryConfig = {
 export type RealSiteConfig = {
   apiBaseURL: string;
   baseURL: string;
+  mockRepositoryApi: boolean;
   repository: RepositoryConfig;
   sessionToken: string;
   user: UserConfig;
@@ -61,6 +62,7 @@ function loadConfig(): RealSiteConfig {
   return {
     apiBaseURL: (process.env.PLAYWRIGHT_API_BASE_URL || baseURL).replace(/\/+$/, ''),
     baseURL,
+    mockRepositoryApi: process.env.E2E_MOCK_REPOSITORY_API === '1',
     repository: {
       branch: requiredEnv('E2E_REPO_BRANCH'),
       name: requiredEnv('E2E_REPO_NAME'),
@@ -109,21 +111,28 @@ async function isVisible(locator: ReturnType<Page['locator']>): Promise<boolean>
   }
 }
 
+function createAuthenticatedApi(
+  request: APIRequestContext,
+  config: RealSiteConfig
+): AuthenticatedPageApi {
+  return {
+    get: (path) => request.get(absoluteUrl(config, path), {
+      headers: authHeaders(config),
+    }),
+    post: (path, body) => request.post(absoluteUrl(config, path), {
+      data: body,
+      headers: authHeaders(config, body !== undefined),
+    }),
+    put: (path, body) => request.put(absoluteUrl(config, path), {
+      data: body,
+      headers: authHeaders(config, body !== undefined),
+    }),
+  };
+}
+
 export const test = base.extend<RealSiteFixtures>({
-  authApi: async ({ page, e2eConfig }, use) => {
-    await use({
-      get: (path) => page.request.get(absoluteUrl(e2eConfig, path), {
-        headers: authHeaders(e2eConfig),
-      }),
-      post: (path, body) => page.request.post(absoluteUrl(e2eConfig, path), {
-        data: body,
-        headers: authHeaders(e2eConfig, body !== undefined),
-      }),
-      put: (path, body) => page.request.put(absoluteUrl(e2eConfig, path), {
-        data: body,
-        headers: authHeaders(e2eConfig, body !== undefined),
-      }),
-    });
+  authApi: async ({ request, e2eConfig }, use) => {
+    await use(createAuthenticatedApi(request, e2eConfig));
   },
   e2eConfig: async ({}, use) => {
     await use(loadConfig());
@@ -131,6 +140,82 @@ export const test = base.extend<RealSiteFixtures>({
 });
 
 export { expect };
+
+export async function installRepositoryApiMocks(
+  page: Page,
+  config: RealSiteConfig
+): Promise<void> {
+  if (!config.mockRepositoryApi) {
+    return;
+  }
+
+  const fullName = `${config.repository.owner}/${config.repository.name}`;
+  const now = new Date().toISOString();
+
+  await page.route('**/daifu/github/repositories**', async (route) => {
+    if (route.request().method() !== 'GET') {
+      await route.fallback();
+      return;
+    }
+
+    const path = new URL(route.request().url()).pathname;
+
+    if (path === '/daifu/github/repositories') {
+      await route.fulfill({
+        contentType: 'application/json',
+        json: [{
+          clone_url: `https://github.com/${fullName}.git`,
+          created_at: now,
+          default_branch: config.repository.branch,
+          description: 'Real-site E2E repository fixture',
+          forks_count: 0,
+          full_name: fullName,
+          html_url: `https://github.com/${fullName}`,
+          id: 9_000_001,
+          language: 'TypeScript',
+          name: config.repository.name,
+          open_issues_count: 0,
+          owner: {
+            avatar_url: null,
+            html_url: `https://github.com/${config.repository.owner}`,
+            id: 9_000_002,
+            login: config.repository.owner,
+          },
+          private: false,
+          pushed_at: now,
+          stargazers_count: 0,
+          updated_at: now,
+        }],
+      });
+      return;
+    }
+
+    if (path.endsWith(`/${config.repository.owner}/${config.repository.name}/branches`)) {
+      await route.fulfill({
+        contentType: 'application/json',
+        json: [{
+          commit: {
+            sha: 'e2e-fixture',
+            url: `https://api.github.com/repos/${fullName}/commits/e2e-fixture`,
+          },
+          name: config.repository.branch,
+          protected: false,
+        }],
+      });
+      return;
+    }
+
+    if (path.endsWith(`/${config.repository.owner}/${config.repository.name}/issues`)) {
+      await route.fulfill({
+        contentType: 'application/json',
+        json: [],
+      });
+      return;
+    }
+
+    await route.fallback();
+  });
+}
 
 export async function authenticateViaCallback(
   page: Page,
@@ -169,7 +254,7 @@ export async function selectConfiguredRepository(
 }
 
 export async function responseJson<T>(
-  response: APIResponse,
+  response: APIResponse | Response,
   label: string
 ): Promise<T> {
   try {
