@@ -1180,6 +1180,84 @@ def test_answer_issue_confirmation_starts_daifu_stage_tool_sequence(db_and_user,
     assert captured["run_stage_tool"]["objective"] == objective
 
 
+def test_answer_stage_gate_add_notes_creates_fresh_pending_gate(db_and_user):
+    db, user, session = db_and_user
+    objective = "Resolve GitHub issue #77 with the 3-mode workflow."
+    question = UserQuestion(
+        question_id="q_start_architect_notes",
+        session_id=session.id,
+        user_id=user.id,
+        mode="architect",
+        question_text="Start Architect?",
+        options=[
+            {"id": "start_next_stage", "label": "Start Architect"},
+            {"id": "add_notes", "label": "Add notes or constraints"},
+            {"id": "stop_here", "label": "Stop here"},
+        ],
+        multi_select=False,
+        status=UserQuestionStatus.PENDING.value,
+        question_metadata={
+            "origin": "stage_gate",
+            "pending_tool": "run_architect_mode",
+            "next_mode": "architect",
+            "objective": objective,
+            "summary": "Issue #77 is ready for execution.",
+            "recommendation": "Daifu recommends starting Architect first.",
+        },
+    )
+    session.mode_status = "waiting_for_input"
+    session.mode_metadata = {
+        "pending_question_ids": [question.question_id],
+        "pending_daifu_tool": "run_architect_mode",
+        "pending_stage_tool_objective": objective,
+    }
+    db.add(question)
+    db.commit()
+
+    response = asyncio.run(
+        session_routes.answer_session_question(
+            session_id=session.session_id,
+            question_id=question.question_id,
+            request=AnswerQuestionRequest(
+                selected_option_ids=["add_notes"],
+                answer_text="Keep this as a control-flow-only E2E check.",
+                resume_execution=True,
+            ),
+            db=db,
+            current_user=user,
+        )
+    )
+
+    db.refresh(question)
+    db.refresh(session)
+    pending_questions = (
+        db.query(UserQuestion)
+        .filter(
+            UserQuestion.session_id == session.id,
+            UserQuestion.status == UserQuestionStatus.PENDING.value,
+        )
+        .all()
+    )
+
+    assert response.resumed is False
+    assert question.status == UserQuestionStatus.ANSWERED.value
+    assert [item.question_id for item in pending_questions] != [question.question_id]
+    assert len(pending_questions) == 1
+    next_question = pending_questions[0]
+    assert next_question.question_text == "Start Architect?"
+    assert next_question.question_metadata["origin"] == "stage_gate"
+    assert next_question.question_metadata["objective"].endswith(
+        "Keep this as a control-flow-only E2E check."
+    )
+    assert session.mode_status == "waiting_for_input"
+    assert session.mode_metadata["pending_question_ids"] == [next_question.question_id]
+
+    context = session_routes.SessionService.get_context(db, session)
+    assert [item.question_id for item in context.pending_questions] == [
+        next_question.question_id
+    ]
+
+
 def test_answer_tester_stage_gate_runs_only_tester(db_and_user, monkeypatch):
     db, user, session = db_and_user
     session.architect_completed_at = session_routes.utc_now()
