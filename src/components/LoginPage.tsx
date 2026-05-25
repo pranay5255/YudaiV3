@@ -7,6 +7,7 @@ import {
   GitPullRequestArrow,
   Loader2,
   PanelsTopLeft,
+  Play,
   ShieldCheck,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
@@ -14,46 +15,88 @@ import { useAuth } from '../hooks/useAuth';
 const ENTERPRISE_VIDEO_SRC = '/videos/yudai-enterprise-intro.mp4';
 const BRAND_LOGO_SRC = '/assets/baseLogo.png';
 
-const CAPABILITIES = [
+const NAV_LINKS = [
+  { href: '#product', label: 'Product' },
+  { href: '#workflow', label: 'Workflow' },
+  { href: '#security', label: 'Security' },
+  { href: '#docs', label: 'Docs' },
+  { href: '#get-started', label: 'Get Started' },
+];
+
+const HERO_PROOF = [
+  { label: 'Mode order', value: 'A/T/C' },
+  { label: 'Delivery target', value: 'GitHub' },
+  { label: 'Runtime owner', value: 'Backend' },
+];
+
+const TERMINAL_LINES = [
+  { label: 'repo', value: 'connected with branch and issue context' },
+  { label: 'architect', value: 'constraints mapped before execution' },
+  { label: 'tester', value: 'contracts and checks captured as evidence' },
+  { label: 'coder', value: 'patch prepared for reviewable PR flow' },
+];
+
+const PRODUCT_POINTS = [
   {
-    copy: 'Orchestrate repository context, constraints, and adversarial objectives before execution.',
+    copy: 'Repository, branch, issue, and prior session context stay attached to the run from prompt to PR.',
     icon: PanelsTopLeft,
-    label: 'Architect',
+    title: 'Repo context first',
   },
   {
-    copy: 'Validate tests, contracts, and regression evidence before the patch gate opens.',
-    icon: ShieldCheck,
-    label: 'Tester',
-  },
-  {
-    copy: 'Apply constrained worker edits that fit the existing codebase patterns.',
+    copy: 'Architect, Tester, and Coder stages are explicit product states, not hidden prompt choreography.',
     icon: Code2,
-    label: 'Coder',
+    title: 'Governed execution',
   },
   {
-    copy: 'Move accepted changes into GitHub with traceable decisions and review context.',
+    copy: 'Every run keeps artifacts, decisions, questions, and GitHub outcomes traceable for review.',
     icon: GitPullRequestArrow,
-    label: 'Review',
+    title: 'Reviewable output',
   },
 ];
 
-const PROOF_POINTS = [
-  { label: 'Lifecycle roles', value: '3' },
-  { label: 'Backend gate', value: 'Enforced' },
-  { label: 'Runtime target', value: 'Modal' },
+const WORKFLOW_STEPS = [
+  {
+    copy: 'Define the repo, branch, objective, constraints, and any human questions before the runtime moves.',
+    icon: PanelsTopLeft,
+    title: 'Architect',
+  },
+  {
+    copy: 'Run contract-aware checks and capture the evidence reviewers need before implementation starts.',
+    icon: ShieldCheck,
+    title: 'Tester',
+  },
+  {
+    copy: 'Apply scoped edits inside the sandbox and prepare the change for GitHub-native delivery.',
+    icon: Code2,
+    title: 'Coder',
+  },
+  {
+    copy: 'Publish issues or PRs with session context, artifacts, and the audit trail still attached.',
+    icon: GitPullRequestArrow,
+    title: 'PR handoff',
+  },
 ];
 
-const TRUST_POINTS = [
-  'Auditable context',
-  'Contract-aware automation',
-  'GitHub-native delivery',
+const SECURITY_POINTS = [
+  'GitHub OAuth and bearer-session auth remain backend owned.',
+  'The browser never executes shell commands directly against Modal.',
+  'Runtime profiles and published versions define what agents can use.',
+  'Audit events preserve questions, artifacts, mode state, and delivery links.',
 ];
 
-const VIDEO_STEPS = [
-  'Architect',
-  'Tester',
-  'Coder',
-  'PR',
+const DOC_ITEMS = [
+  {
+    body: 'Routes, auth, AI stream, and backend ownership boundaries live in the architecture guide.',
+    title: 'Architecture map',
+  },
+  {
+    body: 'Mode order, runtime profile versions, and sandbox lifecycle rules are documented as contracts.',
+    title: 'Runtime contracts',
+  },
+  {
+    body: 'The landing-page design review captures palette, typography, layout, accessibility, and QA rules.',
+    title: 'Design review',
+  },
 ];
 
 function getAuthError(): string | null {
@@ -84,155 +127,254 @@ export function LoginPage(): JSX.Element {
   }
 
   return (
-    <main className="landing-page relative isolate min-h-dvh overflow-x-hidden bg-bg text-fg">
-      <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(135deg,rgb(6,7,9),rgb(13,18,19)_46%,rgb(12,10,14))]" />
-      <video
-        aria-hidden="true"
-        autoPlay
-        className="landing-ambient-drift landing-video-mask pointer-events-none absolute inset-y-0 -right-36 z-0 hidden h-full w-[68%] object-cover opacity-[0.16] blur-3xl brightness-[0.38] contrast-125 saturate-[1.35] xl:block"
-        loop
-        muted
-        playsInline
-        preload="metadata"
-        src={ENTERPRISE_VIDEO_SRC}
-      />
-      <div className="pointer-events-none absolute inset-0 z-0 bg-[linear-gradient(90deg,rgba(6,7,9,0.98)_0%,rgba(6,7,9,0.9)_42%,rgba(6,7,9,0.76)_68%,rgba(6,7,9,0.96)_100%)]" />
-      <div className="landing-grid pointer-events-none absolute inset-0 z-0 opacity-35" />
+    <div className="yudai-landing">
+      <div aria-hidden="true" className="yudai-rules">
+        <span />
+        <span />
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
 
-      <section className="relative z-10 mx-auto grid min-h-dvh w-full max-w-7xl grid-cols-[minmax(0,1fr)] content-start gap-9 px-5 py-7 sm:px-8 sm:py-10 lg:grid-cols-[minmax(0,1fr)_minmax(360px,520px)] lg:content-center lg:items-center lg:gap-12 xl:gap-16">
-        <div className="w-full min-w-0 max-w-3xl">
-          <div className="landing-reveal inline-flex min-h-14 max-w-full items-center gap-3 rounded-2xl bg-white/[0.07] p-2 pr-4 shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_18px_60px_rgba(0,0,0,0.28)] backdrop-blur-xl">
-            <div className="grid size-12 shrink-0 place-items-center rounded-xl bg-white text-black shadow-[0_0_0_1px_rgba(255,255,255,0.32),0_10px_28px_rgba(0,0,0,0.22)] sm:size-14">
+      <header className="yudai-nav">
+        <a aria-label="Yudai Labs home" className="yudai-nav-brand" href="#top">
+          <span className="yudai-nav-mark" aria-hidden="true">
+            <img alt="" src={BRAND_LOGO_SRC} />
+          </span>
+          <span className="yudai-nav-wordmark">Yudai Labs</span>
+        </a>
+
+        <nav aria-label="Primary" className="yudai-nav-links">
+          {NAV_LINKS.map((link) => (
+            <a href={link.href} key={link.href}>{link.label}</a>
+          ))}
+        </nav>
+
+        <button
+          aria-label="Sign in with GitHub"
+          className="yudai-nav-signin"
+          disabled={isLoading}
+          onClick={() => void handleLogin()}
+          type="button"
+        >
+          <Github aria-hidden="true" />
+          <span>Sign in</span>
+        </button>
+      </header>
+
+      <main id="top">
+        <a className="yudai-announcement" href="#workflow">
+          <span className="yudai-announcement__label">Preview</span>
+          <span>Governed GitHub delivery with Architect, Tester, and Coder stages.</span>
+          <ArrowRight aria-hidden="true" />
+        </a>
+
+        <section aria-labelledby="yudai-hero-title" className="yudai-hero">
+          <div className="yudai-hero-copy">
+            <div className="yudai-hero-logo">
               <img
-                alt=""
-                className="size-9 object-contain sm:size-10"
+                alt="Yudai Labs logo"
+                className="yudai-hero-logo__mark"
                 src={BRAND_LOGO_SRC}
               />
+              <p>Repo-governed agents</p>
             </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-fg">Yudai</p>
-              <p className="truncate text-xs text-fg-muted">Enterprise agent workspace</p>
-            </div>
-          </div>
 
-          <h1 className="landing-reveal landing-delay-1 mt-8 max-w-4xl text-balance text-4xl font-semibold leading-[1.04] text-fg sm:text-5xl lg:text-6xl xl:text-7xl">
-            Yudai Agent Console for adversarial GitHub workflows.
-          </h1>
-          <p className="landing-reveal landing-delay-2 mt-5 max-w-2xl text-pretty text-base leading-8 text-fg-secondary sm:text-lg">
-            Yudai gives engineering teams a controlled Architect, Tester, and Coder lifecycle for repository changes: Daifu chat through OpenRouter, Modal-backed execution, typed contracts, and PR-ready context without losing review authority.
-          </p>
+            <h1 className="yudai-hero-title" id="yudai-hero-title">
+              <span>Yudai Labs</span>
+              <em>governed agent delivery for GitHub repositories.</em>
+            </h1>
 
-          <div className="landing-reveal landing-delay-3 mt-8 flex flex-col gap-4 sm:flex-row sm:items-center">
-            <button
-              className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-amber px-5 pl-5 pr-4 text-sm font-semibold text-black shadow-[0_18px_42px_rgba(245,158,11,0.22),0_0_0_1px_rgba(255,255,255,0.22)_inset] transition-[background-color,box-shadow,scale] duration-150 ease-out hover:bg-yellow-400 hover:shadow-[0_22px_54px_rgba(245,158,11,0.28),0_0_0_1px_rgba(255,255,255,0.28)_inset] active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100 sm:w-auto"
-              disabled={isLoading}
-              onClick={() => void handleLogin()}
-              type="button"
-            >
-              {isLoading ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : <Github aria-hidden="true" className="size-4" />}
-              Continue with GitHub
-              <ArrowRight aria-hidden="true" className="size-4" />
-            </button>
-            <div className="flex min-w-0 items-center gap-2 text-sm text-fg-muted">
-              <CheckCircle2 aria-hidden="true" className="size-4 shrink-0 text-success" />
-              <span className="truncate">Built for traceable engineering work</span>
-            </div>
-          </div>
+            <p className="yudai-hero-subtitle">
+              Yudai turns repository context, tests, sandbox execution, and PR handoff into one traceable workflow. Engineers keep review authority while agents work inside explicit product boundaries.
+            </p>
 
-          {visibleError && (
-            <div className="mt-5 max-w-xl rounded-lg bg-red-500/10 px-4 py-3 text-sm text-red-200 shadow-[0_0_0_1px_rgba(239,68,68,0.26)]" role="alert">
-              {visibleError}
-            </div>
-          )}
-
-          <div className="landing-reveal landing-delay-4 mt-10 grid w-full max-w-2xl grid-cols-[repeat(3,minmax(0,1fr))] gap-2 sm:gap-3">
-            {PROOF_POINTS.map((stat) => (
-              <div
-                className="min-w-0 rounded-xl bg-white/[0.06] p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_18px_46px_rgba(0,0,0,0.18)] backdrop-blur-md sm:p-4"
-                key={stat.label}
+            <div className="yudai-hero-actions">
+              <button
+                className="yudai-button yudai-button--primary"
+                disabled={isLoading}
+                onClick={() => void handleLogin()}
+                type="button"
               >
-                <div className="truncate text-base font-semibold tabular-nums text-fg sm:text-2xl">{stat.value}</div>
-                <div className="mt-1 truncate text-xs text-fg-muted">{stat.label}</div>
+                {isLoading ? <Loader2 aria-hidden="true" className="yudai-spin" /> : <Github aria-hidden="true" />}
+                <span>{isLoading ? 'Opening GitHub...' : 'Continue with GitHub'}</span>
+                <ArrowRight aria-hidden="true" />
+              </button>
+              <a className="yudai-button yudai-button--ghost" href="#product">
+                <span>See product</span>
+              </a>
+            </div>
+
+            {visibleError && (
+              <div className="yudai-auth-error" role="alert">
+                {visibleError}
               </div>
-            ))}
+            )}
+
+            <div className="yudai-proof-grid" aria-label="Yudai delivery facts">
+              {HERO_PROOF.map((item) => (
+                <div className="yudai-proof" key={item.label}>
+                  <strong>{item.value}</strong>
+                  <span>{item.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div className="landing-reveal landing-delay-5 mt-8 grid max-w-2xl gap-3 sm:grid-cols-2">
-            {CAPABILITIES.map((capability) => {
-              const Icon = capability.icon;
+          <aside className="yudai-agent-panel" aria-label="Yudai agent lifecycle terminal preview">
+            <div className="yudai-terminal-bar">
+              <span />
+              <span />
+              <span />
+              <strong>yudai-agent</strong>
+            </div>
+            <div className="yudai-terminal-body">
+              <p className="yudai-terminal-command">$ yudai run --repo selected --mode governed</p>
+              {TERMINAL_LINES.map((line) => (
+                <div className="yudai-terminal-line" key={line.label}>
+                  <span>{line.label}</span>
+                  <p>{line.value}</p>
+                </div>
+              ))}
+              <div className="yudai-terminal-status">
+                <CheckCircle2 aria-hidden="true" />
+                <span>Evidence ready for reviewer handoff</span>
+              </div>
+            </div>
+          </aside>
+        </section>
+
+        <section className="yudai-section yudai-product" id="product">
+          <div className="yudai-section-copy">
+            <p className="yudai-kicker">Product</p>
+            <h2>Agent work that stays inside the repo contract.</h2>
+            <p>
+              The landing page is public, but the promise is operational: connect GitHub, choose the repository, run a governed lifecycle, and keep the result attached to evidence your team can review.
+            </p>
+          </div>
+
+          <div className="yudai-feature-grid">
+            {PRODUCT_POINTS.map((point) => {
+              const Icon = point.icon;
 
               return (
-                <div
-                  className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-xl bg-black/[0.24] p-3 shadow-[0_0_0_1px_rgba(255,255,255,0.08)] backdrop-blur-sm"
-                  key={capability.label}
-                >
-                  <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-cyan/10 text-cyan shadow-[0_0_0_1px_rgba(34,211,238,0.18)]">
-                    <Icon aria-hidden="true" className="size-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-fg">{capability.label}</div>
-                    <p className="mt-1 text-pretty text-xs leading-5 text-fg-muted">{capability.copy}</p>
-                  </div>
-                </div>
+                <article className="yudai-feature-card" key={point.title}>
+                  <Icon aria-hidden="true" />
+                  <h3>{point.title}</h3>
+                  <p>{point.copy}</p>
+                </article>
               );
             })}
           </div>
+        </section>
 
-          <div className="landing-reveal landing-delay-6 mt-5 flex flex-wrap gap-2">
-            {TRUST_POINTS.map((point) => (
-              <span
-                className="inline-flex min-h-8 items-center rounded-lg bg-white/[0.06] px-3 text-xs font-medium text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
-                key={point}
-              >
-                {point}
-              </span>
+        <section className="yudai-section yudai-workflow" id="workflow">
+          <div className="yudai-workflow-copy">
+            <p className="yudai-kicker">Workflow</p>
+            <h2>From objective to PR, with each stage visible.</h2>
+            <ol className="yudai-workflow-list">
+              {WORKFLOW_STEPS.map((step) => {
+                const Icon = step.icon;
+
+                return (
+                  <li key={step.title}>
+                    <Icon aria-hidden="true" />
+                    <div>
+                      <h3>{step.title}</h3>
+                      <p>{step.copy}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+
+          <div className="yudai-video-frame">
+            <div className="yudai-video-toolbar">
+              <span>Enterprise workflow</span>
+              <Play aria-hidden="true" />
+            </div>
+            <video
+              aria-label="Yudai enterprise workflow demo video"
+              className="yudai-workflow-video"
+              controls
+              muted
+              playsInline
+              preload="metadata"
+              src={ENTERPRISE_VIDEO_SRC}
+            />
+          </div>
+        </section>
+
+        <section className="yudai-section yudai-security" id="security">
+          <div className="yudai-section-copy">
+            <p className="yudai-kicker">Security</p>
+            <h2>Control plane first, sandbox second.</h2>
+            <p>
+              Yudai keeps authentication, repository access, execution state, and artifact ownership in the backend. The frontend presents state; it does not become the runtime authority.
+            </p>
+          </div>
+
+          <div className="yudai-security-grid">
+            {SECURITY_POINTS.map((point) => (
+              <article className="yudai-security-card" key={point}>
+                <ShieldCheck aria-hidden="true" />
+                <p>{point}</p>
+              </article>
             ))}
           </div>
-        </div>
+        </section>
 
-        <aside className="landing-reveal landing-delay-7 relative min-w-0 lg:justify-self-end">
-          <div className="landing-panel-ring relative mx-auto w-full max-w-[540px] rounded-[28px] p-2">
-            <div className="landing-shimmer pointer-events-none absolute inset-0 rounded-[28px]" />
-            <div className="relative overflow-hidden rounded-[20px] bg-black shadow-[0_30px_90px_rgba(0,0,0,0.48)]">
-              <div className="aspect-video bg-black">
-                <video
-                  aria-hidden="true"
-                  autoPlay
-                  className="image-outline h-full w-full object-contain object-center brightness-[0.9] contrast-[1.06] saturate-[1.12]"
-                  loop
-                  muted
-                  playsInline
-                  preload="metadata"
-                  src={ENTERPRISE_VIDEO_SRC}
-                />
-              </div>
-              <div className="bg-black/[0.78] p-3 shadow-[0_-1px_0_rgba(255,255,255,0.1)] sm:p-4">
-                <div className="flex min-w-0 items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="size-2 shrink-0 rounded-full bg-success shadow-[0_0_18px_rgba(16,185,129,0.9)]" />
-                    <span className="truncate text-sm font-semibold text-fg">Lifecycle audit live</span>
-                  </div>
-                  <span className="shrink-0 rounded-md bg-white/10 px-2 py-1 text-xs text-fg-secondary shadow-[0_0_0_1px_rgba(255,255,255,0.1)]">
-                    Modal runtime
-                  </span>
-                </div>
-                <div className="mt-4 grid grid-cols-4 gap-1.5">
-                  {VIDEO_STEPS.map((step, index) => (
-                    <div className="min-w-0" key={step}>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.16]">
-                        <span className="block h-full rounded-full bg-cyan/80" />
-                      </div>
-                      <div className="mt-2 truncate text-xs text-fg-muted">
-                        <span className="tabular-nums text-fg-secondary">0{index + 1}</span> {step}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
+        <section className="yudai-section yudai-docs" id="docs">
+          <div className="yudai-section-copy">
+            <p className="yudai-kicker">Docs</p>
+            <h2>Implementation rules are documented with the product surface.</h2>
+            <p>
+              The public page mirrors the same principles used in the app: concise copy, clear ownership boundaries, visible state, and traceability over hype.
+            </p>
           </div>
-        </aside>
-      </section>
-    </main>
+
+          <div className="yudai-doc-grid">
+            {DOC_ITEMS.map((item) => (
+              <article className="yudai-doc-card" key={item.title}>
+                <h3>{item.title}</h3>
+                <p>{item.body}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="yudai-get-started" id="get-started">
+          <div>
+            <p className="yudai-kicker">Get Started</p>
+            <h2>Bring the workflow into your GitHub session.</h2>
+            <p>
+              Sign in with GitHub to enter the authenticated Agent Workbench, select a repository, and start a governed run.
+            </p>
+          </div>
+          <button
+            className="yudai-button yudai-button--primary"
+            disabled={isLoading}
+            onClick={() => void handleLogin()}
+            type="button"
+          >
+            {isLoading ? <Loader2 aria-hidden="true" className="yudai-spin" /> : <Github aria-hidden="true" />}
+            <span>{isLoading ? 'Opening GitHub...' : 'Start with GitHub'}</span>
+            <ArrowRight aria-hidden="true" />
+          </button>
+        </section>
+      </main>
+
+      <footer className="yudai-footer">
+        <a className="yudai-nav-brand" href="#top">
+          <span className="yudai-nav-mark" aria-hidden="true">
+            <img alt="" src={BRAND_LOGO_SRC} />
+          </span>
+          <span className="yudai-nav-wordmark">Yudai Labs</span>
+        </a>
+        <span>GitHub-native agent delivery with traceable execution.</span>
+      </footer>
+    </div>
   );
 }
