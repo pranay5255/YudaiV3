@@ -489,29 +489,42 @@ the wrong issue.
 
 ## UI Direction
 
-The visual source of truth is the landing page:
+The public visual source of truth is the Yudai Labs landing/auth page:
 
 ```text
 src/components/LoginPage.tsx
+src/index.css
+docs/LANDING_PAGE_DESIGN_REVIEW.md
 ```
 
-Shared visual goals:
+Public landing-page goals:
 
-- dark operational workspace
-- precise enterprise feel
+- Godel-inspired structure without copied assets, copy, or product claims
+- sticky toolbar, centered announcement pill, first-screen hero, and anchor
+  sections for Product, Workflow, Security, Docs, and Get Started
+- warm near-black background, cream primary text, taupe secondary text, orange
+  CTA/accent states, dotted vertical rules, and subtle grain
+- large Yudai Labs logo/wordmark from `/assets/baseLogo.png`
+- real workflow media from `/videos/yudai-enterprise-intro.mp4` inside a framed,
+  contained product/workflow section
+- concise engineering copy about governed GitHub delivery, repo context, tests,
+  PRs, Modal-backed execution, and traceability
+
+Authenticated workspace goals remain operational and dense:
+
 - clear hierarchy for repository, session, issue, and run state
-- restrained cyan/sky/emerald accents
+- restrained cyan/sky/emerald accents for runtime status
 - amber reserved for warnings or cautionary solve actions
-- real logo asset from `/assets/baseLogo.png`
-- Inter/sans for normal UI; mono only for IDs, branch names, counters, and code
-  labels
+- mono labels only where they help identify IDs, branches, counters, commands,
+  or code-like state
 
 Use these files as design references:
 
 - `src/components/LoginPage.tsx`
 - `src/index.css`
-- `src/tailwind.config.js`
+- `docs/LANDING_PAGE_DESIGN_REVIEW.md`
 - `src/public/assets/baseLogo.png`
+- `src/public/videos/yudai-enterprise-intro.mp4`
 - `src/components/AgentWorkbench.tsx`
 
 Older shell components still contain amber-forward and mono-heavy styling. Treat
